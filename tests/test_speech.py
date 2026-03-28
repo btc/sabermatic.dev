@@ -82,9 +82,12 @@ class TestGenerateTTS:
         """Create a mock response that supports async iteration."""
         response = AsyncMock()
 
-        async def mock_aiter_bytes(chunk_size=None):
+        async def _gen():
             for chunk in chunks:
                 yield chunk
+
+        async def mock_aiter_bytes(chunk_size=None):
+            return _gen()
 
         response.aiter_bytes = mock_aiter_bytes
         return response
