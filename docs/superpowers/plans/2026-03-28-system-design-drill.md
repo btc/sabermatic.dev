@@ -36,9 +36,11 @@ async def get_settings(request: Request) -> Settings:
 
 All LLM calls that expect structured JSON output must use this pattern:
 
-1. **Prefer Claude's `tool_use`** for structured output where possible. Define the expected schema as a tool, and Claude returns structured JSON guaranteed to match the schema.
-2. **If using raw text output**, wrap `json.loads` in a `parse_llm_json()` helper that: strips markdown fences (```json ... ```), strips any text before the first `{` or `[`, retries once on parse failure with a "please return valid JSON only" follow-up, and raises a clear error with the raw text for debugging.
-3. **Always store `raw_response`** — the unparsed LLM output — in both the database and filesystem, so parse failures can be diagnosed and re-parsed later.
+1. **Prefer Claude's `tool_use`** for structured output where possible. Define the expected schema as a tool, and Claude returns structured JSON guaranteed to match the schema. This solves *syntactic* parsing (no markdown fences, no preamble text, valid JSON guaranteed).
+2. **Semantic validation after parsing.** Tool use guarantees structure but not sense. After extracting the tool call input, validate: scores are not all identical (degenerate), strengths/gaps arrays are non-empty, advice is more than one sentence. If validation fails, retry once with feedback ("scores appear degenerate — please re-evaluate more carefully"). If retry also fails, accept the result but flag `status_detail` on the session so the user sees "evaluation may need re-review."
+3. **If using raw text output**, wrap `json.loads` in a `parse_llm_json()` helper that: strips markdown fences, strips any text before the first `{` or `[`, retries once on parse failure with a "please return valid JSON only" follow-up, and raises a clear error with the raw text for debugging.
+4. **Always store `raw_response`** — the unparsed LLM output — in both the database and filesystem, so parse failures can be diagnosed and re-parsed later.
+5. **On API errors**, retry once with exponential backoff. If the retry fails, store the error in `status_detail` and surface it to the user. Do not fall back to `parse_llm_json()` on API errors — that's a different failure mode.
 
 ### Error propagation from background tasks
 
@@ -69,16 +71,73 @@ Audio chunks within a turn use the format `turn_{turn:03d}_chunk_{chunk:03d}.{ex
 
 ### CSS
 
-Use CSS modules (`.module.css` files) for component styles. No inline style objects, no Tailwind. Keep it simple.
+Single stylesheet (`global.css`) with scoped class names. No CSS modules, no Tailwind. This is a personal tool with ~15 components — class name collision risk is zero. One file is simpler to iterate on than a dozen `.module.css` files.
+
+### Audio playback
+
+TTS returns MP3 chunks. The browser plays them using an `AudioContext` source buffer queue:
+
+1. Each incoming MP3 chunk is appended to a buffer array.
+2. A playback loop checks the buffer. When a chunk is available, it creates an `AudioBufferSourceNode`, schedules it to start at the end of the previous chunk's duration, and plays it.
+3. If the user interrupts (presses spacebar), stop all scheduled sources and clear the buffer.
+
+Do NOT use `new Audio()` per chunk (overlapping playback) or `decodeAudioData` on incomplete buffers (requires complete audio files). Instead, stream MP3 data through `MediaSource` + `SourceBuffer` which handles partial data natively.
+
+### Connection loss during interviews
+
+If the WebSocket drops mid-interview:
+1. The orchestrator's `run()` loop exits via the `shutdown` message.
+2. The session is saved in its current state (`status: active`, all messages so far preserved in DB).
+3. The frontend shows "Connection lost. Your session has been saved." with options: "Review what we have" (navigates to session review with partial transcript) or "Back to Home."
+4. There is no automatic resume. A new WS connection creates a new orchestrator. The partial session's data is preserved for review but the interview cannot be continued. This is acceptable for v1 — resume would require serializing orchestrator state, which is complex for minimal benefit.
+
+### Coach analysis locking
+
+Only one coach analysis can run at a time. Use a simple advisory lock:
+
+```python
+async def try_run_coach(conn):
+    locked = await conn.fetchval("SELECT pg_try_advisory_lock(1)")
+    if not locked:
+        return  # another analysis is running
+    try:
+        # ... run coach
+    finally:
+        await conn.fetchval("SELECT pg_advisory_unlock(1)")
+```
+
+This also handles the debounce: the endpoint checks `latest_review.created_at >= latest_eval.evaluated_at`. If a second evaluation completes while the coach is running, the next Home load will trigger a new analysis (the lock will be released by then).
+
+### Database creation
+
+Do NOT use shell `createdb`. Use asyncpg to connect to the `postgres` database and issue `CREATE DATABASE drill` via SQL. This works regardless of pg_hba.conf, socket paths, or default roles:
+
+```python
+conn = await asyncpg.connect("postgresql://localhost/postgres")
+await conn.execute("CREATE DATABASE drill")
+```
+
+### Frontend processing feedback
+
+When the orchestrator sends `{"type": "state", "state": "PROCESSING"}`, the frontend must show visible feedback:
+- A pulsing indicator or "Thinking..." label below the chat
+- The timer continues counting
+- The text input is disabled (prevents sending while processing)
+
+This prevents the "app looks frozen" problem during the 3-5 second Whisper+Claude pipeline.
 
 ### Testing
 
 Test the hardest code, not the easiest. Priorities:
-1. **Interview orchestrator** — the core interaction loop, tested with mock LLM/speech clients
+
+1. **Interview orchestrator** — the core interaction loop. Include error paths:
+   - Whisper returns empty transcription → send error, let user re-record or type
+   - Claude stream errors partway through → save partial response, send error, offer retry
+   - DB connection drops mid-session → catch, attempt reconnect, save what we can
 2. **State machine** — all transitions including edge cases
-3. **LLM response parsing** — malformed JSON, markdown fences, missing fields
+3. **LLM response parsing** — malformed JSON, markdown fences, missing fields, semantic validation (degenerate scores)
 4. **Database constraints** — verify CHECK constraints, foreign keys, and enums reject bad data
-5. **Audio pipeline** — chunk sequencing, interrupt handling
+5. **WebSocket handler** — test with Starlette TestClient, verify message routing, verify TTS interrupt works outside the queue
 
 Do NOT write tests that only verify mock setup. If a test mocks the return value and asserts that value, it's not testing anything.
 
@@ -161,11 +220,7 @@ drill/
 │       │   ├── QuestionList.tsx
 │       │   ├── CoachCard.tsx
 │       │   └── TraceWidget.tsx
-│       └── styles/              # CSS modules
-│           ├── global.css
-│           ├── Interview.module.css
-│           ├── Home.module.css
-│           └── ...
+│       └── global.css           # Single stylesheet, dark theme
 ├── data/                        # Created at runtime
 ├── .env.example
 ├── requirements.txt
@@ -240,8 +295,10 @@ def get_openai(request: Request):
 
 Reads `migrations/` directory, finds `.sql` files sorted numerically, tracks applied migrations in a `_migrations` table, applies unapplied ones in order.
 
-- [ ] **Step 9: Create `scripts/init_db.py`** — runs `createdb drill` (catches "already exists"), runs migrations, seeds questions
-- [ ] **Step 10: Create `tests/conftest.py`**
+- [ ] **Step 9: Create `backend/seed_questions.py`** — 18 seed questions from design spec (URL shortener through CDN). Each has title, prompt (deliberately vague), difficulty, tags, optional hints.
+
+- [ ] **Step 10a: Create `scripts/init_db.py`** — connects to `postgres` DB via asyncpg, issues `CREATE DATABASE drill` (catches "already exists"), runs migrations, seeds questions
+- [ ] **Step 10b: Create `tests/conftest.py`**
 
 ```python
 # Creates drill_test DB, runs migrations, provides db_conn fixture
@@ -288,17 +345,7 @@ All query functions take `conn: asyncpg.Connection` as first arg — no global p
 
 ---
 
-### Task 3: Seed Questions
-
-**Files:** `backend/seed_questions.py`
-
-- [ ] **Step 1: Create 18 seed questions** — from design spec (URL shortener through CDN). Each has title, prompt (deliberately vague), difficulty, tags, optional hints.
-- [ ] **Step 2: Run `scripts/init_db.py`, verify seeds are inserted**
-- [ ] **Step 3: Commit**
-
----
-
-### Task 4: LLM Parse Helper + Speech Module
+### Task 3: LLM Parse Helper + Speech Module
 
 **Files:** `backend/llm_parse.py`, `backend/speech.py`, `tests/test_llm_parse.py`, `tests/test_speech.py`
 
@@ -349,7 +396,7 @@ def parse_llm_json(text: str) -> dict[str, Any]:
 
 ---
 
-### Task 5: Interviewer Module
+### Task 4: Interviewer Module
 
 **Files:** `backend/interviewer.py`, `tests/test_interviewer.py`
 
@@ -396,7 +443,7 @@ The `Interviewer` class has:
 
 ---
 
-### Task 6: Evaluator Module
+### Task 5: Evaluator Module
 
 **Files:** `backend/evaluator.py`, `tests/test_evaluator.py`
 
@@ -466,7 +513,7 @@ System prompt: full rubric from design spec. Include the metacognitive feedback 
 
 ---
 
-### Task 7: Coach Module
+### Task 6: Coach Module
 
 **Files:** `backend/coach.py`, `tests/test_coach.py`
 
@@ -534,7 +581,7 @@ Use `tool_use` for structured output, same pattern as evaluator. Tool schema def
 
 ---
 
-### Task 8: Storage + Session State Machine
+### Task 7: Storage + Session State Machine
 
 **Files:** `backend/storage.py`, `backend/session_manager.py`, `tests/test_storage.py`, `tests/test_session_manager.py`
 
@@ -556,7 +603,7 @@ def save_audio_chunk(self, session_dir: str, direction: str, turn: int, chunk_in
 
 ---
 
-### Task 9: Interview Orchestrator (sequential message queue)
+### Task 8: Interview Orchestrator (sequential message queue)
 
 **Files:** `backend/orchestrator.py`, `backend/messages.py`, `tests/test_orchestrator.py`
 
@@ -682,6 +729,51 @@ async def test_messages_are_sequential(mock_deps):
     await orch.run(send=results.append)
 
     assert max_concurrent <= 1  # never more than one transcription in flight
+
+@pytest.mark.asyncio
+async def test_whisper_empty_transcription_sends_error(mock_deps):
+    """Empty Whisper result sends error, doesn't crash the loop."""
+    mock_deps.openai_client.audio.transcriptions.create = AsyncMock(
+        return_value=MagicMock(text="")
+    )
+    orch = InterviewOrchestrator(mock_deps)
+    results = []
+
+    await orch.enqueue(WSMessage(type="start", question_id=1, timer_sec=2700, tts_enabled=False, briefed=False))
+    await orch.enqueue(WSMessage(type="end_turn", audio_data=b"silence"))
+    await orch.enqueue(WSMessage(type="shutdown"))
+
+    await orch.run(send=results.append)
+
+    assert any(r["type"] == "error" for r in results)
+    # Loop didn't crash — shutdown was processed
+    assert orch._state.state in {SessionState.WAITING_FOR_CANDIDATE, SessionState.ENDED}
+
+@pytest.mark.asyncio
+async def test_claude_stream_error_saves_partial(mock_deps):
+    """If Claude errors mid-stream, save what we got, send error, continue."""
+    # Mock that yields 2 tokens then raises
+    async def failing_stream(*args, **kwargs):
+        yield "I would"
+        yield " suggest"
+        raise anthropic.APIError("Connection reset")
+
+    mock_deps.anthropic_client.messages.stream = failing_stream
+
+    orch = InterviewOrchestrator(mock_deps)
+    results = []
+
+    await orch.enqueue(WSMessage(type="start", question_id=1, ...))
+    await orch.enqueue(WSMessage(type="text_input", text="Let me discuss requirements..."))
+    await orch.enqueue(WSMessage(type="shutdown"))
+
+    await orch.run(send=results.append)
+
+    errors = [r for r in results if r["type"] == "error"]
+    assert len(errors) >= 1
+    # Partial response should still have been streamed to the client
+    texts = [r for r in results if r["type"] == "interviewer_text"]
+    assert len(texts) > 0
 ```
 
 - [ ] **Step 3: Implement `backend/orchestrator.py`**
@@ -859,7 +951,7 @@ class InterviewOrchestrator:
 
 ---
 
-### Task 10: Routes + Thin WebSocket Handler
+### Task 9: Routes + Thin WebSocket Handler
 
 **Files:** `backend/main.py`, `backend/routes/*.py`, `tests/test_routes.py`
 
@@ -930,7 +1022,7 @@ async def interview_websocket(ws: WebSocket) -> None:
 
 ---
 
-### Task 11: Tracing
+### Task 10: Tracing
 
 **Files:** `backend/tracing.py`, `backend/routes/traces.py`, `tests/test_tracing.py`
 
@@ -941,7 +1033,7 @@ async def interview_websocket(ws: WebSocket) -> None:
 
 ---
 
-### Task 12: Frontend Scaffolding
+### Task 11: Frontend Scaffolding
 
 **Files:** `frontend/` — package.json, vite config, types, API client, WebSocket client, hooks
 
@@ -1004,7 +1096,7 @@ export function useWebSocket(onMessage: (msg: WSServerMessage) => void) {
 
 ---
 
-### Task 13: Interview Screen (Voice + Text)
+### Task 12: Interview Screen (Voice + Text)
 
 **Files:** `frontend/src/pages/Interview.tsx`, `frontend/src/components/ChatMessage.tsx`, `frontend/src/components/Timer.tsx`, `frontend/src/components/AudioControls.tsx`, `frontend/src/components/TextInput.tsx`, CSS modules
 
@@ -1042,7 +1134,7 @@ const handleTextSubmit = (text: string) => {
 
 ---
 
-### Task 14: Remaining Frontend Screens + Trace Widget
+### Task 13: Remaining Frontend Screens + Trace Widget
 
 **Files:** `frontend/src/pages/Home.tsx`, `History.tsx`, `Results.tsx`, `SessionReview.tsx`, all remaining components, CSS modules
 
@@ -1080,7 +1172,7 @@ const handleTextSubmit = (text: string) => {
 
 ---
 
-### Task 15: Run Script + Final Integration
+### Task 14: Run Script + Final Integration
 
 **Files:** `scripts/run.py`, `.gitignore`, health check endpoint
 
@@ -1129,8 +1221,23 @@ const handleTextSubmit = (text: string) => {
 - [x] Dependency versions — >= lower bounds
 - [x] No migration path — migrations/ directory
 
-**Known limitations for v2:**
+**v2→v3 fixes (from second review):**
+- [x] Sequential message queue eliminates concurrency bugs by construction
+- [x] Audio protocol clarified: browser owns recording buffer, server receives final blob
+- [x] Semantic validation for LLM responses (not just syntactic)
+- [x] Coach advisory lock prevents concurrent analyses
+- [x] `createdb` via asyncpg SQL, not shell command
+- [x] Frontend shows "Processing..." during pipeline latency
+- [x] Connection loss acknowledged with session preservation, no phantom resume
+- [x] TTS playback via MediaSource + SourceBuffer (not decodeAudioData)
+- [x] Single stylesheet instead of CSS modules
+- [x] Seeds merged into Task 1 (14 tasks total, not 15)
+- [x] Error-path tests for orchestrator: empty transcription, Claude stream failure
+
+**Known limitations:**
 - Context window summarization for 60+ minute sessions not implemented
 - No audio playback of past sessions in browser (audio is stored on disk)
 - Speech tests mock the API — integration tests require API keys
 - No frontend test infrastructure (Vitest + React Testing Library would be a good follow-up)
+- 30+ repetitive CRUD functions in database.py — acknowledged as maintenance surface, acceptable for a tool this size
+- No automatic interview resume after connection loss (v2 feature)
