@@ -198,8 +198,12 @@ export default function Interview() {
         spaceDownRef.current = false;
         try {
           const audioData = await stopRecording();
+          console.log("[drill] spacebar up, audioData length:", audioData?.length ?? 0);
           if (audioData) {
+            console.log("[drill] sending end_turn");
             send({ type: "end_turn", audio_data: audioData });
+          } else {
+            console.warn("[drill] no audio data from stopRecording");
           }
         } catch {
           // Ignore recording errors

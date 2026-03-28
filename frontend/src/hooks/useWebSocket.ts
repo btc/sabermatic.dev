@@ -21,7 +21,12 @@ export function useWebSocket(onMessage: (msg: WSServerMessage) => void) {
   }, []);
 
   const send = useCallback((msg: WSClientMessage) => {
-    socketRef.current?.send(msg);
+    if (!socketRef.current?.connected) {
+      console.error("[drill] WS send failed: not connected, msg type:", msg.type);
+      return;
+    }
+    console.log("[drill] WS send:", msg.type);
+    socketRef.current.send(msg);
   }, []);
 
   const disconnect = useCallback(() => {
