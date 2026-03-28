@@ -38,3 +38,6 @@ htmlcov/
 # Node (frontend)
 node_modules/
 frontend/dist/
+
+# Claude Code / Superpowers
+.superpowers/
