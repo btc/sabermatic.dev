@@ -371,7 +371,7 @@ If you identify a specific gap that would benefit from a custom practice questio
             questions=questions,
         )
 
-        response = client.messages.create(  # type: ignore[union-attr]
+        response = await client.messages.create(  # type: ignore[union-attr]
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             system=system_prompt,

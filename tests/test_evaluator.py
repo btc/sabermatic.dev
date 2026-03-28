@@ -1,7 +1,7 @@
 """Tests for backend.evaluator — LLM evaluator module."""
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -352,7 +352,7 @@ class TestEvaluate:
         mock_response.model_dump.return_value = {"content": [{"type": "tool_use", "input": tool_input}]}
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
 
         messages = [
             _make_message(1, MessageRole.interviewer, "Design a cache."),
@@ -389,7 +389,7 @@ class TestEvaluate:
         mock_response.model_dump.return_value = {"content": [{"type": "tool_use", "input": tool_input}]}
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
 
         messages = [
             _make_message(1, MessageRole.interviewer, "Design a cache."),

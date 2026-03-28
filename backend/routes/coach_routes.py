@@ -35,6 +35,12 @@ async def _run_coach_analysis(
     coach_model: str,
 ):
     """Background task: run coach analysis. Catches ALL exceptions."""
+    async with pool.acquire() as conn:
+        locked = await conn.fetchval("SELECT pg_try_advisory_lock(1)")
+        if not locked:
+            logger.info("Coach: analysis already running, skipping")
+            return
+
     try:
         async with pool.acquire() as conn:
             sessions = await list_sessions(conn)
@@ -93,11 +99,6 @@ async def trigger_coach_analysis(
         and latest_review.created_at >= latest_eval_time
     ):
         return {"status": "up_to_date"}
-
-    # Try to acquire advisory lock to prevent concurrent analyses
-    locked = await conn.fetchval("SELECT pg_try_advisory_lock(1)")
-    if not locked:
-        return {"status": "already_running"}
 
     background_tasks.add_task(
         _run_coach_analysis,
