@@ -41,8 +41,10 @@ from backend.models import (
 from backend.session_manager import InvalidTransition, SessionState, SessionStateMachine
 from backend.speech import generate_tts, transcribe_audio
 from backend.storage import SessionStorage
+from backend.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer("drill.orchestrator")
 
 
 @dataclass
@@ -163,6 +165,12 @@ class InterviewOrchestrator:
 
     async def _do_start(self, msg: WSMessage, send: SendFn) -> None:
         """Create session, stream opening question, optionally start TTS."""
+        with tracer.start_as_current_span("interview.start", attributes={
+            "question_id": msg.question_id or 0,
+        }):
+            await self._do_start_inner(msg, send)
+
+    async def _do_start_inner(self, msg: WSMessage, send: SendFn) -> None:
         self._tts_enabled = msg.tts_enabled if msg.tts_enabled is not None else True
         self._timer_sec = msg.timer_sec or 2700
         self._state.transition(SessionState.STARTING)
@@ -241,6 +249,14 @@ class InterviewOrchestrator:
 
     async def _do_end_turn(self, msg: WSMessage, send: SendFn) -> None:
         """Transcribe audio, then get interviewer response. Sequential."""
+        with tracer.start_as_current_span("interview.turn", attributes={
+            "session_id": self._session_id or 0,
+            "turn": self._state.turn_count + 1,
+            "input_type": "voice",
+        }):
+            await self._do_end_turn_inner(msg, send)
+
+    async def _do_end_turn_inner(self, msg: WSMessage, send: SendFn) -> None:
         self.cancel_tts()
         if self._tts_task:
             try:
@@ -259,9 +275,12 @@ class InterviewOrchestrator:
             )
 
         # 1. Transcribe
-        transcript = await transcribe_audio(
-            self.deps.openai_client, msg.audio_data
-        )
+        with tracer.start_as_current_span("speech.transcribe", attributes={
+            "audio_size_bytes": len(msg.audio_data) if msg.audio_data else 0,
+        }):
+            transcript = await transcribe_audio(
+                self.deps.openai_client, msg.audio_data
+            )
         if not transcript or not transcript.strip():
             await self._send(send, {
                 "type": "error",
@@ -299,6 +318,14 @@ class InterviewOrchestrator:
 
     async def _do_text_input(self, msg: WSMessage, send: SendFn) -> None:
         """Same as end_turn but skip Whisper — text goes straight to Claude."""
+        with tracer.start_as_current_span("interview.turn", attributes={
+            "session_id": self._session_id or 0,
+            "turn": self._state.turn_count + 1,
+            "input_type": "text",
+        }):
+            await self._do_text_input_inner(msg, send)
+
+    async def _do_text_input_inner(self, msg: WSMessage, send: SendFn) -> None:
         self.cancel_tts()
         if self._tts_task:
             try:
@@ -354,6 +381,10 @@ class InterviewOrchestrator:
         # Stream response
         full_response = ""
         stream_errored = False
+        llm_span = tracer.start_span("llm.interviewer", attributes={
+            "session_id": self._session_id or 0,
+            "history_length": len(api_messages),
+        })
         try:
             async for token in self._interviewer.get_response_stream(
                 self.deps.anthropic_client,
@@ -368,7 +399,7 @@ class InterviewOrchestrator:
                 })
         except Exception as e:
             stream_errored = True
-            # Close the text stream for the client
+            llm_span.set_attribute("error", str(e))
             await self._send(send, {
                 "type": "interviewer_text",
                 "content": "",
@@ -378,6 +409,9 @@ class InterviewOrchestrator:
                 "type": "error",
                 "message": f"Interviewer error: {e}",
             })
+        finally:
+            llm_span.set_attribute("response_length", len(full_response))
+            llm_span.end()
 
         if not stream_errored:
             await self._send(send, {
@@ -436,6 +470,14 @@ class InterviewOrchestrator:
 
     async def _do_end_session(self, msg: WSMessage, send: SendFn) -> None:
         """End the session: finalize in DB, notify client."""
+        with tracer.start_as_current_span("interview.end_session", attributes={
+            "session_id": self._session_id or 0,
+            "duration_sec": self._state.elapsed_seconds or 0,
+            "turn_count": self._state.turn_count,
+        }):
+            await self._do_end_session_inner(msg, send)
+
+    async def _do_end_session_inner(self, msg: WSMessage, send: SendFn) -> None:
         self.cancel_tts()
         self._state.transition(SessionState.ENDING)
         self._state.transition(SessionState.ENDED)
@@ -480,6 +522,9 @@ class InterviewOrchestrator:
 
     async def _stream_tts(self, text: str, send: SendFn) -> None:
         """Stream TTS audio. Fire-and-forget, cancellable."""
+        tts_span = tracer.start_span("speech.tts", attributes={
+            "text_length": len(text),
+        })
         try:
             chunk_index = 0
             async for chunk in generate_tts(
@@ -502,10 +547,15 @@ class InterviewOrchestrator:
                     "data": base64.b64encode(chunk).decode(),
                 })
             await self._send(send, {"type": "interviewer_done"})
+            tts_span.set_attribute("chunks", chunk_index)
+            tts_span.end()
         except asyncio.CancelledError:
-            pass  # Expected on interrupt
+            tts_span.set_attribute("cancelled", True)
+            tts_span.end()
         except Exception:
             logger.exception("TTS streaming error")
+            tts_span.set_attribute("error", True)
+            tts_span.end()
             await self._send(send, {"type": "interviewer_done"})  # Graceful degradation
 
     async def _finalize_if_active(self, send: SendFn) -> None:

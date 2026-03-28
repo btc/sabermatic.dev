@@ -34,6 +34,7 @@ def _make_span(name: str, trace_id: int, span_id: int, start_ns: int, end_ns: in
     span.status.status_code = MagicMock()
     span.status.status_code.name = "OK"
     span.attributes = {"key": "value"}
+    span.parent = None
 
     ctx = SpanContext(
         trace_id=trace_id,
@@ -149,13 +150,14 @@ def test_file_span_exporter_handles_bad_span_gracefully():
 
 def test_action_labels_covers_expected_span_names():
     expected = {
+        "interview.start",
         "interview.turn",
+        "interview.end_session",
         "speech.transcribe",
         "llm.interviewer",
         "speech.tts",
         "interview.evaluate",
         "coach.analyze",
-        "db.save_message",
     }
     assert expected.issubset(set(ACTION_LABELS.keys()))
 
