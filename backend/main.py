@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 
 from backend.config import Settings
+from backend.tracing import setup_tracing, instrument_app
 
 
 def create_app(
@@ -16,6 +17,8 @@ def create_app(
     async def lifespan(app: FastAPI):
         s = settings or Settings()
         app.state.settings = s
+        setup_tracing(data_dir=str(s.data_dir))
+        instrument_app(app)
         url = database_url or s.database_url
         app.state.pool = await asyncpg.create_pool(url, min_size=1, max_size=3)
         app.state.anthropic_client = anthropic.AsyncAnthropic(
