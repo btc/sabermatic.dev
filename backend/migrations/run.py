@@ -49,10 +49,11 @@ async def run_migrations(conn: asyncpg.Connection) -> list[str]:
             continue
 
         sql = migration_path.read_text()
-        await conn.execute(sql)
-        await conn.execute(
-            "INSERT INTO _migrations (filename) VALUES ($1)", filename
-        )
+        async with conn.transaction():
+            await conn.execute(sql)
+            await conn.execute(
+                "INSERT INTO _migrations (filename) VALUES ($1)", filename
+            )
         newly_applied.append(filename)
         print(f"  Applied: {filename}")
 

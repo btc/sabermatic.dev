@@ -13,7 +13,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE session_status AS ENUM ('active', 'completed', 'evaluating', 'reviewed');
+    CREATE TYPE session_status AS ENUM ('active', 'completed', 'evaluating', 'reviewed', 'evaluation_failed');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
