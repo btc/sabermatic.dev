@@ -8,6 +8,7 @@ import Timer from "../components/Timer";
 import AudioControls from "../components/AudioControls";
 import TextInput from "../components/TextInput";
 import TraceWidget from "../components/TraceWidget";
+import { setSessionTraceId, startSpan, recordEvent } from "../tracer";
 import type { WSServerMessage } from "../types";
 
 interface ChatEntry {
@@ -131,10 +132,13 @@ export default function Interview() {
   }, [connect, disconnect]);
 
   async function handleBegin() {
+    setSessionTraceId();
+    recordEvent("user.begin_interview", { question_id: Number(questionId) });
+
     // Request mic permission upfront (user gesture unlocks both mic and audio)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop()); // release immediately
+      stream.getTracks().forEach((t) => t.stop());
     } catch {
       // User denied mic — they can still use text input
     }
@@ -172,6 +176,8 @@ export default function Interview() {
 
   // ---------- Push-to-talk (spacebar) ----------
 
+  const recordingSpanRef = useRef<ReturnType<typeof startSpan> | null>(null);
+
   useEffect(() => {
     async function handleKeyDown(e: KeyboardEvent) {
       if (
@@ -183,11 +189,14 @@ export default function Interview() {
       ) {
         e.preventDefault();
         spaceDownRef.current = true;
+        recordingSpanRef.current = startSpan("user.spacebar_press");
         stopPlayback();
         try {
           await startRecording();
         } catch {
           spaceDownRef.current = false;
+          recordingSpanRef.current?.end({ error: "recording_failed" });
+          recordingSpanRef.current = null;
         }
       }
     }
@@ -196,17 +205,26 @@ export default function Interview() {
       if (e.code === "Space" && spaceDownRef.current) {
         e.preventDefault();
         spaceDownRef.current = false;
+
+        // End the recording span
+        const recSpan = recordingSpanRef.current;
+        recordingSpanRef.current = null;
+
         try {
+          const encodeSpan = startSpan("audio.encode");
           const audioData = await stopRecording();
-          console.log("[drill] spacebar up, audioData length:", audioData?.length ?? 0);
+          encodeSpan.end({ audio_length: audioData?.length ?? 0 });
+
           if (audioData) {
-            console.log("[drill] sending end_turn");
+            const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
             send({ type: "end_turn", audio_data: audioData });
+            sendSpan.end();
+            recSpan?.end({ audio_length: audioData.length });
           } else {
-            console.warn("[drill] no audio data from stopRecording");
+            recSpan?.end({ error: "no_audio_data" });
           }
-        } catch {
-          // Ignore recording errors
+        } catch (err) {
+          recSpan?.end({ error: String(err) });
         }
       }
     }
@@ -222,6 +240,7 @@ export default function Interview() {
   // ---------- Text submit ----------
 
   function handleTextSubmit(text: string) {
+    recordEvent("user.text_submit", { text_length: text.length });
     send({ type: "text_input", text });
     setMessages((prev) => [
       ...prev,
@@ -232,6 +251,7 @@ export default function Interview() {
   // ---------- End session ----------
 
   function handleEndSession() {
+    recordEvent("user.end_session");
     send({ type: "end_session" });
   }
 
