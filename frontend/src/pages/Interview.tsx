@@ -114,28 +114,29 @@ export default function Interview() {
   const { connect, send, disconnect } = useWebSocket(handleMessage);
 
   // ---------- Connect on mount ----------
+  // Guard against React StrictMode double-mounting: only init once.
+  const initRef = useRef(false);
 
   useEffect(() => {
-    let mounted = true;
+    if (initRef.current) return;
+    initRef.current = true;
 
     async function init() {
       try {
         await connect();
-        if (!mounted) return;
         send({
           type: "start",
           question_id: Number(questionId),
         });
         startTimer();
       } catch {
-        if (mounted) setDisconnected(true);
+        setDisconnected(true);
       }
     }
 
     init();
 
     return () => {
-      mounted = false;
       disconnect();
     };
   }, [questionId, connect, send, disconnect, startTimer]);
