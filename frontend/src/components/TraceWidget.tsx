@@ -2,6 +2,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { TraceEntry } from "../types";
 import api from "../api/client";
 
+function timeAgo(isoStr: string): string {
+  const sec = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
 export default function TraceWidget() {
   const [traces, setTraces] = useState<TraceEntry[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -48,9 +58,7 @@ export default function TraceWidget() {
             <>
               <span className="trace-id-short">{latest.trace_id_short}</span>
               <span className="trace-action">{latest.action_label}</span>
-              {latest.duration_ms != null && (
-                <span className="trace-duration">{latest.duration_ms}ms</span>
-              )}
+              <span className="trace-ago">{timeAgo(latest.start_time)}</span>
               <button
                 className="trace-copy-btn"
                 onClick={(e) => {
@@ -83,8 +91,9 @@ export default function TraceWidget() {
                 >
                   <span className="trace-id-short">{t.trace_id_short}</span>
                   <span className="trace-action">{t.action_label}</span>
+                  <span className="trace-ago">{timeAgo(t.start_time)}</span>
                   {t.duration_ms != null && (
-                    <span className="trace-duration">{t.duration_ms}ms</span>
+                    <span className="trace-duration">{(t.duration_ms / 1000).toFixed(1)}s</span>
                   )}
                   <span
                     className={`trace-status ${t.status === "OK" ? "trace-status-ok" : "trace-status-err"}`}
