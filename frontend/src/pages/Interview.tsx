@@ -131,6 +131,14 @@ export default function Interview() {
   }, [connect, disconnect]);
 
   async function handleBegin() {
+    // Request mic permission upfront (user gesture unlocks both mic and audio)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop()); // release immediately
+    } catch {
+      // User denied mic — they can still use text input
+    }
+
     setStarted(true);
     send({
       type: "start",

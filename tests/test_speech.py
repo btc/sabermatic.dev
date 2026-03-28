@@ -81,13 +81,12 @@ class TestGenerateTTS:
     def _make_streaming_response(self, chunks: list[bytes]):
         """Create a mock response that supports async iteration."""
         response = AsyncMock()
-        response.iter_bytes = MagicMock()
 
-        async def mock_iter_bytes(chunk_size=None):
+        async def mock_aiter_bytes(chunk_size=None):
             for chunk in chunks:
                 yield chunk
 
-        response.iter_bytes.return_value = mock_iter_bytes()
+        response.aiter_bytes = mock_aiter_bytes
         return response
 
     async def test_yields_audio_chunks(self, mock_client):
