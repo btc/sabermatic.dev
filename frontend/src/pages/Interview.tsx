@@ -7,6 +7,7 @@ import ChatMessage from "../components/ChatMessage";
 import Timer from "../components/Timer";
 import AudioControls from "../components/AudioControls";
 import TextInput from "../components/TextInput";
+import TraceWidget from "../components/TraceWidget";
 import type { WSServerMessage } from "../types";
 
 interface ChatEntry {
@@ -273,6 +274,7 @@ export default function Interview() {
           placeholder="Type instead of speaking..."
         />
       </div>
+      <TraceWidget />
     </div>
   );
 }
