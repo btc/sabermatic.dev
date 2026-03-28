@@ -399,7 +399,7 @@ You MUST use the submit_evaluation tool to submit your structured evaluation. Do
             messages=messages,
         )
 
-        response = client.messages.create(  # type: ignore[union-attr]
+        response = await client.messages.create(  # type: ignore[union-attr]
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             system=system_prompt,

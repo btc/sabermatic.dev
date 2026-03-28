@@ -1,7 +1,7 @@
 """Tests for backend.coach — strategic coaching module."""
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -370,7 +370,7 @@ class TestAnalyze:
         }
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
 
         question = _make_question(10, title="URL Shortener")
         session = _make_session(100, question_id=10)
@@ -417,7 +417,7 @@ class TestAnalyze:
         }
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
 
         question = _make_question(10, title="URL Shortener")
         session = _make_session(100, question_id=10)
