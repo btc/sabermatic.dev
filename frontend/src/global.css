@@ -149,6 +149,17 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.interview-cancel-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .interview-end-btn {
   background: var(--accent-red);
   font-size: 0.85rem;

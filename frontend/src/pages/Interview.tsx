@@ -255,6 +255,12 @@ export default function Interview() {
     send({ type: "end_session" });
   }
 
+  function handleCancel() {
+    recordEvent("user.cancel_session");
+    disconnect();
+    navigate("/");
+  }
+
   // ---------- Render ----------
 
   if (!started) {
@@ -280,6 +286,9 @@ export default function Interview() {
       <header className="interview-header">
         <h2 className="interview-title">{questionTitle}</h2>
         <Timer elapsed={seconds} total={TIMER_TOTAL} />
+        <button className="interview-cancel-btn" onClick={handleCancel}>
+          Cancel
+        </button>
         <button className="interview-end-btn" onClick={handleEndSession}>
           End Session
         </button>
