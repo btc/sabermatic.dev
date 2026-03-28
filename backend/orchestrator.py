@@ -399,7 +399,9 @@ class InterviewOrchestrator:
                 })
         except Exception as e:
             stream_errored = True
-            llm_span.set_attribute("error", str(e))
+            llm_span.set_attribute("error", True)
+            llm_span.set_attribute("error.message", str(e))
+            llm_span.set_attribute("error.type", type(e).__name__)
             await self._send(send, {
                 "type": "interviewer_text",
                 "content": "",
@@ -552,9 +554,11 @@ class InterviewOrchestrator:
         except asyncio.CancelledError:
             tts_span.set_attribute("cancelled", True)
             tts_span.end()
-        except Exception:
+        except Exception as e:
             logger.exception("TTS streaming error")
             tts_span.set_attribute("error", True)
+            tts_span.set_attribute("error.message", str(e))
+            tts_span.set_attribute("error.type", type(e).__name__)
             tts_span.end()
             await self._send(send, {"type": "interviewer_done"})  # Graceful degradation
 

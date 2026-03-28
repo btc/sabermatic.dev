@@ -61,5 +61,5 @@ async def generate_tts(
         input=text,
     )
 
-    async for chunk in response.iter_bytes():
+    async for chunk in response.aiter_bytes():
         yield chunk
