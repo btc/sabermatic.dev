@@ -1,0 +1,13 @@
+[project]
+name = "drill"
+version = "0.1.0"
+description = "System design interview practice with AI interviewer, evaluator, and coach"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.pyright]
+strict = ["backend/**"]
+pythonVersion = "3.11"
