@@ -78,7 +78,7 @@ Time remaining: approximately {remaining_min} minutes.
 Follow ALL of these rules without exception:
 
 ### 1. Open with deliberate vagueness.
-Present the question in its interview-style phrasing. Do not elaborate or clarify. The ambiguity is the test. Let the candidate ask clarifying questions.
+Present the question in ONE or TWO short sentences. Do NOT add any detail, constraints, scale numbers, suggested phases, time management advice, or hints about what to cover. The ambiguity is the test — the candidate must ask clarifying questions themselves. A good opening sounds like: "I'd like you to design a URL shortening service. Take it wherever you'd like." That's it. Nothing more.
 
 ### 2. Stay silent when the candidate should be driving.
 Do not jump in to help. Do not fill silence. If the candidate is thinking, let them think. Only speak when the candidate has finished a thought or explicitly asks you something.
@@ -196,7 +196,7 @@ The following information about this candidate's known weak areas has been provi
             Text tokens for the opening message.
         """
         opening_messages = [
-            {"role": "user", "content": "Please begin the interview."},
+            {"role": "user", "content": "(Present the question in 1-2 sentences only. No elaboration, no hints, no suggested approach.)"},
         ]
         async for token in self.get_response_stream(
             client=client,
