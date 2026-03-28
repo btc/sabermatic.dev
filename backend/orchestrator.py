@@ -79,6 +79,7 @@ class InterviewOrchestrator:
         self._question: Question | None = None
         self._system_prompt: str = ""
         self._sequence: int = 0
+        self._last_candidate_sequence: int = 0
         self._tts_enabled: bool = True
         self._tts_task: asyncio.Task | None = None
         self._timer_sec: int = 2700
@@ -226,9 +227,21 @@ class InterviewOrchestrator:
     async def _do_end_turn(self, msg: WSMessage, send: SendFn) -> None:
         """Transcribe audio, then get interviewer response. Sequential."""
         self.cancel_tts()
+        if self._tts_task:
+            try:
+                await asyncio.wait_for(self._tts_task, timeout=0.1)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            self._tts_task = None
         self._state.transition(SessionState.CANDIDATE_SPEAKING)
         self._state.transition(SessionState.PROCESSING)
         await self._send(send, {"type": "state", "state": "processing"})
+
+        # Save incoming audio to disk
+        if msg.audio_data and self._session_dir:
+            self.deps.storage.save_audio_chunk(
+                self._session_dir, "in", self._sequence, 0, msg.audio_data, "webm"
+            )
 
         # 1. Transcribe
         transcript = await transcribe_audio(
@@ -253,6 +266,7 @@ class InterviewOrchestrator:
 
         # 2. Save candidate message
         self._sequence += 1
+        self._last_candidate_sequence = self._sequence
         async with self.deps.pool.acquire() as conn:
             await insert_message(
                 conn,
@@ -271,12 +285,19 @@ class InterviewOrchestrator:
     async def _do_text_input(self, msg: WSMessage, send: SendFn) -> None:
         """Same as end_turn but skip Whisper — text goes straight to Claude."""
         self.cancel_tts()
+        if self._tts_task:
+            try:
+                await asyncio.wait_for(self._tts_task, timeout=0.1)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            self._tts_task = None
         self._state.transition(SessionState.CANDIDATE_SPEAKING)
         self._state.transition(SessionState.PROCESSING)
         await self._send(send, {"type": "state", "state": "processing"})
 
         # Save candidate message (no raw_content since it was typed)
         self._sequence += 1
+        self._last_candidate_sequence = self._sequence
         async with self.deps.pool.acquire() as conn:
             await insert_message(
                 conn,
@@ -395,7 +416,7 @@ class InterviewOrchestrator:
                 "UPDATE messages SET content = $1 WHERE session_id = $2 AND sequence = $3",
                 msg.text,
                 self._session_id,
-                self._sequence,
+                self._last_candidate_sequence,
             )
 
     async def _do_end_session(self, msg: WSMessage, send: SendFn) -> None:

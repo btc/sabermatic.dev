@@ -631,3 +631,65 @@ class TestShutdownFinalization:
         call_args = mock_update_status.call_args
         assert call_args[0][1] == 42  # session_id
         assert call_args[0][2] == "completed"  # status
+
+
+class TestEditTranscript:
+    """edit_transcript updates the candidate message, not the interviewer's."""
+
+    @patch("backend.orchestrator.update_session_status")
+    @patch("backend.orchestrator.get_session_messages")
+    @patch("backend.orchestrator.insert_message")
+    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_question")
+    async def test_edit_transcript_targets_candidate_message(
+        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+    ):
+        """edit_transcript after text_input updates the candidate message (seq 2),
+        not the subsequent interviewer message (seq 3)."""
+        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        mock_get_msgs.return_value = [
+            _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome"),
+            _make_mock_message(2, 42, 2, MessageRole.candidate, "Original answer"),
+        ]
+
+        orch = InterviewOrchestrator(mock_deps)
+        results = []
+        await orch.enqueue(
+            WSMessage(
+                type="start",
+                question_id=1,
+                timer_sec=2700,
+                tts_enabled=False,
+                briefed=False,
+            )
+        )
+        # text_input creates candidate message at sequence 2
+        await orch.enqueue(
+            WSMessage(type="text_input", text="Original answer")
+        )
+        # After text_input + interviewer response, _sequence == 3 (interviewer),
+        # but _last_candidate_sequence should still be 2.
+        await orch.enqueue(
+            WSMessage(type="edit_transcript", text="Corrected answer")
+        )
+        await orch.enqueue(WSMessage(type="shutdown"))
+        await orch.run(send=results.append)
+
+        # Find the UPDATE call on the mock connection
+        mock_conn = mock_deps._mock_conn
+        execute_calls = mock_conn.execute.call_args_list
+        update_calls = [
+            c for c in execute_calls
+            if "UPDATE messages" in str(c.args[0])
+        ]
+        assert len(update_calls) == 1, "Expected exactly one UPDATE messages call"
+
+        update_args = update_calls[0].args
+        new_text, session_id, sequence = update_args[1], update_args[2], update_args[3]
+        assert new_text == "Corrected answer"
+        assert session_id == 42
+        # Candidate was saved at sequence 2; interviewer response at sequence 3.
+        # The fix ensures we target sequence 2, not 3.
+        assert sequence == 2, (
+            f"edit_transcript should target candidate sequence 2, got {sequence}"
+        )
