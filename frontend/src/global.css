@@ -1067,6 +1067,11 @@ button:disabled {
   color: var(--text-muted);
 }
 
+.trace-ago {
+  color: #555;
+  font-size: 10px;
+}
+
 .trace-copy-btn {
   background: transparent;
   color: var(--text-muted);
