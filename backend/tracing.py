@@ -33,10 +33,15 @@ class FileSpanExporter(SpanExporter):
                 day_dir = os.path.join(self.base_dir, date_str)
                 os.makedirs(day_dir, exist_ok=True)
 
+                parent_id = None
+                if span.parent and span.parent.span_id:
+                    parent_id = format(span.parent.span_id, "016x")
+
                 record = {
                     "trace_id": trace_id_hex,
                     "trace_id_short": trace_id_short,
                     "span_id": format(ctx.span_id, "016x"),
+                    "parent_span_id": parent_id,
                     "name": span.name,
                     "start_time": dt.isoformat(),
                     "duration_ms": round((span.end_time - span.start_time) / 1e6, 2)
@@ -60,13 +65,14 @@ class FileSpanExporter(SpanExporter):
 
 # User-friendly action labels for the trace widget
 ACTION_LABELS: dict[str, str] = {
+    "interview.start": "Started session",
     "interview.turn": "Stopped talking",
+    "interview.end_session": "Session ended",
     "speech.transcribe": "Transcribing speech",
     "llm.interviewer": "Interviewer responding",
     "speech.tts": "Generating audio",
     "interview.evaluate": "Evaluating session",
     "coach.analyze": "Coach analyzing",
-    "db.save_message": "Saving message",
 }
 
 
