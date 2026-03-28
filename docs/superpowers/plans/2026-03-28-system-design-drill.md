@@ -556,62 +556,135 @@ def save_audio_chunk(self, session_dir: str, direction: str, turn: int, chunk_in
 
 ---
 
-### Task 9: Interview Orchestrator (decomposed WebSocket handler)
+### Task 9: Interview Orchestrator (sequential message queue)
 
-**Files:** `backend/orchestrator.py`, `tests/test_orchestrator.py`
+**Files:** `backend/orchestrator.py`, `backend/messages.py`, `tests/test_orchestrator.py`
 
-This is the most critical piece. The v1 plan had a 230-line monolithic WebSocket handler with scoping bugs. The v2 decomposes it into a testable class.
+This is the most critical piece. The architecture is a **sequential message queue** — one message processed at a time, no concurrency except TTS playback. This eliminates race conditions by construction: two messages can never be in-flight simultaneously, so state machine checks become assertions rather than guards.
 
-- [ ] **Step 1: Write failing tests for orchestrator**
+**Why sequential:** Transcription, LLM calls, DB writes, and state transitions should never overlap. There's nothing useful the user can do while the pipeline is processing a turn. The only genuinely concurrent operation is TTS playback (audio plays while the user reads or thinks, and needs to be interruptible). TTS runs as a separate task with explicit cancellation.
+
+**TTS interrupt is the one exception to the queue.** The queue blocks during LLM calls. If the user wants to interrupt TTS during that time, `cancel_tts` must be callable directly — it doesn't go through the queue. This is a small, contained exception.
+
+- [ ] **Step 1: Define message types**
+
+Create `backend/messages.py`:
+
+```python
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Literal
+
+@dataclass
+class WSMessage:
+    type: str
+    question_id: int | None = None
+    timer_sec: int | None = None
+    tts_enabled: bool | None = None
+    briefed: bool | None = None
+    audio_data: bytes | None = None
+    text: str | None = None
+
+def parse_ws_message(raw: dict) -> WSMessage:
+    """Parse raw JSON dict into typed WSMessage."""
+    msg_type = raw["type"]
+    return WSMessage(
+        type=msg_type,
+        question_id=raw.get("question_id"),
+        timer_sec=raw.get("timer_sec"),
+        tts_enabled=raw.get("tts_enabled"),
+        briefed=raw.get("briefed"),
+        audio_data=base64.b64decode(raw["audio_data"]) if "audio_data" in raw else None,
+        text=raw.get("text"),
+    )
+```
+
+- [ ] **Step 2: Write failing tests for orchestrator**
+
+Tests enqueue messages, drain the queue, and assert on results. No timing-sensitive assertions, no wondering about interleavings.
 
 ```python
 @pytest.mark.asyncio
-async def test_start_session_creates_session_and_sends_opening(mock_deps):
-    """Starting a session inserts a DB row and streams the opening question."""
+async def test_start_then_end_turn_flow(mock_deps):
+    """Full turn: start → end_turn → produces transcription + interviewer response."""
     orch = InterviewOrchestrator(mock_deps)
-    messages_sent = []
-    await orch.handle_start(
-        question_id=1, timer_sec=2700, tts_enabled=False, briefed=False,
-        send=messages_sent.append,
-    )
-    assert orch.session_id is not None
-    assert orch.state_machine.state == SessionState.WAITING_FOR_CANDIDATE
-    assert any(m["type"] == "interviewer_text" for m in messages_sent)
+    results = []
 
-@pytest.mark.asyncio
-async def test_end_turn_transcribes_and_gets_response(mock_deps):
-    """End turn sends audio to Whisper, sends transcription to Claude, returns response."""
-    orch = InterviewOrchestrator(mock_deps)
-    await orch.handle_start(question_id=1, ...)
-    messages_sent = []
-    await orch.handle_end_turn(
-        audio_data=b"fake-audio", send=messages_sent.append,
-    )
-    assert any(m["type"] == "transcription" for m in messages_sent)
-    assert any(m["type"] == "interviewer_text" for m in messages_sent)
+    await orch.enqueue(WSMessage(type="start", question_id=1, timer_sec=2700, tts_enabled=False, briefed=False))
+    await orch.enqueue(WSMessage(type="end_turn", audio_data=b"fake-audio"))
+    await orch.enqueue(WSMessage(type="shutdown"))
 
-@pytest.mark.asyncio
-async def test_end_turn_before_start_raises(mock_deps):
-    """Sending end_turn without starting should fail gracefully."""
-    orch = InterviewOrchestrator(mock_deps)
-    with pytest.raises(InvalidTransition):
-        await orch.handle_end_turn(audio_data=b"audio", send=lambda m: None)
+    await orch.run(send=results.append)
+
+    types = [r["type"] for r in results]
+    assert "interviewer_text" in types  # opening
+    assert "transcription" in types
+    # Second interviewer_text after the transcription
+    text_indices = [i for i, r in enumerate(results) if r["type"] == "interviewer_text"]
+    trans_index = types.index("transcription")
+    assert any(i > trans_index for i in text_indices)
 
 @pytest.mark.asyncio
 async def test_text_input_skips_whisper(mock_deps):
-    """Text input should bypass Whisper and go straight to Claude."""
+    """Text input bypasses Whisper, goes straight to Claude."""
     orch = InterviewOrchestrator(mock_deps)
-    await orch.handle_start(question_id=1, ...)
-    messages_sent = []
-    await orch.handle_text_input(
-        text="I'd start by clarifying requirements...", send=messages_sent.append,
-    )
-    # No transcription message (text was provided directly)
-    assert not any(m["type"] == "transcription" for m in messages_sent)
-    assert any(m["type"] == "interviewer_text" for m in messages_sent)
+    results = []
+
+    await orch.enqueue(WSMessage(type="start", question_id=1, timer_sec=2700, tts_enabled=False, briefed=False))
+    await orch.enqueue(WSMessage(type="text_input", text="I'd start by clarifying requirements..."))
+    await orch.enqueue(WSMessage(type="shutdown"))
+
+    await orch.run(send=results.append)
+
+    types = [r["type"] for r in results]
+    assert "transcription" not in types  # no whisper involved
+    assert "interviewer_text" in types
+
+@pytest.mark.asyncio
+async def test_end_turn_before_start_sends_error(mock_deps):
+    """Sending end_turn without starting sends error, doesn't crash."""
+    orch = InterviewOrchestrator(mock_deps)
+    results = []
+
+    await orch.enqueue(WSMessage(type="end_turn", audio_data=b"audio"))
+    await orch.enqueue(WSMessage(type="shutdown"))
+
+    await orch.run(send=results.append)
+
+    assert any(r["type"] == "error" for r in results)
+
+@pytest.mark.asyncio
+async def test_messages_are_sequential(mock_deps):
+    """Two rapid end_turns process one at a time, never overlap."""
+    call_count = 0
+    max_concurrent = 0
+
+    original_transcribe = mock_deps.openai_client.audio.transcriptions.create
+
+    async def counting_transcribe(*args, **kwargs):
+        nonlocal call_count, max_concurrent
+        call_count += 1
+        current = call_count
+        max_concurrent = max(max_concurrent, current)
+        result = await original_transcribe(*args, **kwargs)
+        call_count -= 1
+        return result
+
+    mock_deps.openai_client.audio.transcriptions.create = counting_transcribe
+
+    orch = InterviewOrchestrator(mock_deps)
+    await orch.enqueue(WSMessage(type="start", question_id=1, timer_sec=2700, tts_enabled=False, briefed=False))
+    await orch.enqueue(WSMessage(type="end_turn", audio_data=b"audio1"))
+    await orch.enqueue(WSMessage(type="end_turn", audio_data=b"audio2"))
+    await orch.enqueue(WSMessage(type="shutdown"))
+
+    results = []
+    await orch.run(send=results.append)
+
+    assert max_concurrent <= 1  # never more than one transcription in flight
 ```
 
-- [ ] **Step 2: Implement `backend/orchestrator.py`**
+- [ ] **Step 3: Implement `backend/orchestrator.py`**
 
 ```python
 @dataclass
@@ -623,59 +696,166 @@ class OrchestratorDeps:
     settings: Settings
     storage: SessionStorage
 
+
 class InterviewOrchestrator:
-    """Manages one interview session. One instance per WebSocket connection."""
+    """Sequential message processor for one interview session.
+
+    Architecture: one asyncio.Queue, one consumer. Messages are processed
+    one at a time in order. No two handlers ever run concurrently.
+
+    The only concurrent operation is TTS playback, which runs as a
+    separate task and can be cancelled from outside the queue via
+    cancel_tts().
+    """
 
     def __init__(self, deps: OrchestratorDeps) -> None:
         self.deps = deps
-        self.state_machine = SessionStateMachine()
-        self.interviewer = Interviewer(InterviewerConfig(model=deps.settings.interviewer_model))
-        self.session_id: int | None = None
-        self.session_dir: str | None = None
-        self.question: Question | None = None
-        self.system_prompt: str = ""
-        self.sequence: int = 0
-        self.tts_enabled: bool = True
-        self.tts_task: asyncio.Task | None = None
+        self._queue: asyncio.Queue[WSMessage] = asyncio.Queue()
+        self._state = SessionStateMachine()
+        self._interviewer = Interviewer(InterviewerConfig(model=deps.settings.interviewer_model))
+        self._session_id: int | None = None
+        self._session_dir: str | None = None
+        self._question: Question | None = None
+        self._system_prompt: str = ""
+        self._sequence: int = 0
+        self._tts_enabled: bool = True
+        self._tts_task: asyncio.Task | None = None
 
-    async def handle_start(self, question_id: int, timer_sec: int,
-                           tts_enabled: bool, briefed: bool,
-                           send: Callable) -> None:
-        """Handle 'start' message. Creates session, sends opening."""
-        # All state is on self — no closures, no nonlocal
+    async def enqueue(self, msg: WSMessage) -> None:
+        """Called by the WS handler. Never blocks meaningfully."""
+        await self._queue.put(msg)
 
-    async def handle_end_turn(self, audio_data: bytes | None,
-                              send: Callable) -> None:
-        """Handle 'end_turn'. Transcribe → Claude → TTS → send."""
+    def cancel_tts(self) -> None:
+        """Cancel TTS playback. Callable outside the queue (for interrupts).
+        This is the ONE exception to 'everything goes through the queue.'"""
+        if self._tts_task and not self._tts_task.done():
+            self._tts_task.cancel()
 
-    async def handle_text_input(self, text: str, send: Callable) -> None:
-        """Handle typed text input. Skip Whisper, go straight to Claude."""
+    async def run(self, send: Callable) -> None:
+        """Main loop. Processes one message at a time.
+        Run this as a task when the WS connects."""
+        while True:
+            msg = await self._queue.get()
+            if msg.type == "shutdown":
+                self.cancel_tts()
+                await self._finalize_if_active(send)
+                break
+            try:
+                await self._handle(msg, send)
+            except Exception as e:
+                await send({"type": "error", "message": str(e)})
 
-    async def handle_interrupt(self) -> None:
-        """Cancel TTS playback."""
+    async def _handle(self, msg: WSMessage, send: Callable) -> None:
+        """Dispatch to the appropriate handler. Sequential by construction."""
+        match msg.type:
+            case "start":
+                await self._do_start(msg, send)
+            case "end_turn":
+                await self._do_end_turn(msg, send)
+            case "text_input":
+                await self._do_text_input(msg, send)
+            case "edit_transcript":
+                await self._do_edit_transcript(msg)
+            case "end_session":
+                await self._do_end_session(msg, send)
+            case _:
+                await send({"type": "error", "message": f"Unknown message type: {msg.type}"})
 
-    async def handle_end_session(self, send: Callable) -> None:
-        """Handle 'end_session'. Get closing remark, finalize."""
+    async def _do_start(self, msg: WSMessage, send: Callable) -> None:
+        """Create session, get opening statement, optionally start TTS."""
+        self._state.transition(SessionState.STARTING)
+        # ... create session in DB, build system prompt, get opening
+        self._state.transition(SessionState.INTERVIEWER_SPEAKING)
 
-    async def handle_edit_transcript(self, text: str) -> None:
-        """Handle transcript edit before send."""
+        response_text = await self._stream_interviewer_opening(send)
+        await self._save_message(MessageRole.INTERVIEWER, response_text)
 
-    async def _stream_tts(self, text: str, send: Callable) -> None:
-        """Stream TTS audio. Instance method, not a closure."""
+        if self._tts_enabled:
+            self._tts_task = asyncio.create_task(self._stream_tts(response_text, send))
+        else:
+            await send({"type": "interviewer_done"})
 
-    async def _get_interviewer_response(self, send: Callable) -> str:
-        """Get interviewer response, stream tokens. Returns full text."""
+        self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
+        await send({"type": "state", "state": self._state.state.value})
+
+    async def _do_end_turn(self, msg: WSMessage, send: Callable) -> None:
+        """Transcribe → display → Claude → TTS. All sequential except TTS."""
+        self.cancel_tts()  # interrupt any playing TTS
+        self._state.transition(SessionState.CANDIDATE_SPEAKING)
+        self._state.transition(SessionState.PROCESSING)
+        await send({"type": "state", "state": "PROCESSING"})
+
+        # 1. Transcribe (sequential — blocks until done)
+        transcript = await self._transcribe(msg.audio_data)
+        await send({"type": "transcription", "text": transcript})
+        await self._save_message(MessageRole.CANDIDATE, transcript, raw_content=transcript)
+
+        # 2. Get interviewer response (sequential — streams tokens via send)
+        self._state.transition(SessionState.INTERVIEWER_SPEAKING)
+        response_text = await self._get_interviewer_response(send)
+        await self._save_message(MessageRole.INTERVIEWER, response_text)
+
+        # 3. TTS is fire-and-forget with cancellation handle (the ONE concurrent thing)
+        if self._tts_enabled:
+            self._tts_task = asyncio.create_task(self._stream_tts(response_text, send))
+        else:
+            await send({"type": "interviewer_done"})
+
+        self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
+        await send({"type": "state", "state": self._state.state.value})
+        await send({"type": "timer", "elapsed_seconds": self._state.elapsed_seconds})
+
+    async def _do_text_input(self, msg: WSMessage, send: Callable) -> None:
+        """Same as end_turn but skip Whisper. Text provided directly."""
+        self.cancel_tts()
+        self._state.transition(SessionState.CANDIDATE_SPEAKING)
+        self._state.transition(SessionState.PROCESSING)
+
+        await self._save_message(MessageRole.CANDIDATE, msg.text)
+
+        self._state.transition(SessionState.INTERVIEWER_SPEAKING)
+        response_text = await self._get_interviewer_response(send)
+        await self._save_message(MessageRole.INTERVIEWER, response_text)
+
+        if self._tts_enabled:
+            self._tts_task = asyncio.create_task(self._stream_tts(response_text, send))
+        else:
+            await send({"type": "interviewer_done"})
+
+        self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
+        await send({"type": "state", "state": self._state.state.value})
+
+    async def _do_end_session(self, msg: WSMessage, send: Callable) -> None:
+        """Get closing remark, finalize session, save transcript."""
+        self.cancel_tts()
+        self._state.transition(SessionState.ENDING)
+        # ... get closing remark, save, transition to ENDED
+
+    async def _do_edit_transcript(self, msg: WSMessage) -> None:
+        """Update the most recent candidate message content."""
+        # ... UPDATE messages SET content = $1 WHERE ...
+
+    # --- Private helpers (all sequential, no concurrency concerns) ---
+
+    async def _transcribe(self, audio_data: bytes) -> str: ...
+    async def _get_interviewer_response(self, send: Callable) -> str: ...
+    async def _stream_tts(self, text: str, send: Callable) -> None: ...
+    async def _save_message(self, role: MessageRole, content: str, raw_content: str | None = None) -> None: ...
+    async def _finalize_if_active(self, send: Callable) -> None: ...
 ```
 
-Key differences from v1:
-- All state on `self` — no closures, no `nonlocal`, no scoping bugs
-- `_stream_tts` is an instance method, always available, references `self.sequence` etc.
-- Each handler is independently testable with mock deps
-- `handle_text_input` is a first-class method for text-based conversation
-- `send` callback is passed to each method — the WS handler creates it from `ws.send_text`
+**Key properties of this design:**
 
-- [ ] **Step 3: Run orchestrator tests, verify pass**
-- [ ] **Step 4: Commit**
+1. **Sequential by construction.** `_handle` is awaited before the next `_queue.get()`. Two handlers never run simultaneously. State machine checks are assertions, not race-prone guards.
+
+2. **TTS is the one exception.** It runs as a `create_task` because audio should play while the user reads/thinks. `cancel_tts()` is callable from outside the queue — the WS receive loop can call it directly when it sees an `audio` message (the user started talking, interrupt playback).
+
+3. **Testable without timing.** Enqueue messages, call `run()`, assert on the collected `send` results. The queue serializes everything. No mocking of asyncio, no sleep-based assertions.
+
+4. **Error containment.** Each `_handle` call is wrapped in try/except. A failed transcription sends an error message but doesn't crash the loop. The next message in the queue still gets processed.
+
+- [ ] **Step 4: Run orchestrator tests, verify pass**
+- [ ] **Step 5: Commit**
 
 ---
 
@@ -702,7 +882,7 @@ async def trigger_coach_analysis(
     # ... trigger analysis
 ```
 
-- [ ] **Step 3: Implement `backend/routes/ws.py`** — thin handler
+- [ ] **Step 3: Implement `backend/routes/ws.py`** — trivial shell, delegates everything to orchestrator queue
 
 ```python
 @router.websocket("/ws/interview")
@@ -715,36 +895,34 @@ async def interview_websocket(ws: WebSocket) -> None:
         settings=ws.app.state.settings,
         storage=SessionStorage(ws.app.state.settings.data_dir),
     )
-    orchestrator = InterviewOrchestrator(deps)
+    orch = InterviewOrchestrator(deps)
 
     async def send(data: dict) -> None:
         await ws.send_text(json.dumps(data))
 
+    # The orchestrator runs its queue consumer as a task
+    runner = asyncio.create_task(orch.run(send))
+
     try:
         while True:
             raw = await ws.receive_text()
-            msg = json.loads(raw)
-            match msg["type"]:
-                case "start":
-                    await orchestrator.handle_start(
-                        msg["question_id"], msg.get("timer_sec", 2700),
-                        msg.get("tts_enabled", True), msg.get("briefed", False),
-                        send,
-                    )
-                case "audio":
-                    await orchestrator.handle_interrupt()
-                    # Buffer audio chunks (orchestrator manages buffer)
-                case "end_turn":
-                    await orchestrator.handle_end_turn(audio_data, send)
-                case "text_input":
-                    await orchestrator.handle_text_input(msg["text"], send)
-                case "edit_transcript":
-                    await orchestrator.handle_edit_transcript(msg["text"])
-                case "end_session":
-                    await orchestrator.handle_end_session(send)
+            msg = parse_ws_message(json.loads(raw))
+
+            # TTS interrupt is the ONE thing handled outside the queue.
+            # User started talking — cancel audio immediately, don't wait
+            # for the queue to drain.
+            if msg.type == "audio":
+                orch.cancel_tts()
+                # Audio chunks are accumulated; end_turn carries final blob
+                continue
+
+            await orch.enqueue(msg)
     except WebSocketDisconnect:
-        await orchestrator.handle_disconnect()
+        await orch.enqueue(WSMessage(type="shutdown"))
+        await runner
 ```
+
+**Audio protocol resolution:** The client accumulates audio chunks in the browser via MediaRecorder. `audio` messages are sent during recording for real-time waveform display (and to trigger TTS interrupt). The actual audio blob is sent with the `end_turn` message as `audio_data`. The server does NOT buffer audio chunks — the browser owns the recording buffer. This eliminates the ambiguity from v2.
 
 - [ ] **Step 4: Write route tests** — REST endpoints (questions, sessions, stats). WebSocket test using Starlette `TestClient.websocket_connect()`.
 - [ ] **Step 5: Run tests, verify pass**
