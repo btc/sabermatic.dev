@@ -122,6 +122,21 @@ class InterviewOrchestrator:
             except Exception as e:
                 logger.exception("Unhandled error processing message %s", msg.type)
                 await self._send(send, {"type": "error", "message": str(e)})
+                # Recover state: if we're stuck mid-processing, force back to
+                # WAITING_FOR_CANDIDATE so the user can continue.
+                if self._session_id and self._state.state in (
+                    SessionState.PROCESSING,
+                    SessionState.CANDIDATE_SPEAKING,
+                    SessionState.INTERVIEWER_SPEAKING,
+                ):
+                    try:
+                        self._state.state = SessionState.WAITING_FOR_CANDIDATE
+                        await self._send(send, {
+                            "type": "state",
+                            "state": SessionState.WAITING_FOR_CANDIDATE.value,
+                        })
+                    except Exception:
+                        pass
 
     async def _handle(self, msg: WSMessage, send: SendFn) -> None:
         """Dispatch a single message to the appropriate handler."""
@@ -240,7 +255,7 @@ class InterviewOrchestrator:
         # Save incoming audio to disk
         if msg.audio_data and self._session_dir:
             self.deps.storage.save_audio_chunk(
-                self._session_dir, "in", self._sequence, 0, msg.audio_data, "webm"
+                self._session_dir, "audio_in", self._sequence + 1, 0, msg.audio_data, "webm"
             )
 
         # 1. Transcribe
