@@ -582,17 +582,42 @@ data/
       c9a2f1_coach_review.json
 ```
 
-### Surfacing Trace IDs
+### Trace Widget (UI)
 
-- **On screen:** tiny monospace text in the bottom-left corner of every screen. Updates with each action. Click to copy full trace ID to clipboard. Muted, nearly invisible unless you're looking for it.
+Fixed to viewport bottom-left. Always visible, never scrolls away. Low opacity, unobtrusive.
 
-  ```
-  t:a3f8c2
-  ```
+**Two-tier labeling.** Top-level labels are user-meaningful actions, not internal span names. Technical spans nest underneath.
 
-- **In browser console:** every trace logs `[trace:a3f8c2] interview.turn started` as a fallback.
+User-level actions:
+- "Stopped talking" → wraps Whisper transcription pipeline
+- "Interviewer responding" → wraps Claude + TTS pipeline
+- "Started session" → wraps session creation + first interviewer message
+- "Opened app" → wraps coach analysis
+- "Session ended" → wraps evaluation pipeline
+- "Loaded history" → wraps dashboard queries
 
-- **Debugging flow:** something feels off → glance at corner → copy trace ID → open Claude Code → "trace a3f8c2 had a long pause" → read the trace JSON → see exactly where the time went.
+**Collapsed state:** one-liner showing the most recent action — trace ID, human-readable label, duration, clipboard copy icon.
+
+```
+t:a3f8c2  Stopped talking  4.7s  📋
+```
+
+**Expanded state:** click to open a scrollable log of recent actions, newest at top. Each row is expandable to reveal technical spans underneath. Clipboard icon on every row.
+
+```
+▾ t:a3f8c2  Stopped talking              4.7s  📋
+    speech.transcribe                     1.2s
+    llm.interviewer (ttft: 1.8s)          2.9s
+    speech.tts                            0.6s
+▸ t:e1b4d7  Interviewer responding        3.1s  📋
+▸ t:c2f901  Opened app                    4.3s  📋
+```
+
+Errors show duration in red so they're immediately visible.
+
+**Also in browser console:** every trace logs `[trace:a3f8c2] Stopped talking` as a fallback.
+
+**Debugging flow:** something feels off → glance at corner or expand the widget → copy trace ID → open Claude Code → "trace a3f8c2 had a long pause after I stopped talking" → read the trace JSON → see exactly where the time went.
 
 ---
 
