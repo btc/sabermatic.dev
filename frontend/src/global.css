@@ -1177,3 +1177,43 @@ button:disabled {
   max-height: 120px;
   overflow-y: auto;
 }
+
+/* ---- Begin Interview screen ---- */
+
+.interview-begin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 1rem;
+}
+
+.interview-begin h2 {
+  font-size: 1.5rem;
+  color: var(--text-primary);
+}
+
+.interview-begin-hint {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  max-width: 400px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.interview-begin-btn {
+  background: var(--accent-blue);
+  color: var(--bg-primary);
+  border: none;
+  padding: 12px 32px;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 1rem;
+}
+
+.interview-begin-btn:hover {
+  opacity: 0.9;
+}

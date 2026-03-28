@@ -26,6 +26,7 @@ export default function Interview() {
   const [processing, setProcessing] = useState(false);
   const [disconnected, setDisconnected] = useState(false);
   const [questionTitle, setQuestionTitle] = useState("Interview");
+  const [started, setStarted] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const spaceDownRef = useRef(false);
@@ -115,32 +116,28 @@ export default function Interview() {
   const { connect, send, disconnect } = useWebSocket(handleMessage);
 
   // ---------- Connect on mount ----------
-  // Guard against React StrictMode double-mounting: only init once.
+  // Connect WS on mount, but don't send "start" until user clicks Begin
   const initRef = useRef(false);
 
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
 
-    async function init() {
-      try {
-        await connect();
-        send({
-          type: "start",
-          question_id: Number(questionId),
-        });
-        startTimer();
-      } catch {
-        setDisconnected(true);
-      }
-    }
-
-    init();
+    connect().catch(() => setDisconnected(true));
 
     return () => {
       disconnect();
     };
-  }, [questionId, connect, send, disconnect, startTimer]);
+  }, [connect, disconnect]);
+
+  async function handleBegin() {
+    setStarted(true);
+    send({
+      type: "start",
+      question_id: Number(questionId),
+    });
+    startTimer();
+  }
 
   // ---------- Fetch question title ----------
 
@@ -227,6 +224,23 @@ export default function Interview() {
   }
 
   // ---------- Render ----------
+
+  if (!started) {
+    return (
+      <div className="interview-page">
+        <div className="interview-begin">
+          <h2>{questionTitle}</h2>
+          <p className="interview-begin-hint">
+            The interviewer will speak to you. Use spacebar to talk back, or type below.
+          </p>
+          <button className="interview-begin-btn" onClick={handleBegin}>
+            Begin Interview
+          </button>
+        </div>
+        <TraceWidget />
+      </div>
+    );
+  }
 
   return (
     <div className="interview-page">
