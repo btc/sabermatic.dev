@@ -77,10 +77,21 @@ ACTION_LABELS: dict[str, str] = {
 
 
 def setup_tracing(data_dir: str = "./data") -> None:
-    """Initialize OTEL with file export."""
+    """Initialize OTEL with file export + optional Jaeger/OTLP export."""
     provider = TracerProvider()
-    exporter = FileSpanExporter(base_dir=os.path.join(data_dir, "traces"))
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+
+    # File exporter (always on — feeds the in-app trace widget)
+    file_exporter = FileSpanExporter(base_dir=os.path.join(data_dir, "traces"))
+    provider.add_span_processor(BatchSpanProcessor(file_exporter))
+
+    # OTLP exporter (Jaeger) — best-effort, don't fail if Jaeger isn't running
+    try:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        otlp_exporter = OTLPSpanExporter()  # defaults to localhost:4317
+        provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+    except Exception:
+        pass  # Jaeger not available — file traces still work
+
     trace.set_tracer_provider(provider)
     HTTPXClientInstrumentor().instrument()
 
