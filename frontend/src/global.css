@@ -120,3 +120,255 @@ button:disabled {
   background: var(--accent-orange);
   color: #000;
 }
+
+/* ---- Interview page layout ---- */
+
+.interview-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.interview-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.interview-title {
+  flex: 1;
+  font-size: 1.1rem;
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.interview-end-btn {
+  background: var(--accent-red);
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+  flex-shrink: 0;
+}
+
+.interview-chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 0;
+}
+
+.interview-chat-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.interview-bottom {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  padding: 0.75rem 1rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ---- Chat messages ---- */
+
+.chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.chat-row-left {
+  flex-direction: row;
+  align-self: flex-start;
+}
+
+.chat-row-right {
+  flex-direction: row-reverse;
+  align-self: flex-end;
+}
+
+.chat-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.chat-avatar-interviewer {
+  background: #3a2a6a;
+  color: #d0c0ff;
+}
+
+.chat-avatar-candidate {
+  background: #1b4a1b;
+  color: #a0e0a0;
+}
+
+.chat-bubble {
+  max-width: 85%;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  line-height: 1.5;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.chat-bubble-interviewer {
+  background: #2a2a4a;
+}
+
+.chat-bubble-candidate {
+  background: #1b3a1b;
+}
+
+.chat-thinking {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.chat-system {
+  text-align: center;
+  color: var(--accent-red);
+  font-size: 0.85rem;
+  padding: 0.5rem;
+}
+
+/* Blinking cursor for streaming messages */
+.chat-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--text);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ---- Timer ---- */
+
+.timer {
+  font-family: "SF Mono", "Consolas", "Monaco", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.timer-normal {
+  color: var(--accent-blue);
+}
+
+.timer-warning {
+  color: var(--accent-orange);
+}
+
+.timer-overtime {
+  color: var(--accent-red);
+}
+
+/* ---- Audio controls ---- */
+
+.audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 28px;
+}
+
+.audio-controls-recording {
+  color: var(--accent-red);
+}
+
+.audio-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-red);
+  animation: blink 1s step-end infinite;
+}
+
+.rec-label {
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+}
+
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+}
+
+.waveform-bar {
+  width: 3px;
+  background: var(--accent-red);
+  border-radius: 1px;
+  transition: height 0.05s ease;
+}
+
+/* ---- Text input ---- */
+
+.text-input-form {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 720px;
+}
+
+.text-input-field {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+}
+
+.text-input-field:focus {
+  border-color: var(--accent-blue);
+}
+
+.text-input-field:disabled {
+  opacity: 0.5;
+}
+
+.text-input-field::placeholder {
+  color: var(--text-muted);
+}
+
+.text-input-send {
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+}
