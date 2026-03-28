@@ -532,6 +532,70 @@ python run.py
 
 ---
 
+## Observability: Local Tracing
+
+OpenTelemetry instrumentation with local file export. Every user action traces through the full pipeline. Zero additional infrastructure — no Jaeger, no collector, just JSON files on disk.
+
+### Span Tree
+
+```
+interview.turn (one conversational turn)
+├── ws.receive_audio          # WebSocket audio receipt, chunk size
+├── speech.transcribe         # Whisper API: latency, audio duration, confidence
+├── ws.send_transcription     # Transcription sent to client
+├── llm.interviewer           # Claude API: tokens in/out, time to first token
+│   ├── llm.stream_chunk      # Each streamed token batch
+│   └── llm.complete          # Total response
+├── speech.tts                # TTS API: latency to first audio chunk
+│   └── speech.tts_chunk      # Each audio chunk streamed back
+├── ws.send_audio             # Audio chunks sent to client
+└── db.save_message           # Postgres write
+
+interview.evaluate (post-session)
+├── db.load_transcript
+├── llm.evaluator
+├── db.save_evaluation
+└── db.save_annotations
+
+coach.analyze (on app load)
+├── db.load_history
+├── llm.coach
+├── db.save_question          # If new scenario generated
+└── db.save_review
+```
+
+### Instrumentation Approach
+
+- **Auto-instrumentation** for FastAPI (HTTP/WS requests), asyncpg (DB queries), httpx (outbound API calls to Whisper, Claude, TTS) — a few lines each.
+- **Manual spans** for business logic: session state transitions, turn processing, evaluation pipeline.
+- Each span carries custom attributes: `session_id`, `turn_sequence`, `audio_duration_sec`, `token_count`, `model`, error messages.
+
+### Storage
+
+```
+data/
+  traces/
+    2026-03-28/
+      a3f8c2_session_012_turn_001.json
+      a3f8c2_session_012_turn_002.json
+      b7e1d4_session_012_evaluate.json
+      c9a2f1_coach_review.json
+```
+
+### Surfacing Trace IDs
+
+- **On screen:** tiny monospace text in the bottom-left corner of every screen. Updates with each action. Click to copy full trace ID to clipboard. Muted, nearly invisible unless you're looking for it.
+
+  ```
+  t:a3f8c2
+  ```
+
+- **In browser console:** every trace logs `[trace:a3f8c2] interview.turn started` as a fallback.
+
+- **Debugging flow:** something feels off → glance at corner → copy trace ID → open Claude Code → "trace a3f8c2 had a long pause" → read the trace JSON → see exactly where the time went.
+
+---
+
 ## What Not to Build (v1)
 
 - Whiteboard / diagramming (massive scope, v2)
