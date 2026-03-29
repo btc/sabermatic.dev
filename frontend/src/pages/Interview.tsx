@@ -34,9 +34,11 @@ export default function Interview() {
 
   const {
     isRecording,
-    isPreparing,
     isPlaying,
+    micReady,
     analyserData,
+    initMic,
+    releaseMic,
     startRecording,
     stopRecording,
     playAudioChunk,
@@ -132,17 +134,18 @@ export default function Interview() {
 
     return () => {
       disconnect();
+      releaseMic();
     };
-  }, [connect, disconnect]);
+  }, [connect, disconnect, releaseMic]);
 
   async function handleBegin() {
     setSessionTraceId();
     recordEvent("user.begin_interview", { question_id: Number(questionId) });
 
-    // Request mic permission upfront (user gesture unlocks both mic and audio)
+    // Acquire mic once — stays open for the entire interview.
+    // User gesture here unlocks both mic permission and audio playback.
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
+      await initMic();
     } catch {
       // User denied mic — they can still use text input
     }
@@ -181,10 +184,9 @@ export default function Interview() {
   // ---------- Push-to-talk (spacebar) ----------
 
   const recordingSpanRef = useRef<ReturnType<typeof startSpan> | null>(null);
-  const recordingReadyRef = useRef(false); // true once startRecording() has fully resolved
 
   useEffect(() => {
-    async function handleKeyDown(e: KeyboardEvent) {
+    function handleKeyDown(e: KeyboardEvent) {
       if (
         e.code === "Space" &&
         !e.repeat &&
@@ -194,22 +196,11 @@ export default function Interview() {
       ) {
         e.preventDefault();
         spaceDownRef.current = true;
-        recordingReadyRef.current = false;
         recordingSpanRef.current = startSpan("user.spacebar_press");
         stopPlayback();
-        try {
-          await startRecording();
-          recordingReadyRef.current = true;
-          // If user released spacebar while we were initializing, stop immediately
-          if (!spaceDownRef.current) {
-            await finishRecording();
-          }
-        } catch {
-          spaceDownRef.current = false;
-          recordingReadyRef.current = false;
-          recordingSpanRef.current?.end({ error: "recording_failed" });
-          recordingSpanRef.current = null;
-        }
+        // startRecording is SYNCHRONOUS now — mic stream is already open.
+        // No getUserMedia call, no race condition, no delay.
+        startRecording();
       }
     }
 
@@ -218,36 +209,25 @@ export default function Interview() {
         e.preventDefault();
         spaceDownRef.current = false;
 
-        // If recording is ready, stop and send. If not ready yet,
-        // handleKeyDown will detect spaceDownRef=false after startRecording
-        // resolves and call finishRecording itself.
-        if (recordingReadyRef.current) {
-          await finishRecording();
+        const recSpan = recordingSpanRef.current;
+        recordingSpanRef.current = null;
+
+        try {
+          const encodeSpan = startSpan("audio.encode");
+          const audioData = await stopRecording();
+          encodeSpan.end({ audio_length: audioData?.length ?? 0 });
+
+          if (audioData) {
+            const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
+            send({ type: "end_turn", audio_data: audioData });
+            sendSpan.end();
+            recSpan?.end({ audio_length: audioData.length });
+          } else {
+            recSpan?.end({ error: "no_audio_data" });
+          }
+        } catch (err) {
+          recSpan?.end({ error: String(err) });
         }
-        // else: handleKeyDown's post-await check will handle it
-      }
-    }
-
-    async function finishRecording() {
-      recordingReadyRef.current = false;
-      const recSpan = recordingSpanRef.current;
-      recordingSpanRef.current = null;
-
-      try {
-        const encodeSpan = startSpan("audio.encode");
-        const audioData = await stopRecording();
-        encodeSpan.end({ audio_length: audioData?.length ?? 0 });
-
-        if (audioData) {
-          const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
-          send({ type: "end_turn", audio_data: audioData });
-          sendSpan.end();
-          recSpan?.end({ audio_length: audioData.length });
-        } else {
-          recSpan?.end({ error: "no_audio_data" });
-        }
-      } catch (err) {
-        recSpan?.end({ error: String(err) });
       }
     }
 
@@ -360,7 +340,7 @@ export default function Interview() {
 
       {/* Bottom area */}
       <div className="interview-bottom">
-        <AudioControls isRecording={isRecording} isPreparing={isPreparing} analyserData={analyserData} />
+        <AudioControls isRecording={isRecording} micReady={micReady} analyserData={analyserData} />
         <TextInput
           onSubmit={handleTextSubmit}
           disabled={serverState === "processing" || serverState === "interviewer_speaking"}

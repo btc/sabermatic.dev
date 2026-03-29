@@ -14,42 +14,78 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 export function useAudio() {
   const [isRecording, setIsRecording] = useState(false);
-  const [isPreparing, setIsPreparing] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [micReady, setMicReady] = useState(false);
   const [analyserData, setAnalyserData] = useState<Uint8Array | null>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  // Persistent mic stream — acquired once, reused for every recording
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
 
-  // Playback: accumulate base64 chunks, play complete audio on flush
+  // Per-recording state
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  // Playback
   const audioChunksRef = useRef<string[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // ---- Recording ----
+  // ---- Mic initialization (call once, e.g. on "Begin Interview") ----
 
-  const startRecording = useCallback(async () => {
-    setIsPreparing(true);
+  const initMic = useCallback(async () => {
+    if (streamRef.current) return; // already initialized
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = stream;
 
-    // Set up analyser for waveform visualisation
     const audioCtx = new AudioContext();
     const source = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
+    audioCtxRef.current = audioCtx;
     analyserRef.current = analyser;
 
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      analyser.getByteTimeDomainData(dataArray);
-      setAnalyserData(new Uint8Array(dataArray));
-      animFrameRef.current = requestAnimationFrame(tick);
-    };
-    tick();
+    setMicReady(true);
+  }, []);
 
-    // MediaRecorder
+  const releaseMic = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close();
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+    setMicReady(false);
+  }, []);
+
+  // ---- Recording (synchronous start — no getUserMedia call) ----
+
+  const startRecording = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) {
+      console.error("[drill] startRecording called but mic not initialized");
+      return;
+    }
+
+    // Start waveform animation
+    const analyser = analyserRef.current;
+    if (analyser) {
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteTimeDomainData(dataArray);
+        setAnalyserData(new Uint8Array(dataArray));
+        animFrameRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    }
+
+    // Create recorder on the persistent stream — this is synchronous
     const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     chunksRef.current = [];
     recorder.ondataavailable = (e) => {
@@ -57,26 +93,24 @@ export function useAudio() {
     };
     mediaRecorderRef.current = recorder;
     recorder.start();
-    setIsPreparing(false);
     setIsRecording(true);
   }, []);
 
   const stopRecording = useCallback(async (): Promise<string> => {
+    // Stop waveform animation
+    cancelAnimationFrame(animFrameRef.current);
+    setAnalyserData(null);
+
     return new Promise((resolve) => {
       const recorder = mediaRecorderRef.current;
       if (!recorder || recorder.state === "inactive") {
+        setIsRecording(false);
         resolve("");
         return;
       }
 
       recorder.onstop = async () => {
-        // Stop analyser animation
-        cancelAnimationFrame(animFrameRef.current);
-        setAnalyserData(null);
-
-        // Stop all tracks to release mic
-        recorder.stream.getTracks().forEach((t) => t.stop());
-
+        // Do NOT stop stream tracks — the stream persists between recordings
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
         const b64 = await blobToBase64(blob);
         setIsRecording(false);
@@ -88,9 +122,6 @@ export function useAudio() {
   }, []);
 
   // ---- Playback ----
-  // TTS sends many small MP3 fragments. Individual fragments are NOT valid
-  // standalone MP3 files. We accumulate all chunks, then play the complete
-  // audio when flushPlayback() is called (on "interviewer_done").
 
   const playAudioChunk = useCallback((base64: string) => {
     audioChunksRef.current.push(base64);
@@ -101,7 +132,6 @@ export function useAudio() {
     audioChunksRef.current = [];
     if (chunks.length === 0) return;
 
-    // Decode all base64 chunks and concatenate into a single binary blob
     const binaryChunks = chunks.map((b64) => {
       const binary = atob(b64);
       const bytes = new Uint8Array(binary.length);
@@ -154,9 +184,11 @@ export function useAudio() {
 
   return {
     isRecording,
-    isPreparing,
     isPlaying,
+    micReady,
     analyserData,
+    initMic,
+    releaseMic,
     startRecording,
     stopRecording,
     playAudioChunk,

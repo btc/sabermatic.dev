@@ -1,19 +1,10 @@
 interface AudioControlsProps {
   isRecording: boolean;
-  isPreparing: boolean;
+  micReady: boolean;
   analyserData: Uint8Array | null;
 }
 
-export default function AudioControls({ isRecording, isPreparing, analyserData }: AudioControlsProps) {
-  if (isPreparing) {
-    return (
-      <div className="audio-controls audio-controls-preparing">
-        <span className="prep-dot" />
-        <span className="prep-label">Activating mic...</span>
-      </div>
-    );
-  }
-
+export default function AudioControls({ isRecording, micReady, analyserData }: AudioControlsProps) {
   if (isRecording) {
     return (
       <div className="audio-controls audio-controls-recording">
@@ -40,7 +31,9 @@ export default function AudioControls({ isRecording, isPreparing, analyserData }
 
   return (
     <div className="audio-controls">
-      <span className="audio-hint">Hold SPACE to talk</span>
+      <span className="audio-hint">
+        {micReady ? "Hold SPACE to talk" : "Mic not available — use text input"}
+      </span>
     </div>
   );
 }
