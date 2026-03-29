@@ -14,6 +14,8 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 export function useAudio() {
   const [isRecording, setIsRecording] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [analyserData, setAnalyserData] = useState<Uint8Array | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -28,6 +30,7 @@ export function useAudio() {
   // ---- Recording ----
 
   const startRecording = useCallback(async () => {
+    setIsPreparing(true);
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     // Set up analyser for waveform visualisation
@@ -54,6 +57,7 @@ export function useAudio() {
     };
     mediaRecorderRef.current = recorder;
     recorder.start();
+    setIsPreparing(false);
     setIsRecording(true);
   }, []);
 
@@ -119,19 +123,23 @@ export function useAudio() {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudioRef.current = audio;
+    setIsPlaying(true);
     audio.onended = () => {
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
+      setIsPlaying(false);
     };
     audio.onerror = (e) => {
       console.error("[drill] Audio playback error:", e);
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
+      setIsPlaying(false);
     };
     audio.play().catch((e) => {
       console.error("[drill] Audio play() rejected:", e);
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
+      setIsPlaying(false);
     });
   }, []);
 
@@ -141,10 +149,13 @@ export function useAudio() {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
     }
+    setIsPlaying(false);
   }, []);
 
   return {
     isRecording,
+    isPreparing,
+    isPlaying,
     analyserData,
     startRecording,
     stopRecording,
