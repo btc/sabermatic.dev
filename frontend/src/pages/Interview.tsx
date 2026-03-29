@@ -38,6 +38,7 @@ export default function Interview() {
     startRecording,
     stopRecording,
     playAudioChunk,
+    flushPlayback,
     stopPlayback,
   } = useAudio();
 
@@ -73,6 +74,7 @@ export default function Interview() {
           break;
 
         case "interviewer_done":
+          flushPlayback(); // Play the accumulated TTS audio
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.role === "interviewer" && last.isStreaming) {
@@ -111,7 +113,7 @@ export default function Interview() {
           break;
       }
     },
-    [navigate, playAudioChunk]
+    [navigate, playAudioChunk, flushPlayback]
   );
 
   const { connect, send, disconnect } = useWebSocket(handleMessage);
