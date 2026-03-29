@@ -181,6 +181,7 @@ export default function Interview() {
   // ---------- Push-to-talk (spacebar) ----------
 
   const recordingSpanRef = useRef<ReturnType<typeof startSpan> | null>(null);
+  const recordingReadyRef = useRef(false); // true once startRecording() has fully resolved
 
   useEffect(() => {
     async function handleKeyDown(e: KeyboardEvent) {
@@ -193,12 +194,19 @@ export default function Interview() {
       ) {
         e.preventDefault();
         spaceDownRef.current = true;
+        recordingReadyRef.current = false;
         recordingSpanRef.current = startSpan("user.spacebar_press");
         stopPlayback();
         try {
           await startRecording();
+          recordingReadyRef.current = true;
+          // If user released spacebar while we were initializing, stop immediately
+          if (!spaceDownRef.current) {
+            await finishRecording();
+          }
         } catch {
           spaceDownRef.current = false;
+          recordingReadyRef.current = false;
           recordingSpanRef.current?.end({ error: "recording_failed" });
           recordingSpanRef.current = null;
         }
@@ -210,26 +218,36 @@ export default function Interview() {
         e.preventDefault();
         spaceDownRef.current = false;
 
-        // End the recording span
-        const recSpan = recordingSpanRef.current;
-        recordingSpanRef.current = null;
-
-        try {
-          const encodeSpan = startSpan("audio.encode");
-          const audioData = await stopRecording();
-          encodeSpan.end({ audio_length: audioData?.length ?? 0 });
-
-          if (audioData) {
-            const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
-            send({ type: "end_turn", audio_data: audioData });
-            sendSpan.end();
-            recSpan?.end({ audio_length: audioData.length });
-          } else {
-            recSpan?.end({ error: "no_audio_data" });
-          }
-        } catch (err) {
-          recSpan?.end({ error: String(err) });
+        // If recording is ready, stop and send. If not ready yet,
+        // handleKeyDown will detect spaceDownRef=false after startRecording
+        // resolves and call finishRecording itself.
+        if (recordingReadyRef.current) {
+          await finishRecording();
         }
+        // else: handleKeyDown's post-await check will handle it
+      }
+    }
+
+    async function finishRecording() {
+      recordingReadyRef.current = false;
+      const recSpan = recordingSpanRef.current;
+      recordingSpanRef.current = null;
+
+      try {
+        const encodeSpan = startSpan("audio.encode");
+        const audioData = await stopRecording();
+        encodeSpan.end({ audio_length: audioData?.length ?? 0 });
+
+        if (audioData) {
+          const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
+          send({ type: "end_turn", audio_data: audioData });
+          sendSpan.end();
+          recSpan?.end({ audio_length: audioData.length });
+        } else {
+          recSpan?.end({ error: "no_audio_data" });
+        }
+      } catch (err) {
+        recSpan?.end({ error: String(err) });
       }
     }
 
