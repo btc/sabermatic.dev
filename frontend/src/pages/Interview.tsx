@@ -24,7 +24,7 @@ export default function Interview() {
   const navigate = useNavigate();
 
   const [messages, setMessages] = useState<ChatEntry[]>([]);
-  const [processing, setProcessing] = useState(false);
+  const [serverState, setServerState] = useState("");
   const [disconnected, setDisconnected] = useState(false);
   const [questionTitle, setQuestionTitle] = useState("Interview");
   const [started, setStarted] = useState(false);
@@ -34,6 +34,8 @@ export default function Interview() {
 
   const {
     isRecording,
+    isPreparing,
+    isPlaying,
     analyserData,
     startRecording,
     stopRecording,
@@ -94,7 +96,7 @@ export default function Interview() {
           break;
 
         case "state":
-          setProcessing(msg.state === "processing");
+          setServerState(msg.state);
           break;
 
         case "session_ended":
@@ -307,11 +309,27 @@ export default function Interview() {
               isStreaming={msg.isStreaming}
             />
           ))}
-          {processing && (
+          {serverState === "processing" && (
+            <div className="chat-row chat-row-right">
+              <div className="chat-bubble chat-bubble-candidate chat-thinking">
+                Transcribing...
+              </div>
+              <div className="chat-avatar chat-avatar-candidate">Y</div>
+            </div>
+          )}
+          {serverState === "interviewer_speaking" && !messages.some(m => m.isStreaming) && (
             <div className="chat-row chat-row-left">
               <div className="chat-avatar chat-avatar-interviewer">I</div>
               <div className="chat-bubble chat-bubble-interviewer chat-thinking">
                 Thinking...
+              </div>
+            </div>
+          )}
+          {isPlaying && (
+            <div className="chat-row chat-row-left">
+              <div className="chat-avatar chat-avatar-interviewer">I</div>
+              <div className="chat-bubble chat-bubble-interviewer chat-speaking">
+                &#9835; Speaking...
               </div>
             </div>
           )}
@@ -324,10 +342,10 @@ export default function Interview() {
 
       {/* Bottom area */}
       <div className="interview-bottom">
-        <AudioControls isRecording={isRecording} analyserData={analyserData} />
+        <AudioControls isRecording={isRecording} isPreparing={isPreparing} analyserData={analyserData} />
         <TextInput
           onSubmit={handleTextSubmit}
-          disabled={processing}
+          disabled={serverState === "processing" || serverState === "interviewer_speaking"}
           placeholder="Type instead of speaking..."
         />
       </div>

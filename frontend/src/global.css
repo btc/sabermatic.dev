@@ -256,6 +256,12 @@ button:disabled {
   font-style: italic;
 }
 
+.chat-speaking {
+  opacity: 0.7;
+  font-style: italic;
+  color: var(--accent-blue);
+}
+
 .chat-system {
   text-align: center;
   color: var(--accent-red);
@@ -322,14 +328,31 @@ button:disabled {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent-red);
-  animation: blink 1s step-end infinite;
+  background: var(--accent-green);
 }
 
 .rec-label {
   font-weight: 700;
   font-size: 0.8rem;
   letter-spacing: 0.05em;
+  color: var(--accent-green);
+}
+
+.prep-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-orange);
+  animation: blink 0.5s step-end infinite;
+}
+
+.prep-label {
+  font-size: 0.8rem;
+  color: var(--accent-orange);
+}
+
+.audio-controls-preparing {
+  color: var(--accent-orange);
 }
 
 .waveform {
