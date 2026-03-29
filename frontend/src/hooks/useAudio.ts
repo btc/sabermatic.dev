@@ -21,9 +21,8 @@ export function useAudio() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
 
-  // Playback queue: sequential audio playback via standard Audio elements
-  const audioQueueRef = useRef<string[]>([]);
-  const isPlayingRef = useRef(false);
+  // Playback: accumulate base64 chunks, play complete audio on flush
+  const audioChunksRef = useRef<string[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // ---- Recording ----
@@ -84,48 +83,64 @@ export function useAudio() {
     });
   }, []);
 
-  // ---- Playback (queued sequential) ----
+  // ---- Playback ----
+  // TTS sends many small MP3 fragments. Individual fragments are NOT valid
+  // standalone MP3 files. We accumulate all chunks, then play the complete
+  // audio when flushPlayback() is called (on "interviewer_done").
 
-  const playNext = useCallback(() => {
-    if (audioQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      return;
+  const playAudioChunk = useCallback((base64: string) => {
+    audioChunksRef.current.push(base64);
+  }, []);
+
+  const flushPlayback = useCallback(() => {
+    const chunks = audioChunksRef.current;
+    audioChunksRef.current = [];
+    if (chunks.length === 0) return;
+
+    // Decode all base64 chunks and concatenate into a single binary blob
+    const binaryChunks = chunks.map((b64) => {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    });
+
+    const totalLength = binaryChunks.reduce((sum, c) => sum + c.length, 0);
+    const combined = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of binaryChunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
     }
-    isPlayingRef.current = true;
-    const b64 = audioQueueRef.current.shift()!;
-    const audio = new Audio(`data:audio/mp3;base64,${b64}`);
+
+    const blob = new Blob([combined], { type: "audio/mp3" });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
     currentAudioRef.current = audio;
     audio.onended = () => {
+      URL.revokeObjectURL(url);
       currentAudioRef.current = null;
-      playNext();
     };
-    audio.onerror = () => {
+    audio.onerror = (e) => {
+      console.error("[drill] Audio playback error:", e);
+      URL.revokeObjectURL(url);
       currentAudioRef.current = null;
-      playNext();
     };
-    audio.play().catch(() => {
+    audio.play().catch((e) => {
+      console.error("[drill] Audio play() rejected:", e);
+      URL.revokeObjectURL(url);
       currentAudioRef.current = null;
-      playNext();
     });
   }, []);
 
-  const playAudioChunk = useCallback(
-    (base64: string) => {
-      audioQueueRef.current.push(base64);
-      if (!isPlayingRef.current) {
-        playNext();
-      }
-    },
-    [playNext]
-  );
-
   const stopPlayback = useCallback(() => {
-    audioQueueRef.current = [];
+    audioChunksRef.current = [];
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
     }
-    isPlayingRef.current = false;
   }, []);
 
   return {
@@ -134,6 +149,7 @@ export function useAudio() {
     startRecording,
     stopRecording,
     playAudioChunk,
+    flushPlayback,
     stopPlayback,
   };
 }
