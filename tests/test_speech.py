@@ -72,30 +72,42 @@ class TestTranscribeAudio:
 class TestGenerateTTS:
     @pytest.fixture
     def mock_client(self):
+        """Build a mock AsyncOpenAI whose audio.speech.with_streaming_response.create
+        returns an async context-manager that yields a response with iter_bytes."""
         client = AsyncMock()
         client.audio = MagicMock()
         client.audio.speech = MagicMock()
-        client.audio.speech.create = AsyncMock()
+        client.audio.speech.with_streaming_response = MagicMock()
+        client.audio.speech.with_streaming_response.create = MagicMock()
         return client
 
     def _make_streaming_response(self, chunks: list[bytes]):
-        """Create a mock response that supports async iteration."""
-        response = AsyncMock()
+        """Create a mock response usable as ``async with ... as response``
+        where ``response.iter_bytes()`` yields the given chunks."""
+        response = MagicMock()
 
-        async def _gen():
+        async def _iter_bytes(chunk_size=None):
             for chunk in chunks:
                 yield chunk
 
-        async def mock_aiter_bytes(chunk_size=None):
-            return _gen()
+        response.iter_bytes = _iter_bytes
 
-        response.aiter_bytes = mock_aiter_bytes
-        return response
+        # Build an async context manager that yields the response
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(return_value=response)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return ctx
+
+    def _setup_mock(self, mock_client, chunks: list[bytes]):
+        """Wire the mock client so with_streaming_response.create returns
+        the context manager for the given chunks."""
+        ctx = self._make_streaming_response(chunks)
+        mock_client.audio.speech.with_streaming_response.create.return_value = ctx
+        return ctx
 
     async def test_yields_audio_chunks(self, mock_client):
         chunks = [b"chunk1", b"chunk2", b"chunk3"]
-        mock_response = self._make_streaming_response(chunks)
-        mock_client.audio.speech.create.return_value = mock_response
+        self._setup_mock(mock_client, chunks)
 
         collected = []
         async for chunk in generate_tts(mock_client, "Hello world"):
@@ -104,31 +116,28 @@ class TestGenerateTTS:
         assert collected == chunks
 
     async def test_passes_correct_parameters(self, mock_client):
-        mock_response = self._make_streaming_response([b"data"])
-        mock_client.audio.speech.create.return_value = mock_response
+        self._setup_mock(mock_client, [b"data"])
 
         async for _ in generate_tts(mock_client, "Hello", voice="nova", model="tts-1-hd"):
             pass
 
-        call_kwargs = mock_client.audio.speech.create.call_args.kwargs
+        call_kwargs = mock_client.audio.speech.with_streaming_response.create.call_args.kwargs
         assert call_kwargs["model"] == "tts-1-hd"
         assert call_kwargs["voice"] == "nova"
         assert call_kwargs["input"] == "Hello"
 
     async def test_uses_default_voice_and_model(self, mock_client):
-        mock_response = self._make_streaming_response([b"data"])
-        mock_client.audio.speech.create.return_value = mock_response
+        self._setup_mock(mock_client, [b"data"])
 
         async for _ in generate_tts(mock_client, "Test"):
             pass
 
-        call_kwargs = mock_client.audio.speech.create.call_args.kwargs
+        call_kwargs = mock_client.audio.speech.with_streaming_response.create.call_args.kwargs
         assert call_kwargs["model"] == "tts-1"
         assert call_kwargs["voice"] == "onyx"
 
     async def test_handles_empty_response(self, mock_client):
-        mock_response = self._make_streaming_response([])
-        mock_client.audio.speech.create.return_value = mock_response
+        self._setup_mock(mock_client, [])
 
         collected = []
         async for chunk in generate_tts(mock_client, "Hello"):
@@ -137,18 +146,16 @@ class TestGenerateTTS:
         assert collected == []
 
     async def test_propagates_api_error(self, mock_client):
-        mock_client.audio.speech.create.side_effect = Exception("TTS API error")
+        mock_client.audio.speech.with_streaming_response.create.side_effect = Exception("TTS API error")
         with pytest.raises(Exception, match="TTS API error"):
             async for _ in generate_tts(mock_client, "Hello"):
                 pass
 
-    async def test_requests_streaming_response(self, mock_client):
-        """Verify that the create call uses response_format suitable for streaming."""
-        mock_response = self._make_streaming_response([b"data"])
-        mock_client.audio.speech.create.return_value = mock_response
+    async def test_uses_streaming_response(self, mock_client):
+        """Verify that the create call goes through with_streaming_response."""
+        self._setup_mock(mock_client, [b"data"])
 
         async for _ in generate_tts(mock_client, "Test"):
             pass
 
-        # Verify the call was made (streaming is handled by with_streaming_response)
-        mock_client.audio.speech.create.assert_called_once()
+        mock_client.audio.speech.with_streaming_response.create.assert_called_once()

@@ -46,6 +46,9 @@ async def generate_tts(
 ) -> AsyncIterator[bytes]:
     """Generate text-to-speech audio using OpenAI TTS, yielding chunks.
 
+    Uses ``with_streaming_response`` so audio bytes are streamed as they
+    arrive from the API rather than buffered in memory first.
+
     Args:
         client: An AsyncOpenAI client instance.
         text: The text to convert to speech.
@@ -53,14 +56,12 @@ async def generate_tts(
         model: The TTS model to use.
 
     Yields:
-        Chunks of audio bytes.
+        Chunks of audio bytes (MP3).
     """
-    response = await client.audio.speech.create(
+    async with client.audio.speech.with_streaming_response.create(
         model=model,
         voice=voice,
         input=text,
-    )
-
-    aiter = await response.aiter_bytes()
-    async for chunk in aiter:
-        yield chunk
+    ) as response:
+        async for chunk in response.iter_bytes():
+            yield chunk
