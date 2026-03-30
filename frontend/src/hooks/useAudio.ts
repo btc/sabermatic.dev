@@ -29,9 +29,10 @@ export function useAudio() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  // Playback
+  // Playback via AudioContext (survives autoplay policy)
+  const playbackCtxRef = useRef<AudioContext | null>(null);
   const audioChunksRef = useRef<string[]>([]);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   // ---- Mic initialization (call once, e.g. on "Begin Interview") ----
 
@@ -49,6 +50,10 @@ export function useAudio() {
     audioCtxRef.current = audioCtx;
     analyserRef.current = analyser;
 
+    // Create a separate AudioContext for TTS playback.
+    // Created during user gesture (click), so it's unlocked for autoplay.
+    playbackCtxRef.current = new AudioContext();
+
     setMicReady(true);
   }, []);
 
@@ -60,6 +65,10 @@ export function useAudio() {
     if (audioCtxRef.current) {
       audioCtxRef.current.close();
       audioCtxRef.current = null;
+    }
+    if (playbackCtxRef.current) {
+      playbackCtxRef.current.close();
+      playbackCtxRef.current = null;
     }
     analyserRef.current = null;
     setMicReady(false);
@@ -131,7 +140,7 @@ export function useAudio() {
     }
   }, []);
 
-  const flushPlayback = useCallback(() => {
+  const flushPlayback = useCallback(async () => {
     const chunks = audioChunksRef.current;
     audioChunksRef.current = [];
     if (chunks.length === 0) {
@@ -161,39 +170,46 @@ export function useAudio() {
       total_bytes: totalLength,
     });
 
-    const blob = new Blob([combined], { type: "audio/mp3" });
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    currentAudioRef.current = audio;
-    setIsPlaying(true);
-    audio.onended = () => {
-      playSpan.end({ result: "completed" });
-      URL.revokeObjectURL(url);
-      currentAudioRef.current = null;
+    const ctx = playbackCtxRef.current;
+    if (!ctx) {
+      playSpan.end({ result: "error", error: "no_playback_context" });
+      return;
+    }
+
+    // Resume context if suspended (browsers suspend after inactivity)
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    try {
+      // decodeAudioData needs a complete audio file — our concatenated MP3 is one
+      const audioBuffer = await ctx.decodeAudioData(combined.buffer.slice(0));
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+
+      currentSourceRef.current = source;
+      setIsPlaying(true);
+
+      source.onended = () => {
+        playSpan.end({ result: "completed", duration_sec: audioBuffer.duration });
+        currentSourceRef.current = null;
+        setIsPlaying(false);
+      };
+
+      source.start(0);
+      recordEvent("audio.play_started", { total_bytes: totalLength, duration_sec: audioBuffer.duration });
+    } catch (e) {
+      playSpan.end({ result: "error", error: String(e) });
       setIsPlaying(false);
-    };
-    audio.onerror = (e) => {
-      const err = e instanceof ErrorEvent ? e.message : String(e);
-      playSpan.end({ result: "error", error: err });
-      URL.revokeObjectURL(url);
-      currentAudioRef.current = null;
-      setIsPlaying(false);
-    };
-    audio.play().then(() => {
-      recordEvent("audio.play_started", { total_bytes: totalLength });
-    }).catch((e) => {
-      playSpan.end({ result: "rejected", error: String(e) });
-      URL.revokeObjectURL(url);
-      currentAudioRef.current = null;
-      setIsPlaying(false);
-    });
+    }
   }, []);
 
   const stopPlayback = useCallback(() => {
     audioChunksRef.current = [];
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current = null;
+    if (currentSourceRef.current) {
+      try { currentSourceRef.current.stop(); } catch { /* already stopped */ }
+      currentSourceRef.current = null;
     }
     setIsPlaying(false);
   }, []);
