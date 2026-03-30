@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
 
 from backend.deps import get_db
@@ -11,6 +11,8 @@ from backend.database import (
     get_message_annotations,
     get_dimension_averages,
     get_question_stats,
+    archive_session,
+    archive_sessions_bulk,
 )
 from backend.models import Session, SessionCreate, Message, Evaluation, MessageAnnotation
 
@@ -23,8 +25,11 @@ async def create_session(body: SessionCreate, conn: asyncpg.Connection = Depends
 
 
 @router.get("/", response_model=list[Session])
-async def list_all_sessions(conn: asyncpg.Connection = Depends(get_db)):
-    return await list_sessions(conn)
+async def list_all_sessions(
+    include_archived: bool = Query(default=False),
+    conn: asyncpg.Connection = Depends(get_db),
+):
+    return await list_sessions(conn, include_archived=include_archived)
 
 
 @router.get("/stats")
@@ -32,6 +37,12 @@ async def session_stats(conn: asyncpg.Connection = Depends(get_db)):
     averages = await get_dimension_averages(conn)
     question_stats = await get_question_stats(conn)
     return {"averages": averages, "question_stats": question_stats}
+
+
+@router.post("/archive-bulk")
+async def archive_bulk(body: dict, conn: asyncpg.Connection = Depends(get_db)):
+    await archive_sessions_bulk(conn, body["session_ids"], archived=True)
+    return {"status": "archived", "count": len(body["session_ids"])}
 
 
 @router.get("/{session_id}", response_model=Session)
@@ -66,3 +77,19 @@ async def get_evaluation(
         raise HTTPException(status_code=404, detail="No evaluation found")
     annotations = await get_message_annotations(conn, ev.id)
     return {"evaluation": ev, "annotations": annotations}
+
+
+@router.patch("/{session_id}/archive")
+async def archive_session_endpoint(
+    session_id: int, conn: asyncpg.Connection = Depends(get_db)
+):
+    await archive_session(conn, session_id, archived=True)
+    return {"status": "archived"}
+
+
+@router.patch("/{session_id}/unarchive")
+async def unarchive_session_endpoint(
+    session_id: int, conn: asyncpg.Connection = Depends(get_db)
+):
+    await archive_session(conn, session_id, archived=False)
+    return {"status": "unarchived"}

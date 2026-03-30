@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 import asyncpg
 
 from backend.deps import get_db, get_settings
@@ -86,19 +86,21 @@ async def _run_coach_analysis(
 async def trigger_coach_analysis(
     request: Request,
     background_tasks: BackgroundTasks,
+    force: bool = Query(default=False),
     conn: asyncpg.Connection = Depends(get_db),
     settings=Depends(get_settings),
 ):
-    # Check if analysis is up to date
-    latest_review = await get_latest_coach_review(conn)
-    latest_eval_time = await get_latest_evaluation_time(conn)
+    if not force:
+        # Check if analysis is up to date
+        latest_review = await get_latest_coach_review(conn)
+        latest_eval_time = await get_latest_evaluation_time(conn)
 
-    if (
-        latest_review is not None
-        and latest_eval_time is not None
-        and latest_review.created_at >= latest_eval_time
-    ):
-        return {"status": "up_to_date"}
+        if (
+            latest_review is not None
+            and latest_eval_time is not None
+            and latest_review.created_at >= latest_eval_time
+        ):
+            return {"status": "up_to_date"}
 
     background_tasks.add_task(
         _run_coach_analysis,
