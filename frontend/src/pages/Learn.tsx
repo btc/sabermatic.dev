@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import api from "../api/client";
 
 interface EducatorContent {
@@ -36,13 +37,13 @@ export default function Learn() {
         <section className="learn-section">
           <h2>Model Answer</h2>
           <div className="learn-markdown">
-            <ReactMarkdown>{content.model_answer}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content.model_answer}</ReactMarkdown>
           </div>
         </section>
         <section className="learn-section">
           <h2>Gap Deep-Dives</h2>
           <div className="learn-markdown">
-            <ReactMarkdown>{content.gap_deepdives}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content.gap_deepdives}</ReactMarkdown>
           </div>
         </section>
       </div>
