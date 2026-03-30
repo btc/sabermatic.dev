@@ -214,6 +214,32 @@ class TestBuildMessages:
         assert messages[1]["content"] == "Second"
 
 
+def _make_mock_stream(tokens: list[str], model: str = "claude-sonnet-4-20250514",
+                       input_tokens: int = 100, output_tokens: int = 50):
+    """Build a reusable mock Anthropic stream context manager.
+
+    The mock supports both text_stream iteration and get_final_message().
+    """
+    async def mock_text_iter():
+        for token in tokens:
+            yield token
+
+    final_usage = MagicMock()
+    final_usage.input_tokens = input_tokens
+    final_usage.output_tokens = output_tokens
+
+    final_message = MagicMock()
+    final_message.model = model
+    final_message.usage = final_usage
+
+    mock_stream = MagicMock()
+    mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
+    mock_stream.__aexit__ = AsyncMock(return_value=False)
+    mock_stream.text_stream = mock_text_iter()
+    mock_stream.get_final_message = AsyncMock(return_value=final_message)
+    return mock_stream
+
+
 class TestGetResponseStream:
     @pytest.fixture
     def interviewer(self):
@@ -221,17 +247,7 @@ class TestGetResponseStream:
 
     async def test_get_response_stream_yields_tokens(self, interviewer):
         """get_response_stream should yield text tokens from the stream."""
-        mock_stream_cm = AsyncMock()
-
-        # Build a mock that works as an async context manager producing text events
-        async def mock_text_iter():
-            for token in ["Hello", " ", "world"]:
-                yield token
-
-        mock_stream = MagicMock()
-        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
-        mock_stream.__aexit__ = AsyncMock(return_value=False)
-        mock_stream.text_stream = mock_text_iter()
+        mock_stream = _make_mock_stream(["Hello", " ", "world"])
 
         mock_client = MagicMock()
         mock_client.messages = MagicMock()
@@ -249,13 +265,7 @@ class TestGetResponseStream:
 
     async def test_get_response_stream_passes_system_and_messages(self, interviewer):
         """Verify system prompt and messages are passed to the API."""
-        async def mock_text_iter():
-            yield "ok"
-
-        mock_stream = MagicMock()
-        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
-        mock_stream.__aexit__ = AsyncMock(return_value=False)
-        mock_stream.text_stream = mock_text_iter()
+        mock_stream = _make_mock_stream(["ok"])
 
         mock_client = MagicMock()
         mock_client.messages = MagicMock()
@@ -277,6 +287,50 @@ class TestGetResponseStream:
         assert call_kwargs["model"] == interviewer.config.model
         assert call_kwargs["max_tokens"] == interviewer.config.max_tokens
 
+    async def test_get_response_stream_populates_usage_out(self, interviewer):
+        """usage_out list is populated with model and token counts after streaming."""
+        mock_stream = _make_mock_stream(
+            ["Hello", " world"],
+            model="claude-sonnet-4-20250514",
+            input_tokens=120,
+            output_tokens=30,
+        )
+
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(return_value=mock_stream)
+
+        usage_out: list = []
+        async for _ in interviewer.get_response_stream(
+            client=mock_client,
+            system_prompt="You are an interviewer.",
+            messages=[{"role": "user", "content": "Hi"}],
+            usage_out=usage_out,
+        ):
+            pass
+
+        assert len(usage_out) == 1
+        assert usage_out[0]["model"] == "claude-sonnet-4-20250514"
+        assert usage_out[0]["usage"]["input_tokens"] == 120
+        assert usage_out[0]["usage"]["output_tokens"] == 30
+
+    async def test_get_response_stream_no_usage_out_does_not_call_final_message(self, interviewer):
+        """When usage_out is None, get_final_message should not be called."""
+        mock_stream = _make_mock_stream(["ok"])
+
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(return_value=mock_stream)
+
+        async for _ in interviewer.get_response_stream(
+            client=mock_client,
+            system_prompt="You are an interviewer.",
+            messages=[{"role": "user", "content": "Hi"}],
+        ):
+            pass
+
+        mock_stream.get_final_message.assert_not_called()
+
 
 class TestGetOpening:
     @pytest.fixture
@@ -285,14 +339,7 @@ class TestGetOpening:
 
     async def test_get_opening_yields_tokens(self, interviewer):
         """get_opening should stream the first interviewer message with no history."""
-        async def mock_text_iter():
-            for token in ["Welcome", " to", " the", " interview."]:
-                yield token
-
-        mock_stream = MagicMock()
-        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
-        mock_stream.__aexit__ = AsyncMock(return_value=False)
-        mock_stream.text_stream = mock_text_iter()
+        mock_stream = _make_mock_stream(["Welcome", " to", " the", " interview."])
 
         mock_client = MagicMock()
         mock_client.messages = MagicMock()
@@ -309,13 +356,7 @@ class TestGetOpening:
 
     async def test_get_opening_passes_empty_user_message(self, interviewer):
         """get_opening should pass a single user message to start the conversation."""
-        async def mock_text_iter():
-            yield "ok"
-
-        mock_stream = MagicMock()
-        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
-        mock_stream.__aexit__ = AsyncMock(return_value=False)
-        mock_stream.text_stream = mock_text_iter()
+        mock_stream = _make_mock_stream(["ok"])
 
         mock_client = MagicMock()
         mock_client.messages = MagicMock()
@@ -331,3 +372,29 @@ class TestGetOpening:
         # Must include a user message (Anthropic API requires alternating roles starting with user)
         assert len(call_kwargs["messages"]) == 1
         assert call_kwargs["messages"][0]["role"] == "user"
+
+    async def test_get_opening_populates_usage_out(self, interviewer):
+        """usage_out is passed through get_opening -> get_response_stream."""
+        mock_stream = _make_mock_stream(
+            ["Welcome!"],
+            model="claude-sonnet-4-20250514",
+            input_tokens=80,
+            output_tokens=15,
+        )
+
+        mock_client = MagicMock()
+        mock_client.messages = MagicMock()
+        mock_client.messages.stream = MagicMock(return_value=mock_stream)
+
+        usage_out: list = []
+        async for _ in interviewer.get_opening(
+            client=mock_client,
+            system_prompt="You are an interviewer.",
+            usage_out=usage_out,
+        ):
+            pass
+
+        assert len(usage_out) == 1
+        assert usage_out[0]["model"] == "claude-sonnet-4-20250514"
+        assert usage_out[0]["usage"]["input_tokens"] == 80
+        assert usage_out[0]["usage"]["output_tokens"] == 15
