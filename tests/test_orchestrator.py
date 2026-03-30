@@ -65,8 +65,16 @@ def _make_mock_message(
     )
 
 
-def _make_anthropic_stream_mock(tokens: list[str]):
-    """Create a mock Anthropic client whose messages.stream yields tokens."""
+def _make_anthropic_stream_mock(
+    tokens: list[str],
+    model: str = "claude-sonnet-4-20250514",
+    input_tokens: int = 100,
+    output_tokens: int = 50,
+):
+    """Create a mock Anthropic client whose messages.stream yields tokens.
+
+    Each stream also supports get_final_message() returning fake usage data.
+    """
 
     # Each call to .stream() needs a fresh async iterator, so use side_effect
     def make_stream(**kwargs):
@@ -74,10 +82,19 @@ def _make_anthropic_stream_mock(tokens: list[str]):
             for t in tokens:
                 yield t
 
+        final_usage = MagicMock()
+        final_usage.input_tokens = input_tokens
+        final_usage.output_tokens = output_tokens
+
+        final_message = MagicMock()
+        final_message.model = model
+        final_message.usage = final_usage
+
         stream = MagicMock()
         stream.__aenter__ = AsyncMock(return_value=stream)
         stream.__aexit__ = AsyncMock(return_value=False)
         stream.text_stream = fresh_text_iter()
+        stream.get_final_message = AsyncMock(return_value=final_message)
         return stream
 
     mock_client = MagicMock()
@@ -511,10 +528,18 @@ class TestErrorHandling:
                     for t in ["Welcome", " to", " the", " interview."]:
                         yield t
 
+                final_usage = MagicMock()
+                final_usage.input_tokens = 100
+                final_usage.output_tokens = 50
+                final_message = MagicMock()
+                final_message.model = "claude-sonnet-4-20250514"
+                final_message.usage = final_usage
+
                 stream = MagicMock()
                 stream.__aenter__ = AsyncMock(return_value=stream)
                 stream.__aexit__ = AsyncMock(return_value=False)
                 stream.text_stream = ok_iter()
+                stream.get_final_message = AsyncMock(return_value=final_message)
                 return stream
             else:
                 # Second call (response) yields partial then errors
@@ -527,6 +552,7 @@ class TestErrorHandling:
                 stream.__aenter__ = AsyncMock(return_value=stream)
                 stream.__aexit__ = AsyncMock(return_value=False)
                 stream.text_stream = error_iter()
+                stream.get_final_message = AsyncMock(return_value=MagicMock())
                 return stream
 
         mock_deps.anthropic_client.messages.stream = MagicMock(side_effect=make_stream)
@@ -747,3 +773,72 @@ class TestEditTranscript:
         assert sequence == 2, (
             f"edit_transcript should target candidate sequence 2, got {sequence}"
         )
+
+
+class TestRawResponseCapture:
+    """Verify that LLM usage data is captured as raw_response on interviewer messages."""
+
+    @patch("backend.orchestrator.update_session_status")
+    @patch("backend.orchestrator.get_session_messages")
+    @patch("backend.orchestrator.insert_message")
+    @patch("backend.orchestrator.get_session")
+    @patch("backend.orchestrator.get_question")
+    async def test_opening_message_has_raw_response(
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+    ):
+        """When a new session loads, the opening message is saved with raw_response."""
+        mock_get_q.return_value = mock_deps._mock_question
+        mock_get_sess.return_value = mock_deps._mock_session
+        mock_update_status.return_value = mock_deps._mock_session
+        mock_get_msgs.return_value = []
+        mock_insert_msg.return_value = _make_mock_message(
+            1, 42, 1, MessageRole.interviewer, "Welcome"
+        )
+
+        orch = InterviewOrchestrator(mock_deps)
+        results = []
+        await orch.enqueue(WSMessage(type="load", session_id=42))
+        await orch.enqueue(WSMessage(type="shutdown"))
+        await orch.run(send=results.append)
+
+        # insert_message should have been called once for the opening
+        assert mock_insert_msg.call_count == 1
+        call_args = mock_insert_msg.call_args
+        message_create = call_args[0][1]  # second positional arg is MessageCreate
+        assert message_create.raw_response is not None
+        assert "model" in message_create.raw_response
+        assert "usage" in message_create.raw_response
+        assert "input_tokens" in message_create.raw_response["usage"]
+        assert "output_tokens" in message_create.raw_response["usage"]
+
+    @patch("backend.orchestrator.update_session_status")
+    @patch("backend.orchestrator.get_session_messages")
+    @patch("backend.orchestrator.insert_message")
+    @patch("backend.orchestrator.get_session")
+    @patch("backend.orchestrator.get_question")
+    async def test_turn_response_has_raw_response(
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+    ):
+        """After a text_input turn, the interviewer response message has raw_response."""
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        mock_get_msgs.return_value = [
+            _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome"),
+            _make_mock_message(2, 42, 2, MessageRole.candidate, "My question."),
+        ]
+
+        orch = InterviewOrchestrator(mock_deps)
+        results = []
+        await orch.enqueue(WSMessage(type="load", session_id=42))
+        await orch.enqueue(WSMessage(type="text_input", text="My question."))
+        await orch.enqueue(WSMessage(type="shutdown"))
+        await orch.run(send=results.append)
+
+        # The last insert_message call is for the interviewer's response
+        assert mock_insert_msg.call_count >= 2  # candidate + interviewer
+        last_call = mock_insert_msg.call_args_list[-1]
+        message_create = last_call[0][1]
+        assert message_create.role == MessageRole.interviewer
+        assert message_create.raw_response is not None
+        assert "model" in message_create.raw_response
+        assert message_create.raw_response["usage"]["input_tokens"] == 100
+        assert message_create.raw_response["usage"]["output_tokens"] == 50

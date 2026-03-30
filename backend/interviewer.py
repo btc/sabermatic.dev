@@ -169,6 +169,7 @@ The following information about this candidate's known weak areas has been provi
         client: object,
         system_prompt: str,
         messages: list[dict[str, str]],
+        usage_out: list | None = None,
     ) -> AsyncIterator[str]:
         """Stream a response from the interviewer LLM.
 
@@ -176,6 +177,9 @@ The following information about this candidate's known weak areas has been provi
             client: An Anthropic client instance.
             system_prompt: The system prompt built by build_system_prompt.
             messages: Conversation history in Anthropic API format.
+            usage_out: Optional list that will be populated with usage data
+                after streaming completes. If provided, a single dict with
+                ``model`` and ``usage`` keys is appended.
 
         Yields:
             Text tokens as they arrive from the API.
@@ -188,11 +192,21 @@ The following information about this candidate's known weak areas has been provi
         ) as stream:
             async for token in stream.text_stream:
                 yield token
+            if usage_out is not None:
+                final = await stream.get_final_message()
+                usage_out.append({
+                    "model": final.model,
+                    "usage": {
+                        "input_tokens": final.usage.input_tokens,
+                        "output_tokens": final.usage.output_tokens,
+                    },
+                })
 
     async def get_opening(
         self,
         client: object,
         system_prompt: str,
+        usage_out: list | None = None,
     ) -> AsyncIterator[str]:
         """Stream the opening interviewer message (no prior history).
 
@@ -202,6 +216,8 @@ The following information about this candidate's known weak areas has been provi
         Args:
             client: An Anthropic client instance.
             system_prompt: The system prompt built by build_system_prompt.
+            usage_out: Optional list that will be populated with usage data
+                after streaming completes. Passed through to get_response_stream.
 
         Yields:
             Text tokens for the opening message.
@@ -213,5 +229,6 @@ The following information about this candidate's known weak areas has been provi
             client=client,
             system_prompt=system_prompt,
             messages=opening_messages,
+            usage_out=usage_out,
         ):
             yield token

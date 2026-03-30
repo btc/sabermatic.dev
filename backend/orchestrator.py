@@ -244,7 +244,7 @@ class InterviewOrchestrator:
             self._state.transition(SessionState.INTERVIEWER_SPEAKING)
 
             # Stream opening message
-            full_response = await self._stream_interviewer_opening(send)
+            full_response, opening_usage = await self._stream_interviewer_opening(send)
 
             # Save interviewer message to DB
             self._sequence += 1
@@ -256,6 +256,7 @@ class InterviewOrchestrator:
                         sequence=self._sequence,
                         role=MessageRole.interviewer,
                         content=full_response,
+                        raw_response=opening_usage,
                     ),
                 )
 
@@ -432,6 +433,7 @@ class InterviewOrchestrator:
         # Stream response
         full_response = ""
         stream_errored = False
+        usage_data: list = []
         llm_span = tracer.start_span("llm.interviewer", attributes={
             "session_id": self._session_id or 0,
             "history_length": len(api_messages),
@@ -441,6 +443,7 @@ class InterviewOrchestrator:
                 self.deps.anthropic_client,
                 self._system_prompt,
                 api_messages,
+                usage_out=usage_data,
             ):
                 full_response += token
                 await self._send(send, {
@@ -474,6 +477,7 @@ class InterviewOrchestrator:
             })
 
         # Save interviewer message
+        raw_resp = usage_data[0] if usage_data else None
         self._sequence += 1
         async with self.deps.pool.acquire() as conn:
             await insert_message(
@@ -483,6 +487,7 @@ class InterviewOrchestrator:
                     sequence=self._sequence,
                     role=MessageRole.interviewer,
                     content=full_response or "(error - no response)",
+                    raw_response=raw_resp,
                 ),
             )
 
@@ -569,11 +574,12 @@ class InterviewOrchestrator:
     # Streaming helpers
     # ------------------------------------------------------------------
 
-    async def _stream_interviewer_opening(self, send: SendFn) -> str:
-        """Get and stream the opening question. Returns full text."""
+    async def _stream_interviewer_opening(self, send: SendFn) -> tuple[str, dict | None]:
+        """Get and stream the opening question. Returns (full text, usage dict or None)."""
         full = ""
+        usage_data: list = []
         async for token in self._interviewer.get_opening(
-            self.deps.anthropic_client, self._system_prompt
+            self.deps.anthropic_client, self._system_prompt, usage_out=usage_data
         ):
             full += token
             await self._send(send, {
@@ -586,7 +592,7 @@ class InterviewOrchestrator:
             "content": "",
             "done": True,
         })
-        return full
+        return full, (usage_data[0] if usage_data else None)
 
     async def _stream_tts(self, text: str, send: SendFn) -> None:
         """Stream TTS audio. Fire-and-forget, cancellable."""
