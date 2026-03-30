@@ -348,16 +348,23 @@ class InterviewOrchestrator:
                 self._session_dir, "audio_in", self._sequence + 1, 0, msg.audio_data, "webm"
             )
 
-        # 1. Transcribe
+        # 1. Transcribe (with one retry on empty result)
         with tracer.start_as_current_span("speech.transcribe", attributes={
             "audio_size_bytes": len(msg.audio_data) if msg.audio_data else 0,
         }):
             transcript = await transcribe_audio(
                 self.deps.openai_client, msg.audio_data
             )
+            if not transcript or not transcript.strip():
+                # Retry once after 1 second
+                logger.info("Empty transcription for session %d, retrying...", self._session_id)
+                await asyncio.sleep(1)
+                transcript = await transcribe_audio(
+                    self.deps.openai_client, msg.audio_data
+                )
         if not transcript or not transcript.strip():
             raise TranscriptionError(
-                "Could not transcribe audio. Try again or type instead.",
+                "Could not transcribe audio after retry. Please type your response instead.",
                 audio_size=len(msg.audio_data) if msg.audio_data else 0,
             )
 
