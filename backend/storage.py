@@ -42,7 +42,7 @@ class SessionStorage:
             f.write(data)
         return path
 
-    def save_transcript(self, session_dir: str, transcript: dict) -> str:
+    def save_transcript(self, session_dir: str, transcript: dict[str, object]) -> str:
         """Save a transcript dict as JSON.
 
         Returns the absolute path to the saved file.
@@ -52,7 +52,7 @@ class SessionStorage:
             json.dump(transcript, f, indent=2)
         return path
 
-    def save_evaluation_json(self, session_dir: str, evaluation: dict) -> str:
+    def save_evaluation_json(self, session_dir: str, evaluation: dict[str, object]) -> str:
         """Save a raw evaluation response as JSON.
 
         Returns the absolute path to the saved file.

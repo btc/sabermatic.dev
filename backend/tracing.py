@@ -19,7 +19,7 @@ class FileSpanExporter(SpanExporter):
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         for span in spans:
             try:
-                ctx = span.get_span_context()
+                ctx = span.get_span_context()  # type: ignore[no-untyped-call]
                 if ctx is None:
                     continue
                 trace_id_hex = format(ctx.trace_id, "032x")

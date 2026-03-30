@@ -13,3 +13,5 @@ opentelemetry-instrumentation-httpx>=0.46b0
 opentelemetry-exporter-otlp-proto-grpc>=1.25.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+mypy>=1.10.0
+asyncpg-stubs>=0.29.0

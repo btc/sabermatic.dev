@@ -8,7 +8,7 @@ informed recovery decisions and the client gets actionable messages.
 class InterviewError(Exception):
     """Base class for all interview domain errors."""
 
-    def to_ws_payload(self) -> dict:
+    def to_ws_payload(self) -> dict[str, str]:
         kind = type(self).__name__
         snake = ""
         for i, c in enumerate(kind):

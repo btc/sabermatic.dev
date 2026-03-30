@@ -19,7 +19,11 @@ import base64
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, Union
+
+import anthropic
+import asyncpg
+from openai import AsyncOpenAI
 
 from backend.config import Settings
 from backend.errors import InterviewError, LLMError, SessionLoadError, TranscriptionError
@@ -52,15 +56,15 @@ tracer = get_tracer("drill.orchestrator")
 class OrchestratorDeps:
     """All external dependencies, injectable for testing."""
 
-    pool: Any  # asyncpg.Pool
-    anthropic_client: Any  # anthropic.AsyncAnthropic
-    openai_client: Any  # openai.AsyncOpenAI
+    pool: asyncpg.Pool[asyncpg.Record]
+    anthropic_client: anthropic.AsyncAnthropic
+    openai_client: AsyncOpenAI
     settings: Settings
     storage: SessionStorage
 
 
 # Type alias for the send callback (sync or async).
-SendFn = Callable[[dict], Any]
+SendFn = Callable[[dict[str, Any]], Union[Any, Awaitable[Any]]]
 
 
 class InterviewOrchestrator:
@@ -84,7 +88,7 @@ class InterviewOrchestrator:
         self._sequence: int = 0
         self._last_candidate_sequence: int = 0
         self._tts_enabled: bool = True
-        self._tts_task: asyncio.Task | None = None
+        self._tts_task: asyncio.Task[None] | None = None
         self._timer_sec: int = 2700
         self._briefing: str | None = None
         self._started_at: datetime | None = None
@@ -98,7 +102,7 @@ class InterviewOrchestrator:
         if self._tts_task and not self._tts_task.done():
             self._tts_task.cancel()
 
-    async def _send(self, send: SendFn, payload: dict) -> None:
+    async def _send(self, send: SendFn, payload: dict[str, Any]) -> None:
         """Call the send function, handling both sync and async callbacks."""
         result = send(payload)
         if asyncio.iscoroutine(result):
@@ -208,6 +212,8 @@ class InterviewOrchestrator:
             await self._do_load_inner(msg, send)
 
     async def _do_load_inner(self, msg: WSMessage, send: SendFn) -> None:
+        if msg.session_id is None:
+            raise SessionLoadError("No session_id provided", session_id=None)
         # Load session and related data from DB
         async with self.deps.pool.acquire() as conn:
             session = await get_session(conn, msg.session_id)
@@ -348,24 +354,25 @@ class InterviewOrchestrator:
                 self._session_dir, "audio_in", self._sequence + 1, 0, msg.audio_data, "webm"
             )
 
+        audio_data = msg.audio_data or b""
         # 1. Transcribe (with one retry on empty result)
         with tracer.start_as_current_span("speech.transcribe", attributes={
-            "audio_size_bytes": len(msg.audio_data) if msg.audio_data else 0,
+            "audio_size_bytes": len(audio_data),
         }):
             transcript = await transcribe_audio(
-                self.deps.openai_client, msg.audio_data
+                self.deps.openai_client, audio_data
             )
             if not transcript or not transcript.strip():
                 # Retry once after 1 second
                 logger.info("Empty transcription for session %d, retrying...", self._session_id)
                 await asyncio.sleep(1)
                 transcript = await transcribe_audio(
-                    self.deps.openai_client, msg.audio_data
+                    self.deps.openai_client, audio_data
                 )
         if not transcript or not transcript.strip():
             raise TranscriptionError(
                 "Could not transcribe audio after retry. Please type your response instead.",
-                audio_size=len(msg.audio_data) if msg.audio_data else 0,
+                audio_size=len(audio_data),
             )
 
         await self._send(send, {"type": "transcription", "text": transcript})
@@ -433,6 +440,8 @@ class InterviewOrchestrator:
             "state": self._state.state.value,
         })
 
+        assert self._question is not None, "Question must be loaded before responding"
+        assert self._session_id is not None, "Session must be loaded before responding"
         # Rebuild system prompt with current elapsed time from DB started_at
         elapsed = 0
         if self._started_at is not None:
@@ -458,7 +467,7 @@ class InterviewOrchestrator:
 
         # Stream response
         full_response = ""
-        usage_data: list = []
+        usage_data: list[dict[str, Any]] = []
         llm_span = tracer.start_span("llm.interviewer", attributes={
             "session_id": self._session_id or 0,
             "history_length": len(api_messages),
@@ -566,6 +575,7 @@ class InterviewOrchestrator:
             await self._do_end_session_inner(msg, send)
 
     async def _do_end_session_inner(self, msg: WSMessage, send: SendFn) -> None:
+        assert self._session_id is not None, "Session must be loaded before ending"
         self.cancel_tts()
         self._state.transition(SessionState.ENDING)
         self._state.transition(SessionState.ENDED)
@@ -597,10 +607,10 @@ class InterviewOrchestrator:
     # Streaming helpers
     # ------------------------------------------------------------------
 
-    async def _stream_interviewer_opening(self, send: SendFn) -> tuple[str, dict | None]:
+    async def _stream_interviewer_opening(self, send: SendFn) -> tuple[str, dict[str, Any] | None]:
         """Get and stream the opening question. Returns (full text, usage dict or None)."""
         full = ""
-        usage_data: list = []
+        usage_data: list[dict[str, Any]] = []
         async for token in self._interviewer.get_opening(
             self.deps.anthropic_client, self._system_prompt, usage_out=usage_data
         ):
@@ -663,7 +673,7 @@ class InterviewOrchestrator:
 
     async def _finalize_if_active(self, send: SendFn) -> None:
         """Save session if it was active when shutdown/disconnect happened."""
-        if self._session_id and self._state.is_active:
+        if self._session_id is not None and self._state.is_active:
             # Transition to terminal state
             try:
                 self._state.transition(SessionState.ENDING)

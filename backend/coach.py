@@ -5,8 +5,10 @@ topic coverage assessment, thinking pattern recognition, scenario generation,
 and metacognitive coaching. Uses Claude's tool_use feature for structured output.
 """
 
-from typing import Any
+from typing import Any, cast
 
+import anthropic
+from anthropic.types import MessageParam, ToolParam, ToolChoiceToolParam
 from pydantic import BaseModel
 
 from backend.models import (
@@ -343,7 +345,7 @@ If you identify a specific gap that would benefit from a custom practice questio
 
     async def analyze(
         self,
-        client: object,
+        client: anthropic.AsyncAnthropic,
         sessions: list[Session],
         evaluations: list[Evaluation],
         questions: list[Question],
@@ -371,18 +373,19 @@ If you identify a specific gap that would benefit from a custom practice questio
             questions=questions,
         )
 
-        response = await client.messages.create(  # type: ignore[union-attr]
+        response = await client.messages.create(
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             system=system_prompt,
-            messages=[{"role": "user", "content": history_summary}],
-            tools=self.get_tool_schema(),
-            tool_choice={"type": "tool", "name": "submit_analysis"},
+            messages=cast(list[MessageParam], [{"role": "user", "content": history_summary}]),
+            tools=cast(list[ToolParam], self.get_tool_schema()),
+            tool_choice=cast(ToolChoiceToolParam, {"type": "tool", "name": "submit_analysis"}),
         )
 
         # Extract tool call input from the response
-        tool_input = response.content[0].input
-        raw_response = response.model_dump()
+        # tool_choice forces a ToolUseBlock; cast since the union includes TextBlock etc.
+        tool_input: dict[str, Any] = response.content[0].input  # type: ignore[union-attr]
+        raw_response: dict[str, Any] = response.model_dump()
 
         return self.parse_response(
             raw=tool_input,

@@ -5,8 +5,10 @@ probing with WHY, introducing constraints, tracking coverage, pushing past
 hand-waving, staying neutral, keeping responses short, and managing time.
 """
 
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, cast
 
+import anthropic
+from anthropic.types import MessageParam
 from pydantic import BaseModel
 
 from backend.models import Message, MessageRole
@@ -166,10 +168,10 @@ The following information about this candidate's known weak areas has been provi
 
     async def get_response_stream(
         self,
-        client: object,
+        client: anthropic.AsyncAnthropic,
         system_prompt: str,
         messages: list[dict[str, str]],
-        usage_out: list | None = None,
+        usage_out: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream a response from the interviewer LLM.
 
@@ -184,11 +186,11 @@ The following information about this candidate's known weak areas has been provi
         Yields:
             Text tokens as they arrive from the API.
         """
-        async with client.messages.stream(  # type: ignore[union-attr]
+        async with client.messages.stream(
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             system=system_prompt,
-            messages=messages,
+            messages=cast(list[MessageParam], messages),
         ) as stream:
             async for token in stream.text_stream:
                 yield token
@@ -204,9 +206,9 @@ The following information about this candidate's known weak areas has been provi
 
     async def get_opening(
         self,
-        client: object,
+        client: anthropic.AsyncAnthropic,
         system_prompt: str,
-        usage_out: list | None = None,
+        usage_out: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream the opening interviewer message (no prior history).
 

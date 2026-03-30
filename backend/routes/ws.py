@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -14,7 +17,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws/interview/{session_id}")
-async def interview_websocket(ws: WebSocket, session_id: int):
+async def interview_websocket(ws: WebSocket, session_id: int) -> None:
     await ws.accept()
     deps = OrchestratorDeps(
         pool=ws.app.state.pool,
@@ -25,7 +28,7 @@ async def interview_websocket(ws: WebSocket, session_id: int):
     )
     orch = InterviewOrchestrator(deps)
 
-    async def send(data: dict):
+    async def send(data: dict[str, Any]) -> None:
         await ws.send_text(json.dumps(data, default=str))
 
     # Immediately enqueue load — orchestrator loads session from DB

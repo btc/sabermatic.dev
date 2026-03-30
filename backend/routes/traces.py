@@ -16,7 +16,7 @@ router = APIRouter(prefix="/traces", tags=["traces"])
 async def get_recent_traces(
     request: Request,
     limit: int = Query(default=50, le=200),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Return recent trace entries for the widget."""
     settings = request.app.state.settings
     traces_dir = os.path.join(str(settings.data_dir), "traces")
@@ -25,7 +25,7 @@ async def get_recent_traces(
         return []
 
     # Collect all .jsonl files, sorted by modification time descending
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     day_dirs = sorted(
         [d for d in os.listdir(traces_dir) if os.path.isdir(os.path.join(traces_dir, d))],
         reverse=True,

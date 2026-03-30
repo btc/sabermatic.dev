@@ -5,8 +5,10 @@ scores per dimension, qualitative feedback (strengths, gaps, advice), and
 per-message annotations that reference specific points in the conversation.
 """
 
-from typing import Any
+from typing import Any, cast
 
+import anthropic
+from anthropic.types import MessageParam, ToolParam, ToolChoiceToolParam
 from pydantic import BaseModel
 
 from backend.models import EvaluationCreate, Message, MessageRole
@@ -371,7 +373,7 @@ You MUST use the submit_evaluation tool to submit your structured evaluation. Do
 
     async def evaluate(
         self,
-        client: object,
+        client: anthropic.AsyncAnthropic,
         question_title: str,
         question_prompt: str,
         messages: list[Message],
@@ -399,18 +401,19 @@ You MUST use the submit_evaluation tool to submit your structured evaluation. Do
             messages=messages,
         )
 
-        response = await client.messages.create(  # type: ignore[union-attr]
+        response = await client.messages.create(
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             system=system_prompt,
-            messages=[{"role": "user", "content": transcript_text}],
-            tools=self.get_tool_schema(),
-            tool_choice={"type": "tool", "name": "submit_evaluation"},
+            messages=cast(list[MessageParam], [{"role": "user", "content": transcript_text}]),
+            tools=cast(list[ToolParam], self.get_tool_schema()),
+            tool_choice=cast(ToolChoiceToolParam, {"type": "tool", "name": "submit_evaluation"}),
         )
 
         # Extract tool call input from the response
-        tool_input = response.content[0].input
-        raw_response = response.model_dump()
+        # tool_choice forces a ToolUseBlock; cast since the union includes TextBlock etc.
+        tool_input: dict[str, Any] = response.content[0].input  # type: ignore[union-attr]
+        raw_response: dict[str, Any] = response.model_dump()
 
         eval_create = self.parse_response(
             raw=tool_input,

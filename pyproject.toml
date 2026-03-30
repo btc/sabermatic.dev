@@ -11,3 +11,16 @@ testpaths = ["tests"]
 [tool.pyright]
 strict = ["backend/**"]
 pythonVersion = "3.11"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["backend"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "opentelemetry.*",
+    "anthropic.*",
+]
+ignore_missing_imports = true
