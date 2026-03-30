@@ -68,7 +68,14 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
     setEducatorState("checking");
 
     api.sessions.educator(sid)
-      .then(() => { if (!cancelled) setEducatorState("exists"); })
+      .then((data: any) => {
+        if (cancelled) return;
+        if (data.status === "failed") {
+          setEducatorState("error");
+        } else {
+          setEducatorState("exists");
+        }
+      })
       .catch(() => { if (!cancelled) setEducatorState("none"); });
 
     return () => { cancelled = true; };
@@ -86,9 +93,13 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
 
     pollRef.current = setInterval(async () => {
       try {
-        await api.sessions.educator(sid);
+        const data: any = await api.sessions.educator(sid);
         if (pollRef.current) clearInterval(pollRef.current);
-        setEducatorState("exists");
+        if (data.status === "failed") {
+          setEducatorState("error");
+        } else {
+          setEducatorState("exists");
+        }
       } catch {
         // still generating
       }

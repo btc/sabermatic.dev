@@ -166,6 +166,7 @@ async def _run_educator(
     educator_model: str,
 ):
     """Background task: run educator analysis. Catches ALL exceptions."""
+    evaluation = None
     try:
         async with pool.acquire() as conn:
             session = await get_session(conn, session_id)
@@ -229,6 +230,21 @@ async def _run_educator(
 
     except Exception:
         logger.exception("Educator failed for session %d", session_id)
+        # Record failure sentinel so frontend can show error + retry
+        if evaluation is not None:
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE evaluations
+                        SET educator_raw_response = $1
+                        WHERE id = $2
+                        """,
+                        json.dumps({"error": True, "message": "Educator analysis failed"}),
+                        evaluation.id,
+                    )
+            except Exception:
+                logger.exception("Failed to record educator failure")
 
 
 @router.post("/{session_id}/educate")
@@ -251,12 +267,24 @@ async def trigger_educator(
             status_code=404, detail="No evaluation found for this session"
         )
 
-    # Check if educator content already exists
+    # Already has content — no re-generation
     if evaluation.educator_model_answer is not None:
         return {
             "status": "already_generated",
             "evaluation_id": evaluation.id,
         }
+
+    # Clear failure sentinel if retrying
+    if (
+        evaluation.educator_raw_response
+        and isinstance(evaluation.educator_raw_response, dict)
+        and evaluation.educator_raw_response.get("error")
+    ):
+        async with request.app.state.pool.acquire() as write_conn:
+            await write_conn.execute(
+                "UPDATE evaluations SET educator_raw_response = NULL WHERE id = $1",
+                evaluation.id,
+            )
 
     # Use pool from app state for background task (DI connection closes after request)
     background_tasks.add_task(
@@ -283,11 +311,24 @@ async def get_educator_content(
         )
 
     if evaluation.educator_model_answer is None:
+        # Check if there's a recorded failure
+        if (
+            evaluation.educator_raw_response
+            and isinstance(evaluation.educator_raw_response, dict)
+            and evaluation.educator_raw_response.get("error")
+        ):
+            return {
+                "status": "failed",
+                "message": evaluation.educator_raw_response.get(
+                    "message", "Unknown error"
+                ),
+            }
         raise HTTPException(
             status_code=404, detail="Educator content not yet generated"
         )
 
     return {
+        "status": "ok",
         "evaluation_id": evaluation.id,
         "model_answer": evaluation.educator_model_answer,
         "gap_deepdives": evaluation.educator_gap_deepdives,
