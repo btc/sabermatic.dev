@@ -29,6 +29,12 @@ export function useAudio() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
+  // Multi-segment state
+  const segmentsRef = useRef<Blob[]>([]);
+  const [pendingSegments, setPendingSegments] = useState(0);
+  const [pendingDuration, setPendingDuration] = useState(0);
+  const recordingStartRef = useRef<number>(0);
+
   // Playback via AudioContext (survives autoplay policy)
   const playbackCtxRef = useRef<AudioContext | null>(null);
   const audioChunksRef = useRef<string[]>([]);
@@ -102,11 +108,12 @@ export function useAudio() {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
     mediaRecorderRef.current = recorder;
+    recordingStartRef.current = performance.now();
     recorder.start();
     setIsRecording(true);
   }, []);
 
-  const stopRecording = useCallback(async (): Promise<string> => {
+  const stopRecording = useCallback(async (): Promise<void> => {
     // Stop waveform animation
     cancelAnimationFrame(animFrameRef.current);
     setAnalyserData(null);
@@ -115,20 +122,41 @@ export function useAudio() {
       const recorder = mediaRecorderRef.current;
       if (!recorder || recorder.state === "inactive") {
         setIsRecording(false);
-        resolve("");
+        resolve();
         return;
       }
 
-      recorder.onstop = async () => {
+      const elapsedSec = (performance.now() - recordingStartRef.current) / 1000;
+
+      recorder.onstop = () => {
         // Do NOT stop stream tracks — the stream persists between recordings
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const b64 = await blobToBase64(blob);
+        if (blob.size > 0) {
+          segmentsRef.current = [...segmentsRef.current, blob];
+          setPendingSegments(segmentsRef.current.length);
+          setPendingDuration((prev) => prev + elapsedSec);
+        }
         setIsRecording(false);
-        resolve(b64);
+        resolve();
       };
 
       recorder.stop();
     });
+  }, []);
+
+  const submitRecording = useCallback(async (): Promise<string> => {
+    if (segmentsRef.current.length === 0) return "";
+    const combined = new Blob(segmentsRef.current, { type: "audio/webm" });
+    segmentsRef.current = [];
+    setPendingSegments(0);
+    setPendingDuration(0);
+    return blobToBase64(combined);
+  }, []);
+
+  const discardRecording = useCallback(() => {
+    segmentsRef.current = [];
+    setPendingSegments(0);
+    setPendingDuration(0);
   }, []);
 
   // ---- Playback ----
@@ -219,10 +247,14 @@ export function useAudio() {
     isPlaying,
     micReady,
     analyserData,
+    pendingSegments,
+    pendingDuration,
     initMic,
     releaseMic,
     startRecording,
     stopRecording,
+    submitRecording,
+    discardRecording,
     playAudioChunk,
     flushPlayback,
     stopPlayback,

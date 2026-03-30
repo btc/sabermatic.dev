@@ -2,9 +2,17 @@ interface AudioControlsProps {
   isRecording: boolean;
   micReady: boolean;
   analyserData: Uint8Array | null;
+  pendingSegments: number;
+  pendingDuration: number;
 }
 
-export default function AudioControls({ isRecording, micReady, analyserData }: AudioControlsProps) {
+export default function AudioControls({
+  isRecording,
+  micReady,
+  analyserData,
+  pendingSegments,
+  pendingDuration,
+}: AudioControlsProps) {
   if (isRecording) {
     return (
       <div className="audio-controls audio-controls-recording">
@@ -29,10 +37,23 @@ export default function AudioControls({ isRecording, micReady, analyserData }: A
     );
   }
 
+  if (pendingSegments > 0) {
+    const durationStr = pendingDuration.toFixed(1);
+    return (
+      <div className="audio-controls audio-controls-pending">
+        <span className="pending-dot" />
+        <span className="pending-label">
+          {pendingSegments} {pendingSegments === 1 ? "segment" : "segments"} ({durationStr}s)
+          {" "}&mdash; SPACE for more | ENTER to submit | ESC to discard
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="audio-controls">
       <span className="audio-hint">
-        {micReady ? "Hold SPACE to talk" : "Mic not available — use text input"}
+        {micReady ? "Hold SPACE to talk, ENTER to submit" : "Mic not available — use text input"}
       </span>
     </div>
   );
