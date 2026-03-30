@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.config import Settings
+from backend.errors import InterviewError, LLMError, SessionLoadError, TranscriptionError
 from backend.database import (
     get_latest_coach_review,
     get_question,
@@ -120,11 +121,46 @@ class InterviewOrchestrator:
             except InvalidTransition as e:
                 await self._send(send, {
                     "type": "error",
-                    "message": f"Invalid state transition: {e}",
+                    "error_kind": "invalid_transition",
+                    "message": str(e),
                 })
+            except InterviewError as e:
+                logger.warning("Interview error processing %s: %s", msg.type, e)
+                await self._send(send, e.to_ws_payload())
+                # Recover state if stuck mid-turn
+                if self._session_id and self._state.state in (
+                    SessionState.PROCESSING,
+                    SessionState.CANDIDATE_SPEAKING,
+                    SessionState.INTERVIEWER_SPEAKING,
+                ):
+                    try:
+                        self._state.state = SessionState.WAITING_FOR_CANDIDATE
+                        await self._send(send, {
+                            "type": "state",
+                            "state": SessionState.WAITING_FOR_CANDIDATE.value,
+                        })
+                    except Exception:
+                        pass
+                # Save partial LLM response if available
+                if isinstance(e, LLMError) and e.partial_response:
+                    self._sequence += 1
+                    async with self.deps.pool.acquire() as conn:
+                        await insert_message(
+                            conn,
+                            MessageCreate(
+                                session_id=self._session_id,
+                                sequence=self._sequence,
+                                role=MessageRole.interviewer,
+                                content=e.partial_response + " (error - incomplete)",
+                            ),
+                        )
             except Exception as e:
                 logger.exception("Unhandled error processing message %s", msg.type)
-                await self._send(send, {"type": "error", "message": str(e)})
+                await self._send(send, {
+                    "type": "error",
+                    "error_kind": "internal_error",
+                    "message": str(e),
+                })
                 # Recover state: if we're stuck mid-processing, force back to
                 # WAITING_FOR_CANDIDATE so the user can continue.
                 if self._session_id and self._state.state in (
@@ -176,19 +212,11 @@ class InterviewOrchestrator:
         async with self.deps.pool.acquire() as conn:
             session = await get_session(conn, msg.session_id)
             if not session:
-                await self._send(send, {
-                    "type": "error",
-                    "message": "Session not found",
-                })
-                return
+                raise SessionLoadError("Session not found", session_id=msg.session_id)
 
             self._question = await get_question(conn, session.question_id)
             if not self._question:
-                await self._send(send, {
-                    "type": "error",
-                    "message": "Question not found",
-                })
-                return
+                raise SessionLoadError("Question not found", session_id=msg.session_id)
 
             messages = await get_session_messages(conn, session.id)
 
@@ -328,19 +356,10 @@ class InterviewOrchestrator:
                 self.deps.openai_client, msg.audio_data
             )
         if not transcript or not transcript.strip():
-            await self._send(send, {
-                "type": "error",
-                "message": "Could not transcribe audio. Try again or type instead.",
-            })
-            # Recover: go back to waiting for candidate
-            # PROCESSING -> INTERVIEWER_SPEAKING -> WAITING_FOR_CANDIDATE
-            self._state.transition(SessionState.INTERVIEWER_SPEAKING)
-            self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
-            await self._send(send, {
-                "type": "state",
-                "state": self._state.state.value,
-            })
-            return
+            raise TranscriptionError(
+                "Could not transcribe audio. Try again or type instead.",
+                audio_size=len(msg.audio_data) if msg.audio_data else 0,
+            )
 
         await self._send(send, {"type": "transcription", "text": transcript})
 
@@ -432,7 +451,6 @@ class InterviewOrchestrator:
 
         # Stream response
         full_response = ""
-        stream_errored = False
         usage_data: list = []
         llm_span = tracer.start_span("llm.interviewer", attributes={
             "session_id": self._session_id or 0,
@@ -452,7 +470,6 @@ class InterviewOrchestrator:
                     "done": False,
                 })
         except Exception as e:
-            stream_errored = True
             llm_span.set_attribute("error", True)
             llm_span.set_attribute("error.message", str(e))
             llm_span.set_attribute("error.type", type(e).__name__)
@@ -461,20 +478,19 @@ class InterviewOrchestrator:
                 "content": "",
                 "done": True,
             })
-            await self._send(send, {
-                "type": "error",
-                "message": f"Interviewer error: {e}",
-            })
+            raise LLMError(
+                f"Interviewer error: {e}",
+                partial_response=full_response or None,
+            )
         finally:
             llm_span.set_attribute("response_length", len(full_response))
             llm_span.end()
 
-        if not stream_errored:
-            await self._send(send, {
-                "type": "interviewer_text",
-                "content": "",
-                "done": True,
-            })
+        await self._send(send, {
+            "type": "interviewer_text",
+            "content": "",
+            "done": True,
+        })
 
         # Save interviewer message
         raw_resp = usage_data[0] if usage_data else None
@@ -486,7 +502,7 @@ class InterviewOrchestrator:
                     session_id=self._session_id,
                     sequence=self._sequence,
                     role=MessageRole.interviewer,
-                    content=full_response or "(error - no response)",
+                    content=full_response,
                     raw_response=raw_resp,
                 ),
             )
