@@ -52,6 +52,8 @@ def _row_to_session(row: asyncpg.Record) -> Session:
         status_detail=row["status_detail"],
         timer_setting_sec=row["timer_setting_sec"],
         interviewer_briefed=row["interviewer_briefed"],
+        archived=row["archived"],
+        tts_enabled=row["tts_enabled"],
         started_at=row["started_at"],
         ended_at=row["ended_at"],
         duration_seconds=row["duration_seconds"],
@@ -68,6 +70,7 @@ def _row_to_message(row: asyncpg.Record) -> Message:
         role=row["role"],
         content=row["content"],
         raw_content=row["raw_content"],
+        raw_response=json.loads(row["raw_response"]) if row["raw_response"] else None,
         timestamp=row["timestamp"],
         audio_path=row["audio_path"],
         audio_duration_sec=row["audio_duration_sec"],
@@ -88,6 +91,9 @@ def _row_to_evaluation(row: asyncpg.Record) -> Evaluation:
         gaps=json.loads(row["gaps"]),
         advice=row["advice"],
         raw_response=json.loads(row["raw_response"]),
+        educator_model_answer=row["educator_model_answer"],
+        educator_gap_deepdives=row["educator_gap_deepdives"],
+        educator_raw_response=json.loads(row["educator_raw_response"]) if row["educator_raw_response"] else None,
         evaluated_at=row["evaluated_at"],
     )
 
@@ -161,11 +167,13 @@ async def insert_session(
         """
         INSERT INTO sessions (
             question_id, status, timer_setting_sec, interviewer_briefed,
+            tts_enabled,
             started_at, ended_at, duration_seconds, turn_count, audio_dir, status_detail
         )
         VALUES (
             $1, $2::session_status, $3, $4,
-            COALESCE($5, now()), $6, $7, $8, $9, $10
+            $5,
+            COALESCE($6, now()), $7, $8, $9, $10, $11
         )
         RETURNING *
         """,
@@ -173,6 +181,7 @@ async def insert_session(
         s.status.value,
         s.timer_setting_sec,
         s.interviewer_briefed,
+        s.tts_enabled,
         s.started_at,
         s.ended_at,
         s.duration_seconds,
@@ -192,8 +201,15 @@ async def get_session(
     return _row_to_session(row)
 
 
-async def list_sessions(conn: asyncpg.Connection) -> list[Session]:
-    rows = await conn.fetch("SELECT * FROM sessions ORDER BY started_at DESC")
+async def list_sessions(
+    conn: asyncpg.Connection, include_archived: bool = False
+) -> list[Session]:
+    if include_archived:
+        rows = await conn.fetch("SELECT * FROM sessions ORDER BY started_at DESC")
+    else:
+        rows = await conn.fetch(
+            "SELECT * FROM sessions WHERE archived = false ORDER BY started_at DESC"
+        )
     return [_row_to_session(r) for r in rows]
 
 
@@ -233,6 +249,31 @@ async def update_session_status(
     return _row_to_session(row)
 
 
+async def archive_session(
+    conn: asyncpg.Connection, session_id: int, archived: bool
+) -> None:
+    await conn.execute(
+        "UPDATE sessions SET archived = $1 WHERE id = $2", archived, session_id
+    )
+
+
+async def archive_sessions_bulk(
+    conn: asyncpg.Connection, session_ids: list[int], archived: bool
+) -> None:
+    await conn.execute(
+        "UPDATE sessions SET archived = $1 WHERE id = ANY($2)", archived, session_ids
+    )
+
+
+async def get_session_token_usage(
+    conn: asyncpg.Connection, session_id: int
+) -> list[dict]:
+    rows = await conn.fetch(
+        "SELECT * FROM llm_token_usage WHERE session_id = $1", session_id
+    )
+    return [dict(r) for r in rows]
+
+
 # --- Messages ---
 
 
@@ -243,9 +284,10 @@ async def insert_message(
         """
         INSERT INTO messages (
             session_id, sequence, role, content, raw_content,
+            raw_response,
             timestamp, audio_path, audio_duration_sec
         )
-        VALUES ($1, $2, $3::message_role, $4, $5, COALESCE($6, now()), $7, $8)
+        VALUES ($1, $2, $3::message_role, $4, $5, $6::jsonb, COALESCE($7, now()), $8, $9)
         RETURNING *
         """,
         m.session_id,
@@ -253,6 +295,7 @@ async def insert_message(
         m.role.value,
         m.content,
         m.raw_content,
+        json.dumps(m.raw_response) if m.raw_response is not None else None,
         m.timestamp,
         m.audio_path,
         m.audio_duration_sec,
@@ -405,17 +448,19 @@ async def get_latest_coach_review(
 async def get_dimension_averages(
     conn: asyncpg.Connection,
 ) -> Optional[dict[str, float]]:
-    """Average score across all evaluations, per dimension."""
+    """Average score across all evaluations for non-archived sessions."""
     row = await conn.fetchrow(
         """
         SELECT
-            AVG(score_requirements)  AS avg_requirements,
-            AVG(score_highlevel)     AS avg_highlevel,
-            AVG(score_deepdive)      AS avg_deepdive,
-            AVG(score_scalability)   AS avg_scalability,
-            AVG(score_communication) AS avg_communication,
-            AVG(score_overall)       AS avg_overall
-        FROM evaluations
+            AVG(e.score_requirements)  AS avg_requirements,
+            AVG(e.score_highlevel)     AS avg_highlevel,
+            AVG(e.score_deepdive)      AS avg_deepdive,
+            AVG(e.score_scalability)   AS avg_scalability,
+            AVG(e.score_communication) AS avg_communication,
+            AVG(e.score_overall)       AS avg_overall
+        FROM evaluations e
+        JOIN sessions s ON s.id = e.session_id
+        WHERE s.archived = false
         """
     )
     if row is None or row["avg_requirements"] is None:
@@ -433,7 +478,7 @@ async def get_dimension_averages(
 async def get_question_stats(
     conn: asyncpg.Connection,
 ) -> list[dict]:
-    """Per-question session count and average overall score."""
+    """Per-question session count and average overall score (excluding archived)."""
     rows = await conn.fetch(
         """
         SELECT
@@ -442,7 +487,7 @@ async def get_question_stats(
             COUNT(DISTINCT s.id) AS session_count,
             AVG(e.score_overall) AS avg_overall
         FROM questions q
-        LEFT JOIN sessions s ON s.question_id = q.id
+        LEFT JOIN sessions s ON s.question_id = q.id AND s.archived = false
         LEFT JOIN evaluations e ON e.session_id = s.id
         GROUP BY q.id, q.title
         ORDER BY q.id

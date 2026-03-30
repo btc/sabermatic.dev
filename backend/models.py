@@ -6,7 +6,7 @@ database-generated fields like id and timestamps.
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -78,6 +78,7 @@ class SessionCreate(BaseModel):
     status: SessionStatus = SessionStatus.active
     timer_setting_sec: int = 2700
     interviewer_briefed: bool = False
+    tts_enabled: bool = True
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
@@ -93,6 +94,8 @@ class Session(BaseModel):
     status_detail: Optional[str] = None
     timer_setting_sec: int
     interviewer_briefed: bool
+    archived: bool = False
+    tts_enabled: bool = True
     started_at: datetime
     ended_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
@@ -109,6 +112,7 @@ class MessageCreate(BaseModel):
     role: MessageRole
     content: str
     raw_content: Optional[str] = None
+    raw_response: Optional[dict[str, Any]] = None
     audio_path: Optional[str] = None
     audio_duration_sec: Optional[float] = None
     timestamp: Optional[datetime] = None
@@ -121,6 +125,7 @@ class Message(BaseModel):
     role: MessageRole
     content: str
     raw_content: Optional[str] = None
+    raw_response: Optional[dict[str, Any]] = None
     timestamp: datetime
     audio_path: Optional[str] = None
     audio_duration_sec: Optional[float] = None
@@ -175,6 +180,9 @@ class Evaluation(BaseModel):
     gaps: list[str]
     advice: str
     raw_response: dict
+    educator_model_answer: Optional[str] = None
+    educator_gap_deepdives: Optional[str] = None
+    educator_raw_response: Optional[dict[str, Any]] = None
     evaluated_at: datetime
 
 
