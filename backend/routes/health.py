@@ -8,7 +8,7 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check(request: Request) -> dict:
+async def health_check(request: Request) -> dict[str, object]:
     checks: dict[str, bool] = {}
 
     # DB check

@@ -27,26 +27,29 @@ def _estimate_cost(model: str | None, input_tokens: int, output_tokens: int) -> 
 @router.get("/{session_id}/costs")
 async def get_session_costs(
     session_id: int, conn: Conn = Depends(get_db)
-) -> dict:
+) -> dict[str, object]:
     breakdown = await get_session_cost_breakdown(conn, session_id)
 
     total_input = 0
     total_output = 0
     total_cost = 0.0
-    items = []
+    items: list[dict[str, object]] = []
 
     for row in breakdown:
-        input_t = row.get("input_tokens") or 0
-        output_t = row.get("output_tokens") or 0
-        cost = _estimate_cost(row.get("model"), int(input_t), int(output_t))
-        total_input += int(input_t)
-        total_output += int(output_t)
+        raw_input = row.get("input_tokens")
+        raw_output = row.get("output_tokens")
+        input_t = int(str(raw_input)) if raw_input is not None else 0
+        output_t = int(str(raw_output)) if raw_output is not None else 0
+        model = str(row.get("model") or "")
+        cost = _estimate_cost(model or None, input_t, output_t)
+        total_input += input_t
+        total_output += output_t
         total_cost += cost
         items.append({
             "role": row.get("role"),
-            "model": row.get("model"),
-            "input_tokens": int(input_t),
-            "output_tokens": int(output_t),
+            "model": model,
+            "input_tokens": input_t,
+            "output_tokens": output_t,
             "estimated_cost_usd": round(cost, 4),
         })
 
