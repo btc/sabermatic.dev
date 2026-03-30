@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { recordEvent, startSpan } from "../tracer";
 
 // ---- helpers ----
 
@@ -126,14 +127,17 @@ export function useAudio() {
   const playAudioChunk = useCallback((base64: string) => {
     audioChunksRef.current.push(base64);
     if (audioChunksRef.current.length === 1) {
-      console.log("[drill] First audio chunk received, length:", base64.length);
+      recordEvent("audio.first_chunk_received", { chunk_b64_length: base64.length });
     }
   }, []);
 
   const flushPlayback = useCallback(() => {
     const chunks = audioChunksRef.current;
     audioChunksRef.current = [];
-    if (chunks.length === 0) return;
+    if (chunks.length === 0) {
+      recordEvent("audio.flush_empty", { reason: "no_chunks_accumulated" });
+      return;
+    }
 
     const binaryChunks = chunks.map((b64) => {
       const binary = atob(b64);
@@ -152,7 +156,10 @@ export function useAudio() {
       offset += chunk.length;
     }
 
-    console.log(`[drill] flushPlayback: ${chunks.length} chunks, ${totalLength} bytes`);
+    const playSpan = startSpan("audio.playback_attempt", {
+      chunk_count: chunks.length,
+      total_bytes: totalLength,
+    });
 
     const blob = new Blob([combined], { type: "audio/mp3" });
     const url = URL.createObjectURL(blob);
@@ -160,21 +167,22 @@ export function useAudio() {
     currentAudioRef.current = audio;
     setIsPlaying(true);
     audio.onended = () => {
-      console.log("[drill] Audio playback ended normally");
+      playSpan.end({ result: "completed" });
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
       setIsPlaying(false);
     };
     audio.onerror = (e) => {
-      console.error("[drill] Audio playback error:", e);
+      const err = e instanceof ErrorEvent ? e.message : String(e);
+      playSpan.end({ result: "error", error: err });
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
       setIsPlaying(false);
     };
     audio.play().then(() => {
-      console.log("[drill] Audio play() started successfully");
+      recordEvent("audio.play_started", { total_bytes: totalLength });
     }).catch((e) => {
-      console.error("[drill] Audio play() rejected:", e);
+      playSpan.end({ result: "rejected", error: String(e) });
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
       setIsPlaying(false);
