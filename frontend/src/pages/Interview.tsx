@@ -41,10 +41,14 @@ export default function Interview({ sessionId, session }: InterviewProps) {
     isPlaying,
     micReady,
     analyserData,
+    pendingSegments,
+    pendingDuration,
     initMic,
     releaseMic,
     startRecording,
     stopRecording,
+    submitRecording,
+    discardRecording,
     playAudioChunk,
     flushPlayback,
     stopPlayback,
@@ -195,6 +199,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Spacebar — start recording (ignore if in text input)
       if (
         e.code === "Space" &&
         !e.repeat &&
@@ -208,9 +213,26 @@ export default function Interview({ sessionId, session }: InterviewProps) {
         stopPlayback();
         startRecording();
       }
+
+      // Enter — submit all buffered segments (only when not in text input)
+      if (
+        e.code === "Enter" &&
+        !e.repeat &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement)
+      ) {
+        // Let the async handler run — we just need to prevent default here
+        // if there are pending segments to avoid any form submission side effects
+      }
+
+      // Escape — discard all buffered segments
+      if (e.code === "Escape") {
+        discardRecording();
+      }
     }
 
     async function handleKeyUp(e: KeyboardEvent) {
+      // Spacebar up — stop recording, buffer the segment (do not send)
       if (e.code === "Space" && spaceDownRef.current) {
         e.preventDefault();
         spaceDownRef.current = false;
@@ -219,20 +241,33 @@ export default function Interview({ sessionId, session }: InterviewProps) {
         recordingSpanRef.current = null;
 
         try {
-          const encodeSpan = startSpan("audio.encode");
-          const audioData = await stopRecording();
-          encodeSpan.end({ audio_length: audioData?.length ?? 0 });
-
-          if (audioData) {
-            const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
-            send({ type: "end_turn", audio_data: audioData });
-            sendSpan.end();
-            recSpan?.end({ audio_length: audioData.length });
-          } else {
-            recSpan?.end({ error: "no_audio_data" });
-          }
+          await stopRecording();
+          recSpan?.end({ result: "segment_buffered" });
         } catch (err) {
           recSpan?.end({ error: String(err) });
+        }
+      }
+
+      // Enter up — submit buffered segments (only when not in text input)
+      if (
+        e.code === "Enter" &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement)
+      ) {
+        if (pendingSegments > 0) {
+          try {
+            const encodeSpan = startSpan("audio.encode");
+            const audioData = await submitRecording();
+            encodeSpan.end({ audio_length: audioData?.length ?? 0 });
+
+            if (audioData) {
+              const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
+              send({ type: "end_turn", audio_data: audioData });
+              sendSpan.end();
+            }
+          } catch (err) {
+            recordEvent("audio.submit_error", { error: String(err) });
+          }
         }
       }
     }
@@ -243,7 +278,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [startRecording, stopRecording, stopPlayback, send]);
+  }, [startRecording, stopRecording, submitRecording, discardRecording, stopPlayback, send, pendingSegments]);
 
   // ---------- Text submit ----------
 
@@ -338,7 +373,13 @@ export default function Interview({ sessionId, session }: InterviewProps) {
 
       {/* Bottom area */}
       <div className="interview-bottom">
-        <AudioControls isRecording={isRecording} micReady={micReady} analyserData={analyserData} />
+        <AudioControls
+          isRecording={isRecording}
+          micReady={micReady}
+          analyserData={analyserData}
+          pendingSegments={pendingSegments}
+          pendingDuration={pendingDuration}
+        />
         {micNeedsGesture && (
           <button className="btn-secondary" onClick={handleEnableMic} style={{ marginBottom: "0.5rem" }}>
             Enable Mic

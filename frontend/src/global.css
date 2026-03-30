@@ -355,6 +355,23 @@ button:disabled {
   color: var(--accent-orange);
 }
 
+.audio-controls-pending {
+  color: var(--accent-orange);
+}
+
+.pending-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-orange);
+  flex-shrink: 0;
+}
+
+.pending-label {
+  font-size: 0.8rem;
+  color: var(--accent-orange);
+}
+
 .waveform {
   display: flex;
   align-items: center;
