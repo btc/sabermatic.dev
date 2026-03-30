@@ -145,4 +145,5 @@ export type WSServerMessage =
   | { type: "session_ended"; session_id: number }
   | { type: "error"; message: string }
   | { type: "message_history"; sequence: number; role: string; content: string; timestamp: string | null }
+  | { type: "tts_error"; message: string }
   | { type: "session_loaded"; session_id: number; started_at: string; timer_sec: number; tts_enabled: boolean };

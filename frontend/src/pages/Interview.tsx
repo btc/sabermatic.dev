@@ -12,7 +12,7 @@ import { setSessionTraceId, startSpan, recordEvent } from "../tracer";
 import type { Session, WSServerMessage } from "../types";
 
 interface ChatEntry {
-  role: "interviewer" | "candidate";
+  role: "interviewer" | "candidate" | "system";
   content: string;
   isStreaming: boolean;
 }
@@ -127,6 +127,17 @@ export default function Interview({ sessionId, session }: InterviewProps) {
         case "session_ended":
           // Re-fetch session status to trigger SessionPage to re-render
           window.location.reload();
+          break;
+
+        case "tts_error":
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: msg.message,
+              isStreaming: false,
+            },
+          ]);
           break;
 
         case "error":
@@ -332,14 +343,18 @@ export default function Interview({ sessionId, session }: InterviewProps) {
       {/* Chat log */}
       <div className="interview-chat">
         <div className="interview-chat-inner">
-          {messages.map((msg, i) => (
-            <ChatMessage
-              key={i}
-              role={msg.role}
-              content={msg.content}
-              isStreaming={msg.isStreaming}
-            />
-          ))}
+          {messages.map((msg, i) =>
+            msg.role === "system" ? (
+              <div key={i} className="chat-system">{msg.content}</div>
+            ) : (
+              <ChatMessage
+                key={i}
+                role={msg.role}
+                content={msg.content}
+                isStreaming={msg.isStreaming}
+              />
+            )
+          )}
           {serverState === "processing" && (
             <div className="chat-row chat-row-right">
               <div className="chat-bubble chat-bubble-candidate chat-thinking">

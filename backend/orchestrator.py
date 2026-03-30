@@ -643,11 +643,15 @@ class InterviewOrchestrator:
             tts_span.set_attribute("cancelled", True)
             tts_span.end()
         except Exception as e:
-            logger.exception("TTS streaming error")
+            logger.warning("TTS failed for session %d: %s", self._session_id, e)
             tts_span.set_attribute("error", True)
             tts_span.set_attribute("error.message", str(e))
             tts_span.set_attribute("error.type", type(e).__name__)
             tts_span.end()
+            await self._send(send, {
+                "type": "tts_error",
+                "message": "Audio unavailable, continuing with text.",
+            })
             await self._send(send, {"type": "interviewer_done"})  # Graceful degradation
 
     async def _finalize_if_active(self, send: SendFn) -> None:
