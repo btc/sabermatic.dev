@@ -12,6 +12,7 @@ import pytest
 import pytest_asyncio
 
 from backend.migrations.run import run_migrations
+from backend.seed_questions import seed_questions
 
 
 TEST_DB_NAME = "drill_test"
@@ -41,10 +42,11 @@ async def test_database() -> AsyncGenerator[str, None]:
     finally:
         await admin_conn.close()
 
-    # Run migrations against the test DB
+    # Run migrations and seed questions against the test DB
     conn = await asyncpg.connect(TEST_DB_URL)
     try:
         await run_migrations(conn)
+        await seed_questions(conn)
     finally:
         await conn.close()
 
