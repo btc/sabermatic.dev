@@ -1,14 +1,12 @@
-import { useNavigate } from "react-router-dom";
 import type { CoachReview, Question } from "../types";
 
 interface CoachCardProps {
   review: CoachReview;
   suggestedQuestion: Question | null;
+  onStartSession?: (questionId: number) => void;
 }
 
-export default function CoachCard({ review, suggestedQuestion }: CoachCardProps) {
-  const navigate = useNavigate();
-
+export default function CoachCard({ review, suggestedQuestion, onStartSession }: CoachCardProps) {
   return (
     <div className="coach-card">
       <div className="coach-card-header">
@@ -29,7 +27,7 @@ export default function CoachCard({ review, suggestedQuestion }: CoachCardProps)
           </div>
           <button
             className="coach-start-btn"
-            onClick={() => navigate(`/interview/${suggestedQuestion.id}`)}
+            onClick={() => onStartSession?.(suggestedQuestion.id)}
           >
             Start This Session
           </button>

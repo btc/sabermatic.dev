@@ -10,12 +10,12 @@ export function useWebSocket(onMessage: (msg: WSServerMessage) => void) {
 
   const socketRef = useRef<InterviewSocket | null>(null);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (sessionId: number) => {
     // Avoid double-connecting
     if (socketRef.current?.connected) return;
 
     const socket = new InterviewSocket();
-    await socket.connect();
+    await socket.connect(sessionId);
     socket.onMessage((msg) => onMessageRef.current(msg));
     socketRef.current = socket;
   }, []);

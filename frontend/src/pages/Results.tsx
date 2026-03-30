@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type { Session, Evaluation } from "../types";
 import api from "../api/client";
 import ScoreBar, { scoreColor } from "../components/ScoreBar";
 import TraceWidget from "../components/TraceWidget";
 
-export default function Results() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+interface ResultsProps {
+  sessionId: number;
+}
+
+export default function Results({ sessionId }: ResultsProps) {
   const navigate = useNavigate();
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -15,7 +18,7 @@ export default function Results() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startRef = useRef(Date.now());
 
-  const sid = Number(sessionId);
+  const sid = sessionId;
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +221,7 @@ export default function Results() {
       </div>
 
       <div className="results-actions">
-        <button onClick={() => navigate(`/session/${sid}`)}>
+        <button onClick={() => window.location.reload()}>
           Review Transcript
         </button>
         <button className="btn-secondary" onClick={() => navigate("/")}>

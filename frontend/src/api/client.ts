@@ -33,6 +33,19 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PATCH",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`PATCH ${path} ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 // ---- API namespace ----
 
 const api = {
@@ -44,12 +57,22 @@ const api = {
   sessions: {
     list: () => get<Session[]>("/api/sessions/"),
     get: (id: number) => get<Session>(`/api/sessions/${id}`),
+    create: (body: { question_id: number; timer_setting_sec: number; tts_enabled: boolean }) =>
+      post<Session>("/api/sessions", body),
     messages: (id: number) => get<Message[]>(`/api/sessions/${id}/messages`),
     evaluation: (id: number) =>
       get<{ evaluation: Evaluation; annotations: MessageAnnotation[] }>(
         `/api/sessions/${id}/evaluation`
       ),
     stats: () => get<SessionStatsResponse>("/api/sessions/stats"),
+    archive: (id: number) => patch<Session>(`/api/sessions/${id}/archive`),
+    unarchive: (id: number) => patch<Session>(`/api/sessions/${id}/unarchive`),
+    archiveBulk: (ids: number[]) =>
+      post<{ archived_count: number }>("/api/sessions/archive-bulk", { session_ids: ids }),
+    educator: (id: number) =>
+      get<{ lesson: unknown }>(`/api/evaluate/${id}/educator`),
+    triggerEducator: (id: number) =>
+      post<{ status: string }>(`/api/evaluate/${id}/educate`),
   },
 
   evaluate: {
@@ -61,8 +84,8 @@ const api = {
 
   coach: {
     latest: () => get<CoachReview>("/api/coach/latest"),
-    analyze: () =>
-      post<{ status: string }>("/api/coach/analyze"),
+    analyze: (force?: boolean) =>
+      post<{ status: string }>(`/api/coach/analyze${force ? "?force=true" : ""}`),
   },
 
   traces: {

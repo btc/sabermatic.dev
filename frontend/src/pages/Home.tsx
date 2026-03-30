@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { Question, CoachReview, SessionStatsResponse } from "../types";
 import api from "../api/client";
 import CoachCard from "../components/CoachCard";
@@ -8,6 +8,7 @@ import QuestionList from "../components/QuestionList";
 import TraceWidget from "../components/TraceWidget";
 
 export default function Home() {
+  const navigate = useNavigate();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [stats, setStats] = useState<SessionStatsResponse | null>(null);
   const [coachReview, setCoachReview] = useState<CoachReview | null>(null);
@@ -74,6 +75,15 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
 
+  async function handleStartSession(questionId: number) {
+    const session = await api.sessions.create({
+      question_id: questionId,
+      timer_setting_sec: 2700,
+      tts_enabled: true,
+    });
+    navigate(`/sessions/${session.id}`);
+  }
+
   // Derived stats
   const sessionCount = stats?.question_stats.reduce((sum, qs) => sum + qs.session_count, 0) ?? 0;
   const avgScore = stats?.averages?.overall ?? 0;
@@ -109,7 +119,11 @@ export default function Home() {
       </div>
 
       {coachReview && (
-        <CoachCard review={coachReview} suggestedQuestion={suggestedQuestion} />
+        <CoachCard
+          review={coachReview}
+          suggestedQuestion={suggestedQuestion}
+          onStartSession={handleStartSession}
+        />
       )}
 
       {stats?.averages && (
@@ -139,6 +153,7 @@ export default function Home() {
         suggestedQuestionId={coachReview?.suggested_question_id ?? null}
         filterDifficulty={filterDifficulty}
         onFilterChange={setFilterDifficulty}
+        onSelect={handleStartSession}
       />
 
       <TraceWidget />
