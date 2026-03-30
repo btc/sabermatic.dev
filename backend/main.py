@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import anthropic
@@ -14,7 +15,7 @@ def create_app(
     database_url: str | None = None, settings: Settings | None = None
 ) -> FastAPI:
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         s = settings or Settings()
         app.state.settings = s
         setup_tracing(data_dir=str(s.data_dir))

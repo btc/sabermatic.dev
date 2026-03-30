@@ -5,8 +5,10 @@ a model answer tailored to the specific question and deep-dives on each
 knowledge gap identified by the evaluator.
 """
 
-from typing import Any
+from typing import Any, cast
 
+import anthropic
+from anthropic.types import MessageParam, ToolParam, ToolChoiceToolParam
 from pydantic import BaseModel
 
 from backend.models import Message, MessageRole
@@ -176,7 +178,7 @@ Format everything in Markdown. Use headers, code blocks, and tables where they a
 
     async def educate(
         self,
-        client: object,
+        client: anthropic.AsyncAnthropic,
         question_title: str,
         question_prompt: str,
         transcript_text: str,
@@ -204,20 +206,21 @@ Format everything in Markdown. Use headers, code blocks, and tables where they a
             evaluation_summary=evaluation_summary,
         )
 
-        response = await client.messages.create(  # type: ignore[union-attr]
+        response = await client.messages.create(
             model=self.config.model,
             max_tokens=self.config.max_tokens,
             system=system_prompt,
-            messages=[{"role": "user", "content": "Please analyze the interview and provide your educational content using the submit_education tool."}],
-            tools=self.get_tool_schema(),
-            tool_choice={"type": "tool", "name": "submit_education"},
+            messages=cast(list[MessageParam], [{"role": "user", "content": "Please analyze the interview and provide your educational content using the submit_education tool."}]),
+            tools=cast(list[ToolParam], self.get_tool_schema()),
+            tool_choice=cast(ToolChoiceToolParam, {"type": "tool", "name": "submit_education"}),
         )
 
         # Extract tool call input from the response
-        tool_input = response.content[0].input
-        raw_response = response.model_dump()
+        # tool_choice forces a ToolUseBlock; cast since the union includes TextBlock etc.
+        tool_input: dict[str, Any] = response.content[0].input  # type: ignore[union-attr]
+        raw_response: dict[str, Any] = response.model_dump()
 
-        model_answer = tool_input["model_answer"]
-        gap_deepdives = tool_input["gap_deepdives"]
+        model_answer: str = tool_input["model_answer"]
+        gap_deepdives: str = tool_input["gap_deepdives"]
 
         return model_answer, gap_deepdives, raw_response

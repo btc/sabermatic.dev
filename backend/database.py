@@ -5,11 +5,14 @@ Row-to-model conversion uses explicit mapping. JSON fields use json.dumps
 for inserts and json.loads for reads.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import asyncpg
+from asyncpg.pool import PoolConnectionProxy
 
 from backend.models import (
     CoachReview,
@@ -25,6 +28,13 @@ from backend.models import (
     Session,
     SessionCreate,
 )
+
+# asyncpg.Connection and PoolConnectionProxy share the same query interface
+# but are not related by inheritance in the type stubs. This union covers both.
+if TYPE_CHECKING:
+    Conn = Union[asyncpg.Connection[asyncpg.Record], PoolConnectionProxy[asyncpg.Record]]
+else:
+    Conn = Union[asyncpg.Connection, PoolConnectionProxy]
 
 
 # --- Row-to-model helpers ---
@@ -124,7 +134,7 @@ def _row_to_coach_review(row: asyncpg.Record) -> CoachReview:
 
 
 async def insert_question(
-    conn: asyncpg.Connection, q: QuestionCreate
+    conn: Conn, q: QuestionCreate
 ) -> Question:
     row = await conn.fetchrow(
         """
@@ -140,11 +150,12 @@ async def insert_question(
         q.source.value,
         q.source_detail,
     )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
     return _row_to_question(row)
 
 
 async def get_question(
-    conn: asyncpg.Connection, question_id: int
+    conn: Conn, question_id: int
 ) -> Optional[Question]:
     row = await conn.fetchrow("SELECT * FROM questions WHERE id = $1", question_id)
     if row is None:
@@ -152,7 +163,7 @@ async def get_question(
     return _row_to_question(row)
 
 
-async def list_questions(conn: asyncpg.Connection) -> list[Question]:
+async def list_questions(conn: Conn) -> list[Question]:
     rows = await conn.fetch("SELECT * FROM questions ORDER BY id")
     return [_row_to_question(r) for r in rows]
 
@@ -161,7 +172,7 @@ async def list_questions(conn: asyncpg.Connection) -> list[Question]:
 
 
 async def insert_session(
-    conn: asyncpg.Connection, s: SessionCreate
+    conn: Conn, s: SessionCreate
 ) -> Session:
     row = await conn.fetchrow(
         """
@@ -189,11 +200,12 @@ async def insert_session(
         s.audio_dir,
         s.status_detail,
     )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
     return _row_to_session(row)
 
 
 async def get_session(
-    conn: asyncpg.Connection, session_id: int
+    conn: Conn, session_id: int
 ) -> Optional[Session]:
     row = await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id)
     if row is None:
@@ -202,7 +214,7 @@ async def get_session(
 
 
 async def list_sessions(
-    conn: asyncpg.Connection, include_archived: bool = False
+    conn: Conn, include_archived: bool = False
 ) -> list[Session]:
     if include_archived:
         rows = await conn.fetch("SELECT * FROM sessions ORDER BY started_at DESC")
@@ -214,7 +226,7 @@ async def list_sessions(
 
 
 async def update_session_status(
-    conn: asyncpg.Connection,
+    conn: Conn,
     session_id: int,
     status: str,
     *,
@@ -250,7 +262,7 @@ async def update_session_status(
 
 
 async def archive_session(
-    conn: asyncpg.Connection, session_id: int, archived: bool
+    conn: Conn, session_id: int, archived: bool
 ) -> None:
     await conn.execute(
         "UPDATE sessions SET archived = $1 WHERE id = $2", archived, session_id
@@ -258,7 +270,7 @@ async def archive_session(
 
 
 async def archive_sessions_bulk(
-    conn: asyncpg.Connection, session_ids: list[int], archived: bool
+    conn: Conn, session_ids: list[int], archived: bool
 ) -> None:
     await conn.execute(
         "UPDATE sessions SET archived = $1 WHERE id = ANY($2)", archived, session_ids
@@ -266,8 +278,8 @@ async def archive_sessions_bulk(
 
 
 async def get_session_token_usage(
-    conn: asyncpg.Connection, session_id: int
-) -> list[dict]:
+    conn: Conn, session_id: int
+) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         "SELECT * FROM llm_token_usage WHERE session_id = $1", session_id
     )
@@ -278,7 +290,7 @@ async def get_session_token_usage(
 
 
 async def insert_message(
-    conn: asyncpg.Connection, m: MessageCreate
+    conn: Conn, m: MessageCreate
 ) -> Message:
     row = await conn.fetchrow(
         """
@@ -300,11 +312,12 @@ async def insert_message(
         m.audio_path,
         m.audio_duration_sec,
     )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
     return _row_to_message(row)
 
 
 async def get_session_messages(
-    conn: asyncpg.Connection, session_id: int
+    conn: Conn, session_id: int
 ) -> list[Message]:
     rows = await conn.fetch(
         "SELECT * FROM messages WHERE session_id = $1 ORDER BY sequence",
@@ -317,7 +330,7 @@ async def get_session_messages(
 
 
 async def insert_evaluation(
-    conn: asyncpg.Connection, e: EvaluationCreate
+    conn: Conn, e: EvaluationCreate
 ) -> Evaluation:
     row = await conn.fetchrow(
         """
@@ -342,11 +355,12 @@ async def insert_evaluation(
         json.dumps(e.raw_response),
         e.evaluated_at,
     )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
     return _row_to_evaluation(row)
 
 
 async def get_latest_evaluation(
-    conn: asyncpg.Connection, session_id: int
+    conn: Conn, session_id: int
 ) -> Optional[Evaluation]:
     row = await conn.fetchrow(
         """
@@ -363,7 +377,7 @@ async def get_latest_evaluation(
 
 
 async def get_evaluations_for_sessions(
-    conn: asyncpg.Connection, session_ids: list[int]
+    conn: Conn, session_ids: list[int]
 ) -> list[Evaluation]:
     rows = await conn.fetch(
         """
@@ -380,7 +394,7 @@ async def get_evaluations_for_sessions(
 
 
 async def insert_message_annotation(
-    conn: asyncpg.Connection, a: MessageAnnotationCreate
+    conn: Conn, a: MessageAnnotationCreate
 ) -> MessageAnnotation:
     row = await conn.fetchrow(
         """
@@ -393,11 +407,12 @@ async def insert_message_annotation(
         a.annotation_type.value,
         a.content,
     )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
     return _row_to_annotation(row)
 
 
 async def get_message_annotations(
-    conn: asyncpg.Connection, evaluation_id: int
+    conn: Conn, evaluation_id: int
 ) -> list[MessageAnnotation]:
     rows = await conn.fetch(
         "SELECT * FROM message_annotations WHERE evaluation_id = $1 ORDER BY id",
@@ -410,7 +425,7 @@ async def get_message_annotations(
 
 
 async def insert_coach_review(
-    conn: asyncpg.Connection, c: CoachReviewCreate
+    conn: Conn, c: CoachReviewCreate
 ) -> CoachReview:
     row = await conn.fetchrow(
         """
@@ -428,11 +443,12 @@ async def insert_coach_review(
         json.dumps(c.raw_response),
         c.created_at,
     )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
     return _row_to_coach_review(row)
 
 
 async def get_latest_coach_review(
-    conn: asyncpg.Connection,
+    conn: Conn,
 ) -> Optional[CoachReview]:
     row = await conn.fetchrow(
         "SELECT * FROM coach_reviews ORDER BY created_at DESC LIMIT 1"
@@ -446,7 +462,7 @@ async def get_latest_coach_review(
 
 
 async def get_dimension_averages(
-    conn: asyncpg.Connection,
+    conn: Conn,
 ) -> Optional[dict[str, float]]:
     """Average score across all evaluations for non-archived sessions."""
     row = await conn.fetchrow(
@@ -476,8 +492,8 @@ async def get_dimension_averages(
 
 
 async def get_question_stats(
-    conn: asyncpg.Connection,
-) -> list[dict]:
+    conn: Conn,
+) -> list[dict[str, Any]]:
     """Per-question session count and average overall score (excluding archived)."""
     rows = await conn.fetch(
         """
@@ -505,9 +521,10 @@ async def get_question_stats(
 
 
 async def get_latest_evaluation_time(
-    conn: asyncpg.Connection,
+    conn: Conn,
 ) -> Optional[datetime]:
     """Return the most recent evaluated_at timestamp, for coach debounce."""
-    return await conn.fetchval(
+    result: datetime | None = await conn.fetchval(
         "SELECT MAX(evaluated_at) FROM evaluations"
     )
+    return result

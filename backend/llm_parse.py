@@ -94,6 +94,13 @@ def _extract_json_substring(text: str) -> str:
     )
 
 
+def _cast_json(value: object) -> dict[str, Any] | list[Any]:
+    """Cast a json.loads result to the expected return type."""
+    if isinstance(value, (dict, list)):
+        return value
+    raise TypeError(f"Expected dict or list from JSON, got {type(value).__name__}")
+
+
 def parse_llm_json(text: str) -> dict[str, Any] | list[Any]:
     """Extract JSON from LLM output that may include markdown fences or preamble.
 
@@ -123,13 +130,13 @@ def parse_llm_json(text: str) -> dict[str, Any] | list[Any]:
 
     # Step 2: Try direct parse first (fast path)
     try:
-        return json.loads(text)
+        return _cast_json(json.loads(text))
     except json.JSONDecodeError:
         pass
 
     # Step 3: Try with trailing comma fix
     try:
-        return json.loads(_fix_trailing_commas(text))
+        return _cast_json(json.loads(_fix_trailing_commas(text)))
     except json.JSONDecodeError:
         pass
 
@@ -144,13 +151,13 @@ def parse_llm_json(text: str) -> dict[str, Any] | list[Any]:
 
     # Step 5: Try parsing the extracted substring
     try:
-        return json.loads(json_str)
+        return _cast_json(json.loads(json_str))
     except json.JSONDecodeError:
         pass
 
     # Step 6: Try with trailing comma fix on the extracted substring
     try:
-        return json.loads(_fix_trailing_commas(json_str))
+        return _cast_json(json.loads(_fix_trailing_commas(json_str)))
     except json.JSONDecodeError:
         raise LLMParseError(
             f"Could not parse extracted JSON from LLM output: {original_text}",

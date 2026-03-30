@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+import anthropic
 import asyncpg
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
-from backend.deps import get_db, get_settings
+from backend.config import Settings
 from backend.database import (
+    Conn,
     get_session,
     get_session_messages,
     get_question,
@@ -16,6 +21,7 @@ from backend.database import (
     insert_message_annotation,
     update_session_status,
 )
+from backend.deps import get_db, get_settings
 from backend.educator import Educator, EducatorConfig
 from backend.evaluator import Evaluator, EvaluatorConfig
 from backend.models import AnnotationType, MessageAnnotationCreate
@@ -26,11 +32,11 @@ router = APIRouter(prefix="/evaluate", tags=["evaluation"])
 
 
 async def _run_evaluation(
-    pool: asyncpg.Pool,
-    anthropic_client,
+    pool: asyncpg.Pool[asyncpg.Record],
+    anthropic_client: anthropic.AsyncAnthropic,
     session_id: int,
     evaluator_model: str,
-):
+) -> None:
     """Background task: evaluate a session with one automatic retry."""
     for attempt in range(2):
         try:
@@ -65,7 +71,9 @@ async def _run_evaluation(
                     msg_map = {m.sequence: m.id for m in messages}
 
                     for ann in annotations_raw:
-                        msg_seq = ann.get("message_sequence")
+                        msg_seq: int | None = ann.get("message_sequence")
+                        if msg_seq is None:
+                            continue
                         msg_id = msg_map.get(msg_seq)
                         if msg_id is None:
                             continue
@@ -116,9 +124,9 @@ async def trigger_evaluation(
     session_id: int,
     request: Request,
     background_tasks: BackgroundTasks,
-    conn: asyncpg.Connection = Depends(get_db),
-    settings=Depends(get_settings),
-):
+    conn: Conn = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
     session = await get_session(conn, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -160,11 +168,11 @@ async def trigger_evaluation(
 
 
 async def _run_educator(
-    pool: asyncpg.Pool,
-    anthropic_client,
+    pool: asyncpg.Pool[asyncpg.Record],
+    anthropic_client: anthropic.AsyncAnthropic,
     session_id: int,
     educator_model: str,
-):
+) -> None:
     """Background task: run educator analysis. Catches ALL exceptions."""
     evaluation = None
     try:
@@ -252,9 +260,9 @@ async def trigger_educator(
     session_id: int,
     request: Request,
     background_tasks: BackgroundTasks,
-    conn: asyncpg.Connection = Depends(get_db),
-    settings=Depends(get_settings),
-):
+    conn: Conn = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
     """Trigger educator analysis in background."""
     session = await get_session(conn, session_id)
     if session is None:
@@ -301,8 +309,8 @@ async def trigger_educator(
 @router.get("/{session_id}/educator")
 async def get_educator_content(
     session_id: int,
-    conn: asyncpg.Connection = Depends(get_db),
-):
+    conn: Conn = Depends(get_db),
+) -> dict[str, Any]:
     """Get educator content for a session."""
     evaluation = await get_latest_evaluation(conn, session_id)
     if evaluation is None:

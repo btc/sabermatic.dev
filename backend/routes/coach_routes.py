@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+import anthropic
 import asyncpg
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
-from backend.deps import get_db, get_settings
+from backend.config import Settings
 from backend.database import (
+    Conn,
     get_latest_coach_review,
     get_latest_evaluation_time,
     list_sessions,
@@ -13,6 +17,7 @@ from backend.database import (
     insert_coach_review,
     insert_question,
 )
+from backend.deps import get_db, get_settings
 from backend.coach import Coach, CoachConfig
 from backend.models import CoachReview, SessionStatus
 
@@ -22,7 +27,9 @@ router = APIRouter(prefix="/coach", tags=["coach"])
 
 
 @router.get("/latest", response_model=CoachReview)
-async def get_latest_review(conn: asyncpg.Connection = Depends(get_db)):
+async def get_latest_review(
+    conn: Conn = Depends(get_db),
+) -> CoachReview:
     review = await get_latest_coach_review(conn)
     if review is None:
         raise HTTPException(status_code=404, detail="No coach reviews yet")
@@ -30,10 +37,10 @@ async def get_latest_review(conn: asyncpg.Connection = Depends(get_db)):
 
 
 async def _run_coach_analysis(
-    pool: asyncpg.Pool,
-    anthropic_client,
+    pool: asyncpg.Pool[asyncpg.Record],
+    anthropic_client: anthropic.AsyncAnthropic,
     coach_model: str,
-):
+) -> None:
     """Background task: run coach analysis. Catches ALL exceptions."""
     async with pool.acquire() as conn:
         locked = await conn.fetchval("SELECT pg_try_advisory_lock(1)")
@@ -87,9 +94,9 @@ async def trigger_coach_analysis(
     request: Request,
     background_tasks: BackgroundTasks,
     force: bool = Query(default=False),
-    conn: asyncpg.Connection = Depends(get_db),
-    settings=Depends(get_settings),
-):
+    conn: Conn = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
     if not force:
         # Check if analysis is up to date
         latest_review = await get_latest_coach_review(conn)

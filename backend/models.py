@@ -53,7 +53,7 @@ class QuestionCreate(BaseModel):
     prompt: str
     difficulty: Difficulty
     tags: list[str] = Field(default_factory=list)
-    hints: Optional[dict] = None
+    hints: Optional[dict[str, Any]] = None
     source: QuestionSource = QuestionSource.seed
     source_detail: Optional[str] = None
 
@@ -64,7 +64,7 @@ class Question(BaseModel):
     prompt: str
     difficulty: Difficulty
     tags: list[str]
-    hints: Optional[dict] = None
+    hints: Optional[dict[str, Any]] = None
     source: QuestionSource
     source_detail: Optional[str] = None
     created_at: datetime
@@ -151,7 +151,7 @@ class EvaluationCreate(BaseModel):
     strengths: list[str]
     gaps: list[str]
     advice: str
-    raw_response: dict
+    raw_response: dict[str, Any]
     evaluated_at: Optional[datetime] = None
 
     @field_validator(
@@ -179,7 +179,7 @@ class Evaluation(BaseModel):
     strengths: list[str]
     gaps: list[str]
     advice: str
-    raw_response: dict
+    raw_response: dict[str, Any]
     educator_model_answer: Optional[str] = None
     educator_gap_deepdives: Optional[str] = None
     educator_raw_response: Optional[dict[str, Any]] = None
@@ -209,18 +209,18 @@ class MessageAnnotation(BaseModel):
 
 class CoachReviewCreate(BaseModel):
     recommendation: str
-    gap_analysis: dict
+    gap_analysis: dict[str, Any]
     suggested_question_id: Optional[int] = None
     sessions_analyzed: list[int] = Field(default_factory=list)
-    raw_response: dict
+    raw_response: dict[str, Any]
     created_at: Optional[datetime] = None
 
 
 class CoachReview(BaseModel):
     id: int
     recommendation: str
-    gap_analysis: dict
+    gap_analysis: dict[str, Any]
     suggested_question_id: Optional[int] = None
     sessions_analyzed: list[int]
-    raw_response: dict
+    raw_response: dict[str, Any]
     created_at: datetime

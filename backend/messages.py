@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -34,7 +35,7 @@ class WSMessage:
     text: str | None = None
 
 
-def parse_ws_message(raw: dict) -> WSMessage:
+def parse_ws_message(raw: dict[str, Any]) -> WSMessage:
     """Parse a raw JSON dict from the WebSocket into a typed WSMessage.
 
     Audio data arrives as base64-encoded strings and is decoded to bytes.
