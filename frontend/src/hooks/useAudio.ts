@@ -125,6 +125,9 @@ export function useAudio() {
 
   const playAudioChunk = useCallback((base64: string) => {
     audioChunksRef.current.push(base64);
+    if (audioChunksRef.current.length === 1) {
+      console.log("[drill] First audio chunk received, length:", base64.length);
+    }
   }, []);
 
   const flushPlayback = useCallback(() => {
@@ -149,12 +152,15 @@ export function useAudio() {
       offset += chunk.length;
     }
 
+    console.log(`[drill] flushPlayback: ${chunks.length} chunks, ${totalLength} bytes`);
+
     const blob = new Blob([combined], { type: "audio/mp3" });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     currentAudioRef.current = audio;
     setIsPlaying(true);
     audio.onended = () => {
+      console.log("[drill] Audio playback ended normally");
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
       setIsPlaying(false);
@@ -165,7 +171,9 @@ export function useAudio() {
       currentAudioRef.current = null;
       setIsPlaying(false);
     };
-    audio.play().catch((e) => {
+    audio.play().then(() => {
+      console.log("[drill] Audio play() started successfully");
+    }).catch((e) => {
       console.error("[drill] Audio play() rejected:", e);
       URL.revokeObjectURL(url);
       currentAudioRef.current = null;
