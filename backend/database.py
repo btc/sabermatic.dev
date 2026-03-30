@@ -27,6 +27,8 @@ from backend.models import (
     QuestionCreate,
     Session,
     SessionCreate,
+    SessionEvent,
+    SessionEventCreate,
 )
 
 # asyncpg.Connection and PoolConnectionProxy share the same query interface
@@ -456,6 +458,46 @@ async def get_latest_coach_review(
     if row is None:
         return None
     return _row_to_coach_review(row)
+
+
+# --- Session Events ---
+
+
+def _row_to_session_event(row: asyncpg.Record) -> SessionEvent:
+    return SessionEvent(
+        id=row["id"],
+        session_id=row["session_id"],
+        event=row["event"],
+        detail=row["detail"],
+        created_at=row["created_at"],
+    )
+
+
+async def insert_session_event(
+    conn: Conn, event: SessionEventCreate
+) -> SessionEvent:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO session_events (session_id, event, detail)
+        VALUES ($1, $2, $3)
+        RETURNING *
+        """,
+        event.session_id,
+        event.event,
+        event.detail,
+    )
+    assert row is not None, "INSERT ... RETURNING * should always return a row"
+    return _row_to_session_event(row)
+
+
+async def get_session_events(
+    conn: Conn, session_id: int
+) -> list[SessionEvent]:
+    rows = await conn.fetch(
+        "SELECT * FROM session_events WHERE session_id = $1 ORDER BY created_at",
+        session_id,
+    )
+    return [_row_to_session_event(r) for r in rows]
 
 
 # --- Aggregates ---

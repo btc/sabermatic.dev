@@ -204,6 +204,23 @@ class MessageAnnotation(BaseModel):
     content: str
 
 
+# --- SessionEvent ---
+
+
+class SessionEvent(BaseModel):
+    id: int
+    session_id: int
+    event: str
+    detail: str | None = None
+    created_at: datetime
+
+
+class SessionEventCreate(BaseModel):
+    session_id: int
+    event: str
+    detail: str | None = None
+
+
 # --- CoachReview ---
 
 

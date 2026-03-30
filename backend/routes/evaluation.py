@@ -19,12 +19,13 @@ from backend.database import (
     get_latest_evaluation,
     insert_evaluation,
     insert_message_annotation,
+    insert_session_event,
     update_session_status,
 )
 from backend.deps import get_db, get_settings
 from backend.educator import Educator, EducatorConfig
 from backend.evaluator import Evaluator, EvaluatorConfig
-from backend.models import AnnotationType, MessageAnnotationCreate
+from backend.models import AnnotationType, MessageAnnotationCreate, SessionEventCreate
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,9 @@ async def _run_evaluation(
                         )
 
                     await update_session_status(conn, session_id, "reviewed")
+                    await insert_session_event(conn, SessionEventCreate(
+                        session_id=session_id, event="evaluation_completed",
+                    ))
                 return  # success
 
         except Exception:
@@ -113,6 +117,11 @@ async def _run_evaluation(
                         "evaluation_failed",
                         status_detail="Evaluation failed after 2 attempts",
                     )
+                    await insert_session_event(conn, SessionEventCreate(
+                        session_id=session_id,
+                        event="evaluation_failed",
+                        detail=str(e),
+                    ))
             except Exception:
                 logger.exception(
                     "Failed to update session status after evaluation failure"
