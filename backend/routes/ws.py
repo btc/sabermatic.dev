@@ -10,8 +10,8 @@ from backend.storage import SessionStorage
 router = APIRouter()
 
 
-@router.websocket("/ws/interview")
-async def interview_websocket(ws: WebSocket):
+@router.websocket("/ws/interview/{session_id}")
+async def interview_websocket(ws: WebSocket, session_id: int):
     await ws.accept()
     deps = OrchestratorDeps(
         pool=ws.app.state.pool,
@@ -25,6 +25,8 @@ async def interview_websocket(ws: WebSocket):
     async def send(data: dict):
         await ws.send_text(json.dumps(data, default=str))
 
+    # Immediately enqueue load — orchestrator loads session from DB
+    await orch.enqueue(WSMessage(type="load", session_id=session_id))
     runner = asyncio.create_task(orch.run(send))
 
     try:

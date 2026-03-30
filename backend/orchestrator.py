@@ -8,7 +8,7 @@ as a fire-and-forget asyncio.Task with a cancellation handle.
 Usage::
 
     orch = InterviewOrchestrator(deps)
-    await orch.enqueue(WSMessage(type="start", ...))
+    await orch.enqueue(WSMessage(type="load", session_id=42))
     await orch.run(send=websocket.send_json)
 """
 
@@ -18,15 +18,16 @@ import asyncio
 import base64
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from backend.config import Settings
 from backend.database import (
     get_latest_coach_review,
     get_question,
+    get_session,
     get_session_messages,
     insert_message,
-    insert_session,
     update_session_status,
 )
 from backend.interviewer import Interviewer, InterviewerConfig
@@ -35,7 +36,6 @@ from backend.models import (
     MessageCreate,
     MessageRole,
     Question,
-    SessionCreate,
     SessionStatus,
 )
 from backend.session_manager import InvalidTransition, SessionState, SessionStateMachine
@@ -86,6 +86,7 @@ class InterviewOrchestrator:
         self._tts_task: asyncio.Task | None = None
         self._timer_sec: int = 2700
         self._briefing: str | None = None
+        self._started_at: datetime | None = None
 
     async def enqueue(self, msg: WSMessage) -> None:
         """Put a message on the processing queue."""
@@ -143,8 +144,8 @@ class InterviewOrchestrator:
     async def _handle(self, msg: WSMessage, send: SendFn) -> None:
         """Dispatch a single message to the appropriate handler."""
         match msg.type:
-            case "start":
-                await self._do_start(msg, send)
+            case "load":
+                await self._do_load(msg, send)
             case "end_turn":
                 await self._do_end_turn(msg, send)
             case "text_input":
@@ -163,89 +164,133 @@ class InterviewOrchestrator:
     # Handlers
     # ------------------------------------------------------------------
 
-    async def _do_start(self, msg: WSMessage, send: SendFn) -> None:
-        """Create session, stream opening question, optionally start TTS."""
-        with tracer.start_as_current_span("interview.start", attributes={
-            "question_id": msg.question_id or 0,
+    async def _do_load(self, msg: WSMessage, send: SendFn) -> None:
+        """Load session from DB. If no messages, generate opening; otherwise replay history."""
+        with tracer.start_as_current_span("interview.load", attributes={
+            "session_id": msg.session_id or 0,
         }):
-            await self._do_start_inner(msg, send)
+            await self._do_load_inner(msg, send)
 
-    async def _do_start_inner(self, msg: WSMessage, send: SendFn) -> None:
-        self._tts_enabled = msg.tts_enabled if msg.tts_enabled is not None else True
-        self._timer_sec = msg.timer_sec or 2700
-        self._state.transition(SessionState.STARTING)
-
-        # Look up question from DB
+    async def _do_load_inner(self, msg: WSMessage, send: SendFn) -> None:
+        # Load session and related data from DB
         async with self.deps.pool.acquire() as conn:
-            self._question = await get_question(conn, msg.question_id)
+            session = await get_session(conn, msg.session_id)
+            if not session:
+                await self._send(send, {
+                    "type": "error",
+                    "message": "Session not found",
+                })
+                return
+
+            self._question = await get_question(conn, session.question_id)
             if not self._question:
                 await self._send(send, {
                     "type": "error",
                     "message": "Question not found",
                 })
-                # Reset to IDLE so session can be retried
-                self._state = SessionStateMachine()
                 return
 
-            # Create session
-            session = await insert_session(
-                conn,
-                SessionCreate(
-                    question_id=msg.question_id,
-                    timer_setting_sec=self._timer_sec,
-                    interviewer_briefed=msg.briefed or False,
-                ),
-            )
-            self._session_id = session.id
-            self._session_dir = self.deps.storage.create_session_dir(session.id)
+            messages = await get_session_messages(conn, session.id)
 
-            # Get briefing if requested
+            # Get briefing if the session was created with interviewer_briefed
             self._briefing = None
-            if msg.briefed:
+            if session.interviewer_briefed:
                 review = await get_latest_coach_review(conn)
                 if review:
                     self._briefing = review.recommendation
+
+        # Set all instance state from the loaded session
+        self._session_id = session.id
+        self._timer_sec = session.timer_setting_sec
+        self._tts_enabled = session.tts_enabled
+        self._session_dir = self.deps.storage.create_session_dir(session.id)
+        self._started_at = session.started_at
+
+        # Restore sequence counters from existing messages
+        if messages:
+            self._sequence = max(m.sequence for m in messages)
+            candidate_msgs = [m for m in messages if m.role == MessageRole.candidate]
+            if candidate_msgs:
+                self._last_candidate_sequence = max(m.sequence for m in candidate_msgs)
+
+        # Compute elapsed time from DB started_at
+        now = datetime.now(timezone.utc)
+        started = self._started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        elapsed = int((now - started).total_seconds())
 
         # Build system prompt
         self._system_prompt = self._interviewer.build_system_prompt(
             question_title=self._question.title,
             question_prompt=self._question.prompt,
             timer_sec=self._timer_sec,
-            elapsed_sec=0,
+            elapsed_sec=elapsed,
             briefing=self._briefing,
         )
 
-        self._state.transition(SessionState.INTERVIEWER_SPEAKING)
-
-        # Stream opening message
-        full_response = await self._stream_interviewer_opening(send)
-
-        # Save interviewer message to DB
-        self._sequence += 1
-        async with self.deps.pool.acquire() as conn:
-            await insert_message(
-                conn,
-                MessageCreate(
-                    session_id=self._session_id,
-                    sequence=self._sequence,
-                    role=MessageRole.interviewer,
-                    content=full_response,
-                ),
-            )
-
-        # TTS (fire-and-forget)
-        if self._tts_enabled:
-            self._tts_task = asyncio.create_task(
-                self._stream_tts(full_response, send)
-            )
-        else:
-            await self._send(send, {"type": "interviewer_done"})
-
-        self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
+        # Send session_loaded metadata to client
         await self._send(send, {
-            "type": "state",
-            "state": self._state.state.value,
+            "type": "session_loaded",
+            "session_id": session.id,
+            "started_at": session.started_at.isoformat(),
+            "timer_sec": self._timer_sec,
+            "tts_enabled": self._tts_enabled,
         })
+
+        if not messages:
+            # New session — generate opening question
+            self._state.transition(SessionState.STARTING)
+            self._state.transition(SessionState.INTERVIEWER_SPEAKING)
+
+            # Stream opening message
+            full_response = await self._stream_interviewer_opening(send)
+
+            # Save interviewer message to DB
+            self._sequence += 1
+            async with self.deps.pool.acquire() as conn:
+                await insert_message(
+                    conn,
+                    MessageCreate(
+                        session_id=self._session_id,
+                        sequence=self._sequence,
+                        role=MessageRole.interviewer,
+                        content=full_response,
+                    ),
+                )
+
+            # TTS (fire-and-forget)
+            if self._tts_enabled:
+                self._tts_task = asyncio.create_task(
+                    self._stream_tts(full_response, send)
+                )
+            else:
+                await self._send(send, {"type": "interviewer_done"})
+
+            self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
+            await self._send(send, {
+                "type": "state",
+                "state": self._state.state.value,
+            })
+        else:
+            # Existing session — send message history and resume
+            self._state.transition(SessionState.STARTING)
+            self._state.transition(SessionState.INTERVIEWER_SPEAKING)
+
+            for m in messages:
+                await self._send(send, {
+                    "type": "message_history",
+                    "sequence": m.sequence,
+                    "role": m.role.value if hasattr(m.role, "value") else m.role,
+                    "content": m.content,
+                    "timestamp": m.timestamp.isoformat(),
+                })
+
+            self._state.transition(SessionState.WAITING_FOR_CANDIDATE)
+            await self._send(send, {
+                "type": "state",
+                "state": self._state.state.value,
+            })
 
     async def _do_end_turn(self, msg: WSMessage, send: SendFn) -> None:
         """Transcribe audio, then get interviewer response. Sequential."""
@@ -361,8 +406,14 @@ class InterviewOrchestrator:
             "state": self._state.state.value,
         })
 
-        # Rebuild system prompt with current elapsed time
-        elapsed = self._state.elapsed_seconds or 0
+        # Rebuild system prompt with current elapsed time from DB started_at
+        elapsed = 0
+        if self._started_at is not None:
+            now = datetime.now(timezone.utc)
+            started = self._started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            elapsed = int((now - started).total_seconds())
         self._system_prompt = self._interviewer.build_system_prompt(
             question_title=self._question.title,
             question_prompt=self._question.prompt,
@@ -448,9 +499,16 @@ class InterviewOrchestrator:
             "type": "state",
             "state": self._state.state.value,
         })
+        timer_elapsed = 0
+        if self._started_at is not None:
+            now = datetime.now(timezone.utc)
+            started = self._started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            timer_elapsed = int((now - started).total_seconds())
         await self._send(send, {
             "type": "timer",
-            "elapsed_seconds": self._state.elapsed_seconds or 0,
+            "elapsed_seconds": timer_elapsed,
         })
 
     async def _do_edit_transcript(self, msg: WSMessage, send: SendFn) -> None:
@@ -484,12 +542,20 @@ class InterviewOrchestrator:
         self._state.transition(SessionState.ENDING)
         self._state.transition(SessionState.ENDED)
 
+        duration = None
+        if self._started_at is not None:
+            now = datetime.now(timezone.utc)
+            started = self._started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            duration = int((now - started).total_seconds())
+
         async with self.deps.pool.acquire() as conn:
             await update_session_status(
                 conn,
                 self._session_id,
                 SessionStatus.completed.value,
-                duration_seconds=self._state.elapsed_seconds,
+                duration_seconds=duration,
                 turn_count=self._state.turn_count,
                 audio_dir=self._session_dir,
             )
@@ -572,12 +638,20 @@ class InterviewOrchestrator:
             except InvalidTransition:
                 pass  # Best-effort during shutdown
 
+            duration = None
+            if self._started_at is not None:
+                now = datetime.now(timezone.utc)
+                started = self._started_at
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                duration = int((now - started).total_seconds())
+
             async with self.deps.pool.acquire() as conn:
                 await update_session_status(
                     conn,
                     self._session_id,
                     SessionStatus.completed.value,
-                    duration_seconds=self._state.elapsed_seconds,
+                    duration_seconds=duration,
                     turn_count=self._state.turn_count,
                     audio_dir=self._session_dir,
                 )

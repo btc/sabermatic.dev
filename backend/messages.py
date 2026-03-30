@@ -16,7 +16,7 @@ class WSMessage:
     """Typed representation of a WebSocket message.
 
     Only ``type`` is required. Other fields are populated depending on message type:
-    - start: question_id, timer_sec, tts_enabled, briefed
+    - load: session_id
     - end_turn: audio_data
     - text_input: text
     - edit_transcript: text
@@ -25,6 +25,7 @@ class WSMessage:
     """
 
     type: str
+    session_id: int | None = None
     question_id: int | None = None
     timer_sec: int | None = None
     tts_enabled: bool | None = None
@@ -50,6 +51,7 @@ def parse_ws_message(raw: dict) -> WSMessage:
     """
     return WSMessage(
         type=raw["type"],
+        session_id=raw.get("session_id"),
         question_id=raw.get("question_id"),
         timer_sec=raw.get("timer_sec"),
         tts_enabled=raw.get("tts_enabled"),
