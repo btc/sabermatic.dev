@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.messages import WSMessage, parse_ws_message
 from backend.orchestrator import InterviewOrchestrator, OrchestratorDeps
 from backend.storage import SessionStorage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -32,7 +35,17 @@ async def interview_websocket(ws: WebSocket, session_id: int):
     try:
         while True:
             raw = await ws.receive_text()
-            msg = parse_ws_message(json.loads(raw))
+            try:
+                data = json.loads(raw)
+                msg = parse_ws_message(data)
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.warning("Malformed WS message (session %d): %s", session_id, e)
+                await ws.send_text(json.dumps({
+                    "type": "error",
+                    "error_kind": "malformed_message",
+                    "message": f"Could not parse message: {e}",
+                }))
+                continue
             # TTS interrupt: handled outside the queue
             if msg.type == "audio":
                 orch.cancel_tts()
