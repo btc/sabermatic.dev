@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useAudio } from "../hooks/useAudio";
 import { useTimer } from "../hooks/useTimer";
@@ -9,7 +9,7 @@ import AudioControls from "../components/AudioControls";
 import TextInput from "../components/TextInput";
 import TraceWidget from "../components/TraceWidget";
 import { setSessionTraceId, startSpan, recordEvent } from "../tracer";
-import type { WSServerMessage } from "../types";
+import type { Session, WSServerMessage } from "../types";
 
 interface ChatEntry {
   role: "interviewer" | "candidate";
@@ -19,15 +19,19 @@ interface ChatEntry {
 
 const TIMER_TOTAL = 45 * 60; // 45 minutes default
 
-export default function Interview() {
-  const { questionId } = useParams<{ questionId: string }>();
+interface InterviewProps {
+  sessionId: number;
+  session: Session;
+}
+
+export default function Interview({ sessionId, session }: InterviewProps) {
   const navigate = useNavigate();
 
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [serverState, setServerState] = useState("");
   const [disconnected, setDisconnected] = useState(false);
   const [questionTitle, setQuestionTitle] = useState("Interview");
-  const [started, setStarted] = useState(false);
+  const [micNeedsGesture, setMicNeedsGesture] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const spaceDownRef = useRef(false);
@@ -46,13 +50,28 @@ export default function Interview() {
     stopPlayback,
   } = useAudio();
 
-  const { seconds, start: startTimer } = useTimer();
+  const { seconds, setStartedAt } = useTimer();
 
   // ---------- WebSocket message handler ----------
 
   const handleMessage = useCallback(
     (msg: WSServerMessage) => {
       switch (msg.type) {
+        case "session_loaded":
+          setStartedAt(msg.started_at);
+          break;
+
+        case "message_history":
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: msg.role as "interviewer" | "candidate",
+              content: msg.content,
+              isStreaming: false,
+            },
+          ]);
+          break;
+
         case "interviewer_text":
           setMessages((prev) => {
             // If last message is a streaming interviewer message, update it
@@ -102,7 +121,8 @@ export default function Interview() {
           break;
 
         case "session_ended":
-          navigate(`/results/${msg.session_id}`);
+          // Re-fetch session status to trigger SessionPage to re-render
+          window.location.reload();
           break;
 
         case "error":
@@ -117,53 +137,41 @@ export default function Interview() {
           break;
       }
     },
-    [navigate, playAudioChunk, flushPlayback]
+    [playAudioChunk, flushPlayback, setStartedAt]
   );
 
   const { connect, send, disconnect } = useWebSocket(handleMessage);
 
   // ---------- Connect on mount ----------
-  // Connect WS on mount, but don't send "start" until user clicks Begin
   const initRef = useRef(false);
 
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
 
-    connect().catch(() => setDisconnected(true));
+    setSessionTraceId();
+    recordEvent("user.begin_interview", { session_id: sessionId });
+
+    // Connect WS with sessionId
+    connect(sessionId).catch(() => setDisconnected(true));
+
+    // Try to init mic immediately (may fail without user gesture)
+    initMic().catch(() => {
+      setMicNeedsGesture(true);
+    });
 
     return () => {
       disconnect();
       releaseMic();
     };
-  }, [connect, disconnect, releaseMic]);
-
-  async function handleBegin() {
-    setSessionTraceId();
-    recordEvent("user.begin_interview", { question_id: Number(questionId) });
-
-    // Acquire mic once — stays open for the entire interview.
-    // User gesture here unlocks both mic permission and audio playback.
-    try {
-      await initMic();
-    } catch {
-      // User denied mic — they can still use text input
-    }
-
-    setStarted(true);
-    send({
-      type: "start",
-      question_id: Number(questionId),
-    });
-    startTimer();
-  }
+  }, [sessionId, connect, disconnect, releaseMic, initMic]);
 
   // ---------- Fetch question title ----------
 
   useEffect(() => {
     async function fetchTitle() {
       try {
-        const res = await fetch(`/api/questions/${questionId}`);
+        const res = await fetch(`/api/questions/${session.question_id}`);
         if (res.ok) {
           const data = await res.json();
           setQuestionTitle(data.title);
@@ -173,7 +181,7 @@ export default function Interview() {
       }
     }
     fetchTitle();
-  }, [questionId]);
+  }, [session.question_id]);
 
   // ---------- Auto-scroll ----------
 
@@ -198,8 +206,6 @@ export default function Interview() {
         spaceDownRef.current = true;
         recordingSpanRef.current = startSpan("user.spacebar_press");
         stopPlayback();
-        // startRecording is SYNCHRONOUS now — mic stream is already open.
-        // No getUserMedia call, no race condition, no delay.
         startRecording();
       }
     }
@@ -263,24 +269,16 @@ export default function Interview() {
     navigate("/");
   }
 
-  // ---------- Render ----------
-
-  if (!started) {
-    return (
-      <div className="interview-page">
-        <div className="interview-begin">
-          <h2>{questionTitle}</h2>
-          <p className="interview-begin-hint">
-            The interviewer will speak to you. Use spacebar to talk back, or type below.
-          </p>
-          <button className="interview-begin-btn" onClick={handleBegin}>
-            Begin Interview
-          </button>
-        </div>
-        <TraceWidget />
-      </div>
-    );
+  async function handleEnableMic() {
+    try {
+      await initMic();
+      setMicNeedsGesture(false);
+    } catch {
+      // Still can't get mic
+    }
   }
+
+  // ---------- Render ----------
 
   return (
     <div className="interview-page">
@@ -341,6 +339,11 @@ export default function Interview() {
       {/* Bottom area */}
       <div className="interview-bottom">
         <AudioControls isRecording={isRecording} micReady={micReady} analyserData={analyserData} />
+        {micNeedsGesture && (
+          <button className="btn-secondary" onClick={handleEnableMic} style={{ marginBottom: "0.5rem" }}>
+            Enable Mic
+          </button>
+        )}
         <TextInput
           onSubmit={handleTextSubmit}
           disabled={serverState === "processing" || serverState === "interviewer_speaking"}

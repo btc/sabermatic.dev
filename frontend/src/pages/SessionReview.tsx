@@ -1,14 +1,17 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import type { Message, Evaluation, MessageAnnotation, Question } from "../types";
 import api from "../api/client";
 import ScoreBar, { scoreColor } from "../components/ScoreBar";
 import TraceWidget from "../components/TraceWidget";
 
-export default function SessionReview() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+interface SessionReviewProps {
+  sessionId: number;
+}
+
+export default function SessionReview({ sessionId }: SessionReviewProps) {
   const navigate = useNavigate();
-  const sid = Number(sessionId);
+  const sid = sessionId;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);

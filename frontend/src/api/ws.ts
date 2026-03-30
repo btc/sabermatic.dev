@@ -7,13 +7,13 @@ export class InterviewSocket {
   private listeners: Set<MessageHandler> = new Set();
 
   /**
-   * Open a WebSocket connection to /ws/interview.
+   * Open a WebSocket connection to /ws/interview/{sessionId}.
    * Resolves once the socket is open; rejects on error or timeout.
    */
-  connect(): Promise<void> {
+  connect(sessionId: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${proto}//${window.location.host}/ws/interview`;
+      const url = `${proto}//${window.location.host}/ws/interview/${sessionId}`;
       const ws = new WebSocket(url);
 
       const timeout = setTimeout(() => {

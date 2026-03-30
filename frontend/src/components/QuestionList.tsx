@@ -1,4 +1,3 @@
-import { useNavigate } from "react-router-dom";
 import type { Question, QuestionStats } from "../types";
 
 interface QuestionListProps {
@@ -7,6 +6,7 @@ interface QuestionListProps {
   suggestedQuestionId: number | null;
   filterDifficulty: string;
   onFilterChange: (difficulty: string) => void;
+  onSelect: (questionId: number) => void;
 }
 
 export default function QuestionList({
@@ -15,8 +15,8 @@ export default function QuestionList({
   suggestedQuestionId,
   filterDifficulty,
   onFilterChange,
+  onSelect,
 }: QuestionListProps) {
-  const navigate = useNavigate();
   const statsMap = new Map(questionStats.map((qs) => [qs.question_id, qs]));
 
   const filtered =
@@ -48,7 +48,7 @@ export default function QuestionList({
             <div
               key={q.id}
               className={`question-item card ${isSuggested ? "question-item-suggested" : ""}`}
-              onClick={() => navigate(`/interview/${q.id}`)}
+              onClick={() => onSelect(q.id)}
             >
               <div className="question-item-top">
                 <span className="question-item-title">

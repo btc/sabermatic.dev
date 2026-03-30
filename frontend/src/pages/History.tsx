@@ -140,7 +140,7 @@ export default function History() {
               key={r.session.id}
               className="session-list-item card"
               style={{ borderLeftColor: borderColor }}
-              onClick={() => navigate(`/session/${r.session.id}`)}
+              onClick={() => navigate(`/sessions/${r.session.id}`)}
             >
               <div className="session-item-top">
                 <span className="session-item-title">{r.questionTitle}</span>
