@@ -45,6 +45,12 @@ async def archive_bulk(body: dict, conn: asyncpg.Connection = Depends(get_db)):
     return {"status": "archived", "count": len(body["session_ids"])}
 
 
+@router.post("/unarchive-bulk")
+async def unarchive_bulk(body: dict, conn: asyncpg.Connection = Depends(get_db)):
+    await archive_sessions_bulk(conn, body["session_ids"], archived=False)
+    return {"status": "unarchived", "count": len(body["session_ids"])}
+
+
 @router.get("/{session_id}", response_model=Session)
 async def get_one_session(
     session_id: int, conn: asyncpg.Connection = Depends(get_db)

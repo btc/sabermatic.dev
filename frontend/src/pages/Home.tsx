@@ -84,6 +84,21 @@ export default function Home() {
     navigate(`/sessions/${session.id}`);
   }
 
+  async function handleCoachRefresh() {
+    try {
+      const review = await api.coach.latest();
+      setCoachReview(review);
+      if (review.suggested_question_id) {
+        const sq = questions.find((q) => q.id === review.suggested_question_id) ?? null;
+        setSuggestedQuestion(sq);
+      } else {
+        setSuggestedQuestion(null);
+      }
+    } catch {
+      // no review yet
+    }
+  }
+
   // Derived stats
   const sessionCount = stats?.question_stats.reduce((sum, qs) => sum + qs.session_count, 0) ?? 0;
   const avgScore = stats?.averages?.overall ?? 0;
@@ -123,6 +138,7 @@ export default function Home() {
           review={coachReview}
           suggestedQuestion={suggestedQuestion}
           onStartSession={handleStartSession}
+          onRefresh={handleCoachRefresh}
         />
       )}
 

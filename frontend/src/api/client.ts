@@ -55,7 +55,8 @@ const api = {
   },
 
   sessions: {
-    list: () => get<Session[]>("/api/sessions/"),
+    list: (includeArchived?: boolean) =>
+      get<Session[]>(`/api/sessions/${includeArchived ? "?include_archived=true" : ""}`),
     get: (id: number) => get<Session>(`/api/sessions/${id}`),
     create: (body: { question_id: number; timer_setting_sec: number; tts_enabled: boolean }) =>
       post<Session>("/api/sessions", body),
@@ -69,8 +70,10 @@ const api = {
     unarchive: (id: number) => patch<Session>(`/api/sessions/${id}/unarchive`),
     archiveBulk: (ids: number[]) =>
       post<{ archived_count: number }>("/api/sessions/archive-bulk", { session_ids: ids }),
+    unarchiveBulk: (ids: number[]) =>
+      post<{ archived_count: number }>("/api/sessions/unarchive-bulk", { session_ids: ids }),
     educator: (id: number) =>
-      get<{ lesson: unknown }>(`/api/evaluate/${id}/educator`),
+      get<{ evaluation_id: number; model_answer: string; gap_deepdives: string }>(`/api/evaluate/${id}/educator`),
     triggerEducator: (id: number) =>
       post<{ status: string }>(`/api/evaluate/${id}/educate`),
   },
