@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 import asyncpg
@@ -29,74 +31,84 @@ async def _run_evaluation(
     session_id: int,
     evaluator_model: str,
 ):
-    """Background task: evaluate a session. Catches ALL exceptions."""
-    try:
-        async with pool.acquire() as conn:
-            session = await get_session(conn, session_id)
-            if session is None:
-                logger.error("Evaluation: session %d not found", session_id)
-                return
-
-            question = await get_question(conn, session.question_id)
-            if question is None:
-                raise ValueError(f"Question {session.question_id} not found")
-
-            messages = await get_session_messages(conn, session_id)
-            if not messages:
-                raise ValueError(f"No messages for session {session_id}")
-
-            evaluator = Evaluator(EvaluatorConfig(model=evaluator_model))
-            eval_create, annotations_raw = await evaluator.evaluate(
-                client=anthropic_client,
-                question_title=question.title,
-                question_prompt=question.prompt,
-                messages=messages,
-                session_id=session_id,
-            )
-
-            # Atomic: evaluation + annotations + status update
-            async with conn.transaction():
-                evaluation = await insert_evaluation(conn, eval_create)
-
-                # Map message sequence -> message id for annotations
-                msg_map = {m.sequence: m.id for m in messages}
-
-                for ann in annotations_raw:
-                    msg_seq = ann.get("message_sequence")
-                    msg_id = msg_map.get(msg_seq)
-                    if msg_id is None:
-                        continue
-                    ann_type_str = ann.get("type", "note")
-                    try:
-                        ann_type = AnnotationType(ann_type_str)
-                    except ValueError:
-                        ann_type = AnnotationType.note
-                    await insert_message_annotation(
-                        conn,
-                        MessageAnnotationCreate(
-                            evaluation_id=evaluation.id,
-                            message_id=msg_id,
-                            annotation_type=ann_type,
-                            content=ann.get("content", ""),
-                        ),
-                    )
-
-                await update_session_status(conn, session_id, "reviewed")
-
-    except Exception:
-        logger.exception("Evaluation failed for session %d", session_id)
+    """Background task: evaluate a session with one automatic retry."""
+    for attempt in range(2):
         try:
             async with pool.acquire() as conn:
-                await update_session_status(
-                    conn,
-                    session_id,
-                    "evaluation_failed",
-                    status_detail="Evaluation error",
+                session = await get_session(conn, session_id)
+                if session is None:
+                    logger.error("Evaluation: session %d not found", session_id)
+                    return
+
+                question = await get_question(conn, session.question_id)
+                if question is None:
+                    raise ValueError(f"Question {session.question_id} not found")
+
+                messages = await get_session_messages(conn, session_id)
+                if not messages:
+                    raise ValueError(f"No messages for session {session_id}")
+
+                evaluator = Evaluator(EvaluatorConfig(model=evaluator_model))
+                eval_create, annotations_raw = await evaluator.evaluate(
+                    client=anthropic_client,
+                    question_title=question.title,
+                    question_prompt=question.prompt,
+                    messages=messages,
+                    session_id=session_id,
                 )
+
+                # Atomic: evaluation + annotations + status update
+                async with conn.transaction():
+                    evaluation = await insert_evaluation(conn, eval_create)
+
+                    # Map message sequence -> message id for annotations
+                    msg_map = {m.sequence: m.id for m in messages}
+
+                    for ann in annotations_raw:
+                        msg_seq = ann.get("message_sequence")
+                        msg_id = msg_map.get(msg_seq)
+                        if msg_id is None:
+                            continue
+                        ann_type_str = ann.get("type", "note")
+                        try:
+                            ann_type = AnnotationType(ann_type_str)
+                        except ValueError:
+                            ann_type = AnnotationType.note
+                        await insert_message_annotation(
+                            conn,
+                            MessageAnnotationCreate(
+                                evaluation_id=evaluation.id,
+                                message_id=msg_id,
+                                annotation_type=ann_type,
+                                content=ann.get("content", ""),
+                            ),
+                        )
+
+                    await update_session_status(conn, session_id, "reviewed")
+                return  # success
+
         except Exception:
             logger.exception(
-                "Failed to update session status after evaluation failure"
+                "Evaluation attempt %d failed for session %d",
+                attempt + 1,
+                session_id,
             )
+            if attempt == 0:
+                await asyncio.sleep(2)
+                continue
+            # Final failure after both attempts
+            try:
+                async with pool.acquire() as conn:
+                    await update_session_status(
+                        conn,
+                        session_id,
+                        "evaluation_failed",
+                        status_detail="Evaluation failed after 2 attempts",
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to update session status after evaluation failure"
+                )
 
 
 @router.post("/{session_id}")
@@ -111,13 +123,29 @@ async def trigger_evaluation(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Check if already evaluated
-    existing = await get_latest_evaluation(conn, session_id)
-    if existing is not None:
-        return {"status": "already_evaluated", "evaluation_id": existing.id}
-
-    # Mark as evaluating
-    await update_session_status(conn, session_id, "evaluating")
+    # Allow retry when evaluation previously failed
+    if session.status == "evaluation_failed":
+        await update_session_status(
+            conn, session_id, "evaluating", status_detail=""
+        )
+    elif session.status == "evaluating":
+        # Check if stuck (evaluating for >5 minutes since session ended)
+        if session.ended_at:
+            age = (datetime.now(timezone.utc) - session.ended_at).total_seconds()
+            if age > 300:
+                await update_session_status(
+                    conn, session_id, "evaluating", status_detail=""
+                )
+            else:
+                return {"status": "already_evaluating", "session_id": session_id}
+        else:
+            return {"status": "already_evaluating", "session_id": session_id}
+    else:
+        # Normal path: check for existing evaluation
+        existing = await get_latest_evaluation(conn, session_id)
+        if existing is not None:
+            return {"status": "already_evaluated", "evaluation_id": existing.id}
+        await update_session_status(conn, session_id, "evaluating")
 
     # Use pool from app state for background task (DI connection closes after request)
     background_tasks.add_task(
