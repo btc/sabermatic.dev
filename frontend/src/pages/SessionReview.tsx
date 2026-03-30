@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Message, Evaluation, MessageAnnotation, Question } from "../types";
 import api from "../api/client";
@@ -8,6 +8,8 @@ import TraceWidget from "../components/TraceWidget";
 interface SessionReviewProps {
   sessionId: number;
 }
+
+type EducatorState = "unknown" | "checking" | "exists" | "none" | "generating" | "error";
 
 export default function SessionReview({ sessionId }: SessionReviewProps) {
   const navigate = useNavigate();
@@ -19,6 +21,8 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
   const [question, setQuestion] = useState<Question | null>(null);
   const [showInterviewerAnnotations, setShowInterviewerAnnotations] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [educatorState, setEducatorState] = useState<EducatorState>("checking");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +61,55 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
     load();
     return () => { cancelled = true; };
   }, [sid]);
+
+  // Check educator content on mount
+  useEffect(() => {
+    let cancelled = false;
+    setEducatorState("checking");
+
+    api.sessions.educator(sid)
+      .then(() => { if (!cancelled) setEducatorState("exists"); })
+      .catch(() => { if (!cancelled) setEducatorState("none"); });
+
+    return () => { cancelled = true; };
+  }, [sid]);
+
+  // Poll while generating
+  useEffect(() => {
+    if (educatorState !== "generating") {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      return;
+    }
+
+    pollRef.current = setInterval(async () => {
+      try {
+        await api.sessions.educator(sid);
+        if (pollRef.current) clearInterval(pollRef.current);
+        setEducatorState("exists");
+      } catch {
+        // still generating
+      }
+    }, 3000);
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [educatorState, sid]);
+
+  async function handleGenerateEducator() {
+    setEducatorState("generating");
+    try {
+      await api.sessions.triggerEducator(sid);
+    } catch {
+      setEducatorState("error");
+    }
+  }
 
   // Build annotation map: message_id -> annotations
   const annotationMap = new Map<number, MessageAnnotation[]>();
@@ -180,6 +233,43 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
             <div className="review-section results-advice">
               <h3>Advice</h3>
               <p>{evaluation.advice}</p>
+            </div>
+
+            {/* Educator button */}
+            <div className="review-educator-row">
+              {educatorState === "checking" && (
+                <button className="btn-secondary" disabled>Checking...</button>
+              )}
+              {educatorState === "exists" && (
+                <button
+                  className="review-educator-btn"
+                  onClick={() => navigate(`/sessions/${sid}/learn`)}
+                >
+                  View Deep Analysis
+                </button>
+              )}
+              {educatorState === "none" && (
+                <button
+                  className="review-educator-btn"
+                  onClick={handleGenerateEducator}
+                >
+                  Generate Deep Analysis (Opus)
+                </button>
+              )}
+              {educatorState === "generating" && (
+                <button className="review-educator-btn" disabled>
+                  <span className="results-spinner" style={{ width: 14, height: 14, display: "inline-block", marginRight: 6 }} />
+                  Generating...
+                </button>
+              )}
+              {educatorState === "error" && (
+                <button
+                  className="review-educator-btn"
+                  onClick={handleGenerateEducator}
+                >
+                  Retry Deep Analysis
+                </button>
+              )}
             </div>
           </>
         ) : (
