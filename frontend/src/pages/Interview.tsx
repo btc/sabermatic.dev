@@ -29,12 +29,12 @@ export default function Interview({ sessionId, session }: InterviewProps) {
 
   const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [serverState, setServerState] = useState("");
-  const [disconnected, setDisconnected] = useState(false);
   const [questionTitle, setQuestionTitle] = useState("Interview");
   const [micNeedsGesture, setMicNeedsGesture] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const spaceDownRef = useRef(false);
+  const hasConnectedRef = useRef(false);
 
   const {
     isRecording,
@@ -62,7 +62,9 @@ export default function Interview({ sessionId, session }: InterviewProps) {
     (msg: WSServerMessage) => {
       switch (msg.type) {
         case "session_loaded":
+          hasConnectedRef.current = true;
           setStartedAt(msg.started_at);
+          setMessages([]);  // Clear on reconnect — history replay follows
           break;
 
         case "message_history":
@@ -155,7 +157,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
     [playAudioChunk, flushPlayback, setStartedAt]
   );
 
-  const { connect, send, disconnect } = useWebSocket(handleMessage);
+  const { connect, send, disconnect, connectionStatus } = useWebSocket(handleMessage);
 
   // ---------- Connect on mount ----------
   const initRef = useRef(false);
@@ -168,7 +170,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
     recordEvent("user.begin_interview", { session_id: sessionId });
 
     // Connect WS with sessionId
-    connect(sessionId).catch(() => setDisconnected(true));
+    connect(sessionId).catch(() => {});
 
     // Try to init mic immediately (may fail without user gesture)
     initMic().catch(() => {
@@ -379,8 +381,11 @@ export default function Interview({ sessionId, session }: InterviewProps) {
               </div>
             </div>
           )}
-          {disconnected && (
+          {hasConnectedRef.current && connectionStatus === "disconnected" && (
             <div className="chat-system">Connection lost</div>
+          )}
+          {hasConnectedRef.current && connectionStatus === "reconnecting" && (
+            <div className="chat-system">Reconnecting...</div>
           )}
           <div ref={chatEndRef} />
         </div>
