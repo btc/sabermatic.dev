@@ -41,6 +41,8 @@ async def test_health(client: AsyncClient):
     data = resp.json()
     assert data["status"] == "ok"
     assert data["db"] is True
+    assert data["anthropic"] is True
+    assert data["openai"] is True
 
 
 @pytest.mark.asyncio

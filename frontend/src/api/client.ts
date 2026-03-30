@@ -96,7 +96,7 @@ const api = {
   },
 
   health: {
-    check: () => get<{ status: string; db: boolean }>("/api/health"),
+    check: () => get<{ status: string; db: boolean; anthropic: boolean; openai: boolean }>("/api/health"),
   },
 };
 

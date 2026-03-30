@@ -1,18 +1,43 @@
-from __future__ import annotations
+import logging
 
-from typing import Any
+from fastapi import APIRouter, Request
 
-from fastapi import APIRouter, Depends
-
-from backend.database import Conn
-from backend.deps import get_db
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health_check(
-    conn: Conn = Depends(get_db),
-) -> dict[str, Any]:
-    result = await conn.fetchval("SELECT 1")
-    return {"status": "ok", "db": result == 1}
+async def health_check(request: Request) -> dict:
+    checks: dict[str, bool] = {}
+
+    # DB check
+    try:
+        async with request.app.state.pool.acquire() as conn:
+            result = await conn.fetchval("SELECT 1")
+            checks["db"] = result == 1
+    except Exception as e:
+        logger.warning("Health check: DB failed: %s", e)
+        checks["db"] = False
+
+    # Anthropic check — verify client is configured
+    try:
+        client = request.app.state.anthropic_client
+        checks["anthropic"] = client is not None
+    except Exception as e:
+        logger.warning("Health check: Anthropic failed: %s", e)
+        checks["anthropic"] = False
+
+    # OpenAI check — verify client is configured
+    try:
+        client = request.app.state.openai_client
+        checks["openai"] = client is not None
+    except Exception as e:
+        logger.warning("Health check: OpenAI failed: %s", e)
+        checks["openai"] = False
+
+    all_ok = all(checks.values())
+    return {
+        "status": "ok" if all_ok else "degraded",
+        **checks,
+    }
