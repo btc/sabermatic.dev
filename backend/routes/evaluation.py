@@ -99,7 +99,7 @@ async def _run_evaluation(
                     ))
                 return  # success
 
-        except Exception:
+        except Exception as e:
             logger.exception(
                 "Evaluation attempt %d failed for session %d",
                 attempt + 1,
