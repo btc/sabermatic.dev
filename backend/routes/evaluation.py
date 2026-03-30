@@ -54,35 +54,34 @@ async def _run_evaluation(
                 session_id=session_id,
             )
 
-            # Save evaluation
-            evaluation = await insert_evaluation(conn, eval_create)
+            # Atomic: evaluation + annotations + status update
+            async with conn.transaction():
+                evaluation = await insert_evaluation(conn, eval_create)
 
-            # Map message sequence -> message id for annotations
-            msg_map = {m.sequence: m.id for m in messages}
+                # Map message sequence -> message id for annotations
+                msg_map = {m.sequence: m.id for m in messages}
 
-            # Save annotations
-            for ann in annotations_raw:
-                msg_seq = ann.get("message_sequence")
-                msg_id = msg_map.get(msg_seq)
-                if msg_id is None:
-                    continue
-                ann_type_str = ann.get("type", "note")
-                try:
-                    ann_type = AnnotationType(ann_type_str)
-                except ValueError:
-                    ann_type = AnnotationType.note
-                await insert_message_annotation(
-                    conn,
-                    MessageAnnotationCreate(
-                        evaluation_id=evaluation.id,
-                        message_id=msg_id,
-                        annotation_type=ann_type,
-                        content=ann.get("content", ""),
-                    ),
-                )
+                for ann in annotations_raw:
+                    msg_seq = ann.get("message_sequence")
+                    msg_id = msg_map.get(msg_seq)
+                    if msg_id is None:
+                        continue
+                    ann_type_str = ann.get("type", "note")
+                    try:
+                        ann_type = AnnotationType(ann_type_str)
+                    except ValueError:
+                        ann_type = AnnotationType.note
+                    await insert_message_annotation(
+                        conn,
+                        MessageAnnotationCreate(
+                            evaluation_id=evaluation.id,
+                            message_id=msg_id,
+                            annotation_type=ann_type,
+                            content=ann.get("content", ""),
+                        ),
+                    )
 
-            # Update session status to reviewed
-            await update_session_status(conn, session_id, "reviewed")
+                await update_session_status(conn, session_id, "reviewed")
 
     except Exception:
         logger.exception("Evaluation failed for session %d", session_id)
