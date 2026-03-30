@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -40,14 +40,15 @@ def _make_mock_question() -> Question:
 
 
 def _make_mock_session(session_id: int = 42) -> Session:
-    """A fake session returned by insert_session."""
+    """A fake session returned by get_session."""
     return Session(
         id=session_id,
         question_id=1,
         status=SessionStatus.active,
         timer_setting_sec=2700,
         interviewer_briefed=False,
-        started_at=datetime(2025, 1, 1),
+        tts_enabled=False,
+        started_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
     )
 
 
@@ -60,7 +61,7 @@ def _make_mock_message(
         sequence=sequence,
         role=role,
         content=content,
-        timestamp=datetime(2025, 1, 1),
+        timestamp=datetime(2025, 1, 1, tzinfo=timezone.utc),
     )
 
 
@@ -175,7 +176,13 @@ def mock_deps():
 # ---------------------------------------------------------------------------
 
 class TestWSMessageParsing:
-    def test_parse_start_message(self):
+    def test_parse_load_message(self):
+        raw = {"type": "load", "session_id": 42}
+        msg = parse_ws_message(raw)
+        assert msg.type == "load"
+        assert msg.session_id == 42
+
+    def test_parse_start_message_legacy(self):
         raw = {
             "type": "start",
             "question_id": 1,
@@ -222,20 +229,20 @@ class TestWSMessageParsing:
 # Orchestrator tests
 # ---------------------------------------------------------------------------
 
-# Common patch set for tests that go through the full start flow
+# Common patch set for tests that go through the full load flow
 _DB_PATCHES = [
     "backend.orchestrator.update_session_status",
     "backend.orchestrator.get_session_messages",
     "backend.orchestrator.insert_message",
-    "backend.orchestrator.insert_session",
+    "backend.orchestrator.get_session",
     "backend.orchestrator.get_question",
 ]
 
 
-def _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps):
+def _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps):
     """Wire up the standard DB mock returns."""
     mock_get_q.return_value = mock_deps._mock_question
-    mock_insert_sess.return_value = mock_deps._mock_session
+    mock_get_sess.return_value = mock_deps._mock_session
     mock_insert_msg.return_value = _make_mock_message(
         1, 42, 1, MessageRole.interviewer, "Welcome"
     )
@@ -243,18 +250,18 @@ def _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs
     mock_update_status.return_value = mock_deps._mock_session
 
 
-class TestOrchestratorStartAndEndTurn:
-    """Full turn: start -> end_turn -> transcription + interviewer response."""
+class TestOrchestratorLoadAndEndTurn:
+    """Full turn: load -> end_turn -> transcription + interviewer response."""
 
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
-    async def test_start_then_end_turn_flow(
-        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+    async def test_load_then_end_turn_flow(
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
     ):
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
         # Return messages for context when getting interviewer response
         mock_get_msgs.return_value = [
             _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome to the interview."),
@@ -263,15 +270,7 @@ class TestOrchestratorStartAndEndTurn:
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(
             WSMessage(type="end_turn", audio_data=b"fake-audio")
         )
@@ -280,35 +279,120 @@ class TestOrchestratorStartAndEndTurn:
 
         types = [r["type"] for r in results]
         assert "interviewer_text" in types
+        assert "session_loaded" in types
         assert "transcription" in types
 
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
-    async def test_start_sends_state_updates(
-        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+    async def test_load_sends_state_updates(
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
     ):
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(WSMessage(type="shutdown"))
         await orch.run(send=results.append)
 
         types = [r["type"] for r in results]
         assert "state" in types
         assert "interviewer_done" in types
+        assert "session_loaded" in types
+
+
+class TestLoadWithMessages:
+    """Load a session that already has messages -> sends history, resumes."""
+
+    @patch("backend.orchestrator.update_session_status")
+    @patch("backend.orchestrator.get_session_messages")
+    @patch("backend.orchestrator.get_session")
+    @patch("backend.orchestrator.get_question")
+    async def test_load_with_existing_messages_sends_history(
+        self, mock_get_q, mock_get_sess, mock_get_msgs, mock_update_status, mock_deps
+    ):
+        mock_get_q.return_value = mock_deps._mock_question
+        mock_get_sess.return_value = mock_deps._mock_session
+        mock_update_status.return_value = mock_deps._mock_session
+        mock_get_msgs.return_value = [
+            _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome to the interview."),
+            _make_mock_message(2, 42, 2, MessageRole.candidate, "I'd start with requirements."),
+        ]
+
+        orch = InterviewOrchestrator(mock_deps)
+        results = []
+        await orch.enqueue(WSMessage(type="load", session_id=42))
+        await orch.enqueue(WSMessage(type="shutdown"))
+        await orch.run(send=results.append)
+
+        types = [r["type"] for r in results]
+        assert "session_loaded" in types
+        assert "message_history" in types
+        assert "state" in types
+
+        # Verify message_history messages were sent
+        history_msgs = [r for r in results if r["type"] == "message_history"]
+        assert len(history_msgs) == 2
+        assert history_msgs[0]["role"] == "interviewer"
+        assert history_msgs[0]["content"] == "Welcome to the interview."
+        assert history_msgs[1]["role"] == "candidate"
+        assert history_msgs[1]["content"] == "I'd start with requirements."
+
+        # Verify sequence counters restored correctly
+        assert orch._sequence == 2
+        assert orch._last_candidate_sequence == 2
+
+    @patch("backend.orchestrator.update_session_status")
+    @patch("backend.orchestrator.get_session_messages")
+    @patch("backend.orchestrator.get_session")
+    @patch("backend.orchestrator.get_question")
+    async def test_load_with_no_messages_generates_opening(
+        self, mock_get_q, mock_get_sess, mock_get_msgs, mock_update_status, mock_deps
+    ):
+        mock_get_q.return_value = mock_deps._mock_question
+        mock_get_sess.return_value = mock_deps._mock_session
+        mock_update_status.return_value = mock_deps._mock_session
+        mock_get_msgs.return_value = []
+
+        orch = InterviewOrchestrator(mock_deps)
+        results = []
+
+        with patch("backend.orchestrator.insert_message") as mock_insert_msg:
+            mock_insert_msg.return_value = _make_mock_message(
+                1, 42, 1, MessageRole.interviewer, "Welcome"
+            )
+            await orch.enqueue(WSMessage(type="load", session_id=42))
+            await orch.enqueue(WSMessage(type="shutdown"))
+            await orch.run(send=results.append)
+
+        types = [r["type"] for r in results]
+        assert "session_loaded" in types
+        assert "interviewer_text" in types
+        assert "interviewer_done" in types
+        # No message_history since this is a new session
+        assert "message_history" not in types
+
+
+class TestLoadNonexistentSession:
+    """Load with a session_id that doesn't exist -> error."""
+
+    @patch("backend.orchestrator.get_session")
+    async def test_load_nonexistent_session_sends_error(self, mock_get_sess, mock_deps):
+        mock_get_sess.return_value = None
+
+        orch = InterviewOrchestrator(mock_deps)
+        results = []
+        await orch.enqueue(WSMessage(type="load", session_id=999))
+        await orch.enqueue(WSMessage(type="shutdown"))
+        await orch.run(send=results.append)
+
+        types = [r["type"] for r in results]
+        assert "error" in types
+        error_msgs = [r for r in results if r["type"] == "error"]
+        assert any("not found" in e["message"].lower() for e in error_msgs)
 
 
 class TestTextInput:
@@ -317,12 +401,12 @@ class TestTextInput:
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
     async def test_text_input_skips_whisper(
-        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
     ):
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
         mock_get_msgs.return_value = [
             _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome"),
             _make_mock_message(2, 42, 2, MessageRole.candidate, "My text input"),
@@ -330,15 +414,7 @@ class TestTextInput:
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(
             WSMessage(type="text_input", text="I want to start with requirements.")
         )
@@ -355,8 +431,8 @@ class TestTextInput:
 class TestErrorHandling:
     """Error conditions send error messages but don't crash the loop."""
 
-    async def test_end_turn_before_start_sends_error(self, mock_deps):
-        """end_turn before start -> InvalidTransition -> error message."""
+    async def test_end_turn_before_load_sends_error(self, mock_deps):
+        """end_turn before load -> InvalidTransition -> error message."""
         orch = InterviewOrchestrator(mock_deps)
         results = []
         await orch.enqueue(
@@ -375,12 +451,12 @@ class TestErrorHandling:
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
     async def test_whisper_empty_transcription_sends_error(
         self,
         mock_get_q,
-        mock_insert_sess,
+        mock_get_sess,
         mock_insert_msg,
         mock_get_msgs,
         mock_update_status,
@@ -388,20 +464,12 @@ class TestErrorHandling:
         mock_deps,
     ):
         """Empty transcription -> error message, loop continues."""
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
         mock_transcribe.return_value = ""  # Empty transcription
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(
             WSMessage(type="end_turn", audio_data=b"fake-audio")
         )
@@ -418,17 +486,19 @@ class TestErrorHandling:
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
     async def test_claude_stream_error_saves_partial(
-        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
     ):
-        """Claude errors mid-stream -> partial text saved, error sent, loop continues."""
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
-        mock_get_msgs.return_value = [
-            _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome"),
-            _make_mock_message(2, 42, 2, MessageRole.candidate, "Let me think about this."),
-        ]
+        """Claude errors mid-stream -> partial text saved, error sent, loop continues.
+
+        Load a fresh session (no messages) so the opening streams first,
+        then text_input triggers the second stream which errors.
+        """
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        # Start with no messages so load generates the opening
+        mock_get_msgs.return_value = []
 
         # Make the second stream call (for response after text_input) raise an error
         call_count = [0]
@@ -461,17 +531,23 @@ class TestErrorHandling:
 
         mock_deps.anthropic_client.messages.stream = MagicMock(side_effect=make_stream)
 
+        # After load generates the opening, get_session_messages returns
+        # the conversation for the interviewer response context
+        def msgs_side_effect(*args, **kwargs):
+            if call_count[0] == 0:
+                # During load: no messages -> triggers opening generation
+                return []
+            # During _respond_as_interviewer: return conversation so far
+            return [
+                _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome to the interview."),
+                _make_mock_message(2, 42, 2, MessageRole.candidate, "Let me think about this."),
+            ]
+
+        mock_get_msgs.side_effect = msgs_side_effect
+
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(
             WSMessage(type="text_input", text="Let me think about this.")
         )
@@ -511,12 +587,12 @@ class TestSequentialProcessing:
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
     async def test_messages_are_sequential(
         self,
         mock_get_q,
-        mock_insert_sess,
+        mock_get_sess,
         mock_insert_msg,
         mock_get_msgs,
         mock_update_status,
@@ -524,7 +600,7 @@ class TestSequentialProcessing:
         mock_deps,
     ):
         """Two rapid end_turns never overlap — they execute one at a time."""
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
         mock_get_msgs.return_value = [
             _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome"),
         ]
@@ -545,15 +621,7 @@ class TestSequentialProcessing:
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         # Enqueue two end_turns rapidly
         await orch.enqueue(
             WSMessage(type="end_turn", audio_data=b"audio-1")
@@ -569,23 +637,17 @@ class TestSequentialProcessing:
 
 
 class TestQuestionNotFound:
-    """start with nonexistent question -> error, doesn't crash."""
+    """load with session pointing to nonexistent question -> error, doesn't crash."""
 
     @patch("backend.orchestrator.get_question")
-    async def test_start_with_missing_question(self, mock_get_q, mock_deps):
+    @patch("backend.orchestrator.get_session")
+    async def test_load_with_missing_question(self, mock_get_sess, mock_get_q, mock_deps):
+        mock_get_sess.return_value = mock_deps._mock_session
         mock_get_q.return_value = None
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=999,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(WSMessage(type="shutdown"))
         await orch.run(send=results.append)
 
@@ -600,13 +662,15 @@ class TestShutdownFinalization:
 
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session_messages")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
     async def test_shutdown_finalizes_active_session(
-        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_update_status, mock_deps
+        self, mock_get_q, mock_get_sess, mock_get_msgs, mock_insert_msg, mock_update_status, mock_deps
     ):
         mock_get_q.return_value = mock_deps._mock_question
-        mock_insert_sess.return_value = mock_deps._mock_session
+        mock_get_sess.return_value = mock_deps._mock_session
+        mock_get_msgs.return_value = []
         mock_insert_msg.return_value = _make_mock_message(
             1, 42, 1, MessageRole.interviewer, "Welcome"
         )
@@ -614,15 +678,7 @@ class TestShutdownFinalization:
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         await orch.enqueue(WSMessage(type="shutdown"))
         await orch.run(send=results.append)
 
@@ -639,30 +695,27 @@ class TestEditTranscript:
     @patch("backend.orchestrator.update_session_status")
     @patch("backend.orchestrator.get_session_messages")
     @patch("backend.orchestrator.insert_message")
-    @patch("backend.orchestrator.insert_session")
+    @patch("backend.orchestrator.get_session")
     @patch("backend.orchestrator.get_question")
     async def test_edit_transcript_targets_candidate_message(
-        self, mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
+        self, mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps
     ):
-        """edit_transcript after text_input updates the candidate message (seq 2),
-        not the subsequent interviewer message (seq 3)."""
-        _setup_db_mocks(mock_get_q, mock_insert_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        """edit_transcript after text_input updates the candidate message,
+        not the subsequent interviewer message.
+
+        Load resumes with existing history (seq 1 = interviewer opening).
+        Then text_input adds candidate at seq 2, interviewer responds at seq 3.
+        edit_transcript should target seq 2 (the candidate message).
+        """
+        _setup_db_mocks(mock_get_q, mock_get_sess, mock_insert_msg, mock_get_msgs, mock_update_status, mock_deps)
+        # Load with just the interviewer opening — no candidate messages yet
         mock_get_msgs.return_value = [
             _make_mock_message(1, 42, 1, MessageRole.interviewer, "Welcome"),
-            _make_mock_message(2, 42, 2, MessageRole.candidate, "Original answer"),
         ]
 
         orch = InterviewOrchestrator(mock_deps)
         results = []
-        await orch.enqueue(
-            WSMessage(
-                type="start",
-                question_id=1,
-                timer_sec=2700,
-                tts_enabled=False,
-                briefed=False,
-            )
-        )
+        await orch.enqueue(WSMessage(type="load", session_id=42))
         # text_input creates candidate message at sequence 2
         await orch.enqueue(
             WSMessage(type="text_input", text="Original answer")
@@ -688,8 +741,9 @@ class TestEditTranscript:
         new_text, session_id, sequence = update_args[1], update_args[2], update_args[3]
         assert new_text == "Corrected answer"
         assert session_id == 42
-        # Candidate was saved at sequence 2; interviewer response at sequence 3.
-        # The fix ensures we target sequence 2, not 3.
+        # Load restored sequence to 1 (from the opening message).
+        # text_input incremented to 2 (candidate), interviewer response to 3.
+        # _last_candidate_sequence should be 2.
         assert sequence == 2, (
             f"edit_transcript should target candidate sequence 2, got {sequence}"
         )

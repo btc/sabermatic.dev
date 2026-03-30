@@ -3,6 +3,7 @@ import asyncpg
 
 from backend.deps import get_db
 from backend.database import (
+    insert_session,
     list_sessions,
     get_session,
     get_session_messages,
@@ -11,9 +12,14 @@ from backend.database import (
     get_dimension_averages,
     get_question_stats,
 )
-from backend.models import Session, Message, Evaluation, MessageAnnotation
+from backend.models import Session, SessionCreate, Message, Evaluation, MessageAnnotation
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+@router.post("", response_model=Session, status_code=201)
+async def create_session(body: SessionCreate, conn: asyncpg.Connection = Depends(get_db)):
+    return await insert_session(conn, body)
 
 
 @router.get("/", response_model=list[Session])
