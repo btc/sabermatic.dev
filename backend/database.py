@@ -288,6 +288,25 @@ async def get_session_token_usage(
     return [dict(r) for r in rows]
 
 
+async def get_session_cost_breakdown(
+    conn: Conn, session_id: int
+) -> list[dict[str, object]]:
+    """Get per-role token usage for a session from the llm_token_usage view."""
+    rows = await conn.fetch(
+        """
+        SELECT role, model,
+               SUM(input_tokens) as input_tokens,
+               SUM(output_tokens) as output_tokens
+        FROM llm_token_usage
+        WHERE session_id = $1
+        GROUP BY role, model
+        ORDER BY role
+        """,
+        session_id,
+    )
+    return [dict(r) for r in rows]
+
+
 # --- Messages ---
 
 
