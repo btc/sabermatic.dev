@@ -33,6 +33,7 @@ from backend.database import (
     get_session,
     get_session_messages,
     insert_message,
+    insert_session_event,
     update_session_status,
 )
 from backend.interviewer import Interviewer, InterviewerConfig
@@ -41,6 +42,7 @@ from backend.models import (
     MessageCreate,
     MessageRole,
     Question,
+    SessionEventCreate,
     SessionStatus,
 )
 from backend.session_manager import InvalidTransition, SessionState, SessionStateMachine
@@ -108,6 +110,18 @@ class InterviewOrchestrator:
         if asyncio.iscoroutine(result):
             await result
 
+    async def _emit_event(self, event: str, detail: str | None = None) -> None:
+        """Log a session event to the audit table."""
+        if not self._session_id:
+            return
+        try:
+            async with self.deps.pool.acquire() as conn:
+                await insert_session_event(conn, SessionEventCreate(
+                    session_id=self._session_id, event=event, detail=detail,
+                ))
+        except Exception:
+            logger.debug("Failed to emit event %s for session %d", event, self._session_id)
+
     async def run(self, send: SendFn) -> None:
         """Main loop. Processes one message at a time until shutdown.
 
@@ -118,6 +132,7 @@ class InterviewOrchestrator:
             msg = await self._queue.get()
             if msg.type == "shutdown":
                 self.cancel_tts()
+                await self._emit_event("disconnected")
                 await self._finalize_if_active(send)
                 break
             try:
@@ -130,6 +145,7 @@ class InterviewOrchestrator:
                 })
             except InterviewError as e:
                 logger.warning("Interview error processing %s: %s", msg.type, e)
+                await self._emit_event(f"error_{e.to_ws_payload()['error_kind']}", str(e))
                 await self._send(send, e.to_ws_payload())
                 # Recover state if stuck mid-turn
                 if self._session_id and self._state.state in (
@@ -186,14 +202,18 @@ class InterviewOrchestrator:
         match msg.type:
             case "load":
                 await self._do_load(msg, send)
+                await self._emit_event("session_loaded")
             case "end_turn":
                 await self._do_end_turn(msg, send)
+                await self._emit_event("turn_completed", f"sequence={self._sequence}")
             case "text_input":
                 await self._do_text_input(msg, send)
+                await self._emit_event("turn_completed", f"sequence={self._sequence}")
             case "edit_transcript":
                 await self._do_edit_transcript(msg, send)
             case "end_session":
                 await self._do_end_session(msg, send)
+                await self._emit_event("session_ended")
             case _:
                 await self._send(send, {
                     "type": "error",

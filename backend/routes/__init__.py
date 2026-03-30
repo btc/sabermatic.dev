@@ -6,6 +6,7 @@ from backend.routes.evaluation import router as evaluation_router
 from backend.routes.coach_routes import router as coach_router
 from backend.routes.health import router as health_router
 from backend.routes.traces import router as traces_router
+from backend.routes.events import router as events_router
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(questions_router)
@@ -14,3 +15,4 @@ api_router.include_router(evaluation_router)
 api_router.include_router(coach_router)
 api_router.include_router(health_router)
 api_router.include_router(traces_router)
+api_router.include_router(events_router)
