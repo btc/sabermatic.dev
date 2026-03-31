@@ -17,7 +17,6 @@ interface ChatEntry {
   isStreaming: boolean;
 }
 
-const TIMER_TOTAL = 45 * 60; // 45 minutes default
 
 interface InterviewProps {
   sessionId: number;
@@ -333,7 +332,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
       {/* Header */}
       <header className="interview-header">
         <h2 className="interview-title">{questionTitle}</h2>
-        <Timer elapsed={seconds} total={TIMER_TOTAL} />
+        <Timer elapsed={seconds} total={session.timer_setting_sec} />
         <button className="interview-cancel-btn" onClick={handleCancel}>
           Cancel
         </button>
