@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Question, CoachReview, SessionStatsResponse } from "../types";
 import api from "../api/client";
+import SessionConfig from "../components/SessionConfig";
 import CoachCard from "../components/CoachCard";
 import ScoreDashboard from "../components/ScoreDashboard";
 import QuestionList from "../components/QuestionList";
@@ -13,6 +14,7 @@ export default function Home() {
   const [stats, setStats] = useState<SessionStatsResponse | null>(null);
   const [coachReview, setCoachReview] = useState<CoachReview | null>(null);
   const [suggestedQuestion, setSuggestedQuestion] = useState<Question | null>(null);
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
   const [filterDifficulty, setFilterDifficulty] = useState("all");
   const [loading, setLoading] = useState(true);
 
@@ -75,11 +77,17 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
 
-  async function handleStartSession(questionId: number) {
+  function handleSelectQuestion(questionId: number) {
+    const q = questions.find((q) => q.id === questionId) ?? null;
+    setSelectedQuestion(q);
+  }
+
+  async function handleStartSession(timerSec: number, ttsEnabled: boolean) {
+    if (!selectedQuestion) return;
     const session = await api.sessions.create({
-      question_id: questionId,
-      timer_setting_sec: 2700,
-      tts_enabled: true,
+      question_id: selectedQuestion.id,
+      timer_setting_sec: timerSec,
+      tts_enabled: ttsEnabled,
     });
     navigate(`/sessions/${session.id}`);
   }
@@ -126,53 +134,63 @@ export default function Home() {
 
   return (
     <div className="container">
-      <div className="home-header">
-        <h1>System Design Drill</h1>
-        <Link to="/history" className="home-history-btn">
-          History
-        </Link>
-      </div>
-
-      {coachReview && (
-        <CoachCard
-          review={coachReview}
-          suggestedQuestion={suggestedQuestion}
-          onStartSession={handleStartSession}
-          onRefresh={handleCoachRefresh}
+      {selectedQuestion ? (
+        <SessionConfig
+          question={selectedQuestion}
+          onStart={handleStartSession}
+          onCancel={() => setSelectedQuestion(null)}
         />
-      )}
-
-      {stats?.averages && (
+      ) : (
         <>
-          <div className="stats-row">
-            <div className="stat-card card">
-              <div className="stat-value">{sessionCount}</div>
-              <div className="stat-label">Sessions</div>
-            </div>
-            <div className="stat-card card">
-              <div className="stat-value">{avgScore.toFixed(1)}</div>
-              <div className="stat-label">Avg Score</div>
-            </div>
-            <div className="stat-card card">
-              <div className="stat-value">{weakestDimension}</div>
-              <div className="stat-label">Weakest</div>
-            </div>
+          <div className="home-header">
+            <h1>System Design Drill</h1>
+            <Link to="/history" className="home-history-btn">
+              History
+            </Link>
           </div>
 
-          <ScoreDashboard averages={stats.averages} />
+          {coachReview && (
+            <CoachCard
+              review={coachReview}
+              suggestedQuestion={suggestedQuestion}
+              onStartSession={handleSelectQuestion}
+              onRefresh={handleCoachRefresh}
+            />
+          )}
+
+          {stats?.averages && (
+            <>
+              <div className="stats-row">
+                <div className="stat-card card">
+                  <div className="stat-value">{sessionCount}</div>
+                  <div className="stat-label">Sessions</div>
+                </div>
+                <div className="stat-card card">
+                  <div className="stat-value">{avgScore.toFixed(1)}</div>
+                  <div className="stat-label">Avg Score</div>
+                </div>
+                <div className="stat-card card">
+                  <div className="stat-value">{weakestDimension}</div>
+                  <div className="stat-label">Weakest</div>
+                </div>
+              </div>
+
+              <ScoreDashboard averages={stats.averages} />
+            </>
+          )}
+
+          <QuestionList
+            questions={questions}
+            questionStats={stats?.question_stats ?? []}
+            suggestedQuestionId={coachReview?.suggested_question_id ?? null}
+            filterDifficulty={filterDifficulty}
+            onFilterChange={setFilterDifficulty}
+            onSelect={handleSelectQuestion}
+          />
+
+          <TraceWidget />
         </>
       )}
-
-      <QuestionList
-        questions={questions}
-        questionStats={stats?.question_stats ?? []}
-        suggestedQuestionId={coachReview?.suggested_question_id ?? null}
-        filterDifficulty={filterDifficulty}
-        onFilterChange={setFilterDifficulty}
-        onSelect={handleStartSession}
-      />
-
-      <TraceWidget />
     </div>
   );
 }
