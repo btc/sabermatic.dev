@@ -344,6 +344,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
       {/* Chat log */}
       <div className="interview-chat">
         <div className="interview-chat-inner">
+          <div className="interview-chat-spacer" />
           {messages.map((msg, i) =>
             msg.role === "system" ? (
               <div key={i} className="chat-system">{msg.content}</div>

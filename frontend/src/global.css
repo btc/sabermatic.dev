@@ -180,6 +180,14 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-height: 100%;
+}
+
+/* Spacer pushes messages toward vertical center when content is short.
+   As the conversation grows, the spacer shrinks to zero and messages
+   scroll normally — same pattern as claude.ai */
+.interview-chat-spacer {
+  flex: 1 1 40vh;
 }
 
 .interview-bottom {
