@@ -1548,3 +1548,110 @@ button:disabled {
 .coach-refresh-btn:disabled {
   opacity: 0.5;
 }
+
+/* --- Session Config --- */
+
+.session-config {
+  max-width: 480px;
+  margin: 2rem auto;
+}
+
+.session-config h2 {
+  margin-bottom: 0.25rem;
+}
+
+.session-config > .tag {
+  margin-bottom: 1.5rem;
+}
+
+.session-config-section {
+  margin-bottom: 1.25rem;
+}
+
+.session-config-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+}
+
+.session-config-label input[type="checkbox"] {
+  margin-right: 0.5rem;
+  accent-color: var(--accent-blue);
+  vertical-align: middle;
+}
+
+.session-config-durations {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.session-config-duration-btn {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.4rem 0.9rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.session-config-duration-btn:hover {
+  border-color: var(--accent-blue);
+  color: var(--text);
+}
+
+.session-config-duration-btn-active {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+
+.session-config-custom-input {
+  width: 5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.session-config-custom-input::placeholder {
+  color: var(--text-muted);
+}
+
+.session-config-custom-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+/* Hide number input spinners */
+.session-config-custom-input::-webkit-outer-spin-button,
+.session-config-custom-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.session-config-custom-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.session-config-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.session-config-actions .btn-primary {
+  flex: 1;
+}
+
+.session-config-actions .btn-secondary {
+  flex: 0;
+}
