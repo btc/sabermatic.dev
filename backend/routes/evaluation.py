@@ -94,9 +94,15 @@ async def _run_evaluation(
                         )
 
                     await update_session_status(conn, session_id, "reviewed")
-                    await insert_session_event(conn, SessionEventCreate(
-                        session_id=session_id, event="evaluation_completed",
-                    ))
+
+                # Audit log outside transaction — must never break evaluation
+                try:
+                    async with pool.acquire() as event_conn:
+                        await insert_session_event(event_conn, SessionEventCreate(
+                            session_id=session_id, event="evaluation_completed",
+                        ))
+                except Exception:
+                    logger.debug("Failed to log evaluation_completed event")
                 return  # success
 
         except Exception as e:
@@ -117,11 +123,14 @@ async def _run_evaluation(
                         "evaluation_failed",
                         status_detail="Evaluation failed after 2 attempts",
                     )
-                    await insert_session_event(conn, SessionEventCreate(
-                        session_id=session_id,
-                        event="evaluation_failed",
-                        detail=str(e),
-                    ))
+                    try:
+                        await insert_session_event(conn, SessionEventCreate(
+                            session_id=session_id,
+                            event="evaluation_failed",
+                            detail=str(e),
+                        ))
+                    except Exception:
+                        logger.debug("Failed to log evaluation_failed event")
             except Exception:
                 logger.exception(
                     "Failed to update session status after evaluation failure"
