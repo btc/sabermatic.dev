@@ -78,7 +78,8 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 }
 
 // Close stops River (finishing in-flight jobs) then closes the database pool.
-func (b *Backend) Close() {
+// Implements io.Closer.
+func (b *Backend) Close() error {
 	timeout := time.Duration(b.cfg.River.ShutdownTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -89,4 +90,5 @@ func (b *Backend) Close() {
 
 	b.Pool.Close()
 	slog.Info("database pool closed")
+	return nil
 }
