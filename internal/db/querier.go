@@ -13,7 +13,6 @@ import (
 type Querier interface {
 	CountSeedQuestions(ctx context.Context) (int64, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
-	HealthCheck(ctx context.Context) (int32, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 }
 

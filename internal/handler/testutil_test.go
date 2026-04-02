@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"embed"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,7 +51,9 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("create migration source: %v", err)
 	}
 
-	pgxURL := "pgx5://" + connStr[len("postgres://"):]
+	trimmed := strings.TrimPrefix(connStr, "postgresql://")
+	trimmed = strings.TrimPrefix(trimmed, "postgres://")
+	pgxURL := "pgx5://" + trimmed
 	m, err := migrate.NewWithSourceInstance("iofs", d, pgxURL)
 	if err != nil {
 		t.Fatalf("create migrate: %v", err)

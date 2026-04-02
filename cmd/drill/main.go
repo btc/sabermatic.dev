@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -103,7 +104,11 @@ func runMigrations(databaseURL string) error {
 		return fmt.Errorf("create migration source: %w", err)
 	}
 
-	pgxURL := "pgx5://" + databaseURL[len("postgres://"):]
+	// golang-migrate's pgx5 driver expects pgx5:// scheme.
+	// Handle both postgres:// and postgresql:// connection strings.
+	trimmed := strings.TrimPrefix(databaseURL, "postgresql://")
+	trimmed = strings.TrimPrefix(trimmed, "postgres://")
+	pgxURL := "pgx5://" + trimmed
 	m, err := migrate.NewWithSourceInstance("iofs", d, pgxURL)
 	if err != nil {
 		return fmt.Errorf("create migrate: %w", err)
