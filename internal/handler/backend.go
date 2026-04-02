@@ -78,6 +78,13 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 	}, nil
 }
 
+// SetConfig sets the configuration on a Backend. Useful in tests where
+// Backend is constructed manually (without NewBackend).
+func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
+
+// Config returns the Backend's configuration.
+func (b *Backend) Config() *config.Config { return b.cfg }
+
 // Close stops River (finishing in-flight jobs) then closes the database pool.
 // Implements io.Closer.
 func (b *Backend) Close() error {
