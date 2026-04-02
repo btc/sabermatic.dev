@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,13 +55,19 @@ func TestSendEmail_Integration(t *testing.T) {
 
 	// Set up workers with log sender
 	logSender := email.NewLogSender()
-	workers := jobs.RegisterWorkers(logSender)
+	cfg := &config.Config{
+		Email: config.Email{
+			SendTimeout:     time.Minute,
+			MaxSendAttempts: 3,
+		},
+	}
+	workers := jobs.RegisterWorkers(cfg, logSender)
 
 	// Create and start River client
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: 5},
-			"notifications":    {MaxWorkers: 5},
+			river.QueueDefault:      {MaxWorkers: 5},
+			jobs.QueueNotifications: {MaxWorkers: 5},
 		},
 		Workers: workers,
 	})
@@ -80,7 +87,7 @@ func TestSendEmail_Integration(t *testing.T) {
 		Subject: "Welcome to Drill",
 		Text:    "Welcome!",
 		HTML:    "<h1>Welcome!</h1>",
-	}, nil)
+	}, jobs.SendEmailInsertOpts(&cfg.Email))
 	require.NoError(t, err)
 
 	// Wait for the job to be processed

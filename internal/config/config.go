@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/btc/drill/internal/email"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -65,9 +66,11 @@ type Speech struct {
 }
 
 type Email struct {
-	MailgunAPIKey string `env:"MAILGUN_API_KEY,default=test-key"`
-	MailgunDomain string `env:"MAILGUN_DOMAIN,default=localhost"`
-	FromAddress   string `env:"EMAIL_FROM,default=noreply@drill.dev"`
+	MailgunAPIKey   string        `env:"MAILGUN_API_KEY,default=test-key"`
+	MailgunDomain   string        `env:"MAILGUN_DOMAIN,default=localhost"`
+	FromAddress     string        `env:"EMAIL_FROM,default=noreply@drill.dev"`
+	SendTimeout     time.Duration `env:"EMAIL_SEND_TIMEOUT,default=1m"`
+	MaxSendAttempts int           `env:"EMAIL_MAX_SEND_ATTEMPTS,default=3"`
 }
 
 // NewSender creates the appropriate email sender based on configuration.
