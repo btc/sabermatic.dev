@@ -17,7 +17,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	b := &backend.Backend{Pool: pool, Jobs: backend.NopJobs{}}
+	b := &backend.Backend{Pool: pool, Jobs: &backend.RecordingJobs{}}
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/btc/drill/internal/auth"
@@ -199,26 +201,31 @@ func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
 }
 
 // ForgotPassword enqueues a password-reset email if the user exists.
-// Always returns nil to prevent email enumeration.
+// Returns nil when user is not found (enumeration prevention).
+// Returns actual error for DB/system failures.
 func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 	email = strings.TrimSpace(strings.ToLower(email))
 
 	queries := db.New(b.Pool)
 	user, err := queries.GetUserByEmail(ctx, email)
-	if err == nil {
-		signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
-		token, _ := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
-		resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
-
-		b.Jobs.Insert(ctx, jobs.SendEmailArgs{ //nolint:errcheck
-			To:      user.Email,
-			Subject: "Reset your Drill password",
-			Text:    "Click here to reset your password: " + resetURL,
-			HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
-		}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // User not found — silent, prevent enumeration.
+		}
+		return fmt.Errorf("forgot password: %w", err) // Real DB error.
 	}
 
-	// Always nil to prevent email enumeration.
+	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+	token, _ := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
+	resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
+
+	b.Jobs.Insert(ctx, jobs.SendEmailArgs{ //nolint:errcheck
+		To:      user.Email,
+		Subject: "Reset your Drill password",
+		Text:    "Click here to reset your password: " + resetURL,
+		HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
+	}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+
 	return nil
 }
 
@@ -250,7 +257,7 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) erro
 	}
 
 	// Invalidate all sessions.
-	queries.DeleteUserAuthSessions(ctx, userID)
+	_ = queries.DeleteUserAuthSessions(ctx, userID)
 	return nil
 }
 

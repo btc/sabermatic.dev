@@ -79,7 +79,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 // newTestBackend creates a Backend for integration tests (no River client).
 func newTestBackend(t *testing.T, pool *pgxpool.Pool) *backend.Backend {
 	t.Helper()
-	b := &backend.Backend{Pool: pool, Jobs: backend.NopJobs{}}
+	b := &backend.Backend{Pool: pool, Jobs: &backend.RecordingJobs{}}
 	b.SetConfig(loadTestConfig(t))
 	return b
 }

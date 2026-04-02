@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/jobs"
 )
 
 func TestSignup_Success(t *testing.T) {
@@ -40,6 +42,14 @@ func TestSignup_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "alice@example.com", resp["email"])
 	require.NotEmpty(t, resp["id"])
+
+	// Verify verification email was enqueued.
+	inserted := b.Jobs.(*backend.RecordingJobs).Inserted()
+	require.Len(t, inserted, 1)
+	emailArgs, ok := inserted[0].(jobs.SendEmailArgs)
+	require.True(t, ok)
+	require.Equal(t, "alice@example.com", emailArgs.To)
+	require.Contains(t, emailArgs.Subject, "Verify")
 }
 
 func TestSignup_DuplicateEmail(t *testing.T) {
