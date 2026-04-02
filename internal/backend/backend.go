@@ -1,4 +1,4 @@
-package handler
+package backend
 
 import (
 	"context"
@@ -17,16 +17,17 @@ import (
 	"github.com/btc/drill/internal/jobs"
 )
 
-// Backend holds shared dependencies for all handlers and owns their lifecycles.
+// Backend holds shared dependencies and business logic. Handlers call its
+// methods; it owns the database pool and River client lifecycle.
 type Backend struct {
 	Pool  *pgxpool.Pool
 	River *river.Client[pgx.Tx]
 	cfg   *config.Config
 }
 
-// NewBackend creates a pool, runs River migrations, and starts the River client.
+// New creates a pool, runs River migrations, and starts the River client.
 // App migrations must be run before calling this (schema must exist).
-func NewBackend(cfg *config.Config) (*Backend, error) {
+func New(cfg *config.Config) (*Backend, error) {
 	// Pool uses background context — must outlive any request or signal context.
 	pool, err := cfg.Database.NewPool(context.Background())
 	if err != nil {
@@ -54,10 +55,10 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 	workers := jobs.RegisterWorkers(cfg, emailSender)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault:       {MaxWorkers: cfg.River.NumDefaultWorkers},
-			jobs.QueueNotifications:  {MaxWorkers: cfg.River.NumNotifyWorkers},
-			jobs.QueueAI:             {MaxWorkers: cfg.River.NumAIWorkers},
-			jobs.QueueMaintenance:    {MaxWorkers: cfg.River.NumMaintWorkers},
+			river.QueueDefault:      {MaxWorkers: cfg.River.NumDefaultWorkers},
+			jobs.QueueNotifications: {MaxWorkers: cfg.River.NumNotifyWorkers},
+			jobs.QueueAI:            {MaxWorkers: cfg.River.NumAIWorkers},
+			jobs.QueueMaintenance:   {MaxWorkers: cfg.River.NumMaintWorkers},
 		},
 		Workers: workers,
 	})
@@ -79,7 +80,7 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 }
 
 // SetConfig sets the configuration on a Backend. Useful in tests where
-// Backend is constructed manually (without NewBackend).
+// Backend is constructed manually (without New).
 func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 
 // Config returns the Backend's configuration.

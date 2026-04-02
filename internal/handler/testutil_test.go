@@ -16,6 +16,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 )
 
@@ -73,6 +74,14 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 
 	return pool
+}
+
+// newTestBackend creates a Backend for integration tests (no River client).
+func newTestBackend(t *testing.T, pool *pgxpool.Pool) *backend.Backend {
+	t.Helper()
+	b := &backend.Backend{Pool: pool}
+	b.SetConfig(loadTestConfig(t))
+	return b
 }
 
 // loadTestConfig loads a config.Config suitable for handler integration tests.

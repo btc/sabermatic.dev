@@ -22,8 +22,7 @@ func TestSignup_Success(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(loadTestConfig(t))
+	b := newTestBackend(t, pool)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
@@ -49,8 +48,7 @@ func TestSignup_DuplicateEmail(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(loadTestConfig(t))
+	b := newTestBackend(t, pool)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
@@ -83,8 +81,7 @@ func TestLogin_Success(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(loadTestConfig(t))
+	b := newTestBackend(t, pool)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
@@ -132,8 +129,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(loadTestConfig(t))
+	b := newTestBackend(t, pool)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
@@ -167,8 +163,7 @@ func TestVerifyEmail(t *testing.T) {
 
 	pool := setupTestDB(t)
 	cfg := loadTestConfig(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(cfg)
+	b := newTestBackend(t, pool)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 
@@ -210,8 +205,7 @@ func TestForgotAndResetPassword(t *testing.T) {
 
 	pool := setupTestDB(t)
 	cfg := loadTestConfig(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(cfg)
+	b := newTestBackend(t, pool)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 

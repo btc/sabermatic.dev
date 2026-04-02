@@ -4,10 +4,11 @@ import (
 	"net/http"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/backend"
 )
 
 // GetMe returns the authenticated user's profile.
-func GetMe(b *Backend) http.HandlerFunc {
+func GetMe(b *backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := auth.UserFromContext(r.Context())
 		if user == nil {

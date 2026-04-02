@@ -4,10 +4,11 @@ import (
 	"net/http"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/backend"
 )
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
-func RegisterRoutes(mux *http.ServeMux, b *Backend) {
+func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 	mux.HandleFunc("GET /api/health", Health(b))
 	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
 
