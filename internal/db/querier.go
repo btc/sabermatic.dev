@@ -12,8 +12,19 @@ import (
 
 type Querier interface {
 	CountSeedQuestions(ctx context.Context) (int64, error)
+	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
+	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
+	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
+	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
+	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
+	TouchAuthSession(ctx context.Context, id uuid.UUID) error
+	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
 }
 
 var _ Querier = (*Queries)(nil)
