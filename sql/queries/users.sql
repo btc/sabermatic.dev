@@ -22,3 +22,16 @@ WHERE id = $1;
 -- name: SoftDeleteUser :exec
 UPDATE users SET deleted_at = NOW(), updated_at = NOW()
 WHERE id = $1;
+
+-- name: CreateOAuthUser :one
+INSERT INTO users (email, email_verified, display_name)
+VALUES ($1, TRUE, $2)
+RETURNING *;
+
+-- name: ReactivateUser :exec
+UPDATE users SET deleted_at = NULL, email_verified = TRUE, updated_at = NOW()
+WHERE id = $1;
+
+-- name: GetUserByEmailIncludingDeleted :one
+SELECT * FROM users
+WHERE email = $1;

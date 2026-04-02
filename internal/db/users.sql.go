@@ -12,6 +12,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createOAuthUser = `-- name: CreateOAuthUser :one
+INSERT INTO users (email, email_verified, display_name)
+VALUES ($1, TRUE, $2)
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at
+`
+
+type CreateOAuthUserParams struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+}
+
+func (q *Queries) CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createOAuthUser, arg.Email, arg.DisplayName)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name)
 VALUES ($1, $2, $3)
@@ -67,6 +97,30 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const getUserByEmailIncludingDeleted = `-- name: GetUserByEmailIncludingDeleted :one
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
+WHERE email = $1
+`
+
+func (q *Queries) GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmailIncludingDeleted, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
 WHERE id = $1 AND deleted_at IS NULL
@@ -89,6 +143,16 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const reactivateUser = `-- name: ReactivateUser :exec
+UPDATE users SET deleted_at = NULL, email_verified = TRUE, updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) ReactivateUser(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, reactivateUser, id)
+	return err
 }
 
 const softDeleteUser = `-- name: SoftDeleteUser :exec

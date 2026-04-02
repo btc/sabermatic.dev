@@ -18,6 +18,7 @@ type Config struct {
 	Email    Email
 	River    River
 	Auth     Auth
+	OAuth    OAuth
 }
 
 type Server struct {
@@ -89,6 +90,13 @@ type Auth struct {
 	ResetTokenTTL  time.Duration `env:"AUTH_RESET_TOKEN_TTL,default=1h"`
 	BcryptCost     int           `env:"AUTH_BCRYPT_COST,default=12"`
 	BaseURL        string        `env:"BASE_URL,default=http://localhost:3000"`
+}
+
+type OAuth struct {
+	GoogleClientID     string `env:"OAUTH_GOOGLE_CLIENT_ID"`
+	GoogleClientSecret string `env:"OAUTH_GOOGLE_CLIENT_SECRET"`
+	GitHubClientID     string `env:"OAUTH_GITHUB_CLIENT_ID"`
+	GitHubClientSecret string `env:"OAUTH_GITHUB_CLIENT_SECRET"`
 }
 
 // SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
