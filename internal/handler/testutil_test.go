@@ -11,9 +11,12 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/btc/drill/internal/config"
 )
 
 //go:embed testdata/migrations/*.sql
@@ -70,4 +73,16 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 
 	return pool
+}
+
+// loadTestConfig loads a config.Config suitable for handler integration tests.
+func loadTestConfig(t *testing.T) *config.Config {
+	t.Helper()
+	t.Setenv("DATABASE_URL", "postgres://unused")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	return cfg
 }
