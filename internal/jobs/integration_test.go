@@ -53,14 +53,15 @@ func TestSendEmail_Integration(t *testing.T) {
 	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 	require.NoError(t, err)
 
+	// Load config with defaults (required env vars set for test)
+	t.Setenv("DATABASE_URL", connStr)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
 	// Set up workers with log sender
 	logSender := email.NewLogSender()
-	cfg := &config.Config{
-		Email: config.Email{
-			SendTimeout:     time.Minute,
-			MaxSendAttempts: 3,
-		},
-	}
 	workers := jobs.RegisterWorkers(cfg, logSender)
 
 	// Create and start River client
