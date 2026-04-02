@@ -260,3 +260,77 @@ func TestForgotAndResetPassword(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 }
+
+func TestLogout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	pool := setupTestDB(t)
+	b := newTestBackend(t, pool)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+
+	// Sign up and login to get a session cookie
+	signupBody, _ := json.Marshal(map[string]string{
+		"email":        "logout@example.com",
+		"password":     "securepassword123",
+		"display_name": "Logout User",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/signup", bytes.NewReader(signupBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	loginBody, _ := json.Marshal(map[string]string{
+		"email":    "logout@example.com",
+		"password": "securepassword123",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var sessionCookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "drill_session" {
+			sessionCookie = c
+			break
+		}
+	}
+	require.NotNil(t, sessionCookie)
+
+	// GET /api/me works with session cookie
+	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(sessionCookie)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Logout
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(sessionCookie)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Verify cookie is cleared
+	var clearCookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "drill_session" {
+			clearCookie = c
+			break
+		}
+	}
+	require.NotNil(t, clearCookie)
+	require.Equal(t, -1, clearCookie.MaxAge)
+
+	// GET /api/me now returns 401
+	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(sessionCookie)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
