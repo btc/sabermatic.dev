@@ -81,7 +81,7 @@ func Signup(b *Backend) http.HandlerFunc {
 		// Enqueue verification email (best-effort; River may be nil in tests).
 		if b.River != nil {
 			signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
-			token, err := signer.Sign(user.ID, "verify_email", b.cfg.Auth.VerifyTokenTTL)
+			token, err := signer.Sign(user.ID, "verify-email", b.cfg.Auth.VerifyTokenTTL)
 			if err != nil {
 				slog.Error("sign verification token", "error", err)
 			} else {
