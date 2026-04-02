@@ -1,12 +1,17 @@
 package jobs
 
 import (
+	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/email"
 	"github.com/riverqueue/river"
 )
 
-func RegisterWorkers(sender email.Sender) *river.Workers {
+// RegisterWorkers creates a Workers bundle with all job workers registered.
+func RegisterWorkers(cfg *config.Config, sender email.Sender) *river.Workers {
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &SendEmailWorker{Sender: sender})
+	river.AddWorker(workers, &SendEmailWorker{
+		Sender:   sender,
+		Timeout_: cfg.Email.SendTimeout,
+	})
 	return workers
 }

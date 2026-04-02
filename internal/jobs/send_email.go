@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/email"
 	"github.com/riverqueue/river"
 )
 
+// SendEmailArgs are the arguments for the SendEmail job.
 type SendEmailArgs struct {
 	To      string `json:"to"`
 	Subject string `json:"subject"`
@@ -20,21 +22,23 @@ func (args SendEmailArgs) Kind() string {
 	return "send_email"
 }
 
-func (args SendEmailArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{
-		Queue:       "notifications",
-		MaxAttempts: 3,
+// SendEmailInsertOpts returns the River insert options for email jobs.
+func SendEmailInsertOpts(cfg *config.Email) *river.InsertOpts {
+	return &river.InsertOpts{
+		Queue:       QueueNotifications,
+		MaxAttempts: cfg.MaxSendAttempts,
 	}
 }
 
+// SendEmailWorker processes SendEmail jobs.
 type SendEmailWorker struct {
 	river.WorkerDefaults[SendEmailArgs]
-	Sender email.Sender
+	Sender  email.Sender
+	Timeout_ time.Duration
 }
 
-// Timeout returns the max duration for a single email send attempt.
 func (w *SendEmailWorker) Timeout(job *river.Job[SendEmailArgs]) time.Duration {
-	return 1 * time.Minute
+	return w.Timeout_
 }
 
 func (w *SendEmailWorker) Work(ctx context.Context, job *river.Job[SendEmailArgs]) error {

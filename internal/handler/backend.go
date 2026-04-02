@@ -50,13 +50,13 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 
 	// River client
 	emailSender := cfg.Email.NewSender()
-	workers := jobs.RegisterWorkers(emailSender)
+	workers := jobs.RegisterWorkers(cfg, emailSender)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: cfg.River.NumDefaultWorkers},
-			"notifications":   {MaxWorkers: cfg.River.NumNotifyWorkers},
-			"ai":              {MaxWorkers: cfg.River.NumAIWorkers},
-			"maintenance":     {MaxWorkers: cfg.River.NumMaintWorkers},
+			river.QueueDefault:       {MaxWorkers: cfg.River.NumDefaultWorkers},
+			jobs.QueueNotifications:  {MaxWorkers: cfg.River.NumNotifyWorkers},
+			jobs.QueueAI:             {MaxWorkers: cfg.River.NumAIWorkers},
+			jobs.QueueMaintenance:    {MaxWorkers: cfg.River.NumMaintWorkers},
 		},
 		Workers: workers,
 	})
