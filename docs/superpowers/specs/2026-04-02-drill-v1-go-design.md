@@ -177,8 +177,10 @@ CREATE TABLE annotations (
 CREATE TABLE educator_analyses (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id      UUID UNIQUE NOT NULL REFERENCES interview_sessions(id),
-    model_answer    TEXT NOT NULL,
-    gap_deep_dives  TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'generating'
+                    CHECK (status IN ('generating', 'completed')),
+    model_answer    TEXT,
+    gap_deep_dives  TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -242,7 +244,10 @@ CREATE TABLE usage_periods (
 CREATE INDEX idx_sessions_user_status ON interview_sessions(user_id, status)
     WHERE archived = FALSE;
 CREATE INDEX idx_sessions_user_archived ON interview_sessions(user_id, archived);
+CREATE INDEX idx_sessions_question ON interview_sessions(question_id);
 CREATE INDEX idx_messages_session_seq ON messages(session_id, seq);
+CREATE INDEX idx_annotations_evaluation ON annotations(evaluation_id);
+CREATE INDEX idx_annotations_message ON annotations(message_id);
 CREATE INDEX idx_llm_calls_session ON llm_calls(session_id);
 CREATE INDEX idx_llm_calls_user_created ON llm_calls(user_id, created_at);
 CREATE INDEX idx_user_events_user_created ON user_events(user_id, created_at);
@@ -279,12 +284,15 @@ Questions:
   GET    /api/questions                List (filterable by difficulty, tags)
   POST   /api/questions                Create custom question
   GET    /api/questions/:id            Detail + user stats
+  PUT    /api/questions/:id            Update question (admin: seed; user: own custom)
+  DELETE /api/questions/:id            Delete question (admin: seed; user: own custom)
 
 Sessions:
   POST   /api/sessions                 Start new session (entitlement check)
   GET    /api/sessions                 List (filterable, sortable)
   GET    /api/sessions/:id             Session detail
-  PATCH  /api/sessions/:id/archive     Archive/unarchive
+  PATCH  /api/sessions/:id/archive     Archive/unarchive single session
+  POST   /api/sessions/archive-bulk    Archive/unarchive multiple sessions
   POST   /api/sessions/:id/evaluate    Retry failed evaluation
   GET    /api/sessions/:id/transcript  Full transcript with annotations
   GET    /api/sessions/:id/evaluation  Evaluation results
@@ -318,7 +326,6 @@ Endpoint: `WSS /api/sessions/:id/ws`
 | `InterviewerSpeaking` | LLM streaming tokens through observer fan-out |
 | `WaitingForInput` | Interviewer done, candidate's turn |
 | `Transcribing` | STT in progress on audio input |
-| `EditingTranscript` | Candidate reviewing/editing transcription |
 | `ProcessingInput` | Preparing LLM call with candidate message |
 | `Ending` | Teardown in progress |
 | `Ended` | Terminal |
@@ -328,8 +335,7 @@ Endpoint: `WSS /api/sessions/:id/ws`
 ```
 InterviewerSpeaking → WaitingForInput, Ending
 WaitingForInput     → Transcribing, ProcessingInput, Ending
-Transcribing        → EditingTranscript, Ending
-EditingTranscript   → ProcessingInput, Ending
+Transcribing        → ProcessingInput, Ending
 ProcessingInput     → InterviewerSpeaking, Ending
 Ending              → Ended
 Ended               → (terminal)
@@ -341,7 +347,6 @@ Ended               → (terminal)
 |---|---|---|
 | `session_init` | `{ last_seq: null \| N }` | Through queue |
 | `end_turn` | `{ content, input_method: "text" }` or `{ audio, input_method: "voice" }` | Through queue |
-| `transcription_edit` | `{ message_id, content }` | Through queue |
 | `cancel_tts` | (none) | **Bypasses queue** → `observer.Interrupt()` |
 | `end_session` | (none) | Through queue |
 | `ping` | (none) | Through queue |
@@ -357,8 +362,8 @@ Ended               → (terminal)
 | `tts_chunk` | `{ data, message_id, seq }` |
 | `tts_done` | `{ message_id }` |
 | `transcription_result` | `{ text, message_id }` |
-| `timer_warning` | `{ minutes_remaining: 5 }` |
-| `timer_overtime` | (none) |
+| `timer_warning` | `{ minutes_remaining: N }` — N = `clamp(2, 5, round(duration / 9))` |
+| `timer_overtime` | (none) — session auto-ends 2 minutes after overtime |
 | `session_ended` | `{ reason: "candidate" \| "interviewer" \| "timeout" }` |
 | `reconnect_please` | (none) |
 | `error` | `{ code, message }` |
@@ -402,7 +407,11 @@ func (sm *StateMachine) Transition(next ConductorState) error {
 
 ### Initialization
 
-On `session_init` with `last_seq: null` (new session): the conductor sends `session_loaded` with session metadata, then streams the interviewer's opening message. On `session_init` with `last_seq: N` (reconnect): the conductor sends `reconnect_state` with all messages since seq N.
+On `session_init`, the conductor checks DB state to determine behavior:
+- **No messages in DB** → new session. Send `session_loaded`, stream interviewer's opening message.
+- **Messages exist in DB** → reconnect. Send `reconnect_state` with messages since client's `last_seq`.
+
+The client does not need to distinguish new vs. reconnect. `last_seq: null` means "I have nothing, send me everything." The conductor checks the DB, not the client's claim.
 
 ### Main Loop
 
@@ -439,19 +448,26 @@ The `reconnectTimerCh` fires at the 55-minute mark, but the conductor does not r
 ```
 WaitingForInput
   → if voice input:
+      validate audio (WebM header + container parse for audio track + duration check)
       sm.Transition(Transcribing)
-      call STT, send transcription_result
-      sm.Transition(EditingTranscript)
-      wait for edit timeout or transcription_edit
+      call STT, send transcription_result (read-only, no edit window)
+      write input audio to GCS inline
   → sm.Transition(ProcessingInput)
-    persist candidate message to DB
+    persist candidate message to DB (pre-generated UUID for message_id)
     build prompt (via Builder)
     create observer fan-out (wsWriter + ttsAccumulator + messageAccumulator)
     sm.Transition(InterviewerSpeaking)
     stream LLM response through observers
     persist interviewer message to DB
+    TTS accumulator writes concatenated output audio to GCS in OnDone
     sm.Transition(WaitingForInput)
+    check reconnectPending flag → if set, send reconnect_please
+    check overtime + 2 min → if exceeded, auto-end session
 ```
+
+**Audio validation:** Before STT, the conductor parses the WebM container header to verify it contains an audio track and the duration is reasonable. Rejects non-audio or oversized payloads. WebSocket max message size set to 10MB.
+
+**Message IDs:** The conductor pre-generates a UUID for each message before persistence. This UUID is sent in `transcription_result` and used when persisting to the `messages` table. UUIDs do not depend on the database.
 
 ### Message Queue Bypass
 
@@ -488,7 +504,7 @@ Composite fan-out distributes to all observers. The streaming loop sees one obse
 
 **Observers:**
 - **WSWriter** — sends `interviewer_token` messages to the client. `Interrupt()` is a no-op.
-- **TTSAccumulator** — buffers text, fires TTS API on sentence boundaries in a separate goroutine. `Interrupt()` cancels its internal context, aborting all in-flight and future TTS calls.
+- **TTSAccumulator** — buffers text, fires TTS API on sentence boundaries in a separate goroutine. Sends `tts_chunk` messages to client as chunks arrive. In `OnDone`, writes concatenated audio to GCS as a single MP3 file per interviewer message. `Interrupt()` cancels its internal context, aborting all in-flight and future TTS calls.
 - **MessageAccumulator** — builds the complete response for DB persistence. `Interrupt()` is a no-op.
 
 Adding a new consumer (e.g., content moderation) means implementing `TokenObserver` and passing it to `NewTokenFanOut`. Zero changes to the streaming loop.
@@ -508,7 +524,6 @@ func (b *PromptBuilder) WithSystemInstructions() *PromptBuilder { ... }
 func (b *PromptBuilder) WithQuestion(q db.Question) *PromptBuilder { ... }
 func (b *PromptBuilder) WithTranscript(msgs []db.Message) *PromptBuilder { ... }
 func (b *PromptBuilder) WithTimeContext(elapsed, remaining time.Duration) *PromptBuilder { ... }
-func (b *PromptBuilder) WithCoverageState(covered map[string]bool) *PromptBuilder { ... }
 func (b *PromptBuilder) WithCoachBriefing(ca *db.CoachAnalysis) *PromptBuilder { ... }
 func (b *PromptBuilder) Build() (string, []anthropic.MessageParam) { ... }
 ```
@@ -537,20 +552,21 @@ Two layers:
 
 ## 8. Background Jobs (River)
 
-| Job | Queue | Timeout | Max Attempts |
-|---|---|---|---|
-| `EvaluateSession` | `ai` | 10 min | 4 |
-| `GenerateEducatorContent` | `ai` | 15 min | 5 |
-| `RunCoachAnalysis` | `ai` | 15 min | unique per user |
-| `SendEmail` | `notifications` | 1 min | 3 |
-| `TrackUsageMetrics` | `telemetry` | 30 sec | 3 |
-| `ProcessAudioUpload` | `media` | 2 min | 3 |
+| Job | Queue | Timeout | Max Attempts | Uniqueness |
+|---|---|---|---|---|
+| `EvaluateSession` | `ai` | 10 min | 4 | unique per `session_id` |
+| `GenerateEducatorContent` | `ai` | 15 min | 5 | unique per `session_id` |
+| `RunCoachAnalysis` | `ai` | 15 min | 3 | unique per `user_id` |
+| `SendEmail` | `notifications` | 1 min | 3 | — |
+| `TrackUsageMetrics` | `telemetry` | 30 sec | 3 | — |
+| `CleanupAbandonedSessions` | `maintenance` | 1 min | 1 | periodic, every 3 min |
 
 Key properties:
 - **Transactional enqueue** — evaluation job created in same transaction as session status update to `completed`. No orphaned jobs.
+- **Unique jobs as idempotency keys** — `EvaluateSession` unique on `session_id`, `RunCoachAnalysis` unique on `user_id`. Duplicate enqueues return the existing job. Safe to call retry endpoints multiple times.
 - **Exponential backoff** — configured per job type, handled by River.
-- **Coach uniqueness** — River's built-in unique jobs feature prevents duplicate concurrent analyses per user.
 - **River UI** at `/admin/jobs` behind admin auth for queue visibility.
+- **Abandoned session cleanup** — `CleanupAbandonedSessions` runs every 3 minutes. Finds `active` sessions where `started_at + config_duration_minutes + 5 minutes < NOW()`, sets status to `completed`, enqueues `EvaluateSession` for each.
 
 ### Evaluation Flow
 
@@ -580,7 +596,7 @@ Email verification via signed time-limited token sent by `SendEmail` River job. 
 
 ## 10. Billing
 
-Stripe Checkout for signup, Customer Portal for self-service, webhooks processed as River jobs.
+Stripe Checkout for signup, Customer Portal for self-service. Webhooks processed synchronously in the endpoint handler (verify signature, look up user, update plan, return 200). No River job needed — user always exists before Stripe interaction, and the update is a single DB query. Stripe retries on failure.
 
 ```go
 var Plans = map[string]Plan{
@@ -604,9 +620,12 @@ var Plans = map[string]Plan{
 
 Plans defined as a Go map. Code deploy to change, no architectural changes (FR-007).
 
-Entitlements checked synchronously at session creation: `usage_periods.sessions_used` vs plan limit, `COUNT(active sessions)` vs concurrent limit, `config_duration_minutes` vs max duration.
-
-Free-tier educator content: generated identically, but API returns truncated preview. Full content gated at the API layer.
+**Entitlement enforcement:**
+- **Session count**: Atomic `UPDATE usage_periods SET sessions_used = sessions_used + 1 WHERE sessions_used < $limit RETURNING sessions_used`. Zero rows returned = limit reached. No read-then-check race.
+- **Concurrent sessions**: `COUNT(active)` vs plan limit, checked in same transaction as session creation.
+- **Duration**: `config_duration_minutes` validated against `MaxDurationMinutes`.
+- **Coach access**: `POST /api/coach/analyze` and `GET /api/coach/latest` check `CoachAccess` entitlement. Returns 403 with upgrade message for free-tier users.
+- **Educator access**: Full content for paid users. Free-tier users see a server-side truncated preview (approximately first 2000 characters of `model_answer` plus the first gap deep-dive entry). Full content never sent to free-tier clients.
 
 ---
 
@@ -648,7 +667,7 @@ Indefinite on all tables and Cloud Logging.
 
 ## 12. GDPR Compliance
 
-- **Right of access / data portability**: `GET /api/me/export` enqueues River job → assembles all user data → ZIP → GCS signed URL → email link.
+- **Right of access / data portability**: `GET /api/me/export` enqueues River job → assembles ZIP → GCS signed URL → email link. Export includes: user profile, all sessions (metadata + full transcripts + evaluations + annotations), educator analyses, coach analyses, custom and coach-generated questions, and all audio files (input and output) from GCS. Excludes internal system data (`llm_calls`/`llm_call_content`, `user_events`).
 - **Right to erasure**: `DELETE /api/auth/account` soft-deletes (sets `deleted_at`). Daily River job processes accounts soft-deleted > 30 days: anonymize user record, delete audio from GCS, delete `llm_call_content` rows, retain anonymized scores for aggregate analytics.
 - **Consent**: Cookie consent banner. Session cookies are essential (no consent required). Analytics cookies require opt-in.
 - **Lawful basis**: Contract (user signed up). Legitimate interest (LLM call logging for service improvement). Audio recording disclosed at session start.
@@ -657,7 +676,7 @@ Indefinite on all tables and Cloud Logging.
 
 ## 13. Security & Abuse Prevention
 
-- **Entitlements**: Checked synchronously at session creation and educator request.
+- **Entitlements**: Checked at session creation (atomic increment), educator request, and coach endpoints. See Section 10.
 - **Rate limiting**: Per-user token bucket in Postgres (atomic row update) for API endpoints. In-memory per-connection rate limit for WebSocket messages. The in-memory state is ephemeral and dies with the connection; Postgres-based per-user limit covers cross-connection abuse.
 - **Content moderation**: Interviewer system prompt detects jailbreak attempts. Pre-LLM scan for injection patterns. Flagged messages logged, interview continues.
 - **Account abuse**: Email verification required. Account creation rate-limited per IP. Browser fingerprint flags suspicious patterns for admin review.
@@ -788,11 +807,11 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 | FR | Requirement | Design |
 |---|---|---|
 | FR-007 | Plan structures modifiable without architectural changes | Plans are a Go map compiled into the binary. Code deploy to change, no schema/infrastructure changes. See Section 10. |
-| FR-008 | Plans gate sessions/month, duration, features, concurrency | `usage_periods` for session count. `config_duration_minutes` validated against plan limit. Feature access checked at API layer. Concurrent sessions via `COUNT(active)`. |
+| FR-008 | Plans gate sessions/month, duration, features, concurrency | Atomic `UPDATE usage_periods ... WHERE sessions_used < $limit` for session count. `config_duration_minutes` validated against plan limit. Feature access (educator, coach) checked at API layer. Concurrent sessions via `COUNT(active)` in same transaction. |
 | FR-009 | Free tier same quality as paid | Same AI model, same prompts, same voice I/O for all tiers. Only usage limits differ. |
-| FR-010 | Educator: full for paid, preview for free | `GET /api/sessions/:id/educator` checks plan. Preview returns truncated model_answer + first gap summary. Full content in DB, gated at API. |
-| FR-011 | Real-time entitlement enforcement | `POST /api/sessions` checks `usage_periods.sessions_used` synchronously. Returns 403 with upgrade message if exceeded. |
-| FR-012 | Payment processor integration | Stripe Checkout + Customer Portal + webhooks as River jobs. See Section 10. |
+| FR-010 | Educator: full for paid, preview for free | `GET /api/sessions/:id/educator` checks plan. Preview returns first ~2000 chars of model_answer + first gap deep-dive entry. Full content never sent to free-tier clients. |
+| FR-011 | Real-time entitlement enforcement | `POST /api/sessions` uses atomic `UPDATE ... WHERE sessions_used < $limit`. Returns 403 with upgrade message if zero rows returned. |
+| FR-012 | Payment processor integration | Stripe Checkout + Customer Portal + webhooks processed synchronously. See Section 10. |
 
 ### 4. Interview Experience
 
@@ -802,11 +821,11 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 | FR-014 | Pre-session config (duration 1-180 min, TTS toggle) | `POST /api/sessions` accepts `duration_minutes` (1-180) and `tts_enabled`. For sessions >55 min, preemptive reconnection at 55-min intervals. See Section 4. |
 | FR-015 | Voice input (push-to-talk) and text input, both always available | `end_turn` accepts `input_method: "text"` or `"voice"`. Both always available in frontend. |
 | FR-016 | Multi-segment voice recording | Client-side only. MediaRecorder buffers segments, concatenates on submit, sends single base64 `end_turn`. No server-side segment management. |
-| FR-017 | STT transcription with edit window | Conductor transitions: `WaitingForInput` → `Transcribing` → `EditingTranscript`. Server sends `transcription_result`, waits for timeout or `transcription_edit`. See Section 4. |
+| FR-017 | STT transcription | Conductor transitions: `WaitingForInput` → `Transcribing` → `ProcessingInput`. Server sends `transcription_result` (read-only, no edit window). Transcription goes straight to the LLM for maximum fluidity. |
 | FR-018 | Token-by-token streaming | Anthropic SDK `Messages.Stream()`. Each delta sent as `interviewer_token` via WebSocket. |
 | FR-019 | TTS audio streamed concurrently with text | TTS accumulator observer fires TTS on sentence boundaries. `tts_chunk` messages sent concurrently with text tokens. See Section 5. |
-| FR-020 | Timer with 5-min warning and overtime | Conductor goroutine sends `timer_warning` and `timer_overtime` via dedicated channels. Timer state survives reconnection (recalculated from `started_at`). |
-| FR-021 | Session ends on candidate action or interviewer wrap-up | Client sends `end_session`. Interviewer's time-aware prompt generates closing message. Conductor transitions to `Ending`. |
+| FR-020 | Timer with warning and overtime | Warning at `clamp(2, 5, round(duration / 9))` minutes remaining. Conductor sends `timer_warning` and `timer_overtime` via dedicated channels. Session auto-ends 2 minutes after overtime. Timer state recalculated from `started_at` on reconnect. |
+| FR-021 | Session ends on candidate action | Client sends `end_session`. Conductor transitions to `Ending`. The interviewer prompts wrap-up via time-aware instructions but does not end the session; only the candidate or the 2-minute overtime cutoff ends it. |
 | FR-022 | Connection drop: state preserved, can reconnect and resume | Messages persisted on every turn. Session stays `active` on disconnect. `session_init` with `last_seq` triggers `reconnect_state`. See Section 4, Reconnection. |
 | FR-023 | No pause/resume, single sitting | No pause endpoint. Timer runs continuously from `started_at`. |
 | FR-024 | Chrome and Safari minimum | Standard WebSocket API, MediaRecorder API (Opus/WebM). Supported in Chrome and Safari. |
@@ -822,7 +841,7 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 | FR-029 | Answer clarifying questions collaboratively | Behavioral rules in system prompt. |
 | FR-030 | Probe with "why" | Probing instruction in system prompt. |
 | FR-031 | Introduce constraints at midpoint | Elapsed/remaining time injected into prompt each turn. Midpoint instruction activates based on time. |
-| FR-032 | Track coverage across 7 areas | Coverage areas listed in prompt. Model tracks discussed/uncovered. |
+| FR-032 | Track coverage across 7 areas | Coverage areas listed in system prompt. The LLM tracks coverage from the full transcript each turn. No server-side coverage state. |
 | FR-033 | Push past hand-waving | Anti-hand-waving instruction in prompt. |
 | FR-034 | Never validate design | Neutrality instruction in prompt. |
 | FR-035 | Keep responses to 2-4 sentences | Length constraint in prompt. |
@@ -860,7 +879,7 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 | FR | Requirement | Design |
 |---|---|---|
 | FR-054 | Analyze complete history of reviewed, non-archived sessions | Coach prompt built from all `status = 'reviewed' AND archived = FALSE` sessions for the user. |
-| FR-055 | Narrative + gap analysis + optional custom question | Parsed into `coach_analyses`: `narrative`, `weakest_dimension`, `improving_dimensions`, `topic_gaps`, optional `suggested_question_id`. |
+| FR-055 | Narrative + gap analysis + optional custom question | Parsed into `coach_analyses`: `narrative` (includes thinking patterns and metacognitive coaching as unstructured text), `weakest_dimension`, `improving_dimensions`, `topic_gaps`, optional `suggested_question_id`. |
 | FR-056 | Coach-generated questions in personal question bank | Inserted into `questions` with `source = 'coach_generated'`, `user_id` set, `coach_rationale` populated. |
 | FR-057 | Coach briefs interviewer | When `config_coach_briefing = true`, latest `coach_analyses` appended to interviewer prompt. See FR-038. |
 | FR-058 | Debounced (no re-run if no new sessions) | `POST /api/coach/analyze` compares `sessions_analyzed` array against current reviewed sessions. Force via `?force=true`. |
@@ -885,7 +904,7 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 |---|---|---|
 | FR-068 | Status: active → completed → evaluating → reviewed / evaluation_failed | `interview_sessions.status` CHECK constraint. Transitions enforced in application code. |
 | FR-069 | Archivable, soft-hidden, excluded from coach, restorable | `archived` boolean. Default views filter `WHERE archived = FALSE`. |
-| FR-070 | Archive/unarchive individually or bulk | `PATCH /api/sessions/:id/archive`. Bulk via array of IDs in request body. |
+| FR-070 | Archive/unarchive individually or bulk | `PATCH /api/sessions/:id/archive` for single. `POST /api/sessions/archive-bulk` with `{ session_ids: [...] }` for bulk. |
 | FR-071 | Full transcript preserved | `messages` table. Every message persisted immediately on creation. |
 | FR-072 | Session metadata (duration, turns, timestamps, config) | All columns on `interview_sessions`. |
 | FR-073 | History view with scores and metadata | `GET /api/sessions` joins `interview_sessions` + `evaluations` + `questions`. |
@@ -898,7 +917,7 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 | FR | Requirement | Design |
 |---|---|---|
 | FR-077 | Every LLM request logged (role, prompt, response, model, tokens, cost, latency) | `llm_calls` for metrics, `llm_call_content` for full prompt/response. Written in same transaction. See Section 11. |
-| FR-078 | Every user action logged | `user_events` table with `event_type` and `metadata` JSONB. |
+| FR-078 | Every user action logged | `user_events` table with `event_type` (session_start, turn_submitted, session_ended, evaluation_triggered, educator_requested, coach_triggered) and `metadata` JSONB. Page views excluded — low signal relative to other events. |
 | FR-079 | Every system event logged | Structured JSON to stdout → Cloud Logging. All include trace_id, session_id, user_id. |
 | FR-080 | Per-session and per-candidate cost breakdowns | `SELECT role, SUM(estimated_cost) FROM llm_calls WHERE session_id = $1 GROUP BY role`. |
 | FR-081 | Latency at each stage | OTel spans: STT, LLM time-to-first-token, total LLM, TTS, end-to-end turn. `llm_calls.latency_ms`. |
@@ -911,9 +930,9 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 | FR | Requirement | Design |
 |---|---|---|
 | FR-085 | Rate limits on API and WebSocket | Per-user token bucket in Postgres. In-memory per-connection limit for WebSocket (ephemeral, dies with connection). See Section 13. |
-| FR-086 | Real-time entitlement enforcement | Same as FR-011. Also checked at educator request for feature gating. |
+| FR-086 | Real-time entitlement enforcement | Same as FR-011. Also checked at educator request and coach endpoints for feature gating. |
 | FR-087 | Content moderation | Interviewer prompt includes jailbreak detection. Pre-LLM scan for injection patterns. Flagged messages logged to `user_events`. |
-| FR-088 | Account abuse prevention | Email verification required. Account creation rate-limited per IP. Browser fingerprint flags suspicious patterns. |
+| FR-088 | Account abuse prevention | Email verification required. Account creation rate-limited per IP. Browser fingerprint flags suspicious patterns. Credential sharing detection not needed — billing model naturally disincentivizes it. |
 
 ### 13. Data Retention & Privacy
 
@@ -921,9 +940,9 @@ Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design
 |---|---|---|
 | FR-089 | GDPR compliance | Lawful basis: contract + legitimate interest. Data export, erasure, consent implemented. See Section 12. |
 | FR-090 | Indefinite storage unless GDPR deletion | No automatic expiration on any table or GCS object. |
-| FR-091 | Audio recordings preserved | GCS at `audio/{session_id}/input/{message_id}.webm` and `output/{message_id}.mp3`. Referenced via `messages.audio_url`. |
+| FR-091 | Audio recordings preserved | GCS at `audio/{session_id}/input/{message_id}.webm` (written inline by conductor after STT) and `output/{message_id}.mp3` (written by TTS accumulator in `OnDone`). Referenced via `messages.audio_url`. |
 | FR-092 | All raw LLM responses preserved | `llm_call_content` as JSONB. Queryable via SQL joins. |
-| FR-093 | Complete data export on request | `GET /api/me/export` → River job → ZIP → GCS signed URL → email link. |
+| FR-093 | Complete data export on request | `GET /api/me/export` → River job → ZIP → GCS signed URL → email link. Includes: profile, sessions, transcripts, evaluations, annotations, educator analyses, coach analyses, custom + coach-generated questions, audio files. Excludes: `llm_calls`/`llm_call_content`, `user_events`. |
 | FR-094 | Deletion/anonymization for GDPR + audit integrity | Soft delete, 30-day grace, anonymize PII, retain anonymized aggregates. Cloud Logging not deleted (no PII after anonymization). |
 
 ### 14. Notifications
