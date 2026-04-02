@@ -6,23 +6,39 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 )
 
+// Jobs is the interface for enqueueing and stopping background jobs.
+// Satisfied by *river.Client in production, NopJobs in tests.
+type Jobs interface {
+	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
+	Stop(ctx context.Context) error
+}
+
+// NopJobs is a no-op implementation of Jobs for testing.
+type NopJobs struct{}
+
+func (NopJobs) Insert(context.Context, river.JobArgs, *river.InsertOpts) (*rivertype.JobInsertResult, error) {
+	return &rivertype.JobInsertResult{}, nil
+}
+
+func (NopJobs) Stop(context.Context) error { return nil }
+
 // Backend holds shared dependencies and business logic. Handlers call its
 // methods; it owns the database pool and River client lifecycle.
 type Backend struct {
-	Pool  *pgxpool.Pool
-	River *river.Client[pgx.Tx]
-	cfg   *config.Config
+	Pool *pgxpool.Pool
+	Jobs Jobs
+	cfg  *config.Config
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
@@ -73,9 +89,9 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	return &Backend{
-		Pool:  pool,
-		River: riverClient,
-		cfg:   cfg,
+		Pool: pool,
+		Jobs: riverClient,
+		cfg:  cfg,
 	}, nil
 }
 
@@ -92,7 +108,7 @@ func (b *Backend) Close() error {
 	timeout := time.Duration(b.cfg.River.ShutdownTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := b.River.Stop(ctx); err != nil {
+	if err := b.Jobs.Stop(ctx); err != nil {
 		slog.Warn("river stop error", "error", err)
 	}
 	slog.Info("river stopped")

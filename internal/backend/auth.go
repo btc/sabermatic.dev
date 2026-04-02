@@ -91,23 +91,21 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	// Enqueue verification email (best-effort; River may be nil in tests).
-	if b.River != nil {
-		signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
-		token, err := signer.Sign(user.ID, "verify-email", b.cfg.Auth.VerifyTokenTTL)
+	// Enqueue verification email (best-effort).
+	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+	token, err := signer.Sign(user.ID, "verify-email", b.cfg.Auth.VerifyTokenTTL)
+	if err != nil {
+		slog.Error("sign verification token", "error", err)
+	} else {
+		verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
+		_, err = b.Jobs.Insert(ctx, jobs.SendEmailArgs{
+			To:      user.Email,
+			Subject: "Verify your Drill account",
+			Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
+			HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL),
+		}, jobs.SendEmailInsertOpts(&b.cfg.Email))
 		if err != nil {
-			slog.Error("sign verification token", "error", err)
-		} else {
-			verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
-			_, err = b.River.Insert(ctx, jobs.SendEmailArgs{
-				To:      user.Email,
-				Subject: "Verify your Drill account",
-				Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
-				HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL),
-			}, jobs.SendEmailInsertOpts(&b.cfg.Email))
-			if err != nil {
-				slog.Error("enqueue verification email", "error", err)
-			}
+			slog.Error("enqueue verification email", "error", err)
 		}
 	}
 
@@ -212,14 +210,12 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 		token, _ := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
 		resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
 
-		if b.River != nil {
-			b.River.Insert(ctx, jobs.SendEmailArgs{
-				To:      user.Email,
-				Subject: "Reset your Drill password",
-				Text:    "Click here to reset your password: " + resetURL,
-				HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
-			}, jobs.SendEmailInsertOpts(&b.cfg.Email))
-		}
+		b.Jobs.Insert(ctx, jobs.SendEmailArgs{ //nolint:errcheck
+			To:      user.Email,
+			Subject: "Reset your Drill password",
+			Text:    "Click here to reset your password: " + resetURL,
+			HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
+		}, jobs.SendEmailInsertOpts(&b.cfg.Email))
 	}
 
 	// Always nil to prevent email enumeration.
