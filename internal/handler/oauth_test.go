@@ -2,11 +2,15 @@ package handler_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gorilla/csrf"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
 )
@@ -247,4 +251,50 @@ func TestOAuthLogin_ReactivateDeletedUser(t *testing.T) {
 	oauthAccts, err := queries.GetOAuthAccountsByUser(ctx, reactivated.ID)
 	require.NoError(t, err)
 	require.Len(t, oauthAccts, 1)
+}
+
+func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
+	cfg := loadTestConfig(t)
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	csrfMiddleware := csrf.Protect(
+		csrfKey,
+		csrf.Secure(false),
+		csrf.HttpOnly(false),
+		csrf.CookieName("drill_csrf"),
+		csrf.Path("/"),
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	protected := csrfMiddleware(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/test", nil)
+	w := httptest.NewRecorder()
+	protected.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestCSRF_AllowsGetRequests(t *testing.T) {
+	cfg := loadTestConfig(t)
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	csrfMiddleware := csrf.Protect(
+		csrfKey,
+		csrf.Secure(false),
+		csrf.HttpOnly(false),
+		csrf.CookieName("drill_csrf"),
+		csrf.Path("/"),
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	protected := csrfMiddleware(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	w := httptest.NewRecorder()
+	protected.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
 }
