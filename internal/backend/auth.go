@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/btc/drill/internal/auth"
@@ -68,7 +69,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 	p.DisplayName = strings.TrimSpace(p.DisplayName)
 
 	if p.Email == "" || p.Password == "" || p.DisplayName == "" {
-		return nil, fmt.Errorf("email, password, and display_name are required")
+		return nil, ErrMissingFields
 	}
 	if len(p.Password) < 8 || len(p.Password) > 128 {
 		return nil, ErrPasswordLength
@@ -138,6 +139,9 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (*LoginResult, error
 	if err != nil {
 		// Constant-time: run dummy bcrypt to prevent timing oracle.
 		auth.CheckPassword(dummyBcryptHash, "x")
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("login: get user by email", "error", err)
+		}
 		return nil, ErrInvalidCredentials
 	}
 
@@ -211,8 +215,8 @@ func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
 }
 
 // ForgotPassword enqueues a password-reset email if the user exists.
-// Returns nil when user is not found (enumeration prevention).
-// Returns actual error for DB/system failures.
+// Returns ErrUserNotFound when the email is not registered (caller decides HTTP policy).
+// Returns a wrapped error for any DB or system failure.
 func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 	email = strings.TrimSpace(strings.ToLower(email))
 
@@ -220,22 +224,27 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 	user, err := queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // User not found — silent, prevent enumeration.
+			return ErrUserNotFound
 		}
-		return fmt.Errorf("forgot password: %w", err) // Real DB error.
+		return fmt.Errorf("forgot password: lookup user: %w", err)
 	}
 
 	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
-	token, _ := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
+	token, err := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
+	if err != nil {
+		return fmt.Errorf("forgot password: sign token: %w", err)
+	}
 	resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
 
-	b.Jobs.Insert(ctx, jobs.SendEmailArgs{ //nolint:errcheck
+	_, err = b.Jobs.Insert(ctx, jobs.SendEmailArgs{
 		To:      user.Email,
 		Subject: "Reset your Drill password",
 		Text:    "Click here to reset your password: " + resetURL,
 		HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
 	}, jobs.SendEmailInsertOpts(&b.cfg.Email))
-
+	if err != nil {
+		return fmt.Errorf("forgot password: enqueue email: %w", err)
+	}
 	return nil
 }
 
@@ -291,6 +300,9 @@ func parseClientIP(remoteAddr string) *netip.Addr {
 // isDuplicateKeyError returns true if the error is a Postgres unique-violation
 // (SQLSTATE 23505).
 func isDuplicateKeyError(err error) bool {
-	return strings.Contains(err.Error(), "23505") ||
-		strings.Contains(err.Error(), "duplicate key")
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }
