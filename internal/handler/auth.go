@@ -53,8 +53,8 @@ func Signup(b *Backend) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email, password, and display_name are required"})
 			return
 		}
-		if len(req.Password) < 8 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+		if len(req.Password) < 8 || len(req.Password) > 128 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be between 8 and 128 characters"})
 			return
 		}
 
@@ -325,8 +325,8 @@ func ResetPassword(b *Backend) http.HandlerFunc {
 			return
 		}
 
-		if len(req.Password) < 8 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+		if len(req.Password) < 8 || len(req.Password) > 128 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be between 8 and 128 characters"})
 			return
 		}
 
