@@ -59,8 +59,9 @@ type LoginResult struct {
 }
 
 // Signup creates a new user account, hashes the password, and enqueues a
-// verification email. Returns ErrPasswordLength or ErrDuplicateEmail on
-// validation/constraint failures.
+// verification email. User creation and email enqueue are atomic: both
+// succeed or both roll back. Returns ErrPasswordLength or ErrDuplicateEmail
+// on validation/constraint failures.
 func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, error) {
 	// Normalize.
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
@@ -79,8 +80,14 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	// Insert user.
-	queries := db.New(b.Pool)
+	// Transaction: create user + enqueue verification email atomically.
+	tx, err := b.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	queries := db.New(tx)
 	user, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:        p.Email,
 		PasswordHash: pgtype.Text{String: hash, Valid: true},
@@ -93,22 +100,25 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	// Enqueue verification email (best-effort).
+	// Enqueue verification email within the same transaction.
 	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
 	token, err := signer.Sign(user.ID, "verify-email", b.cfg.Auth.VerifyTokenTTL)
 	if err != nil {
-		slog.Error("sign verification token", "error", err)
-	} else {
-		verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
-		_, err = b.Jobs.Insert(ctx, jobs.SendEmailArgs{
-			To:      user.Email,
-			Subject: "Verify your Drill account",
-			Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
-			HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL),
-		}, jobs.SendEmailInsertOpts(&b.cfg.Email))
-		if err != nil {
-			slog.Error("enqueue verification email", "error", err)
-		}
+		return nil, fmt.Errorf("sign verification token: %w", err)
+	}
+	verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
+	_, err = b.Jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{
+		To:      user.Email,
+		Subject: "Verify your Drill account",
+		Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
+		HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL),
+	}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+	if err != nil {
+		return nil, fmt.Errorf("enqueue verification email: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit signup: %w", err)
 	}
 
 	return &SignupResult{
@@ -257,7 +267,9 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) erro
 	}
 
 	// Invalidate all sessions.
-	_ = queries.DeleteUserAuthSessions(ctx, userID)
+	if err := queries.DeleteUserAuthSessions(ctx, userID); err != nil {
+		return fmt.Errorf("delete user sessions: %w", err)
+	}
 	return nil
 }
 

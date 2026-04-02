@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -12,6 +13,7 @@ import (
 // Satisfied by *river.Client in production, RecordingJobs in tests.
 type Jobs interface {
 	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
+	InsertTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
 	Stop(ctx context.Context) error
 }
 
@@ -22,6 +24,13 @@ type RecordingJobs struct {
 }
 
 func (r *RecordingJobs) Insert(_ context.Context, args river.JobArgs, _ *river.InsertOpts) (*rivertype.JobInsertResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.inserted = append(r.inserted, args)
+	return &rivertype.JobInsertResult{}, nil
+}
+
+func (r *RecordingJobs) InsertTx(_ context.Context, _ pgx.Tx, args river.JobArgs, _ *river.InsertOpts) (*rivertype.JobInsertResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.inserted = append(r.inserted, args)
