@@ -15,7 +15,9 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/gorilla/csrf"
 
+	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/handler"
@@ -62,12 +64,27 @@ func runWithContext(ctx context.Context) error {
 	}
 	defer b.Close()
 
+	// OAuth providers (optional — unconfigured providers return 404).
+	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
+	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
+
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 
+	// CSRF protection wraps the entire mux.
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	csrfMiddleware := csrf.Protect(
+		csrfKey,
+		csrf.Secure(cfg.Auth.SecureCookies()),
+		csrf.HttpOnly(false),
+		csrf.CookieName("drill_csrf"),
+		csrf.Path("/"),
+		csrf.SameSite(csrf.SameSiteLaxMode),
+	)
+
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: mux,
+		Handler: csrfMiddleware(mux),
 	}
 
 	errCh := make(chan error, 1)
