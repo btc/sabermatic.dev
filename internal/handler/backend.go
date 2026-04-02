@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river/rivermigrate"
 
 	"github.com/btc/drill/internal/config"
+	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -49,7 +50,7 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 	}
 
 	// River client
-	emailSender := cfg.Email.NewSender()
+	emailSender := email.NewSender(&cfg.Email)
 	workers := jobs.RegisterWorkers(cfg, emailSender)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{

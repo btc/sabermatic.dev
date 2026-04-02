@@ -3,10 +3,8 @@ package config
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
-	"github.com/btc/drill/internal/email"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sethvargo/go-envconfig"
 )
@@ -21,12 +19,13 @@ type Config struct {
 }
 
 type Server struct {
-	Port int `env:"SERVER_PORT,default=8080"`
+	Port               int `env:"SERVER_PORT,default=8080"`
+	ShutdownTimeoutSec int `env:"SERVER_SHUTDOWN_TIMEOUT_SEC,default=30"`
 }
 
 type Database struct {
 	URL         string `env:"DATABASE_URL,required"`
-	MaxPoolSize int32  `env:"DATABASE_MAX_POOL_SIZE,default=5"`
+	MaxPoolConns int32  `env:"DATABASE_MAX_POOL_SIZE,default=5"`
 }
 
 // NewPool creates a pgxpool connected to the configured database.
@@ -35,7 +34,7 @@ func (d *Database) NewPool(ctx context.Context) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
-	poolCfg.MaxConns = d.MaxPoolSize
+	poolCfg.MaxConns = d.MaxPoolConns
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
@@ -71,16 +70,6 @@ type Email struct {
 	FromAddress     string        `env:"EMAIL_FROM,default=noreply@drill.dev"`
 	SendTimeout     time.Duration `env:"EMAIL_SEND_TIMEOUT,default=1m"`
 	MaxSendAttempts int           `env:"EMAIL_MAX_SEND_ATTEMPTS,default=3"`
-}
-
-// NewSender creates the appropriate email sender based on configuration.
-// Returns a LogSender if Mailgun is not configured (test-key default).
-func (e *Email) NewSender() email.Sender {
-	if e.MailgunAPIKey == "test-key" {
-		slog.Warn("using log email sender (MAILGUN_API_KEY not configured)")
-		return email.NewLogSender()
-	}
-	return email.NewMailgunSender(e.MailgunAPIKey, e.MailgunDomain, e.FromAddress)
 }
 
 type River struct {

@@ -18,7 +18,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 	pool := setupTestDB(t)
 	b := &handler.Backend{Pool: pool}
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	b.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()

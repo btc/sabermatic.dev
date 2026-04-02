@@ -6,7 +6,7 @@ import (
 )
 
 // AdminJobsPlaceholder returns info about where River UI will be available.
-func AdminJobsPlaceholder(b *Backend) http.HandlerFunc {
+func (b *Backend) AdminJobsPlaceholder() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{

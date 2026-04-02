@@ -62,7 +62,7 @@ func runWithContext(ctx context.Context) error {
 	defer b.Close()
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	b.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
@@ -82,7 +82,8 @@ func runWithContext(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		slog.Info("shutting down")
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		shutdownTimeout := time.Duration(cfg.Server.ShutdownTimeoutSec) * time.Second
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer shutdownCancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Warn("http shutdown error", "error", err)
