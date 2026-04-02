@@ -53,10 +53,10 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 	workers := jobs.RegisterWorkers(emailSender)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: cfg.River.DefaultWorkers},
-			"notifications":   {MaxWorkers: cfg.River.NotifyWorkers},
-			"ai":              {MaxWorkers: cfg.River.AIWorkers},
-			"maintenance":     {MaxWorkers: cfg.River.MaintWorkers},
+			river.QueueDefault: {MaxWorkers: cfg.River.NumDefaultWorkers},
+			"notifications":   {MaxWorkers: cfg.River.NumNotifyWorkers},
+			"ai":              {MaxWorkers: cfg.River.NumAIWorkers},
+			"maintenance":     {MaxWorkers: cfg.River.NumMaintWorkers},
 		},
 		Workers: workers,
 	})
@@ -79,7 +79,7 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 
 // Close stops River (finishing in-flight jobs) then closes the database pool.
 func (b *Backend) Close() {
-	timeout := time.Duration(b.cfg.River.ShutdownTimeout) * time.Second
+	timeout := time.Duration(b.cfg.River.ShutdownTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := b.River.Stop(ctx); err != nil {

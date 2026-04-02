@@ -81,11 +81,11 @@ func (e *Email) NewSender() email.Sender {
 }
 
 type River struct {
-	ShutdownTimeout int `env:"RIVER_SHUTDOWN_TIMEOUT_SEC,default=15"`
-	DefaultWorkers  int `env:"RIVER_DEFAULT_WORKERS,default=5"`
-	NotifyWorkers   int `env:"RIVER_NOTIFY_WORKERS,default=5"`
-	AIWorkers       int `env:"RIVER_AI_WORKERS,default=10"`
-	MaintWorkers    int `env:"RIVER_MAINT_WORKERS,default=2"`
+	ShutdownTimeoutSec   int `env:"RIVER_SHUTDOWN_TIMEOUT_SEC,default=15"`
+	NumDefaultWorkers    int `env:"RIVER_DEFAULT_WORKERS,default=5"`
+	NumNotifyWorkers     int `env:"RIVER_NOTIFY_WORKERS,default=5"`
+	NumAIWorkers         int `env:"RIVER_AI_WORKERS,default=10"`
+	NumMaintWorkers      int `env:"RIVER_MAINT_WORKERS,default=2"`
 }
 
 func Load() (*Config, error) {
