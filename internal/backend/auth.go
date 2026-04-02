@@ -102,7 +102,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 	}
 
 	// Enqueue verification email within the same transaction.
-	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+	signer := auth.NewTokenSigner(auth.DeriveKey(b.cfg.Auth.TokenSecret, "hmac-tokens"))
 	token, err := signer.Sign(user.ID, "verify-email", b.cfg.Auth.VerifyTokenTTL)
 	if err != nil {
 		return nil, fmt.Errorf("sign verification token: %w", err)
@@ -201,7 +201,7 @@ func (b *Backend) Logout(ctx context.Context, sessionToken string) error {
 // VerifyEmail marks a user's email as verified using the signed token.
 // Returns ErrInvalidToken if the token is invalid or expired.
 func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
-	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+	signer := auth.NewTokenSigner(auth.DeriveKey(b.cfg.Auth.TokenSecret, "hmac-tokens"))
 	userID, err := signer.Verify(token, "verify-email")
 	if err != nil {
 		return ErrInvalidToken
@@ -229,7 +229,7 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 		return fmt.Errorf("forgot password: lookup user: %w", err)
 	}
 
-	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+	signer := auth.NewTokenSigner(auth.DeriveKey(b.cfg.Auth.TokenSecret, "hmac-tokens"))
 	token, err := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
 	if err != nil {
 		return fmt.Errorf("forgot password: sign token: %w", err)
@@ -256,7 +256,7 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) erro
 		return ErrPasswordLength
 	}
 
-	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+	signer := auth.NewTokenSigner(auth.DeriveKey(b.cfg.Auth.TokenSecret, "hmac-tokens"))
 	userID, err := signer.Verify(p.Token, "reset-password")
 	if err != nil {
 		return ErrInvalidToken

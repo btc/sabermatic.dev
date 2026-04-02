@@ -194,7 +194,7 @@ func TestVerifyEmail(t *testing.T) {
 	userID := signupResp["id"].(string)
 
 	// Generate verification token
-	signer := auth.NewTokenSigner(cfg.Auth.TokenSecret)
+	signer := auth.NewTokenSigner(auth.DeriveKey(cfg.Auth.TokenSecret, "hmac-tokens"))
 	uid, _ := uuid.Parse(userID)
 	token, _ := signer.Sign(uid, "verify-email", cfg.Auth.VerifyTokenTTL)
 
@@ -245,7 +245,7 @@ func TestForgotAndResetPassword(t *testing.T) {
 	require.NoError(t, err)
 
 	// Generate reset token
-	signer := auth.NewTokenSigner(cfg.Auth.TokenSecret)
+	signer := auth.NewTokenSigner(auth.DeriveKey(cfg.Auth.TokenSecret, "hmac-tokens"))
 	token, _ := signer.Sign(user.ID, "reset-password", cfg.Auth.ResetTokenTTL)
 
 	// Reset password

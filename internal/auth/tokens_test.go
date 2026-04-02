@@ -10,7 +10,7 @@ import (
 )
 
 func TestTokens_SignAndVerify(t *testing.T) {
-	signer := auth.NewTokenSigner("test-secret-at-least-32-bytes!!")
+	signer := auth.NewTokenSigner(auth.DeriveKey("test-secret-at-least-32-bytes!!", "hmac-tokens"))
 	userID := uuid.New()
 
 	token, err := signer.Sign(userID, "verify-email", 1*time.Hour)
@@ -23,7 +23,7 @@ func TestTokens_SignAndVerify(t *testing.T) {
 }
 
 func TestTokens_Expired(t *testing.T) {
-	signer := auth.NewTokenSigner("test-secret-at-least-32-bytes!!")
+	signer := auth.NewTokenSigner(auth.DeriveKey("test-secret-at-least-32-bytes!!", "hmac-tokens"))
 	userID := uuid.New()
 
 	token, err := signer.Sign(userID, "verify-email", -1*time.Hour)
@@ -35,7 +35,7 @@ func TestTokens_Expired(t *testing.T) {
 }
 
 func TestTokens_WrongPurpose(t *testing.T) {
-	signer := auth.NewTokenSigner("test-secret-at-least-32-bytes!!")
+	signer := auth.NewTokenSigner(auth.DeriveKey("test-secret-at-least-32-bytes!!", "hmac-tokens"))
 	userID := uuid.New()
 
 	token, err := signer.Sign(userID, "verify-email", 1*time.Hour)
@@ -47,7 +47,7 @@ func TestTokens_WrongPurpose(t *testing.T) {
 }
 
 func TestTokens_Tampered(t *testing.T) {
-	signer := auth.NewTokenSigner("test-secret-at-least-32-bytes!!")
+	signer := auth.NewTokenSigner(auth.DeriveKey("test-secret-at-least-32-bytes!!", "hmac-tokens"))
 	userID := uuid.New()
 
 	token, err := signer.Sign(userID, "verify-email", 1*time.Hour)

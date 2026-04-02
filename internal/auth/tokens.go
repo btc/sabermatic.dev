@@ -18,8 +18,10 @@ type TokenSigner struct {
 	secret []byte
 }
 
-func NewTokenSigner(secret string) *TokenSigner {
-	return &TokenSigner{secret: []byte(secret)}
+// NewTokenSigner creates a signer using the given key (should be an
+// HKDF-derived key, not a raw secret).
+func NewTokenSigner(key []byte) *TokenSigner {
+	return &TokenSigner{secret: key}
 }
 
 // Sign creates a token encoding the user ID, purpose, and expiry.
