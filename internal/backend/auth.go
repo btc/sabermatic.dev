@@ -22,6 +22,27 @@ import (
 // an email is registered. Generated with cost 12.
 var dummyBcryptHash = "$2a$12$LKpvXspMO/C6shvqXZwCVOgIw3YklCI48vEoUxpBu3TWm/ZePR.02"
 
+// SignupParams holds the parameters for Signup.
+type SignupParams struct {
+	Email       string
+	Password    string
+	DisplayName string
+}
+
+// LoginParams holds the parameters for Login.
+type LoginParams struct {
+	Email     string
+	Password  string
+	IP        string
+	UserAgent string
+}
+
+// ResetPasswordParams holds the parameters for ResetPassword.
+type ResetPasswordParams struct {
+	Token       string
+	NewPassword string
+}
+
 // SignupResult is returned by Signup on success.
 type SignupResult struct {
 	UserID uuid.UUID
@@ -38,20 +59,20 @@ type LoginResult struct {
 // Signup creates a new user account, hashes the password, and enqueues a
 // verification email. Returns ErrPasswordLength or ErrDuplicateEmail on
 // validation/constraint failures.
-func (b *Backend) Signup(ctx context.Context, email, password, displayName string) (*SignupResult, error) {
+func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, error) {
 	// Normalize.
-	email = strings.ToLower(strings.TrimSpace(email))
-	displayName = strings.TrimSpace(displayName)
+	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+	p.DisplayName = strings.TrimSpace(p.DisplayName)
 
-	if email == "" || password == "" || displayName == "" {
+	if p.Email == "" || p.Password == "" || p.DisplayName == "" {
 		return nil, fmt.Errorf("email, password, and display_name are required")
 	}
-	if len(password) < 8 || len(password) > 128 {
+	if len(p.Password) < 8 || len(p.Password) > 128 {
 		return nil, ErrPasswordLength
 	}
 
 	// Hash password.
-	hash, err := auth.HashPassword(password, b.cfg.Auth.BcryptCost)
+	hash, err := auth.HashPassword(p.Password, b.cfg.Auth.BcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
@@ -59,9 +80,9 @@ func (b *Backend) Signup(ctx context.Context, email, password, displayName strin
 	// Insert user.
 	queries := db.New(b.Pool)
 	user, err := queries.CreateUser(ctx, db.CreateUserParams{
-		Email:        email,
+		Email:        p.Email,
 		PasswordHash: pgtype.Text{String: hash, Valid: true},
-		DisplayName:  displayName,
+		DisplayName:  p.DisplayName,
 	})
 	if err != nil {
 		if isDuplicateKeyError(err) {
@@ -98,12 +119,12 @@ func (b *Backend) Signup(ctx context.Context, email, password, displayName strin
 
 // Login authenticates a user by email/password, creates a session, and returns
 // the raw session token. Returns ErrInvalidCredentials on any auth failure.
-func (b *Backend) Login(ctx context.Context, email, password, remoteAddr, userAgent string) (*LoginResult, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
+func (b *Backend) Login(ctx context.Context, p LoginParams) (*LoginResult, error) {
+	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
 	// Look up user.
 	queries := db.New(b.Pool)
-	user, err := queries.GetUserByEmail(ctx, email)
+	user, err := queries.GetUserByEmail(ctx, p.Email)
 	if err != nil {
 		// Constant-time: run dummy bcrypt to prevent timing oracle.
 		auth.CheckPassword(dummyBcryptHash, "x")
@@ -117,7 +138,7 @@ func (b *Backend) Login(ctx context.Context, email, password, remoteAddr, userAg
 	}
 
 	// Compare password.
-	if err := auth.CheckPassword(user.PasswordHash.String, password); err != nil {
+	if err := auth.CheckPassword(user.PasswordHash.String, p.Password); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -128,14 +149,14 @@ func (b *Backend) Login(ctx context.Context, email, password, remoteAddr, userAg
 	}
 
 	// Parse client IP.
-	ipAddr := parseClientIP(remoteAddr)
+	ipAddr := parseClientIP(p.IP)
 
 	_, err = queries.CreateAuthSession(ctx, db.CreateAuthSessionParams{
 		UserID:    user.ID,
 		TokenHash: tokenHash,
 		ExpiresAt: time.Now().Add(b.cfg.Auth.SessionTTL),
 		IpAddress: ipAddr,
-		UserAgent: pgtype.Text{String: userAgent, Valid: userAgent != ""},
+		UserAgent: pgtype.Text{String: p.UserAgent, Valid: p.UserAgent != ""},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create auth session: %w", err)
@@ -208,18 +229,18 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 // ResetPassword verifies the reset token, updates the password, and deletes
 // all sessions for the user. Returns ErrPasswordLength or ErrInvalidToken on
 // validation failures.
-func (b *Backend) ResetPassword(ctx context.Context, token, newPassword string) error {
-	if len(newPassword) < 8 || len(newPassword) > 128 {
+func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) error {
+	if len(p.NewPassword) < 8 || len(p.NewPassword) > 128 {
 		return ErrPasswordLength
 	}
 
 	signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
-	userID, err := signer.Verify(token, "reset-password")
+	userID, err := signer.Verify(p.Token, "reset-password")
 	if err != nil {
 		return ErrInvalidToken
 	}
 
-	hash, err := auth.HashPassword(newPassword, b.cfg.Auth.BcryptCost)
+	hash, err := auth.HashPassword(p.NewPassword, b.cfg.Auth.BcryptCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}

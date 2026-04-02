@@ -29,7 +29,11 @@ func Signup(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		result, err := b.Signup(r.Context(), req.Email, req.Password, req.DisplayName)
+		result, err := b.Signup(r.Context(), backend.SignupParams{
+			Email:       req.Email,
+			Password:    req.Password,
+			DisplayName: req.DisplayName,
+		})
 		if err != nil {
 			switch {
 			case errors.Is(err, backend.ErrDuplicateEmail):
@@ -66,7 +70,12 @@ func Login(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		result, err := b.Login(r.Context(), req.Email, req.Password, r.RemoteAddr, r.UserAgent())
+		result, err := b.Login(r.Context(), backend.LoginParams{
+			Email:     req.Email,
+			Password:  req.Password,
+			IP:        r.RemoteAddr,
+			UserAgent: r.UserAgent(),
+		})
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidCredentials) {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
@@ -175,7 +184,10 @@ func ResetPassword(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		if err := b.ResetPassword(r.Context(), req.Token, req.Password); err != nil {
+		if err := b.ResetPassword(r.Context(), backend.ResetPasswordParams{
+			Token:       req.Token,
+			NewPassword: req.Password,
+		}); err != nil {
 			switch {
 			case errors.Is(err, backend.ErrPasswordLength):
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
