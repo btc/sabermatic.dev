@@ -20,8 +20,7 @@ import (
 type Backend struct {
 	Pool  *pgxpool.Pool
 	River *river.Client[pgx.Tx]
-
-	riverShutdownTimeout time.Duration
+	cfg   *config.Config
 }
 
 // NewBackend creates a pool, runs River migrations, and starts the River client.
@@ -72,15 +71,16 @@ func NewBackend(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	return &Backend{
-		Pool:                 pool,
-		River:                riverClient,
-		riverShutdownTimeout: time.Duration(cfg.River.ShutdownTimeout) * time.Second,
+		Pool:  pool,
+		River: riverClient,
+		cfg:   cfg,
 	}, nil
 }
 
 // Close stops River (finishing in-flight jobs) then closes the database pool.
 func (b *Backend) Close() {
-	ctx, cancel := context.WithTimeout(context.Background(), b.riverShutdownTimeout)
+	timeout := time.Duration(b.cfg.River.ShutdownTimeout) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := b.River.Stop(ctx); err != nil {
 		slog.Warn("river stop error", "error", err)
