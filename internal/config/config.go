@@ -118,8 +118,8 @@ func validate(cfg *Config) error {
 	if cfg.Speech.OpenAIAPIKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
 	}
-	if cfg.Auth.TokenSecret == "" {
-		return fmt.Errorf("AUTH_TOKEN_SECRET is required")
+	if len(cfg.Auth.TokenSecret) < 32 {
+		return fmt.Errorf("AUTH_TOKEN_SECRET must be at least 32 characters")
 	}
 	return nil
 }

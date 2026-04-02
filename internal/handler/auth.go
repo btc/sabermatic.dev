@@ -41,13 +41,10 @@ func Signup(b *backend.Backend) http.HandlerFunc {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			case errors.Is(err, backend.ErrPasswordLength):
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			case errors.Is(err, backend.ErrMissingFields):
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			default:
-				// Check for validation errors (missing fields) — they start with known text.
-				if err.Error() == "email, password, and display_name are required" {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-				} else {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
 			return
 		}
@@ -169,10 +166,10 @@ func ForgotPassword(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		if err := b.ForgotPassword(r.Context(), req.Email); err != nil {
+		err := b.ForgotPassword(r.Context(), req.Email)
+		if err != nil && !errors.Is(err, backend.ErrUserNotFound) {
 			slog.Error("forgot password", "error", err)
 		}
-
 		// Always 200 to prevent email enumeration.
 		writeJSON(w, http.StatusOK, map[string]string{"status": "if that email exists, a reset link has been sent"})
 	}
