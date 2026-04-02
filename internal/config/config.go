@@ -16,6 +16,7 @@ type Config struct {
 	Speech   Speech
 	Email    Email
 	River    River
+	Auth     Auth
 }
 
 type Server struct {
@@ -80,6 +81,15 @@ type River struct {
 	NumMaintWorkers      int `env:"RIVER_MAINT_WORKERS,default=2"`
 }
 
+type Auth struct {
+	TokenSecret    string        `env:"AUTH_TOKEN_SECRET,required"`
+	SessionTTL     time.Duration `env:"AUTH_SESSION_TTL,default=720h"`
+	VerifyTokenTTL time.Duration `env:"AUTH_VERIFY_TOKEN_TTL,default=24h"`
+	ResetTokenTTL  time.Duration `env:"AUTH_RESET_TOKEN_TTL,default=1h"`
+	BcryptCost     int           `env:"AUTH_BCRYPT_COST,default=12"`
+	BaseURL        string        `env:"BASE_URL,default=http://localhost:3000"`
+}
+
 func Load() (*Config, error) {
 	var cfg Config
 	if err := envconfig.Process(context.Background(), &cfg); err != nil {
@@ -100,6 +110,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Speech.OpenAIAPIKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
+	}
+	if cfg.Auth.TokenSecret == "" {
+		return fmt.Errorf("AUTH_TOKEN_SECRET is required")
 	}
 	return nil
 }
