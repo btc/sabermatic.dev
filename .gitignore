@@ -41,3 +41,5 @@ frontend/dist/
 
 # Claude Code / Superpowers
 .superpowers/
+# Go binary
+/drill
