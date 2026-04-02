@@ -15,13 +15,11 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 
 	"github.com/btc/drill/internal/config"
-	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -48,27 +46,20 @@ func run() error {
 }
 
 // runWithContext is separated from run() so integration tests can pass a cancellable context.
+// The ctx controls the shutdown signal only — long-lived resources (pool, River) use
+// context.Background() so they remain available during graceful shutdown.
 func runWithContext(ctx context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	poolCfg, err := pgxpool.ParseConfig(cfg.Database.URL)
+	// Pool uses background context — must outlive signal for graceful shutdown.
+	pool, err := cfg.Database.NewPool(context.Background())
 	if err != nil {
-		return fmt.Errorf("parse database url: %w", err)
-	}
-	poolCfg.MaxConns = int32(cfg.Database.MaxPoolSize)
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-	if err != nil {
-		return fmt.Errorf("create pool: %w", err)
+		return fmt.Errorf("database: %w", err)
 	}
 	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("ping database: %w", err)
-	}
 	slog.Info("database connected")
 
 	if err := runMigrations(cfg.Database.URL); err != nil {
@@ -80,7 +71,7 @@ func runWithContext(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create river migrator: %w", err)
 	}
-	riverRes, err := riverMigrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
+	riverRes, err := riverMigrator.Migrate(context.Background(), rivermigrate.DirectionUp, nil)
 	if err != nil {
 		return fmt.Errorf("river migrate: %w", err)
 	}
@@ -88,30 +79,23 @@ func runWithContext(ctx context.Context) error {
 		slog.Info("river migration applied", "version", v.Version)
 	}
 
-	// Set up email sender
-	var emailSender email.Sender
-	if cfg.Email.MailgunAPIKey == "test-key" {
-		slog.Warn("using log email sender (MAILGUN_API_KEY not configured)")
-		emailSender = email.NewLogSender()
-	} else {
-		emailSender = email.NewMailgunSender(cfg.Email.MailgunAPIKey, cfg.Email.MailgunDomain, cfg.Email.FromAddress)
-	}
-
 	// Set up River job queue
+	emailSender := cfg.Email.NewSender()
 	workers := jobs.RegisterWorkers(emailSender)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: 5},
-			"notifications":    {MaxWorkers: 5},
-			"ai":               {MaxWorkers: 10},
-			"maintenance":      {MaxWorkers: 2},
+			river.QueueDefault: {MaxWorkers: cfg.River.DefaultWorkers},
+			"notifications":   {MaxWorkers: cfg.River.NotifyWorkers},
+			"ai":              {MaxWorkers: cfg.River.AIWorkers},
+			"maintenance":     {MaxWorkers: cfg.River.MaintWorkers},
 		},
 		Workers: workers,
 	})
 	if err != nil {
 		return fmt.Errorf("create river client: %w", err)
 	}
-	if err := riverClient.Start(ctx); err != nil {
+	// River uses background context — we manage its lifecycle via Stop().
+	if err := riverClient.Start(context.Background()); err != nil {
 		return fmt.Errorf("start river: %w", err)
 	}
 	slog.Info("river started")
@@ -133,17 +117,22 @@ func runWithContext(ctx context.Context) error {
 		}
 	}()
 
+	// Wait for shutdown signal or server error.
+	// ctx cancellation only triggers the select — it does not cancel pool or River.
 	select {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
 		slog.Info("shutting down")
-		riverStopCtx, riverStopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+
+		riverStopTimeout := time.Duration(cfg.River.ShutdownTimeout) * time.Second
+		riverStopCtx, riverStopCancel := context.WithTimeout(context.Background(), riverStopTimeout)
 		defer riverStopCancel()
 		if err := riverClient.Stop(riverStopCtx); err != nil {
 			slog.Warn("river stop error", "error", err)
 		}
 		slog.Info("river stopped")
+
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer shutdownCancel()
 		return srv.Shutdown(shutdownCtx)
