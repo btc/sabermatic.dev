@@ -6,7 +6,7 @@ import (
 )
 
 // Health returns a handler that checks database connectivity.
-func Health(b *Backend) http.HandlerFunc {
+func (b *Backend) Health() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 

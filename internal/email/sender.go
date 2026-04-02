@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/btc/drill/internal/config"
 	"github.com/mailgun/mailgun-go/v5"
 )
 
@@ -22,20 +23,29 @@ type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-// MailgunSender sends emails via the Mailgun API.
-type MailgunSender struct {
-	mg     *mailgun.Client
-	domain string
-	from   string
+// NewSender creates the appropriate email sender based on configuration.
+// Returns a LogSender if Mailgun is not configured (test-key default).
+func NewSender(cfg *config.Email) Sender {
+	if cfg.MailgunAPIKey == "test-key" {
+		slog.Warn("using log email sender (MAILGUN_API_KEY not configured)")
+		return NewLogSender()
+	}
+	return newMailgunSender(cfg)
 }
 
-func NewMailgunSender(apiKey, domain, from string) *MailgunSender {
-	mg := mailgun.NewMailgun(apiKey)
-	return &MailgunSender{mg: mg, domain: domain, from: from}
+// MailgunSender sends emails via the Mailgun API.
+type MailgunSender struct {
+	mg  *mailgun.Client
+	cfg *config.Email
+}
+
+func newMailgunSender(cfg *config.Email) *MailgunSender {
+	mg := mailgun.NewMailgun(cfg.MailgunAPIKey)
+	return &MailgunSender{mg: mg, cfg: cfg}
 }
 
 func (s *MailgunSender) Send(ctx context.Context, msg Message) error {
-	m := mailgun.NewMessage(s.domain, s.from, msg.Subject, msg.Text, msg.To)
+	m := mailgun.NewMessage(s.cfg.MailgunDomain, s.cfg.FromAddress, msg.Subject, msg.Text, msg.To)
 	if msg.HTML != "" {
 		m.SetHTML(msg.HTML)
 	}
