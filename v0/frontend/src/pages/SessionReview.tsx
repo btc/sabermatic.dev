@@ -72,8 +72,12 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
         if (cancelled) return;
         if (data.status === "failed") {
           setEducatorState("error");
-        } else {
+        } else if (data.status === "generating") {
+          setEducatorState("generating");
+        } else if (data.status === "ok") {
           setEducatorState("exists");
+        } else {
+          setEducatorState("none");
         }
       })
       .catch(() => { if (!cancelled) setEducatorState("none"); });
@@ -94,10 +98,11 @@ export default function SessionReview({ sessionId }: SessionReviewProps) {
     pollRef.current = setInterval(async () => {
       try {
         const data: any = await api.sessions.educator(sid);
+        if (data.status === "generating") return; // keep polling
         if (pollRef.current) clearInterval(pollRef.current);
         if (data.status === "failed") {
           setEducatorState("error");
-        } else {
+        } else if (data.status === "ok") {
           setEducatorState("exists");
         }
       } catch {
