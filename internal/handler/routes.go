@@ -1,6 +1,10 @@
 package handler
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/btc/drill/internal/auth"
+)
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
 func RegisterRoutes(mux *http.ServeMux, b *Backend) {
@@ -14,4 +18,8 @@ func RegisterRoutes(mux *http.ServeMux, b *Backend) {
 	mux.HandleFunc("POST /api/auth/verify-email", VerifyEmail(b))
 	mux.HandleFunc("POST /api/auth/forgot-password", ForgotPassword(b))
 	mux.HandleFunc("POST /api/auth/reset-password", ResetPassword(b))
+
+	// User
+	requireAuth := auth.RequireAuth(b.Pool)
+	mux.Handle("GET /api/me", requireAuth(http.HandlerFunc(GetMe(b))))
 }
