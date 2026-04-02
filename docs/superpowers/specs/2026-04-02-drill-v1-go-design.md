@@ -269,7 +269,7 @@ Auth:
   POST   /api/auth/login               Email/password login
   POST   /api/auth/logout              Invalidate session
   GET    /api/auth/oauth/:provider     Start OAuth flow
-  GET    /api/auth/oauth/:provider/cb  OAuth callback
+  GET    /api/auth/oauth/:provider/callback  OAuth callback
   POST   /api/auth/forgot-password     Send reset email
   POST   /api/auth/reset-password      Reset with token
   POST   /api/auth/verify-email        Verify email token
@@ -774,16 +774,19 @@ Frontend built incrementally with shadcn/ui alongside each backend sub-project.
 | Phase | Scope | Frontend |
 |---|---|---|
 | 1. Foundation | Go scaffolding, DB schema, sqlc, config, health check | None |
-| 2. Auth | Users, OAuth, session cookies, middleware | Login/signup pages |
-| 3. Deployment | Dockerfile, Cloud Run, CI/CD, GCS bucket | None |
-| 4. Conductor | State machine, WebSocket, STT/TTS, LLM streaming | Interview page |
-| 5. Evaluation | Evaluator River job, annotations, validation | Results + SessionReview pages |
-| 6. Educator + Coach | Both AI roles, question generation | Learn page, Home coach card |
-| 7. Billing | Stripe, entitlements, usage tracking | Plan selector, upgrade prompts |
-| 8. Polish + UI | History, Home stats, score trends, bulk archive | Remaining UX |
-| 9. Observability + Admin | OTel, Cloud Trace, admin dashboard, alerts | Admin pages |
+| 2. River | River job queue, SendEmail worker, Mailgun sender | None |
+| 3a. Core Auth | Email/password, sessions, middleware, verify/reset | None |
+| 3b. OAuth | Google + GitHub OAuth, account linking, CSRF | None |
+| 4. Observability | OTel, structured logging, Cloud Trace, metrics | None |
+| 5. Deployment | Dockerfile, Cloud Run, CI/CD, GCS bucket | None |
+| 6. Conductor | State machine, WebSocket, STT/TTS, LLM streaming | Interview page |
+| 7. Evaluation | Evaluator River job, annotations, validation | Results + SessionReview pages |
+| 8. Educator + Coach | Both AI roles, question generation | Learn page, Home coach card |
+| 9. Billing | Stripe, entitlements, usage tracking | Plan selector, upgrade prompts |
+| 10. Polish + UI | History, Home stats, score trends, bulk archive | Remaining UX |
+| 11. Admin | Admin dashboard, alerts, River UI | Admin pages |
 
-Each phase gets its own implementation plan. Phase 1 is the starting point.
+Each phase gets its own implementation plan. Phases 1–3a are complete on main.
 
 ---
 
