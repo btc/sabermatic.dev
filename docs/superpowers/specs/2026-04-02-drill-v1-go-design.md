@@ -38,6 +38,23 @@ The four AI roles (interviewer, evaluator, educator, coach) are different prompt
 
 River workers run inside the same Go process. Jobs are enqueued transactionally with the business logic that creates them. No separate worker deployment, no message broker.
 
+### Key Technology Choices
+
+| Component | Technology | Rationale |
+|---|---|---|
+| Runtime | Go on Cloud Run | Goroutine model handles thousands of concurrent WebSockets with minimal memory. I/O-bound workload. |
+| Database | Cloud SQL (PostgreSQL 16) | Single database for everything: app data, River job queue, auth sessions, rate limiting. |
+| Database access | sqlc + pgx/v5 | Type-safe Go from SQL. No ORM. go-sqlbuilder for the few dynamic queries where optional filters make static SQL impractical (e.g., question list filtered by optional difficulty + tags). sqlc is the default; go-sqlbuilder is the escape hatch, not a second query layer. |
+| Migrations | golang-migrate | Runs at startup with advisory lock. No JVM dependency. Migration files double as sqlc schema source. |
+| Job queue | River | Postgres-backed. Transactional enqueue. Retry with backoff. Built-in UI. Same binary, same connection pool. |
+| LLM | Anthropic Go SDK | All four AI roles. Streaming for interviewer, blocking for eval/educator/coach. |
+| Object storage | GCS | Audio only. Native Cloud Run IAM integration. Negligible egress at this scale. |
+| Frontend | React + Vite + shadcn/ui | SPA with copy-pasted ownable components (Radix UI + Tailwind). TanStack Query for server state. |
+| Payments | Stripe | Checkout, Customer Portal, webhooks processed as River jobs. |
+| Auth | Self-managed in Postgres | golang.org/x/oauth2 for OAuth, bcrypt for passwords, opaque session tokens as HttpOnly cookies. |
+| Observability | OpenTelemetry → Cloud Trace/Monitoring/Logging | End-to-end tracing from frontend through backend. |
+| Config | sethvargo/go-envconfig | Nested structs, environment variables only. |
+
 ---
 
 ## 2. Data Model
@@ -415,7 +432,7 @@ func (c *Conductor) Run(ctx context.Context) {
 }
 ```
 
-The `reconnectTimerCh` fires at the 55-minute mark. The conductor persists any in-flight partial response, sends `reconnect_please`, and closes the WebSocket. The client reconnects immediately, gets a fresh 60-minute Cloud Run window. For a 180-minute session, this happens ~3 times. The user sees at most a brief "Reconnecting..." banner.
+The `reconnectTimerCh` fires at the 55-minute mark, but the conductor does not reconnect immediately. Instead it sets `reconnectPending = true`. After the current turn completes and transitions to `WaitingForInput`, the conductor checks the flag and sends `reconnect_please`. This guarantees reconnection happens between turns — no mid-stream interruption, no partial state to recover. The client reconnects immediately, gets a fresh 60-minute Cloud Run window. For a 180-minute session, this happens ~3 times. The user sees at most a brief "Reconnecting..." banner.
 
 ### Turn Processing Sequence
 
@@ -450,9 +467,9 @@ Every completed message (candidate and interviewer) is persisted to the `message
 
 **Instance death:** Session state is in Postgres. Client reconnects, hits a new instance, which creates a fresh conductor and loads state from DB. Any partial interviewer response from the crash is lost (a few seconds of text). The conductor detects an unanswered candidate turn and re-triggers the LLM call.
 
-**Graceful deploy:** SIGTERM → conductor persists partial state → sends `reconnect_please` → client reconnects to new revision immediately, no backoff.
+**Graceful deploy:** SIGTERM → conductor waits for current turn to complete (within Cloud Run's termination grace period, configured to 30s) → sends `reconnect_please` → client reconnects to new revision immediately, no backoff. If the grace period expires before the turn completes, force-save partial state and close.
 
-**Preemptive reconnect (55-min timer):** Same as graceful deploy, triggered by timer instead of SIGTERM. Enables sessions up to 180 minutes within Cloud Run's 60-minute request timeout.
+**Preemptive reconnect (55-min timer):** Timer sets `reconnectPending` flag. The conductor checks this flag after each turn completes (in `WaitingForInput`). Reconnection always happens between turns — no mid-stream interruption, no partial state. Enables sessions up to 180 minutes within Cloud Run's 60-minute request timeout.
 
 ---
 
@@ -748,3 +765,181 @@ Frontend built incrementally with shadcn/ui alongside each backend sub-project.
 | 9. Observability + Admin | OTel, Cloud Trace, admin dashboard, alerts | Admin pages |
 
 Each phase gets its own implementation plan. Phase 1 is the starting point.
+
+---
+
+## Appendix A: Functional Requirements Traceability
+
+Every FR from `docs/functional-requirements-2026-04-01.md`, mapped to the design decision that addresses it.
+
+### 2. User Management & Authentication
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-001 | Google, email/password, GitHub login | `golang.org/x/oauth2` for Google/GitHub, bcrypt for passwords. `users` + `oauth_accounts` tables. See Section 9. |
+| FR-002 | Account lifecycle (signup, verify, login, reset, logout) | `internal/auth/`. Email verification via signed token + `SendEmail` River job. Logout invalidates `auth_sessions` row. |
+| FR-003 | Account deletion (GDPR-compliant) | `DELETE /api/auth/account` sets `deleted_at`. Daily River job anonymizes after 30 days, deletes audio from GCS, deletes `llm_call_content` rows. See Section 12. |
+| FR-004 | Candidate and Administrator roles | `users.role` column, CHECK constraint. Middleware on admin endpoints checks role. |
+| FR-005 | Admin manages users, config, questions, monitoring | `/admin/*` endpoints. Question CRUD via `/api/questions` (admin creates seed questions with `user_id = NULL`). River UI at `/admin/jobs`. Dashboard at `/admin/dashboard`. |
+| FR-006 | All actions tied to user identity | Session cookie → `auth_sessions` → `user_id`. `user_events` and `llm_calls` tables include `user_id`. Cloud Logging includes user_id. |
+
+### 3. Billing & Access Control
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-007 | Plan structures modifiable without architectural changes | Plans are a Go map compiled into the binary. Code deploy to change, no schema/infrastructure changes. See Section 10. |
+| FR-008 | Plans gate sessions/month, duration, features, concurrency | `usage_periods` for session count. `config_duration_minutes` validated against plan limit. Feature access checked at API layer. Concurrent sessions via `COUNT(active)`. |
+| FR-009 | Free tier same quality as paid | Same AI model, same prompts, same voice I/O for all tiers. Only usage limits differ. |
+| FR-010 | Educator: full for paid, preview for free | `GET /api/sessions/:id/educator` checks plan. Preview returns truncated model_answer + first gap summary. Full content in DB, gated at API. |
+| FR-011 | Real-time entitlement enforcement | `POST /api/sessions` checks `usage_periods.sessions_used` synchronously. Returns 403 with upgrade message if exceeded. |
+| FR-012 | Payment processor integration | Stripe Checkout + Customer Portal + webhooks as River jobs. See Section 10. |
+
+### 4. Interview Experience
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-013 | Real-time bidirectional connection | WebSocket at `WSS /api/sessions/:id/ws`. Cloud Run with 3600s timeout. See Section 3. |
+| FR-014 | Pre-session config (duration 1-180 min, TTS toggle) | `POST /api/sessions` accepts `duration_minutes` (1-180) and `tts_enabled`. For sessions >55 min, preemptive reconnection at 55-min intervals. See Section 4. |
+| FR-015 | Voice input (push-to-talk) and text input, both always available | `end_turn` accepts `input_method: "text"` or `"voice"`. Both always available in frontend. |
+| FR-016 | Multi-segment voice recording | Client-side only. MediaRecorder buffers segments, concatenates on submit, sends single base64 `end_turn`. No server-side segment management. |
+| FR-017 | STT transcription with edit window | Conductor transitions: `WaitingForInput` → `Transcribing` → `EditingTranscript`. Server sends `transcription_result`, waits for timeout or `transcription_edit`. See Section 4. |
+| FR-018 | Token-by-token streaming | Anthropic SDK `Messages.Stream()`. Each delta sent as `interviewer_token` via WebSocket. |
+| FR-019 | TTS audio streamed concurrently with text | TTS accumulator observer fires TTS on sentence boundaries. `tts_chunk` messages sent concurrently with text tokens. See Section 5. |
+| FR-020 | Timer with 5-min warning and overtime | Conductor goroutine sends `timer_warning` and `timer_overtime` via dedicated channels. Timer state survives reconnection (recalculated from `started_at`). |
+| FR-021 | Session ends on candidate action or interviewer wrap-up | Client sends `end_session`. Interviewer's time-aware prompt generates closing message. Conductor transitions to `Ending`. |
+| FR-022 | Connection drop: state preserved, can reconnect and resume | Messages persisted on every turn. Session stays `active` on disconnect. `session_init` with `last_seq` triggers `reconnect_state`. See Section 4, Reconnection. |
+| FR-023 | No pause/resume, single sitting | No pause endpoint. Timer runs continuously from `started_at`. |
+| FR-024 | Chrome and Safari minimum | Standard WebSocket API, MediaRecorder API (Opus/WebM). Supported in Chrome and Safari. |
+| FR-025 | Mobile not required | Desktop-first SPA. No mobile-specific UI. |
+
+### 5. Interviewer Behavior
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-026 | Behave like senior staff engineer | System prompt in `internal/interview/prompt.go`. All FR-026 through FR-038 are product requirements encoded as prompt engineering. |
+| FR-027 | Open with deliberately vague problem statement | Opening instruction in system prompt. |
+| FR-028 | Stay silent when candidate should drive | Silence instruction in system prompt. |
+| FR-029 | Answer clarifying questions collaboratively | Behavioral rules in system prompt. |
+| FR-030 | Probe with "why" | Probing instruction in system prompt. |
+| FR-031 | Introduce constraints at midpoint | Elapsed/remaining time injected into prompt each turn. Midpoint instruction activates based on time. |
+| FR-032 | Track coverage across 7 areas | Coverage areas listed in prompt. Model tracks discussed/uncovered. |
+| FR-033 | Push past hand-waving | Anti-hand-waving instruction in prompt. |
+| FR-034 | Never validate design | Neutrality instruction in prompt. |
+| FR-035 | Keep responses to 2-4 sentences | Length constraint in prompt. |
+| FR-036 | Time-aware pacing | Elapsed/remaining time in prompt. Behavioral instructions change by phase. Builder's `WithTimeContext()`. |
+| FR-037 | Never break character | Character instruction in prompt. |
+| FR-038 | Accept coach briefing on weak areas | If `config_coach_briefing = true`, latest `coach_analyses` appended to system prompt via Builder's `WithCoachBriefing()`. |
+
+### 6. Evaluation
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-039 | Post-session structured assessment | `EvaluateSession` River job, transactionally enqueued when session completes. See Section 8. |
+| FR-040 | 5 dimensions + overall, 1-5 scale | `evaluations` table with 6 score columns, all `CHECK BETWEEN 1 AND 5`. Rubric in evaluator prompt. |
+| FR-041 | Score calibration (3 = borderline, 5 = rare) | Calibration guidance in evaluator system prompt with examples per score level. |
+| FR-042 | Strengths, gaps with evidence, actionable advice | Evaluator prompt requests structured output. Stored in `evaluations.strengths` (JSONB), `.gaps`, `.advice`. |
+| FR-043 | Per-message annotations | `annotations` table with FK to `evaluations` and `messages`. Types: strength, gap, missed_opportunity, note. |
+| FR-044 | Semantic validation with retry | Worker validates: score variance, non-empty lists, valid annotation refs. Failure → River retries with backoff. |
+| FR-045 | evaluation_failed status with manual retry | After max attempts → `status = 'evaluation_failed'`. `POST /api/sessions/:id/evaluate` re-enqueues. |
+| FR-046 | Raw LLM response stored | `llm_call_content` table, written in same transaction as evaluation. |
+
+### 7. Educator
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-047 | Candidate requests deep analysis after evaluation | `POST /api/sessions/:id/educator` enqueues `GenerateEducatorContent` River job. Only available when status is `reviewed`. |
+| FR-048 | Model Answer + Gap Deep-Dives | Stored as markdown in `educator_analyses.model_answer` and `.gap_deep_dives`. |
+| FR-049 | Fresh, personalized per session | No caching. Educator prompt includes full transcript + evaluation for this specific session. |
+| FR-050 | Rendered as formatted markdown | Frontend renders with react-markdown + remark-gfm. |
+| FR-051 | Free tier sees preview only | API truncates content for free users. See FR-010. |
+| FR-052 | Retry on failure | River job with `MaxAttempts: 5`, exponential backoff. Manual retry re-enqueues. |
+| FR-053 | Raw LLM response stored | `llm_call_content`, same pattern as FR-046. |
+
+### 8. Coach
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-054 | Analyze complete history of reviewed, non-archived sessions | Coach prompt built from all `status = 'reviewed' AND archived = FALSE` sessions for the user. |
+| FR-055 | Narrative + gap analysis + optional custom question | Parsed into `coach_analyses`: `narrative`, `weakest_dimension`, `improving_dimensions`, `topic_gaps`, optional `suggested_question_id`. |
+| FR-056 | Coach-generated questions in personal question bank | Inserted into `questions` with `source = 'coach_generated'`, `user_id` set, `coach_rationale` populated. |
+| FR-057 | Coach briefs interviewer | When `config_coach_briefing = true`, latest `coach_analyses` appended to interviewer prompt. See FR-038. |
+| FR-058 | Debounced (no re-run if no new sessions) | `POST /api/coach/analyze` compares `sessions_analyzed` array against current reviewed sessions. Force via `?force=true`. |
+| FR-059 | One concurrent analysis per user | River unique job constraint on `user_id`. |
+| FR-060 | Raw LLM response stored | `llm_call_content`, same pattern. |
+
+### 9. Question Bank
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-061 | Global question bank, admin-managed | `questions` with `user_id = NULL` and `source = 'seed'`. |
+| FR-062 | Question fields (title, prompt, difficulty, tags, hints) | All columns on `questions` table. `difficulty` CHECK to medium/hard. `tags` as TEXT[]. |
+| FR-063 | Three sources: seed, custom, coach_generated | `source` CHECK constraint. |
+| FR-064 | Custom and coach-generated are per-user | API query: `WHERE user_id IS NULL OR user_id = $current_user`. |
+| FR-065 | Per-candidate stats (attempts, best score) | JOIN `questions` → `interview_sessions` → `evaluations`, grouped by question. |
+| FR-066 | Coach's suggested question visually distinguished | `GET /api/coach/latest` returns `suggested_question_id`. Frontend marks it. |
+| FR-067 | Filterable by difficulty and tags | API accepts `?difficulty=hard&tags=caching,databases`. sqlc with `sqlc.narg` for nullable filters; go-sqlbuilder for tag array overlap. |
+
+### 10. Session Lifecycle & History
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-068 | Status: active → completed → evaluating → reviewed / evaluation_failed | `interview_sessions.status` CHECK constraint. Transitions enforced in application code. |
+| FR-069 | Archivable, soft-hidden, excluded from coach, restorable | `archived` boolean. Default views filter `WHERE archived = FALSE`. |
+| FR-070 | Archive/unarchive individually or bulk | `PATCH /api/sessions/:id/archive`. Bulk via array of IDs in request body. |
+| FR-071 | Full transcript preserved | `messages` table. Every message persisted immediately on creation. |
+| FR-072 | Session metadata (duration, turns, timestamps, config) | All columns on `interview_sessions`. |
+| FR-073 | History view with scores and metadata | `GET /api/sessions` joins `interview_sessions` + `evaluations` + `questions`. |
+| FR-074 | Score trend visualization | Frontend chart plotting `score_overall` over `started_at`. |
+| FR-075 | Sortable, filterable (active/archived/all) | API accepts `?archived=false&sort=created_at&order=desc`. |
+| FR-076 | Permanent deletion designed for GDPR | No per-session deletion in UI. Deletion only through account deletion flow (FR-003) or admin action. |
+
+### 11. Observability & Auditability
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-077 | Every LLM request logged (role, prompt, response, model, tokens, cost, latency) | `llm_calls` for metrics, `llm_call_content` for full prompt/response. Written in same transaction. See Section 11. |
+| FR-078 | Every user action logged | `user_events` table with `event_type` and `metadata` JSONB. |
+| FR-079 | Every system event logged | Structured JSON to stdout → Cloud Logging. All include trace_id, session_id, user_id. |
+| FR-080 | Per-session and per-candidate cost breakdowns | `SELECT role, SUM(estimated_cost) FROM llm_calls WHERE session_id = $1 GROUP BY role`. |
+| FR-081 | Latency at each stage | OTel spans: STT, LLM time-to-first-token, total LLM, TTS, end-to-end turn. `llm_calls.latency_ms`. |
+| FR-082 | Full session reconstruction from logs | `messages` + `llm_calls`/`llm_call_content` + `user_events` + Cloud Logging = complete audit trail by session_id. |
+| FR-083 | Observability data retained indefinitely | No TTL on tables. No expiration on Cloud Logging bucket. No GCS lifecycle rules. |
+| FR-084 | Admin monitoring dashboards | `/admin/dashboard` with system health, usage, costs, errors, latency, River UI. |
+
+### 12. Abuse Prevention & Rate Limiting
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-085 | Rate limits on API and WebSocket | Per-user token bucket in Postgres. In-memory per-connection limit for WebSocket (ephemeral, dies with connection). See Section 13. |
+| FR-086 | Real-time entitlement enforcement | Same as FR-011. Also checked at educator request for feature gating. |
+| FR-087 | Content moderation | Interviewer prompt includes jailbreak detection. Pre-LLM scan for injection patterns. Flagged messages logged to `user_events`. |
+| FR-088 | Account abuse prevention | Email verification required. Account creation rate-limited per IP. Browser fingerprint flags suspicious patterns. |
+
+### 13. Data Retention & Privacy
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-089 | GDPR compliance | Lawful basis: contract + legitimate interest. Data export, erasure, consent implemented. See Section 12. |
+| FR-090 | Indefinite storage unless GDPR deletion | No automatic expiration on any table or GCS object. |
+| FR-091 | Audio recordings preserved | GCS at `audio/{session_id}/input/{message_id}.webm` and `output/{message_id}.mp3`. Referenced via `messages.audio_url`. |
+| FR-092 | All raw LLM responses preserved | `llm_call_content` as JSONB. Queryable via SQL joins. |
+| FR-093 | Complete data export on request | `GET /api/me/export` → River job → ZIP → GCS signed URL → email link. |
+| FR-094 | Deletion/anonymization for GDPR + audit integrity | Soft delete, 30-day grace, anonymize PII, retain anonymized aggregates. Cloud Logging not deleted (no PII after anonymization). |
+
+### 14. Notifications
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-095 | Email when evaluation complete, coach has new insights | `SendEmail` River job enqueued by evaluation and coach workers. Transactional email provider (Resend/Postmark/SES). |
+
+### 15. Error Handling & Graceful Degradation
+
+| FR | Requirement | Design |
+|---|---|---|
+| FR-096 | STT failure: retry, then text fallback | Retry with exponential backoff (3 attempts). On exhaustion, send `error` with code `stt_unavailable`. Client prompts text input. |
+| FR-097 | TTS failure: retry, then text-only | Retry (3 attempts). On exhaustion, send `tts_unavailable`. Text responses continue normally. |
+| FR-098 | Interviewer LLM failure: generous retry | Exponential backoff, initial 5s, up to 90s, 5 attempts. Partial response preserved. Client shows "thinking..." during retries. |
+| FR-099 | Evaluation failure: retry, then evaluation_failed | River job `MaxAttempts: 4`, backoff starting 30s. On exhaustion → `evaluation_failed`. Manual retry via API. |
+| FR-100 | Educator failure: retry, then manual retry | River job `MaxAttempts: 5`, backoff starting 30s. Manual retry re-enqueues. |
+| FR-101 | WebSocket reconnection with generous backoff | Client: exponential backoff (1s initial, 30s max, with jitter). Server: state in Postgres, `reconnect_state` on reconnect. Preemptive `reconnect_please` at 55 min and on SIGTERM. |
+| FR-102 | All errors logged, no silent failures, no inconsistent state | Structured logging with full context. Database transactions ensure atomicity. River jobs either succeed or retry; never partial state. |
