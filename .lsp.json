@@ -1,0 +1,9 @@
+{
+  "go": {
+    "command": "gopls",
+    "args": ["serve", "-remote=auto"],
+    "extensionToLanguage": {
+      ".go": "go"
+    }
+  }
+}
