@@ -10,28 +10,11 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
-	"github.com/riverqueue/river/rivertype"
 
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 )
-
-// Jobs is the interface for enqueueing and stopping background jobs.
-// Satisfied by *river.Client in production, NopJobs in tests.
-type Jobs interface {
-	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
-	Stop(ctx context.Context) error
-}
-
-// NopJobs is a no-op implementation of Jobs for testing.
-type NopJobs struct{}
-
-func (NopJobs) Insert(context.Context, river.JobArgs, *river.InsertOpts) (*rivertype.JobInsertResult, error) {
-	return &rivertype.JobInsertResult{}, nil
-}
-
-func (NopJobs) Stop(context.Context) error { return nil }
 
 // Backend holds shared dependencies and business logic. Handlers call its
 // methods; it owns the database pool and River client lifecycle.

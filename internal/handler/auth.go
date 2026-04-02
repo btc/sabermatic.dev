@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/btc/drill/internal/auth"
@@ -113,7 +114,9 @@ func Logout(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		b.Logout(r.Context(), cookie.Value)
+		if err := b.Logout(r.Context(), cookie.Value); err != nil {
+			slog.Error("logout session delete", "error", err)
+		}
 
 		// Clear cookie regardless (HTTP concern).
 		http.SetCookie(w, &http.Cookie{
@@ -166,8 +169,11 @@ func ForgotPassword(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		b.ForgotPassword(r.Context(), req.Email)
+		if err := b.ForgotPassword(r.Context(), req.Email); err != nil {
+			slog.Error("forgot password", "error", err)
+		}
 
+		// Always 200 to prevent email enumeration.
 		writeJSON(w, http.StatusOK, map[string]string{"status": "if that email exists, a reset link has been sent"})
 	}
 }
