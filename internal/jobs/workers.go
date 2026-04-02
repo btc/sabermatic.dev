@@ -9,9 +9,6 @@ import (
 // RegisterWorkers creates a Workers bundle with all job workers registered.
 func RegisterWorkers(cfg *config.Config, sender email.Sender) *river.Workers {
 	workers := river.NewWorkers()
-	river.AddWorker(workers, &SendEmailWorker{
-		Sender:   sender,
-		Timeout_: cfg.Email.SendTimeout,
-	})
+	river.AddWorker(workers, NewSendEmailWorker(&cfg.Email, sender))
 	return workers
 }

@@ -33,12 +33,16 @@ func SendEmailInsertOpts(cfg *config.Email) *river.InsertOpts {
 // SendEmailWorker processes SendEmail jobs.
 type SendEmailWorker struct {
 	river.WorkerDefaults[SendEmailArgs]
-	Sender  email.Sender
-	Timeout_ time.Duration
+	Sender email.Sender
+	cfg    *config.Email
+}
+
+func NewSendEmailWorker(cfg *config.Email, sender email.Sender) *SendEmailWorker {
+	return &SendEmailWorker{Sender: sender, cfg: cfg}
 }
 
 func (w *SendEmailWorker) Timeout(job *river.Job[SendEmailArgs]) time.Duration {
-	return w.Timeout_
+	return w.cfg.SendTimeout
 }
 
 func (w *SendEmailWorker) Work(ctx context.Context, job *river.Job[SendEmailArgs]) error {
