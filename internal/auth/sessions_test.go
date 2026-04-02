@@ -3,6 +3,7 @@ package auth_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net/http"
 	"testing"
 
 	"github.com/btc/drill/internal/auth"
@@ -30,4 +31,23 @@ func TestHashSessionToken(t *testing.T) {
 	require.NotEmpty(t, hash)
 	require.NotEqual(t, "my-token", hash)
 	require.Equal(t, hash, auth.HashSessionToken("my-token"))
+}
+
+func TestSessionCookie_Login(t *testing.T) {
+	c := auth.SessionCookie("my-token", 3600, true)
+	require.Equal(t, auth.SessionCookieName, c.Name)
+	require.Equal(t, "my-token", c.Value)
+	require.Equal(t, "/", c.Path)
+	require.True(t, c.HttpOnly)
+	require.True(t, c.Secure)
+	require.Equal(t, http.SameSiteLaxMode, c.SameSite)
+	require.Equal(t, 3600, c.MaxAge)
+}
+
+func TestSessionCookie_Logout(t *testing.T) {
+	c := auth.SessionCookie("", -1, false)
+	require.Equal(t, auth.SessionCookieName, c.Name)
+	require.Equal(t, "", c.Value)
+	require.Equal(t, -1, c.MaxAge)
+	require.False(t, c.Secure)
 }

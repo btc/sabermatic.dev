@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 )
 
 // GenerateSessionToken creates a random session token and its SHA-256 hash.
@@ -24,4 +25,18 @@ func GenerateSessionToken() (token string, hash string, err error) {
 func HashSessionToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
+}
+
+// SessionCookie builds the standard session cookie. Pass an empty token
+// and maxAge -1 to create a deletion cookie (logout).
+func SessionCookie(token string, maxAge int, secure bool) *http.Cookie {
+	return &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}
 }

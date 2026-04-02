@@ -83,16 +83,11 @@ func Login(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		// Set session cookie (HTTP concern — handler owns cookie construction).
-		http.SetCookie(w, &http.Cookie{
-			Name:     auth.SessionCookieName,
-			Value:    result.Token,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   b.Config().Auth.SecureCookies(),
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   int(b.Config().Auth.SessionTTL.Seconds()),
-		})
+		http.SetCookie(w, auth.SessionCookie(
+			result.Token,
+			int(b.Config().Auth.SessionTTL.Seconds()),
+			b.Config().Auth.SecureCookies(),
+		))
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id":    result.UserID.String(),
@@ -115,16 +110,8 @@ func Logout(b *backend.Backend) http.HandlerFunc {
 			slog.Error("logout session delete", "error", err)
 		}
 
-		// Clear cookie regardless (HTTP concern).
-		http.SetCookie(w, &http.Cookie{
-			Name:     auth.SessionCookieName,
-			Value:    "",
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   b.Config().Auth.SecureCookies(),
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   -1,
-		})
+		// Clear cookie regardless.
+		http.SetCookie(w, auth.SessionCookie("", -1, b.Config().Auth.SecureCookies()))
 
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
