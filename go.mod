@@ -6,6 +6,9 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.1
+	github.com/mailgun/mailgun-go/v5 v5.15.0
+	github.com/riverqueue/river v0.32.0
+	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.32.0
 	github.com/sethvargo/go-envconfig v1.3.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
@@ -42,7 +45,6 @@ require (
 	github.com/klauspost/compress v1.18.2 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
-	github.com/mailgun/mailgun-go/v5 v5.15.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
 	github.com/moby/patternmatcher v0.6.0 // indirect
@@ -59,9 +61,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/riverqueue/river v0.32.0 // indirect
 	github.com/riverqueue/river/riverdriver v0.32.0 // indirect
-	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.32.0 // indirect
 	github.com/riverqueue/river/rivershared v0.32.0 // indirect
 	github.com/riverqueue/river/rivertype v0.32.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.2 // indirect
