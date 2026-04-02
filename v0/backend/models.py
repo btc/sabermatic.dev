@@ -183,6 +183,7 @@ class Evaluation(BaseModel):
     educator_model_answer: Optional[str] = None
     educator_gap_deepdives: Optional[str] = None
     educator_raw_response: Optional[dict[str, Any]] = None
+    educator_status: Optional[str] = None
     evaluated_at: datetime
 
 

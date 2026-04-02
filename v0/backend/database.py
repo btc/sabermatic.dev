@@ -106,6 +106,7 @@ def _row_to_evaluation(row: asyncpg.Record) -> Evaluation:
         educator_model_answer=row["educator_model_answer"],
         educator_gap_deepdives=row["educator_gap_deepdives"],
         educator_raw_response=json.loads(row["educator_raw_response"]) if row["educator_raw_response"] else None,
+        educator_status=row["educator_status"],
         evaluated_at=row["evaluated_at"],
     )
 

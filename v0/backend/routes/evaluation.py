@@ -245,7 +245,8 @@ async def _run_educator(
                 UPDATE evaluations
                 SET educator_model_answer = $1,
                     educator_gap_deepdives = $2,
-                    educator_raw_response = $3
+                    educator_raw_response = $3,
+                    educator_status = 'completed'
                 WHERE id = $4
                 """,
                 model_answer,
@@ -256,17 +257,11 @@ async def _run_educator(
 
     except Exception:
         logger.exception("Educator failed for session %d", session_id)
-        # Record failure sentinel so frontend can show error + retry
         if evaluation is not None:
             try:
                 async with pool.acquire() as conn:
                     await conn.execute(
-                        """
-                        UPDATE evaluations
-                        SET educator_raw_response = $1
-                        WHERE id = $2
-                        """,
-                        json.dumps({"error": True, "message": "Educator analysis failed"}),
+                        "UPDATE evaluations SET educator_status = 'failed' WHERE id = $1",
                         evaluation.id,
                     )
             except Exception:
@@ -293,26 +288,27 @@ async def trigger_educator(
             status_code=404, detail="No evaluation found for this session"
         )
 
-    # Already has content — no re-generation
-    if evaluation.educator_model_answer is not None:
-        return {
-            "status": "already_generated",
-            "evaluation_id": evaluation.id,
-        }
+    if evaluation.educator_status == "completed":
+        return {"status": "already_generated", "evaluation_id": evaluation.id}
 
-    # Clear failure sentinel if retrying
-    if (
-        evaluation.educator_raw_response
-        and isinstance(evaluation.educator_raw_response, dict)
-        and evaluation.educator_raw_response.get("error")
-    ):
-        async with request.app.state.pool.acquire() as write_conn:
-            await write_conn.execute(
-                "UPDATE evaluations SET educator_raw_response = NULL WHERE id = $1",
-                evaluation.id,
-            )
+    if evaluation.educator_status == "generating":
+        return {"status": "already_generating", "evaluation_id": evaluation.id}
 
-    # Use pool from app state for background task (DI connection closes after request)
+    # Atomic claim: NULL or failed → generating. If 0 rows affected, someone else claimed it.
+    async with request.app.state.pool.acquire() as write_conn:
+        claimed = await write_conn.fetchval(
+            """
+            UPDATE evaluations
+            SET educator_status = 'generating'
+            WHERE id = $1
+              AND (educator_status IS NULL OR educator_status = 'failed')
+            RETURNING id
+            """,
+            evaluation.id,
+        )
+    if claimed is None:
+        return {"status": "already_generating", "evaluation_id": evaluation.id}
+
     background_tasks.add_task(
         _run_educator,
         pool=request.app.state.pool,
@@ -336,19 +332,13 @@ async def get_educator_content(
             status_code=404, detail="No evaluation found for this session"
         )
 
-    if evaluation.educator_model_answer is None:
-        # Check if there's a recorded failure
-        if (
-            evaluation.educator_raw_response
-            and isinstance(evaluation.educator_raw_response, dict)
-            and evaluation.educator_raw_response.get("error")
-        ):
-            return {
-                "status": "failed",
-                "message": evaluation.educator_raw_response.get(
-                    "message", "Unknown error"
-                ),
-            }
+    if evaluation.educator_status == "generating":
+        return {"status": "generating", "evaluation_id": evaluation.id}
+
+    if evaluation.educator_status == "failed":
+        return {"status": "failed", "message": "Educator analysis failed"}
+
+    if evaluation.educator_status != "completed":
         raise HTTPException(
             status_code=404, detail="Educator content not yet generated"
         )
