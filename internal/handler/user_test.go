@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/btc/drill/internal/handler"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/handler"
 )
 
 func TestGetMe_Authenticated(t *testing.T) {
@@ -17,9 +18,7 @@ func TestGetMe_Authenticated(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	cfg := loadTestConfig(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(cfg)
+	b := newTestBackend(t, pool)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 
@@ -78,9 +77,7 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	cfg := loadTestConfig(t)
-	b := &handler.Backend{Pool: pool}
-	b.SetConfig(cfg)
+	b := newTestBackend(t, pool)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 

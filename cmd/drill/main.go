@@ -16,6 +16,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/handler"
 )
@@ -55,7 +56,7 @@ func runWithContext(ctx context.Context) error {
 	}
 
 	// Backend owns pool + River lifecycle.
-	b, err := handler.NewBackend(cfg)
+	b, err := backend.New(cfg)
 	if err != nil {
 		return fmt.Errorf("create backend: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/handler"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 	}
 
 	pool := setupTestDB(t)
-	b := &handler.Backend{Pool: pool}
+	b := &backend.Backend{Pool: pool}
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 

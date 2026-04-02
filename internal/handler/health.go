@@ -3,10 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/btc/drill/internal/backend"
 )
 
 // Health returns a handler that checks database connectivity.
-func Health(b *Backend) http.HandlerFunc {
+func Health(b *backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
