@@ -237,3 +237,115 @@ func isDuplicateKeyError(err error) bool {
 	return strings.Contains(err.Error(), "23505") ||
 		strings.Contains(err.Error(), "duplicate key")
 }
+
+// VerifyEmail returns a handler that marks a user's email as verified.
+func VerifyEmail(b *Backend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+		userID, err := signer.Verify(req.Token, "verify-email")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or expired token"})
+			return
+		}
+
+		queries := db.New(b.Pool)
+		if err := queries.VerifyUserEmail(r.Context(), userID); err != nil {
+			slog.Error("verify email", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "email verified"})
+	}
+}
+
+// ForgotPassword returns a handler that enqueues a password reset email.
+// Always returns 200 to prevent email enumeration.
+func ForgotPassword(b *Backend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+		queries := db.New(b.Pool)
+		user, err := queries.GetUserByEmail(r.Context(), req.Email)
+		if err == nil {
+			signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+			token, _ := signer.Sign(user.ID, "reset-password", b.cfg.Auth.ResetTokenTTL)
+			resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
+
+			if b.River != nil {
+				b.River.Insert(r.Context(), jobs.SendEmailArgs{
+					To:      user.Email,
+					Subject: "Reset your Drill password",
+					Text:    "Click here to reset your password: " + resetURL,
+					HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
+				}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+			}
+		}
+
+		// Always 200 to prevent email enumeration.
+		writeJSON(w, http.StatusOK, map[string]string{"status": "if that email exists, a reset link has been sent"})
+	}
+}
+
+// ResetPassword returns a handler that resets a user's password via a signed token.
+func ResetPassword(b *Backend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Token    string `json:"token"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		if len(req.Password) < 8 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+			return
+		}
+
+		signer := auth.NewTokenSigner(b.cfg.Auth.TokenSecret)
+		userID, err := signer.Verify(req.Token, "reset-password")
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or expired token"})
+			return
+		}
+
+		hash, err := auth.HashPassword(req.Password, b.cfg.Auth.BcryptCost)
+		if err != nil {
+			slog.Error("hash password", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+
+		queries := db.New(b.Pool)
+		if err := queries.UpdateUserPassword(r.Context(), db.UpdateUserPasswordParams{
+			ID:           userID,
+			PasswordHash: pgtype.Text{String: hash, Valid: true},
+		}); err != nil {
+			slog.Error("update password", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+
+		// Invalidate all sessions.
+		queries.DeleteUserAuthSessions(r.Context(), userID)
+
+		writeJSON(w, http.StatusOK, map[string]string{"status": "password reset"})
+	}
+}

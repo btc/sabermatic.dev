@@ -11,4 +11,7 @@ func RegisterRoutes(mux *http.ServeMux, b *Backend) {
 	mux.HandleFunc("POST /api/auth/signup", Signup(b))
 	mux.HandleFunc("POST /api/auth/login", Login(b))
 	mux.HandleFunc("POST /api/auth/logout", Logout(b))
+	mux.HandleFunc("POST /api/auth/verify-email", VerifyEmail(b))
+	mux.HandleFunc("POST /api/auth/forgot-password", ForgotPassword(b))
+	mux.HandleFunc("POST /api/auth/reset-password", ResetPassword(b))
 }

@@ -2,14 +2,17 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 )
 
@@ -155,4 +158,111 @@ func TestLogin_WrongPassword(t *testing.T) {
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	require.Contains(t, resp["error"], "invalid email or password")
+}
+
+func TestVerifyEmail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	pool := setupTestDB(t)
+	cfg := loadTestConfig(t)
+	b := &handler.Backend{Pool: pool}
+	b.SetConfig(cfg)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+
+	// Sign up
+	signupBody, _ := json.Marshal(map[string]string{
+		"email":        "verify@example.com",
+		"password":     "securepassword123",
+		"display_name": "Verify User",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/signup", bytes.NewReader(signupBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var signupResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &signupResp)
+	userID := signupResp["id"].(string)
+
+	// Generate verification token
+	signer := auth.NewTokenSigner(cfg.Auth.TokenSecret)
+	uid, _ := uuid.Parse(userID)
+	token, _ := signer.Sign(uid, "verify-email", cfg.Auth.VerifyTokenTTL)
+
+	// Verify email
+	verifyBody, _ := json.Marshal(map[string]string{"token": token})
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/verify-email", bytes.NewReader(verifyBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestForgotAndResetPassword(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	pool := setupTestDB(t)
+	cfg := loadTestConfig(t)
+	b := &handler.Backend{Pool: pool}
+	b.SetConfig(cfg)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+
+	// Sign up
+	signupBody, _ := json.Marshal(map[string]string{
+		"email":        "reset@example.com",
+		"password":     "oldpassword123",
+		"display_name": "Reset User",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/signup", bytes.NewReader(signupBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	// Forgot password (always 200)
+	forgotBody, _ := json.Marshal(map[string]string{"email": "reset@example.com"})
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/forgot-password", bytes.NewReader(forgotBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Get user ID for token generation
+	queries := db.New(pool)
+	user, err := queries.GetUserByEmail(context.Background(), "reset@example.com")
+	require.NoError(t, err)
+
+	// Generate reset token
+	signer := auth.NewTokenSigner(cfg.Auth.TokenSecret)
+	token, _ := signer.Sign(user.ID, "reset-password", cfg.Auth.ResetTokenTTL)
+
+	// Reset password
+	resetBody, _ := json.Marshal(map[string]string{
+		"token":    token,
+		"password": "newpassword456",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/reset-password", bytes.NewReader(resetBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Login with new password succeeds
+	loginBody, _ := json.Marshal(map[string]string{
+		"email":    "reset@example.com",
+		"password": "newpassword456",
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
 }
