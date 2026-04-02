@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -88,6 +89,12 @@ type Auth struct {
 	ResetTokenTTL  time.Duration `env:"AUTH_RESET_TOKEN_TTL,default=1h"`
 	BcryptCost     int           `env:"AUTH_BCRYPT_COST,default=12"`
 	BaseURL        string        `env:"BASE_URL,default=http://localhost:3000"`
+}
+
+// SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
+// should have the Secure flag set.
+func (a *Auth) SecureCookies() bool {
+	return strings.HasPrefix(a.BaseURL, "https://")
 }
 
 func Load() (*Config, error) {

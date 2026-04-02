@@ -172,6 +172,7 @@ func Login(b *Backend) http.HandlerFunc {
 			Value:    rawToken,
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   b.cfg.Auth.SecureCookies(),
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   int(b.cfg.Auth.SessionTTL.Seconds()),
 		})
@@ -209,6 +210,8 @@ func Logout(b *Backend) http.HandlerFunc {
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   b.cfg.Auth.SecureCookies(),
+			SameSite: http.SameSiteLaxMode,
 			MaxAge:   -1,
 		})
 
