@@ -57,6 +57,7 @@ func TestSendEmail_Integration(t *testing.T) {
 	t.Setenv("DATABASE_URL", connStr)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
 	cfg, err := config.Load()
 	require.NoError(t, err)
 
