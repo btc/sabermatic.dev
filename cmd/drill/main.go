@@ -62,7 +62,7 @@ func runWithContext(ctx context.Context) error {
 	defer b.Close()
 
 	mux := http.NewServeMux()
-	b.RegisterRoutes(mux)
+	handler.RegisterRoutes(mux, b)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
