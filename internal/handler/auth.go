@@ -17,6 +17,11 @@ import (
 	"github.com/btc/drill/internal/jobs"
 )
 
+// dummyBcryptHash is used for constant-time login responses. When a user is
+// not found, we still run bcrypt to prevent timing oracles that reveal whether
+// an email is registered. Generated with cost 12.
+var dummyBcryptHash = "$2a$12$LKpvXspMO/C6shvqXZwCVOgIw3YklCI48vEoUxpBu3TWm/ZePR.02"
+
 // writeJSON encodes body as JSON and writes it with the given HTTP status.
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -126,12 +131,15 @@ func Login(b *Backend) http.HandlerFunc {
 		queries := db.New(b.Pool)
 		user, err := queries.GetUserByEmail(r.Context(), req.Email)
 		if err != nil {
+			// Constant-time: run dummy bcrypt to prevent timing oracle
+			auth.CheckPassword(dummyBcryptHash, "x")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
 			return
 		}
 
 		// Check that user has a password (not OAuth-only).
 		if !user.PasswordHash.Valid {
+			auth.CheckPassword(dummyBcryptHash, "x")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
 			return
 		}
