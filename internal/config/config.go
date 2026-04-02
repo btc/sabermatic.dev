@@ -12,6 +12,7 @@ type Config struct {
 	Database DatabaseConfig
 	LLM      LLMConfig
 	Speech   SpeechConfig
+	Email    EmailConfig
 }
 
 type ServerConfig struct {
@@ -36,6 +37,12 @@ type SpeechConfig struct {
 	TTSVoice     string `env:"TTS_VOICE,default=onyx"`
 	TTSModel     string `env:"TTS_MODEL,default=tts-1"`
 	WhisperModel string `env:"WHISPER_MODEL,default=whisper-1"`
+}
+
+type EmailConfig struct {
+	MailgunAPIKey string `env:"MAILGUN_API_KEY,default=test-key"`
+	MailgunDomain string `env:"MAILGUN_DOMAIN,default=localhost"`
+	FromAddress   string `env:"EMAIL_FROM,default=noreply@drill.dev"`
 }
 
 func Load() (*Config, error) {
