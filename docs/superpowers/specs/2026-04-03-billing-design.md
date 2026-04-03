@@ -312,9 +312,10 @@ Step 3 is an optimistic pre-check to avoid unnecessary transactions. Step 5 is t
 2. refund = reserved_minutes - actual_minutes
 3. If refund > 0:
    a. Query ledger_entries WHERE session_id = $1 AND reason = 'session_reserve'
-      to reconstruct per-grant reservation amounts.
-   b. Walk grants in reverse order, credit back up to each grant's original
-      debit amount until refund is fully distributed.
+      to reconstruct per-grant reservation amounts (amounts are negative per
+      ledger convention; use abs(amount) to get each grant's reservation size).
+   b. Walk grants in reverse order (newest-debited first), credit back up to
+      each grant's original debit amount until refund is fully distributed.
    c. INSERT ledger_entry per grant credited (reason: session_refund)
 ```
 
