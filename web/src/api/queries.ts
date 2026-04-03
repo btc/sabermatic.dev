@@ -242,9 +242,14 @@ export function useDeleteAccount() {
 
 // --- Billing ---
 
+export type CheckoutRequest =
+  | { type: "subscription"; plan: "pro" }
+  | { type: "pack"; minutes: number };
+
 export function useCheckout() {
   return useMutation({
-    mutationFn: () => apiClient.post<{ url: string }>("/api/billing/checkout"),
+    mutationFn: (body: CheckoutRequest) =>
+      apiClient.post<{ url: string }>("/api/billing/checkout", body),
   });
 }
 

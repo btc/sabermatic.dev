@@ -16,7 +16,6 @@ import { cn } from "@/lib/utils";
 const DURATION_PRESETS = [15, 30, 45, 60] as const;
 const FREE_PLAN_MAX = 30;
 const PRO_PLAN_MAX = 180;
-const SESSION_LIMIT = 3;
 
 type MicState = "idle" | "granted" | "denied";
 
@@ -89,9 +88,7 @@ export default function SessionConfig() {
     ? durationPreset
     : Math.min(Math.max(1, parseInt(customDuration, 10) || 1), planMax);
 
-  const sessionsUsed = usage?.sessions_used ?? 0;
-  const sessionsLimit = usage?.sessions_limit ?? SESSION_LIMIT;
-  const entitlementExceeded = usage != null && sessionsUsed >= sessionsLimit;
+  const entitlementExceeded = usage != null && usage.total_balance < effectiveDuration;
 
   const hasCoach = coach != null && coach !== undefined;
 
@@ -311,9 +308,9 @@ export default function SessionConfig() {
       {/* Entitlement warning */}
       {entitlementExceeded && (
         <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          You have used all {sessionsLimit} sessions this month.{" "}
+          Not enough minutes for a {effectiveDuration}-minute session.{" "}
           <Link to="/settings/billing" className="text-foreground underline underline-offset-2">
-            Upgrade your plan
+            Buy more minutes
           </Link>{" "}
           to continue.
         </div>
