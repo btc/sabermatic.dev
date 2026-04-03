@@ -21,8 +21,8 @@ import (
 )
 
 // ConductorParams contains everything needed to construct a Conductor.
-// The handler creates these after auth, validation, WebSocket upgrade,
-// advisory lock acquisition, and reading the session_init message.
+// The handler creates these after auth, validation, and WebSocket upgrade.
+// Lock acquisition and session_init reading happen inside Run.
 type ConductorParams struct {
 	// WS is the upgraded WebSocket connection. The conductor wraps it
 	// in a WSConn for writes and uses rawWS directly for readLoop reads.
@@ -31,24 +31,11 @@ type ConductorParams struct {
 	// Backend is the service layer for DB, LLM, STT, and TTS operations.
 	Backend *backend.Backend
 
-	// LockConn is the dedicated connection holding the advisory lock.
-	// The conductor releases it in close().
-	LockConn *pgxpool.Conn
-
 	// SessionID identifies the interview session.
 	SessionID uuid.UUID
 
 	// UserID identifies the authenticated user.
 	UserID uuid.UUID
-
-	// InitMsg is the parsed session_init message from the client.
-	InitMsg WSMessage
-
-	// Model is the LLM model name (e.g., "claude-sonnet-4-20250514").
-	Model string
-
-	// Duration is the configured interview duration. Zero means use the DB value.
-	Duration time.Duration
 }
 
 // Conductor owns all mutable state for one active interview session.
@@ -96,21 +83,50 @@ func NewConductor(p ConductorParams) *Conductor {
 		rawWS:     p.WS,
 		ws:        &Conn{WS: p.WS},
 		backend:   p.Backend,
-		lockConn:  p.LockConn,
-		model:     p.Model,
 		sessionID: p.SessionID,
 		userID:    p.UserID,
-		duration:  p.Duration,
-		initMsg:   p.InitMsg,
 	}
 	c.obs.Store(observer.Noop)
 	return c
 }
 
-// Run is the single entry point for the conductor. It owns the readLoop
-// lifecycle, loads session state, sends initial messages, sets timers, and
-// runs the main event loop. Run blocks until the session ends.
+// Run is the single entry point for the conductor. It acquires the advisory
+// lock, reads session_init, owns the readLoop lifecycle, loads session state,
+// sends initial messages, sets timers, and runs the main event loop.
+// Run blocks until the session ends.
 func (c *Conductor) Run(serverCtx context.Context) {
+	// Phase 1: Acquire advisory lock.
+	lockConn, locked, err := c.backend.AcquireSessionLock(serverCtx, c.sessionID)
+	if err != nil {
+		slog.Error("acquire session lock", "error", err, "session_id", c.sessionID)
+		c.ws.Close(websocket.StatusInternalError, "lock error")
+		return
+	}
+	if !locked {
+		c.ws.Close(websocket.StatusPolicyViolation, "session already in use")
+		return
+	}
+	c.lockConn = lockConn
+
+	// Phase 2: Read session_init (10s timeout).
+	initCtx, initCancel := context.WithTimeout(serverCtx, 10*time.Second)
+	_, data, err := c.rawWS.Read(initCtx)
+	initCancel()
+	if err != nil {
+		slog.Error("read session_init", "error", err, "session_id", c.sessionID)
+		c.close()
+		return
+	}
+	initMsg, err := ParseWSMessage(data)
+	if err != nil || initMsg.Type != "session_init" {
+		slog.Error("invalid session_init", "error", err, "session_id", c.sessionID)
+		c.send(serverCtx, msgError("invalid_init", "expected session_init message"))
+		c.close()
+		return
+	}
+	c.initMsg = initMsg
+
+	// Phase 3: Main lifecycle.
 	readCtx, readCancel := context.WithCancel(context.Background())
 
 	msgCh := make(chan WSMessage)
@@ -231,9 +247,8 @@ func (c *Conductor) loadSession(ctx context.Context) error {
 	c.question = question
 	c.messages = msgs
 	c.ttsEnabled = session.ConfigTtsEnabled
-	if c.duration == 0 {
-		c.duration = time.Duration(session.ConfigDurationMinutes) * time.Minute
-	}
+	c.duration = time.Duration(session.ConfigDurationMinutes) * time.Minute
+	c.model = c.backend.Config().LLM.InterviewerModel
 	c.sm = NewStateMachine(StateWaitingForInput)
 	c.sm.SetStartedAt(session.StartedAt)
 
