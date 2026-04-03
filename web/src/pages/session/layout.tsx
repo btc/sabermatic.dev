@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Outlet, NavLink, useParams, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useParams, useNavigate, Navigate } from "react-router-dom";
 import { useSession, useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
@@ -71,15 +71,21 @@ function TabLink({ to, children, disabled }: TabLinkProps) {
 
 export default function SessionLayout() {
   const { id } = useParams<{ id: string }>();
+  if (!id) return <Navigate to="/" replace />;
+  return <SessionLayoutInner id={id} />;
+}
+
+function SessionLayoutInner({ id }: { id: string }) {
   const navigate = useNavigate();
-  const { data: session } = useSession(id!, {
+
+  const { data: session } = useSession(id, {
     refetchInterval: (query) => {
       const s = query.state.data as import("@/api/types").Session | undefined;
       if (s?.status === "completed" || s?.status === "evaluating") return 3000;
       return false;
     },
   });
-  const { data: evaluation } = useEvaluation(id!, session?.status === "reviewed" || session?.status === "evaluation_failed");
+  const { data: evaluation } = useEvaluation(id, session?.status === "reviewed" || session?.status === "evaluation_failed");
 
   // Redirect active sessions to the interview page
   useEffect(() => {

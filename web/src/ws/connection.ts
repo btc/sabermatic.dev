@@ -57,7 +57,15 @@ export class ConnectionManager {
     };
 
     this.ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data) as ServerMessage;
+      let msg: ServerMessage;
+      try {
+        msg = JSON.parse(event.data as string) as ServerMessage;
+      } catch {
+        console.error("Malformed WS message:", event.data);
+        return;
+      }
+      // NOTE: no runtime schema validation (e.g. zod) — the server is trusted.
+      // Add validation here if third-party or untrusted WS sources are introduced.
       if (msg.type === "reconnect_please") {
         this.immediateReconnect = true;
         this.ws?.close(1000);

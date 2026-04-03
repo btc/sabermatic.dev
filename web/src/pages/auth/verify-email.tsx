@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "./auth-layout";
 import { useVerifyEmail } from "@/api/queries";
@@ -12,9 +12,12 @@ export default function VerifyEmail() {
   const [status, setStatus] = useState<"pending" | "success" | "error">(
     token ? "pending" : "error",
   );
+  // Guard against React StrictMode double-invoke (mounts component twice in dev).
+  const calledRef = useRef(false);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || calledRef.current) return;
+    calledRef.current = true;
     verifyEmail.mutate(
       { token },
       {

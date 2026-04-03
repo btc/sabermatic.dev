@@ -19,8 +19,10 @@ import { cn, formatRelativeDate } from "@/lib/utils";
 // Types
 // ---------------------------------------------------------------------------
 
-type FilterTab = "all" | "in_progress" | "reviewed" | "archived";
-type SortOrder = "newest" | "oldest" | "score_high" | "score_low";
+const VALID_TABS = ["all", "in_progress", "reviewed", "archived"] as const;
+const VALID_SORTS = ["newest", "oldest", "score_high", "score_low"] as const;
+type FilterTab = (typeof VALID_TABS)[number];
+type SortOrder = (typeof VALID_SORTS)[number];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -374,9 +376,11 @@ export default function History() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // URL-synced filter state
-  const tab = (searchParams.get("tab") as FilterTab | null) ?? "all";
-  const sort = (searchParams.get("sort") as SortOrder | null) ?? "newest";
+  // URL-synced filter state — validate against known values to avoid illegal casts
+  const rawTab = searchParams.get("tab");
+  const tab: FilterTab = VALID_TABS.includes(rawTab as FilterTab) ? (rawTab as FilterTab) : "all";
+  const rawSort = searchParams.get("sort");
+  const sort: SortOrder = VALID_SORTS.includes(rawSort as SortOrder) ? (rawSort as SortOrder) : "newest";
 
   function setTab(next: FilterTab) {
     setSelectedIds(new Set());

@@ -18,15 +18,20 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     credentials: "same-origin",
     ...options,
   });
+  // NOTE: `null as T` is a known type lie — all DELETE callers expect void/null
+  // and there is no caller that reads the return value of a 204 response.
   if (response.status === 204) {
     return null as T;
   }
+  // Read text first so the body stream is available for both JSON parse and
+  // error reporting. Calling response.json() first consumes the stream, making
+  // a subsequent response.text() call return an empty string.
+  const text = await response.text();
   let data: unknown;
   try {
-    data = await response.json();
+    data = JSON.parse(text);
   } catch {
-    const text = await response.text().catch(() => "");
-    throw new ApiError(response.status, text || `Non-JSON response (${response.status})`);
+    data = text || `Non-JSON response (${response.status})`;
   }
   if (!response.ok) {
     throw new ApiError(response.status, data);

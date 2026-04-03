@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEducator, useRequestEducator, useMe } from "@/api/queries";
@@ -159,8 +159,13 @@ function GeneratingView() {
 
 export default function DeepDive() {
   const { id: sessionId } = useParams<{ id: string }>();
-  const { data: educator, isError } = useEducator(sessionId!);
-  const requestEducator = useRequestEducator(sessionId!);
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <DeepDiveInner sessionId={sessionId} />;
+}
+
+function DeepDiveInner({ sessionId }: { sessionId: string }) {
+  const { data: educator, isError } = useEducator(sessionId);
+  const requestEducator = useRequestEducator(sessionId);
   const { data: me } = useMe();
 
   const isPro = me?.plan === "pro";
