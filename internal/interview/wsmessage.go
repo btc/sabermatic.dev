@@ -1,0 +1,62 @@
+package interview
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+
+	"github.com/coder/websocket"
+)
+
+// WSConn is the write interface for the WebSocket connection.
+type WSConn interface {
+	SendJSON(ctx context.Context, v any) error
+	Close(code websocket.StatusCode, reason string) error
+}
+
+// Conn wraps a *websocket.Conn to implement WSConn.
+type Conn struct {
+	WS *websocket.Conn
+}
+
+func (c *Conn) SendJSON(ctx context.Context, v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal ws message: %w", err)
+	}
+	return c.WS.Write(ctx, websocket.MessageText, data)
+}
+
+func (c *Conn) Close(code websocket.StatusCode, reason string) error {
+	return c.WS.Close(code, reason)
+}
+
+// WSMessage represents a client-to-server WebSocket message.
+type WSMessage struct {
+	Type        string `json:"type"`
+	LastSeq     *int   `json:"last_seq,omitempty"`
+	Content     string `json:"content,omitempty"`
+	Audio       []byte `json:"-"`
+	AudioBase64 string `json:"audio,omitempty"`
+	InputMethod string `json:"input_method,omitempty"`
+}
+
+// ParseWSMessage parses a raw JSON WebSocket message.
+func ParseWSMessage(data []byte) (WSMessage, error) {
+	var msg WSMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return WSMessage{}, fmt.Errorf("unmarshal ws message: %w", err)
+	}
+	if msg.Type == "" {
+		return WSMessage{}, fmt.Errorf("missing message type")
+	}
+	if msg.AudioBase64 != "" {
+		audio, err := base64.StdEncoding.DecodeString(msg.AudioBase64)
+		if err != nil {
+			return WSMessage{}, fmt.Errorf("decode audio base64: %w", err)
+		}
+		msg.Audio = audio
+	}
+	return msg, nil
+}
