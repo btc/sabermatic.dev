@@ -30,7 +30,7 @@ type Backend struct {
 // App migrations must be run before calling this (schema must exist).
 func New(cfg *config.Config) (*Backend, error) {
 	// Pool uses background context — must outlive any request or signal context.
-	pool, err := cfg.Database.NewPool(context.Background())
+	pool, err := cfg.Database.NewPool(context.Background(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("database: %w", err)
 	}

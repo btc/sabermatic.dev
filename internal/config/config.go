@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sethvargo/go-envconfig"
 )
@@ -19,6 +20,7 @@ type Config struct {
 	River    River
 	Auth     Auth
 	OAuth    OAuth
+	Otel     Otel
 }
 
 type Server struct {
@@ -32,12 +34,16 @@ type Database struct {
 }
 
 // NewPool creates a pgxpool connected to the configured database.
-func (d *Database) NewPool(ctx context.Context) (*pgxpool.Pool, error) {
+// Pass a pgx.QueryTracer to instrument queries (e.g. otelpgx.NewTracer()), or nil for none.
+func (d *Database) NewPool(ctx context.Context, tracer pgx.QueryTracer) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(d.URL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
 	poolCfg.MaxConns = d.MaxPoolConns
+	if tracer != nil {
+		poolCfg.ConnConfig.Tracer = tracer
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
@@ -97,6 +103,14 @@ type OAuth struct {
 	GoogleClientSecret string `env:"OAUTH_GOOGLE_CLIENT_SECRET"`
 	GitHubClientID     string `env:"OAUTH_GITHUB_CLIENT_ID"`
 	GitHubClientSecret string `env:"OAUTH_GITHUB_CLIENT_SECRET"`
+}
+
+type Otel struct {
+	Enabled      bool    `env:"OTEL_ENABLED,default=false"`
+	Exporter     string  `env:"OTEL_EXPORTER,default=stdout"`
+	SampleRate   float64 `env:"OTEL_SAMPLE_RATE,default=1.0"`
+	ServiceName  string  `env:"OTEL_SERVICE_NAME,default=drill"`
+	GCPProjectID string  `env:"GOOGLE_CLOUD_PROJECT"`
 }
 
 // SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
