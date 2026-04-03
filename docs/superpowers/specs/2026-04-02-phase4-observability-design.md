@@ -106,7 +106,7 @@ type Providers struct {
 
 4. Create `TracerProvider`:
    - `sdktrace.WithBatcher(traceExporter)` — batches spans before export.
-   - `sdktrace.WithSampler(sdktrace.TraceIDRatioBased(cfg.SampleRate))` — deterministic sampling.
+   - `sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRate)))` — `ParentBased` respects the remote parent's sampled flag when an inbound `traceparent` header is present (preserving distributed trace completeness); delegates to the inner `TraceIDRatioBased` sampler for root spans with no parent.
    - `sdktrace.WithResource(resource)`.
 
 5. Create `MeterProvider`:
@@ -265,6 +265,8 @@ slog.SetDefault(logger)
 
 Note: JSON logs move to stderr. This separates application logs from stdout trace output (when using stdout exporter in dev). In production on Cloud Run, Cloud Logging captures both stdout and stderr.
 
+**Existing logger relocation:** The current `main()` creates a JSON logger to stdout before calling `run()`. This setup must be moved into `run()` after config load (so `GCPProjectID` is available for the `TraceHandler`). The `main()` function should have no logger setup — if `run()` fails before logger init (e.g., config load error), the error is returned to `main()` and printed via a simple `fmt.Fprintf(os.Stderr, ...)` or a bare `slog.Error` using the default text logger.
+
 ### 6.5 No-Op Behavior
 
 When OTel is disabled, `SpanFromContext` returns a no-op span whose `SpanContext().IsValid()` returns false. The handler skips adding trace fields. Logs look identical to today's output.
@@ -336,7 +338,7 @@ When OTel is disabled, `otelhttp.NewMiddleware` wraps the handler but creates no
 
 ### 8.1 Enqueue Side — Capturing Trace Context
 
-A helper that sets trace metadata on an existing `*river.InsertOpts`, preserving all other fields (queue, max attempts, etc.):
+A helper that merges trace metadata into an existing `*river.InsertOpts`, preserving all other fields (queue, max attempts, and any existing metadata):
 
 ```go
 func SetTraceMetadata(ctx context.Context, opts *river.InsertOpts) {
@@ -344,11 +346,25 @@ func SetTraceMetadata(ctx context.Context, opts *river.InsertOpts) {
     if !sc.IsValid() {
         return
     }
-    opts.Metadata = []byte(fmt.Sprintf(`{"trace_id":"%s","span_id":"%s"}`, sc.TraceID(), sc.SpanID()))
+    traceJSON := []byte(fmt.Sprintf(`{"trace_id":"%s","span_id":"%s"}`, sc.TraceID(), sc.SpanID()))
+    if len(opts.Metadata) == 0 || string(opts.Metadata) == "null" {
+        opts.Metadata = traceJSON
+        return
+    }
+    // Merge into existing metadata JSON object: parse existing, add trace fields, re-marshal.
+    var existing map[string]json.RawMessage
+    if err := json.Unmarshal(opts.Metadata, &existing); err != nil {
+        opts.Metadata = traceJSON // existing metadata is invalid JSON; replace
+        return
+    }
+    existing["trace_id"] = json.RawMessage(fmt.Sprintf(`"%s"`, sc.TraceID()))
+    existing["span_id"] = json.RawMessage(fmt.Sprintf(`"%s"`, sc.SpanID()))
+    merged, _ := json.Marshal(existing)
+    opts.Metadata = merged
 }
 ```
 
-Call sites add one line after building their insert opts. This is opt-in — existing enqueue calls without `SetTraceMetadata` still work; their jobs just won't have a span link. When there's no active span (tests, disabled OTel), it's a no-op.
+This preserves any metadata that River or other code may have set. River's documentation warns against overwriting metadata it stores. Call sites add one line after building their insert opts. This is opt-in — existing enqueue calls without `SetTraceMetadata` still work; their jobs just won't have a span link. When there's no active span (tests, disabled OTel), it's a no-op.
 
 ### 8.2 Execute Side — WorkerMiddleware
 
@@ -417,24 +433,24 @@ The existing `SendEmail` job enqueue call sites in `backend/auth.go` will be upd
 
 ```go
 // Before:
-b.Jobs.Insert(ctx, jobs.SendEmailArgs{...}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+b.jobs.Insert(ctx, jobs.SendEmailArgs{...}, jobs.SendEmailInsertOpts(&b.cfg.Email))
 
 // After:
 opts := jobs.SendEmailInsertOpts(&b.cfg.Email)
 drilotel.SetTraceMetadata(ctx, opts)
-b.Jobs.Insert(ctx, jobs.SendEmailArgs{...}, opts)
+b.jobs.Insert(ctx, jobs.SendEmailArgs{...}, opts)
 ```
 
 **`InsertTx` (e.g., `Signup`):**
 
 ```go
 // Before:
-b.Jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{...}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+b.jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{...}, jobs.SendEmailInsertOpts(&b.cfg.Email))
 
 // After:
 opts := jobs.SendEmailInsertOpts(&b.cfg.Email)
 drilotel.SetTraceMetadata(ctx, opts)
-b.Jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{...}, opts)
+b.jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{...}, opts)
 ```
 
 One extra line per call site. Queue, max attempts, and all other insert opts are preserved. Future enqueue calls follow the same pattern.
@@ -479,15 +495,19 @@ All tests use an in-memory `TracerProvider` with `sdktrace.NewTracerProvider(sdk
 | Log with active span (GCP) | Create span, gcpProjectID="my-project" | Output JSON contains `logging.googleapis.com/trace` as `projects/my-project/traces/{id}` and `logging.googleapis.com/spanId` |
 | Log without span context | Pass background ctx | Output JSON has no trace fields |
 | WithAttrs preserves wrapping | Call WithAttrs, then Handle with span | Both custom attrs and trace fields present |
-| WithGroup preserves wrapping | Call WithGroup("g"), add attr "x" via WithAttrs, then Handle with span | `trace_id`/`span_id` at top level (added by `Handle` via `record.AddAttrs`), custom attr "x" inside group "g" (added by inner handler's `WithAttrs`+`WithGroup`). Verify trace fields are NOT nested inside the group. |
+| WithGroup preserves wrapping | Call WithGroup("g"), add attr "x" via WithAttrs, then Handle with span | Trace fields AND custom attr "x" all appear inside group "g" in JSON output. This is correct slog behavior: `WithGroup` causes the inner handler to nest ALL record attrs (including those added by `record.AddAttrs` in the wrapper's `Handle`) inside the group. |
+
+**Note on WithGroup and Cloud Logging:** When `WithGroup` is used with a GCP-configured `TraceHandler`, the `logging.googleapis.com/trace` field will be nested inside the group, which breaks Cloud Logging auto-correlation. This is a known limitation. In practice, `WithGroup` is not used in this codebase — the default logger is a flat JSON logger. If grouped logging is ever needed alongside GCP trace correlation, the handler would need a more complex approach (e.g., pre-handler attr injection). Not in scope.
 
 **riverware_test.go:**
 
 | Case | Setup | Expected |
 |---|---|---|
-| SetTraceMetadata with active span | Create span, pass existing InsertOpts | Opts.Metadata contains trace_id/span_id JSON, other fields unchanged |
+| SetTraceMetadata with active span, no existing metadata | Create span, pass InsertOpts with nil Metadata | Opts.Metadata contains trace_id/span_id JSON, other fields unchanged |
+| SetTraceMetadata with active span, existing metadata | Create span, pass InsertOpts with `{"foo":"bar"}` Metadata | Opts.Metadata contains foo, trace_id, and span_id (merged) |
 | SetTraceMetadata without span | Background ctx, pass existing InsertOpts | Opts unchanged (Metadata stays nil/empty) |
-| SetTraceMetadata preserves existing fields | InsertOpts with Queue and MaxAttempts set | Queue and MaxAttempts still set after call, Metadata added |
+| SetTraceMetadata preserves InsertOpts fields | InsertOpts with Queue and MaxAttempts set | Queue and MaxAttempts still set after call, Metadata added |
+| SetTraceMetadata with invalid existing metadata | Opts.Metadata is `not-json` | Replaced with trace-only JSON (graceful fallback) |
 | JobTracer.Work creates span | In-memory exporter, call Work | Exported span named `river.job/{kind}` with correct attributes |
 | JobTracer.Work with metadata link | Job metadata has trace_id/span_id | Exported span has link to that span context |
 | JobTracer.Work records error | doInner returns error | Span status is Error, error event recorded |
