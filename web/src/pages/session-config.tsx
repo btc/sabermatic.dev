@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
 import {
   useQuestions,
   useCoachLatest,
@@ -77,8 +77,7 @@ export default function SessionConfig() {
 
   // Redirect if no question param
   if (!questionId) {
-    navigate("/", { replace: true });
-    return null;
+    return <Navigate to="/" replace />;
   }
 
   const question = questions.find((q) => q.id === questionId);

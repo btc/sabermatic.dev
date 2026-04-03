@@ -20,7 +20,7 @@ export function useTimer(startedAt: string | null, durationMinutes: number) {
     tick();
     intervalRef.current = setInterval(tick, 1000);
     return () => clearInterval(intervalRef.current);
-  }, [startedAt, durationMinutes]);
+  }, [startedAt]);
 
   const totalSeconds = durationMinutes * 60;
   const remaining = totalSeconds - elapsed;

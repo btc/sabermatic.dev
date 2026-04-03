@@ -3,6 +3,7 @@ interface QueueEntry {
   seq: number;
 }
 
+// TODO: Add tests for AudioPlayer — requires AudioContext mock infrastructure
 export class AudioPlayer {
   private ctx: AudioContext | null = null;
   private queue: QueueEntry[] = [];
@@ -60,23 +61,30 @@ export class AudioPlayer {
       bytes[i] = binary.charCodeAt(i);
     }
 
-    this.ctx.decodeAudioData(bytes.buffer.slice(0), (audioBuffer) => {
-      if (!this.ctx || !this._isPlaying) {
-        // Cancelled while decoding
-        if (this.queue.length === 0 && this.isDone) {
-          this.onComplete?.();
+    this.ctx.decodeAudioData(
+      bytes.buffer.slice(0),
+      (audioBuffer) => {
+        if (!this.ctx || !this._isPlaying) {
+          // Cancelled while decoding
+          if (this.queue.length === 0 && this.isDone) {
+            this.onComplete?.();
+          }
+          return;
         }
-        return;
-      }
 
-      const source = this.ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(this.ctx.destination);
-      source.onended = () => {
+        const source = this.ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.ctx.destination);
+        source.onended = () => {
+          this.playNext();
+        };
+        source.start();
+      },
+      () => {
+        // Bad chunk — skip and continue with the next one
         this.playNext();
-      };
-      source.start();
-    });
+      },
+    );
   }
 
   done(): void {

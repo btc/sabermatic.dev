@@ -32,6 +32,10 @@ export class ConnectionManager {
     }
   }
 
+  setMessageHandler(handler: (msg: ServerMessage) => void) {
+    this.onMessage = handler;
+  }
+
   destroy() {
     this.destroyed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);

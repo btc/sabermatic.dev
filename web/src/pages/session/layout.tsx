@@ -2,18 +2,11 @@ import { useState, useEffect } from "react";
 import { Outlet, NavLink, useParams, useNavigate } from "react-router-dom";
 import { useSession, useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
+import { WAITING_MESSAGES } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
 // ---------------------------------------------------------------------------
-
-const WAITING_MESSAGES = [
-  "Reviewing your requirements gathering...",
-  "Analyzing architecture decisions...",
-  "Assessing depth of technical discussion...",
-  "Evaluating scalability reasoning...",
-  "Reviewing communication clarity...",
-];
 
 function EvaluatingView() {
   const [index, setIndex] = useState(0);
@@ -79,7 +72,13 @@ function TabLink({ to, children, disabled }: TabLinkProps) {
 export default function SessionLayout() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: session } = useSession(id!);
+  const { data: session } = useSession(id!, {
+    refetchInterval: (query) => {
+      const s = query.state.data as import("@/api/types").Session | undefined;
+      if (s?.status === "completed" || s?.status === "evaluating") return 3000;
+      return false;
+    },
+  });
   const { data: evaluation } = useEvaluation(id!, session?.status === "reviewed" || session?.status === "evaluation_failed");
 
   // Redirect active sessions to the interview page
