@@ -1,10 +1,9 @@
-package interview_test
+package interview
 
 import (
 	"testing"
 	"time"
 
-	"github.com/btc/drill/internal/interview"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,7 +26,7 @@ func TestWarningMinutes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := interview.WarningMinutes(tt.duration)
+			got := warningMinutes(tt.duration)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -47,7 +46,7 @@ func TestWarningMinutes_WarningAt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := interview.WarningMinutes(tt.duration)
+			w := warningMinutes(tt.duration)
 			warningAt := tt.duration - time.Duration(w)*time.Minute
 			remaining := tt.duration - warningAt
 			assert.Equal(t, tt.wantWarningBefore, remaining)
@@ -56,14 +55,27 @@ func TestWarningMinutes_WarningAt(t *testing.T) {
 }
 
 func TestForceState(t *testing.T) {
-	sm := interview.NewStateMachine(interview.StateTranscribing)
+	sm := NewStateMachine(StateTranscribing)
 
 	// Normal transition to WaitingForInput from Transcribing is invalid.
-	err := sm.Transition(interview.StateWaitingForInput)
-	assert.ErrorIs(t, err, interview.ErrInvalidTransition)
-	assert.Equal(t, interview.StateTranscribing, sm.State())
+	err := sm.Transition(StateWaitingForInput)
+	assert.ErrorIs(t, err, ErrInvalidTransition)
+	assert.Equal(t, StateTranscribing, sm.State())
 
 	// ForceState bypasses validation.
-	sm.ForceState(interview.StateWaitingForInput)
-	assert.Equal(t, interview.StateWaitingForInput, sm.State())
+	sm.ForceState(StateWaitingForInput)
+	assert.Equal(t, StateWaitingForInput, sm.State())
+}
+
+func TestIsReconnect(t *testing.T) {
+	c := &Conductor{}
+
+	// No LastSeq -> not a reconnect.
+	c.initMsg = WSMessage{Type: "session_init"}
+	assert.False(t, c.isReconnect())
+
+	// With LastSeq -> reconnect.
+	seq := 3
+	c.initMsg = WSMessage{Type: "session_init", LastSeq: &seq}
+	assert.True(t, c.isReconnect())
 }
