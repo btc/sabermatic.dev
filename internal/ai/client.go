@@ -25,6 +25,8 @@ import (
 var pricing = map[string]struct{ Input, Output float64 }{
 	"claude-sonnet-4-20250514": {Input: 3.0 / 1_000_000, Output: 15.0 / 1_000_000},
 	"claude-sonnet-4-0":        {Input: 3.0 / 1_000_000, Output: 15.0 / 1_000_000},
+	"claude-opus-4-20250514":   {Input: 15.0 / 1_000_000, Output: 75.0 / 1_000_000},
+	"claude-opus-4-0":          {Input: 15.0 / 1_000_000, Output: 75.0 / 1_000_000},
 }
 
 // Client wraps the Anthropic SDK with logging to the DB.

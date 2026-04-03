@@ -59,11 +59,12 @@ func (d *Database) NewPool(ctx context.Context, tracer pgx.QueryTracer) (*pgxpoo
 }
 
 type LLM struct {
-	APIKey           string `env:"ANTHROPIC_API_KEY,required"`
-	InterviewerModel string `env:"INTERVIEWER_MODEL,default=claude-sonnet-4-20250514"`
-	EvaluatorModel   string `env:"EVALUATOR_MODEL,default=claude-sonnet-4-20250514"`
-	EducatorModel    string `env:"EDUCATOR_MODEL,default=claude-sonnet-4-20250514"`
-	CoachModel       string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
+	APIKey             string `env:"ANTHROPIC_API_KEY,required"`
+	InterviewerModel   string `env:"INTERVIEWER_MODEL,default=claude-sonnet-4-20250514"`
+	EvaluatorModel     string `env:"EVALUATOR_MODEL,default=claude-opus-4-20250514"`
+	EvaluatorMaxTokens int64  `env:"EVALUATOR_MAX_TOKENS,default=4096"`
+	EducatorModel      string `env:"EDUCATOR_MODEL,default=claude-sonnet-4-20250514"`
+	CoachModel         string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
 }
 
 type Speech struct {
