@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go, sqlc, River, Anthropic Go SDK (tool_use via `CallToolAndLog`), pgx/v5, testify
 
-**Branch:** Create `feat/educator-coach` from eval HEAD (`fbf6a46`). Rebase onto eval as it progresses.
+**Branch:** Create `feat/educator-coach` from `main` (eval is now merged).
 
 **Spec:** `docs/superpowers/specs/2026-04-03-educator-coach-design.md`
 
@@ -45,8 +45,7 @@
 - `internal/jobs/workers.go` — register educator + coach workers
 - `internal/jobs/error_handler.go` — handle educator failures
 - `internal/handler/routes.go` — register 4 new routes
-- `internal/backend/session.go` — modify LoadSessionForConductor to include coach briefing
-- `internal/interview/conductor.go` — add coachBriefing field, wire into prompt chain
+- `internal/interview/conductor.go` — add coachBriefing field, load in loadSession, wire into prompt chain
 
 ---
 
@@ -56,12 +55,12 @@
 - Create: `sql/migrations/002_educator_failed_status.up.sql`
 - Create: `sql/migrations/002_educator_failed_status.down.sql`
 
-- [ ] **Step 1: Create feature branch from eval HEAD**
+- [ ] **Step 1: Create feature branch from main**
 
 ```bash
 cd /Users/btc/Projects/src/drill
 git fetch origin
-git checkout -b feat/educator-coach fbf6a46
+git checkout -b feat/educator-coach main
 ```
 
 - [ ] **Step 2: Create migration for educator_analyses 'failed' status**
@@ -185,15 +184,26 @@ WHERE user_id IS NULL OR user_id = $1
 ORDER BY created_at;
 ```
 
-- [ ] **Step 6: Run sqlc generate**
+- [ ] **Step 6: Add InsertQuestion query**
+
+Append to `sql/queries/questions.sql` (needed by the coach worker to insert generated questions):
+
+```sql
+-- name: InsertQuestion :one
+INSERT INTO questions (user_id, title, prompt, difficulty, tags, source, coach_rationale)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id;
+```
+
+- [ ] **Step 7: Run sqlc generate**
 
 ```bash
 sqlc generate
 ```
 
-Verify: `internal/db/educator_analyses.sql.go` and `internal/db/coach_analyses.sql.go` are created. `internal/db/querier.go` includes the new methods.
+Verify: `internal/db/educator_analyses.sql.go` and `internal/db/coach_analyses.sql.go` are created. `internal/db/querier.go` includes the new methods (including `InsertQuestion`).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add sql/queries/ internal/db/
@@ -1357,11 +1367,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
@@ -1486,7 +1494,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
@@ -1522,7 +1529,7 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 		CreatedAt:           ca.CreatedAt,
 	}
 	if ca.SuggestedQuestionID.Valid {
-		id := ca.SuggestedQuestionID.Bytes.String()
+		id := uuid.UUID(ca.SuggestedQuestionID.Bytes).String()
 		resp.SuggestedQuestionID = &id
 	}
 	if resp.ImprovingDimensions == nil {
@@ -1610,7 +1617,6 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1770,10 +1776,40 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 
 - [ ] **Step 2: Update error handler for educator failures**
 
-In `internal/jobs/error_handler.go`, update `HandleError` to also handle educator failures. Add after the existing evaluate_session block:
+In `internal/jobs/error_handler.go`, **replace the entire `HandleError` function** with a switch-based dispatch. The current function has a guard clause `if job.Kind != "evaluate_session" { return nil }` that would prevent any educator handling from executing, so we must restructure it.
+
+Replace `HandleError` with:
 
 ```go
-	if job.Kind == "generate_educator_content" && job.Attempt >= job.MaxAttempts {
+func (h *EvalErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRow, err error) *river.ErrorHandlerResult {
+	if job.Attempt < job.MaxAttempts {
+		return nil
+	}
+
+	switch job.Kind {
+	case "evaluate_session":
+		var args EvaluateSessionArgs
+		if unmarshalErr := json.Unmarshal(job.EncodedArgs, &args); unmarshalErr != nil {
+			slog.Error("unmarshal evaluate_session args in error handler", "error", unmarshalErr)
+			return nil
+		}
+
+		slog.Warn("evaluation exhausted retries, marking failed",
+			"session_id", args.SessionID,
+			"attempts", job.Attempt,
+			"error", err,
+		)
+
+		q := db.New(h.Pool)
+		statusErr := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
+			ID:     args.SessionID,
+			Status: "evaluation_failed",
+		})
+		if statusErr != nil {
+			slog.Error("failed to set evaluation_failed status", "error", statusErr, "session_id", args.SessionID)
+		}
+
+	case "generate_educator_content":
 		var args GenerateEducatorContentArgs
 		if unmarshalErr := json.Unmarshal(job.EncodedArgs, &args); unmarshalErr != nil {
 			slog.Error("unmarshal educator args in error handler", "error", unmarshalErr)
@@ -1799,16 +1835,25 @@ In `internal/jobs/error_handler.go`, update `HandleError` to also handle educato
 		if statusErr != nil {
 			slog.Error("set educator failed status", "error", statusErr, "session_id", args.SessionID)
 		}
-		return nil
 	}
+
+	return nil
+}
 ```
 
-Also update `HandlePanic` to include the educator check:
+Also **replace the entire `HandlePanic` function** with:
 
 ```go
-	if job.Kind == "generate_educator_content" && job.Attempt >= job.MaxAttempts {
-		return h.HandleError(ctx, job, nil)
+func (h *EvalErrorHandler) HandlePanic(ctx context.Context, job *rivertype.JobRow, panicVal any, trace string) *river.ErrorHandlerResult {
+	if job.Attempt >= job.MaxAttempts {
+		switch job.Kind {
+		case "evaluate_session", "generate_educator_content":
+			slog.Error("job panicked on final attempt", "kind", job.Kind, "panic", panicVal)
+			return h.HandleError(ctx, job, nil)
+		}
 	}
+	return nil
+}
 ```
 
 - [ ] **Step 3: Register worker in workers.go**
@@ -2053,16 +2098,7 @@ Add to `RegisterWorkers` before the return:
 go build ./internal/jobs/
 ```
 
-Note: This may fail if `InsertQuestion` doesn't exist in the sqlc-generated code. Check `internal/db/querier.go` for an existing insert question query. If it doesn't exist, add to `sql/queries/questions.sql`:
-
-```sql
--- name: InsertQuestion :one
-INSERT INTO questions (user_id, title, prompt, difficulty, tags, source, coach_rationale)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id;
-```
-
-Then run `sqlc generate` and retry.
+`InsertQuestion` was added in Task 2, Step 6, so this should compile.
 
 - [ ] **Step 4: Commit**
 
@@ -2246,51 +2282,11 @@ git commit -m "feat(educator-coach): add HTTP handlers and register routes"
 ### Task 13: Wire Coach Briefing Into Conductor
 
 **Files:**
-- Modify: `internal/backend/session.go`
 - Modify: `internal/interview/conductor.go`
 
-- [ ] **Step 1: Modify LoadSessionForConductor to include coach briefing**
+- [ ] **Step 1: Add coach briefing loading to conductor's loadSession**
 
-In `internal/backend/session.go`, update `LoadSessionForConductor` to conditionally load the latest coach analysis:
-
-```go
-func (b *Backend) LoadSessionForConductor(ctx context.Context, sessionID uuid.UUID) (db.InterviewSession, db.Question, []db.Message, *db.CoachAnalysis, error) {
-	q := db.New(b.pool)
-
-	session, err := q.GetSession(ctx, sessionID)
-	if err != nil {
-		return db.InterviewSession{}, db.Question{}, nil, nil, fmt.Errorf("get session: %w", err)
-	}
-
-	question, err := q.GetQuestion(ctx, session.QuestionID)
-	if err != nil {
-		return db.InterviewSession{}, db.Question{}, nil, nil, fmt.Errorf("get question: %w", err)
-	}
-
-	msgs, err := q.GetMessagesBySession(ctx, sessionID)
-	if err != nil {
-		return db.InterviewSession{}, db.Question{}, nil, nil, fmt.Errorf("get messages: %w", err)
-	}
-
-	// Load coach briefing if enabled.
-	var coachBriefing *db.CoachAnalysis
-	if session.ConfigCoachBriefing {
-		ca, err := q.GetLatestCoachAnalysis(ctx, session.UserID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return db.InterviewSession{}, db.Question{}, nil, nil, fmt.Errorf("get coach analysis: %w", err)
-		}
-		if err == nil {
-			coachBriefing = &ca
-		}
-	}
-
-	return session, question, msgs, coachBriefing, nil
-}
-```
-
-This changes the return signature. Update all callers.
-
-- [ ] **Step 2: Update conductor's loadSession**
+On the eval branch, `LoadSessionForConductor` does not exist. The conductor's `loadSession` calls `c.backend.GetSession()` (returns `db.GetSessionRow`) and `c.backend.GetMessagesBySession()` separately. We add coach briefing loading directly in the conductor's `loadSession`, using the queries package.
 
 In `internal/interview/conductor.go`, update the `Conductor` struct to add a `coachBriefing` field:
 
@@ -2299,35 +2295,56 @@ In `internal/interview/conductor.go`, update the `Conductor` struct to add a `co
 	coachBriefing *db.CoachAnalysis
 ```
 
-Update `loadSession`:
+Update `loadSession` to conditionally load coach briefing after the existing session/message loading:
 
 ```go
 func (c *Conductor) loadSession(ctx context.Context) error {
-	session, question, msgs, coachBriefing, err := c.backend.LoadSessionForConductor(ctx, c.sessionID)
+	row, err := c.backend.GetSession(ctx, c.sessionID)
 	if err != nil {
 		return err
 	}
 
-	c.question = question
+	msgs, err := c.backend.GetMessagesBySession(ctx, c.sessionID)
+	if err != nil {
+		return err
+	}
+
+	c.question = db.Question{
+		Title:  row.QuestionTitle,
+		Prompt: row.QuestionPrompt,
+	}
 	c.messages = msgs
-	c.ttsEnabled = session.ConfigTtsEnabled
-	c.duration = time.Duration(session.ConfigDurationMinutes) * time.Minute
+	c.ttsEnabled = row.ConfigTtsEnabled
+	c.duration = time.Duration(row.ConfigDurationMinutes) * time.Minute
 	c.model = c.backend.Config().LLM.InterviewerModel
-	c.coachBriefing = coachBriefing
 	c.sm = NewStateMachine(StateWaitingForInput)
-	c.sm.SetStartedAt(session.StartedAt)
+	c.sm.SetStartedAt(row.StartedAt)
 
 	if len(msgs) > 0 {
 		c.sequence = int(msgs[len(msgs)-1].Seq)
+	}
+
+	// Load coach briefing if enabled.
+	if row.ConfigCoachBriefing {
+		q := db.New(c.backend.Pool())
+		ca, err := q.GetLatestCoachAnalysis(ctx, row.UserID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("get coach analysis: %w", err)
+		}
+		if err == nil {
+			c.coachBriefing = &ca
+		}
 	}
 
 	return nil
 }
 ```
 
-- [ ] **Step 3: Wire WithCoachBriefing into prompt builder chain**
+Note: This requires adding `"errors"` and `pgx "github.com/jackc/pgx/v5"` to conductor.go's import block (the eval branch conductor imports neither).
 
-In `streamInterviewerResponse`, add `WithCoachBriefing` to the builder chain (line ~347):
+- [ ] **Step 2: Wire WithCoachBriefing into prompt builder chain**
+
+`WithCoachBriefing` already exists on the eval branch in `internal/interview/prompt.go`. In `streamInterviewerResponse`, add it to the builder chain (line ~355):
 
 ```go
 	system, promptMsgs := NewInterviewerPrompt().
@@ -2339,17 +2356,17 @@ In `streamInterviewerResponse`, add `WithCoachBriefing` to the builder chain (li
 		Build()
 ```
 
-- [ ] **Step 4: Verify compilation**
+- [ ] **Step 3: Verify compilation**
 
 ```bash
 go build ./...
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add internal/backend/session.go internal/interview/conductor.go
-git commit -m "feat(conductor): wire coach briefing into interviewer prompt via LoadSessionForConductor"
+git add internal/interview/conductor.go
+git commit -m "feat(conductor): wire coach briefing into interviewer prompt"
 ```
 
 ---
@@ -2384,13 +2401,13 @@ Expected: clean compilation.
 go test ./... -count=1 -timeout 5m
 ```
 
-Expected: all PASS. Fix any compilation errors from the `LoadSessionForConductor` signature change.
+Expected: all PASS.
 
 - [ ] **Step 4: Commit if any fixes were needed**
 
 ```bash
 git add -A
-git commit -m "fix: update LoadSessionForConductor callers for new signature"
+git commit -m "fix: resolve remaining compilation errors"
 ```
 
 ---
@@ -2425,7 +2442,7 @@ Expected: no changes (codegen is already up to date).
 - [ ] **Step 4: Final commit if needed, then log**
 
 ```bash
-git log --oneline feat/educator-coach ^fbf6a46
+git log --oneline feat/educator-coach ^main
 ```
 
 Review commit history for clarity and completeness.
