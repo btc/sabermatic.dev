@@ -10,7 +10,7 @@ export interface TimerState {
 
 export function useTimer(startedAt: string | null, durationMinutes: number) {
   const [elapsed, setElapsed] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const warningThresholdRef = useRef(0);
 
   useEffect(() => {
