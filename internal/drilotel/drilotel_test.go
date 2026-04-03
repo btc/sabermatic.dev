@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
@@ -21,6 +22,7 @@ func TestInit_Disabled(t *testing.T) {
 	require.NoError(t, p.Shutdown(context.Background()))
 }
 
+// Init tests set the global OTel provider and must NOT use t.Parallel().
 func TestInit_StdoutExporter(t *testing.T) {
 	cfg := &config.Otel{
 		Enabled:     true,
@@ -30,7 +32,10 @@ func TestInit_StdoutExporter(t *testing.T) {
 	}
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
-	defer p.Shutdown(context.Background())
+	defer func() {
+		p.Shutdown(context.Background())
+		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+	}()
 
 	assert.NotNil(t, p.TracerProvider)
 	assert.NotNil(t, p.MeterProvider)
@@ -61,6 +66,7 @@ func TestInit_FullRoundtrip(t *testing.T) {
 	}
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
+	t.Cleanup(func() { otel.SetTracerProvider(trace.NewNoopTracerProvider()) })
 
 	tracer := otel.Tracer("roundtrip")
 	ctx, span := tracer.Start(context.Background(), "roundtrip-span")
