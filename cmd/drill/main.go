@@ -22,7 +22,6 @@ import (
 	drill "github.com/btc/drill"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
-	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
@@ -79,8 +78,6 @@ func runWithContext(ctx context.Context) error {
 	// Initialize Stripe — set API key once (package-level global, must not be set per-request).
 	if cfg.Stripe.SecretKey != "" {
 		stripe.Key = cfg.Stripe.SecretKey
-		billing.SetProPriceID(cfg.Stripe.ProPriceID)
-		billing.SetPackPriceIDs(cfg.Stripe.Pack120PriceID, cfg.Stripe.Pack300PriceID, cfg.Stripe.Pack600PriceID)
 		slog.Info("stripe configured")
 	} else {
 		slog.Warn("stripe not configured — billing endpoints will return errors")

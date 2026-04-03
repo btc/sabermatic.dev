@@ -20,7 +20,6 @@ type Plan struct {
 	CoachAccess        bool
 	EducatorAccess     EducatorAccessLevel
 	FreeEducatorLimit  int
-	StripePriceID      string
 }
 
 var plans = map[string]Plan{
@@ -41,7 +40,6 @@ var plans = map[string]Plan{
 		CoachAccess:        true,
 		EducatorAccess:     Full,
 		FreeEducatorLimit:  0,
-		StripePriceID:      "",
 	},
 }
 
@@ -50,41 +48,24 @@ func PlanByName(name string) (Plan, bool) {
 	return p, ok
 }
 
-func SetProPriceID(priceID string) {
-	p := plans["pro"]
-	p.StripePriceID = priceID
-	plans["pro"] = p
-}
-
+// MinutePack defines an available minute-pack purchase size.
 type MinutePack struct {
-	Minutes       int
-	StripePriceID string
+	Minutes int
 }
 
-var packs = map[int]MinutePack{
-	120: {Minutes: 120},
-	300: {Minutes: 300},
-	600: {Minutes: 600},
-}
-
-func PackByMinutes(minutes int) (MinutePack, bool) {
-	p, ok := packs[minutes]
-	return p, ok
-}
-
-func SetPackPriceIDs(pack120, pack300, pack600 string) {
-	set := func(mins int, priceID string) {
-		p := packs[mins]
-		p.StripePriceID = priceID
-		packs[mins] = p
+// ValidPackSize reports whether the given minute count is a purchasable pack.
+func ValidPackSize(minutes int) bool {
+	switch minutes {
+	case 120, 300, 600:
+		return true
+	default:
+		return false
 	}
-	set(120, pack120)
-	set(300, pack300)
-	set(600, pack600)
 }
 
-func AllPacks() []MinutePack {
-	return []MinutePack{packs[120], packs[300], packs[600]}
+// AllPackSizes returns the available minute-pack sizes in ascending order.
+func AllPackSizes() []int {
+	return []int{120, 300, 600}
 }
 
 func EndOfMonth(t time.Time) time.Time {
