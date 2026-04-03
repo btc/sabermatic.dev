@@ -1,8 +1,10 @@
-# Growth, Landing Page, Onboarding & Launch Design Spec
+# Growth, Landing Page & Launch Design Spec
 
 ## Overview
 
 This spec covers the public-facing landing page, conversion funnel, session replay feature, sample session, and launch strategy for Sabermetric. It builds on the existing naming/branding spec and the authenticated UI spec.
+
+**Prerequisite:** The UI spec still references "DRILL" throughout — it predates the naming decision. The UI spec must be updated to use "Sabermetric" / "sabermetric" per the naming spec before implementing any auth or layout pages.
 
 The landing page is a single-scroll showcase that walks visitors through a real evaluated session (v0 session 27), demonstrating every major feature with real data. The goal: share something genuinely useful, let people see what it does, and not go broke running it.
 
@@ -13,11 +15,26 @@ The landing page is a single-scroll showcase that walks visitors through a real 
 3. Optionally clicks "See a real evaluation" → `/sample` → full session replay
 4. Clicks CTA "Start practicing" → `/signup` (Google/GitHub OAuth or email)
 5. Lands on home dashboard → free tier, picks a question, starts first session
-6. After 3+ sessions → coach, educator preview, paid tier available for heavier usage
+6. After 3+ reviewed sessions → coach card appears on home (UI progressive disclosure); educator and coach features gated by billing entitlements (see billing spec)
 
 **No anonymous sessions.** Signup required. Free tier is the trial. Simpler engineering (no session migration, no IP-based rate limiting, no orphaned data), cleaner usage tracking, better conversion (the person who won't do one-click OAuth wasn't converting anyway).
 
 **Authenticated users** who visit `sabermetric.dev` are redirected to `/` (home dashboard). They never see the landing page again.
+
+### Routing
+
+The landing page lives at `/`. The React Router configuration conditionally renders based on auth state:
+- **Unauthenticated:** `/` renders the landing page. The existing `RequireAuth` guard (which redirects to `/login`) does NOT apply to `/` — instead, `/` itself handles both states.
+- **Authenticated:** `/` renders the home dashboard (existing design).
+
+The `/sample` route is a new public route (no auth required). It renders the standard session detail UI (overview, transcript, deep dive tabs) with pre-seeded session 27 data. The session detail component must support a "public mode" that reads from bundled/static data rather than calling authenticated API endpoints.
+
+These routes extend the UI spec's routing table:
+
+| Route | Auth | Description |
+|---|---|---|
+| `/` | conditional | Landing page (unauth) or home dashboard (auth) |
+| `/sample` | public | Sample session detail with replay |
 
 ## Landing Page
 
@@ -64,7 +81,7 @@ The landing page is a single-scroll showcase that walks visitors through a real 
 ### Section 6: Coaching
 
 - Feature copy: tracks your growth across sessions, identifies thinking patterns, recommends what to practice next
-- Illustration: real coach output from v0 user profile — trend sparkline, weakest dimension badge, recommended next question
+- Illustration: real coach output from the v0 user who did session 27 — trend sparkline, weakest dimension badge, recommended next question. Coach data is user-level (not session-level), so this uses that user's full coaching history.
 
 ### Section 7: Voice → Transcript → Analysis
 
@@ -83,7 +100,7 @@ The landing page is a single-scroll showcase that walks visitors through a real 
 Clean, quiet list at the bottom. No logos, no "powered by" badges. Just what's inside.
 
 - Interviewer — Claude Sonnet
-- Evaluator — Claude Sonnet
+- Evaluator — Claude Opus
 - Educator — Claude Opus
 - Coach — Claude Sonnet
 - Speech-to-text — Whisper
@@ -95,7 +112,7 @@ Clean, quiet list at the bottom. No logos, no "powered by" badges. Just what's i
 ### Section 10: CTA Repeat
 
 - "Start practicing" primary amber CTA
-- "No credit card required" muted text below
+- "No credit card required" muted text below (accurate — free tier is 60 min/month with no payment info needed; limits are communicated inside the app, not on the landing page)
 
 ## Session Replay Feature
 
@@ -113,9 +130,13 @@ A general product feature available on any reviewed session and on the sample se
 
 ### Data Requirements Per Session
 
-- Ordered audio segments with timestamps (candidate recordings + interviewer TTS)
-- Transcript messages with timestamps
-- Annotations mapped to message indices
+- Transcript messages with `created_at` timestamps (already stored). Replay timing derived from offsets relative to `session.started_at`.
+- Audio segments (candidate recordings + interviewer TTS) stored in GCS with `audio_url` on each message.
+- Annotations mapped to message `seq` indices (already stored).
+
+**Dependency:** The conductor spec currently defers audio storage (GCS upload). Session replay requires audio persistence to be implemented first. For the sample session (v0 session 27), audio files already exist in v0 storage and can be migrated as static assets independently of the v1 audio pipeline.
+
+**Schema note:** No new columns needed for replay timing — `messages.created_at` relative to `sessions.started_at` provides message-level timing. Per-segment audio duration can be derived from the audio files themselves at playback time.
 
 ### Text-Only Fallback
 
@@ -186,7 +207,7 @@ After Show HN. Use HN feedback to refine before broader launch. Tuesday-Thursday
 
 ### Materials
 
-- **Tagline:** "The science of system design prep" or "Moneyball for system design interviews"
+- **Tagline:** "Moneyball for system design interviews" (reserved for marketing per naming spec) or "data-driven system design prep" (the landing page hold line — consistent branding)
 - **Gallery (5 images):**
   1. Hero with brand and tagline
   2. Scoring dimensions (GIF/video of bars animating)
