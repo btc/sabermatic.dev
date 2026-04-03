@@ -165,8 +165,26 @@ export default function DeepDive() {
 
   const isPro = me?.plan === "pro";
 
-  // Not yet requested (404 or null)
-  if (!educator || isError) {
+  // Error state — separate from "not requested"
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
+        <p className="text-sm text-muted-foreground">
+          Could not load deep analysis. Please try again.
+        </p>
+        <Button
+          variant="outline"
+          onClick={() => requestEducator.mutate()}
+          disabled={requestEducator.isPending}
+        >
+          {requestEducator.isPending ? "Requesting..." : "Retry"}
+        </Button>
+      </div>
+    );
+  }
+
+  // Not yet requested (null data)
+  if (!educator) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
         <p className="text-sm text-muted-foreground leading-relaxed">

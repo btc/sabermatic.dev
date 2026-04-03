@@ -7,15 +7,12 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/api/client";
 import { useInterview } from "@/ws/hooks";
 import { useTimer } from "@/hooks/use-timer";
 import { useAudioRecorder } from "@/audio/hooks";
 import { useAudioPlayer } from "@/audio/hooks";
 import { useSession } from "@/api/queries";
 import { ConnectionState } from "@/ws/connection";
-import type { Session } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,6 +25,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { WAITING_MESSAGES } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -99,14 +97,6 @@ function ProcessingIndicator() {
 // WaitingView — shown after session ends while evaluation is processing
 // ---------------------------------------------------------------------------
 
-const WAITING_MESSAGES = [
-  "Reviewing your requirements gathering...",
-  "Analyzing architecture decisions...",
-  "Assessing depth of technical discussion...",
-  "Evaluating scalability reasoning...",
-  "Reviewing communication clarity...",
-];
-
 function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -133,10 +123,7 @@ function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: Waitin
   }, []);
 
   // Poll for evaluation completion
-  const { data: session } = useQuery({
-    queryKey: ["sessions", sessionId],
-    queryFn: () => apiClient.get<Session>(`/api/sessions/${sessionId}`),
-    enabled: !!sessionId,
+  const { data: session } = useSession(sessionId, {
     refetchInterval: 3000,
   });
 
@@ -190,6 +177,7 @@ export default function Interview() {
     sendText,
     sendAudio,
     endSession,
+    cancelTts,
     setRawMessageHandler,
   } = useInterview(sessionId!);
 
@@ -237,19 +225,27 @@ export default function Interview() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText, state]);
 
+  // ------ Cancel TTS when user starts responding ------
+  const stopTts = useCallback(() => {
+    cancelTts();
+    audioPlayer.cancel();
+  }, [cancelTts, audioPlayer]);
+
   // ------ Spacebar push-to-talk ------
+  const { isRecording: recIsRecording, start: recStart, stop: recStop } = audioRecorder;
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !inputFocused && !audioRecorder.isRecording) {
+      if (e.code === "Space" && !inputFocused && !recIsRecording) {
         e.preventDefault();
+        stopTts();
         ensureAudioContext();
-        audioRecorder.start();
+        recStart();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !inputFocused && audioRecorder.isRecording) {
+      if (e.code === "Space" && !inputFocused && recIsRecording) {
         e.preventDefault();
-        audioRecorder.stop();
+        recStop();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -258,7 +254,7 @@ export default function Interview() {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("keyup", handleKeyUp);
     };
-  }, [inputFocused, audioRecorder, audioRecorder.isRecording, audioRecorder.start, audioRecorder.stop, ensureAudioContext]);
+  }, [inputFocused, recIsRecording, recStart, recStop, ensureAudioContext, stopTts]);
 
   // ------ Escape to blur input ------
   useEffect(() => {
@@ -275,10 +271,11 @@ export default function Interview() {
   const handleSendText = useCallback(() => {
     const trimmed = textInput.trim();
     if (!trimmed) return;
+    stopTts();
     ensureAudioContext();
     sendText(trimmed);
     setTextInput("");
-  }, [textInput, sendText, ensureAudioContext]);
+  }, [textInput, sendText, ensureAudioContext, stopTts]);
 
   const handleSendAudio = useCallback(async () => {
     ensureAudioContext();
@@ -407,6 +404,7 @@ export default function Interview() {
               if (audioRecorder.isRecording) {
                 audioRecorder.stop();
               } else {
+                stopTts();
                 audioRecorder.start();
               }
             }}

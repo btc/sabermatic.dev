@@ -12,6 +12,7 @@ import { useSessions, useArchiveSessions } from "@/api/queries";
 import type { Session, SessionStatus } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatRelativeDate } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -94,8 +95,8 @@ function TrendTooltip({ active, payload }: TrendTooltipProps) {
   if (!active || !payload?.length) return null;
   const point = payload[0]!.payload;
   return (
-    <div className="rounded-lg border border-border bg-stone-900 px-3 py-2 text-xs shadow-lg">
-      <p className="font-medium text-foreground">{point.title}</p>
+    <div className="rounded-lg border border-border bg-popover text-popover-foreground px-3 py-2 text-xs shadow-lg">
+      <p className="font-medium">{point.title}</p>
       <p className="text-muted-foreground">{point.date}</p>
       <p className="mt-1 font-semibold text-amber-400">{point.score}/5</p>
     </div>
@@ -125,7 +126,7 @@ function ScoreTrendChart({ sessions }: { sessions: Session[] }) {
   if (!hasScores) return null;
 
   return (
-    <div className="rounded-lg border border-border bg-stone-950 px-4 py-5">
+    <div className="rounded-lg border border-border bg-card px-4 py-5">
       <h2 className="mb-4 text-sm font-medium text-muted-foreground uppercase tracking-wider">
         Score Trend
       </h2>
@@ -422,8 +423,14 @@ export default function History() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">
-        Loading...
+      <div className="space-y-6">
+        <Skeleton className="h-6 w-24" />
+        <div className="space-y-2">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+        </div>
       </div>
     );
   }

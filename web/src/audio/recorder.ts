@@ -36,7 +36,10 @@ export class AudioRecorder {
   async start(): Promise<void> {
     if (this._isRecording) return;
 
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Reuse existing stream if still active
+    if (!this.stream || this.stream.getTracks().some((t) => t.readyState === "ended")) {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }
     const mimeType = AudioRecorder.preferredMimeType();
     const options = mimeType ? { mimeType } : undefined;
     this.mediaRecorder = new MediaRecorder(this.stream, options);
@@ -60,10 +63,18 @@ export class AudioRecorder {
     this._isRecording = true;
   }
 
-  stop(): void {
-    if (!this._isRecording || !this.mediaRecorder) return;
-    this.mediaRecorder.stop();
-    this._isRecording = false;
+  stop(): Promise<void> {
+    if (!this._isRecording || !this.mediaRecorder) return Promise.resolve();
+    const recorder = this.mediaRecorder;
+    return new Promise<void>((resolve) => {
+      const prev = recorder.onstop;
+      recorder.onstop = (e) => {
+        if (typeof prev === "function") prev.call(recorder, e);
+        resolve();
+      };
+      recorder.stop();
+      this._isRecording = false;
+    });
   }
 
   async submit(): Promise<string> {

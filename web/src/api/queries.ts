@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import { apiClient } from "./client";
 import type {
   User, Question, Session, CreateSessionRequest,
@@ -63,11 +63,15 @@ export function useSessions(params?: { archived?: boolean; status?: string; sort
   });
 }
 
-export function useSession(id: string) {
+export function useSession(
+  id: string,
+  options?: Partial<Pick<UseQueryOptions<Session>, "refetchInterval">>,
+) {
   return useQuery({
     queryKey: ["sessions", id],
     queryFn: () => apiClient.get<Session>(`/api/sessions/${id}`),
     enabled: !!id,
+    ...options,
   });
 }
 
@@ -182,5 +186,69 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => apiClient.post("/api/auth/logout"),
     onSuccess: () => qc.clear(),
+  });
+}
+
+// --- Auth mutations (password, email verification) ---
+
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: (data: { email: string }) =>
+      apiClient.post("/api/auth/forgot-password", data),
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: (data: { token: string; password: string }) =>
+      apiClient.post("/api/auth/reset-password", data),
+  });
+}
+
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (data: { token: string }) =>
+      apiClient.post("/api/auth/verify-email", data),
+  });
+}
+
+// --- Profile ---
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { display_name: string }) =>
+      apiClient.patch("/api/me", data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+}
+
+// --- Data export ---
+
+export function useExportData() {
+  return useMutation({
+    mutationFn: () => apiClient.get("/api/me/export"),
+  });
+}
+
+// --- Account deletion ---
+
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: () => apiClient.delete("/api/auth/account"),
+  });
+}
+
+// --- Billing ---
+
+export function useCheckout() {
+  return useMutation({
+    mutationFn: () => apiClient.post<{ url: string }>("/api/billing/checkout"),
+  });
+}
+
+export function usePortal() {
+  return useMutation({
+    mutationFn: () => apiClient.post<{ url: string }>("/api/billing/portal"),
   });
 }

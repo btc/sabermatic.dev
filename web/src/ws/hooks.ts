@@ -17,6 +17,7 @@ export type InterviewState =
   | "streaming"
   | "ended";
 
+// TODO: Add integration tests for useInterview — requires WebSocket mock infrastructure
 export function useInterview(sessionId: string) {
   const [messages, setMessages] = useState<InterviewMessage[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -140,17 +141,14 @@ export function useInterview(sessionId: string) {
     rawMessageHandlerRef.current = handler;
   }, []);
 
-  // Update handleMessage to also forward to raw handler.
-  // Intentionally accessing the private field via type assertion.
+  // Update the connection manager's message handler to also forward to the raw handler.
   useEffect(() => {
     if (!cmRef.current) return;
     const original = handleMessage;
-    (cmRef.current as unknown as { onMessage: (msg: ServerMessage) => void }).onMessage = (
-      msg: ServerMessage,
-    ) => {
+    cmRef.current.setMessageHandler((msg: ServerMessage) => {
       original(msg);
       rawMessageHandlerRef.current?.(msg);
-    };
+    });
   }, [handleMessage]);
 
   return {

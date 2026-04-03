@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "./auth-layout";
-import { apiClient } from "@/api/client";
+import { useVerifyEmail } from "@/api/queries";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 
 export default function VerifyEmail() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
+  const verifyEmail = useVerifyEmail();
 
   const [status, setStatus] = useState<"pending" | "success" | "error">(
     token ? "pending" : "error",
@@ -14,10 +15,14 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     if (!token) return;
-    apiClient
-      .post("/api/auth/verify-email", { token })
-      .then(() => setStatus("success"))
-      .catch(() => setStatus("error"));
+    verifyEmail.mutate(
+      { token },
+      {
+        onSuccess: () => setStatus("success"),
+        onError: () => setStatus("error"),
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run once on mount
   }, [token]);
 
   return (

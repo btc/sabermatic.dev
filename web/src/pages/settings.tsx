@@ -1,7 +1,11 @@
 import { useState, useRef, KeyboardEvent } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { useMe, useUsage, useLogout } from "@/api/queries";
-import { apiClient, ApiError } from "@/api/client";
+import {
+  useMe, useUsage, useLogout,
+  useUpdateProfile, useExportData, useDeleteAccount,
+  useCheckout, usePortal,
+} from "@/api/queries";
+import { ApiError } from "@/api/client";
 import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -135,25 +139,37 @@ function ThemeToggle() {
 
 function ProfileSection() {
   const { data: user } = useMe();
-  const [displayName, setDisplayName] = useState(user?.display_name ?? "");
-  const [saving, setSaving] = useState(false);
+  // M-8: Track local edits separately. When localEdit is null, display the server value.
+  const [localEdit, setLocalEdit] = useState<string | null>(null);
+  const displayName = localEdit ?? user?.display_name ?? "";
   const [saveError, setSaveError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const updateProfile = useUpdateProfile();
 
-  async function saveName() {
-    if (!displayName.trim() || displayName === user?.display_name) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await apiClient.patch("/api/me", { display_name: displayName.trim() });
-    } catch (err) {
-      const msg = err instanceof ApiError ? `Save failed (${err.status})` : "Save failed";
-      setSaveError(msg);
-      setDisplayName(user?.display_name ?? "");
-    } finally {
-      setSaving(false);
-    }
+  function handleChange(value: string) {
+    setLocalEdit(value);
   }
+
+  function saveName() {
+    if (!displayName.trim() || displayName === user?.display_name) {
+      setLocalEdit(null);
+      return;
+    }
+    setSaveError(null);
+    updateProfile.mutate(
+      { display_name: displayName.trim() },
+      {
+        onSuccess: () => setLocalEdit(null),
+        onError: (err) => {
+          const msg = err instanceof ApiError ? `Save failed (${err.status})` : "Save failed";
+          setSaveError(msg);
+          setLocalEdit(null);
+        },
+      },
+    );
+  }
+
+  const saving = updateProfile.isPending;
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
@@ -175,14 +191,14 @@ function ProfileSection() {
             id="display-name"
             ref={inputRef}
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => handleChange(e.target.value)}
             onBlur={saveName}
             onKeyDown={handleKeyDown}
             disabled={saving}
             className="max-w-sm"
             placeholder="Your name"
           />
-          {saveError && <p className="text-xs text-destructive">{saveError}</p>}
+          {saveError && <p className="text-xs text-orange-500">{saveError}</p>}
         </div>
 
         <div className="space-y-1.5">
@@ -271,22 +287,16 @@ function PreferencesSection() {
 // ---------------------------------------------------------------------------
 
 function DataExportSection() {
-  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const exportData = useExportData();
+  const status = exportData.isIdle ? "idle" : exportData.isPending ? "loading" : exportData.isSuccess ? "done" : "error";
+  const errorMsg = exportData.error instanceof ApiError
+    ? `Export request failed (${exportData.error.status})`
+    : exportData.isError
+      ? "Export request failed. Please try again."
+      : null;
 
-  async function handleExport() {
-    setStatus("loading");
-    setErrorMsg(null);
-    try {
-      await apiClient.get("/api/me/export");
-      setStatus("done");
-    } catch (err) {
-      const msg = err instanceof ApiError
-        ? `Export request failed (${err.status})`
-        : "Export request failed. Please try again.";
-      setErrorMsg(msg);
-      setStatus("error");
-    }
+  function handleExport() {
+    exportData.mutate();
   }
 
   return (
@@ -310,7 +320,7 @@ function DataExportSection() {
               {status === "loading" ? "Requesting..." : "Export my data"}
             </Button>
             {status === "error" && errorMsg && (
-              <p className="text-xs text-destructive">{errorMsg}</p>
+              <p className="text-xs text-orange-500">{errorMsg}</p>
             )}
           </>
         )}
@@ -325,28 +335,30 @@ function DataExportSection() {
 
 function AccountDeletionSection() {
   const [open, setOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteAccount = useDeleteAccount();
   const logout = useLogout();
   const navigate = useNavigate();
 
-  async function handleDelete() {
-    setDeleting(true);
+  function handleDelete() {
     setDeleteError(null);
-    try {
-      await apiClient.delete("/api/auth/account");
-      logout.mutate(undefined, {
-        onSuccess: () => navigate("/login"),
-        onError: () => navigate("/login"),
-      });
-    } catch (err) {
-      const msg = err instanceof ApiError
-        ? `Deletion failed (${err.status})`
-        : "Deletion failed. Please try again.";
-      setDeleteError(msg);
-      setDeleting(false);
-    }
+    deleteAccount.mutate(undefined, {
+      onSuccess: () => {
+        logout.mutate(undefined, {
+          onSuccess: () => navigate("/login"),
+          onError: () => navigate("/login"),
+        });
+      },
+      onError: (err) => {
+        const msg = err instanceof ApiError
+          ? `Deletion failed (${err.status})`
+          : "Deletion failed. Please try again.";
+        setDeleteError(msg);
+      },
+    });
   }
+
+  const deleting = deleteAccount.isPending;
 
   return (
     <>
@@ -381,7 +393,7 @@ function AccountDeletionSection() {
           </DialogHeader>
 
           {deleteError && (
-            <p className="text-xs text-destructive px-0.5">{deleteError}</p>
+            <p className="text-xs text-orange-500 px-0.5">{deleteError}</p>
           )}
 
           <DialogFooter>
@@ -413,25 +425,11 @@ function AccountDeletionSection() {
 function AccountSettings() {
   return (
     <div className="space-y-6">
-      <Section title="Profile">
-        <ProfileSection />
-      </Section>
-
-      <Section title="Linked accounts">
-        <LinkedAccountsSection />
-      </Section>
-
-      <Section title="Appearance">
-        <PreferencesSection />
-      </Section>
-
-      <Section title="Your data">
-        <DataExportSection />
-      </Section>
-
-      <Section title="Account">
-        <AccountDeletionSection />
-      </Section>
+      <ProfileSection />
+      <LinkedAccountsSection />
+      <PreferencesSection />
+      <DataExportSection />
+      <AccountDeletionSection />
     </div>
   );
 }
@@ -507,46 +505,43 @@ function FreeLimitsTable() {
 function BillingSettings() {
   const { data: user } = useMe();
   const { data: usage } = useUsage();
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [portalLoading, setPortalLoading] = useState(false);
-  const [portalError, setPortalError] = useState<string | null>(null);
+  const checkout = useCheckout();
+  const portal = usePortal();
 
   const isPro = user?.plan === "pro";
 
-  async function handleUpgrade() {
-    setCheckoutLoading(true);
-    setCheckoutError(null);
-    try {
-      const res = await apiClient.post<{ url: string }>("/api/billing/checkout");
-      if (res?.url) {
-        window.location.href = res.url;
-      }
-    } catch (err) {
-      const msg = err instanceof ApiError
-        ? `Could not start checkout (${err.status}). Please try again.`
-        : "Could not start checkout. Please try again.";
-      setCheckoutError(msg);
-      setCheckoutLoading(false);
-    }
+  const checkoutLoading = checkout.isPending;
+  const checkoutError = checkout.isError
+    ? checkout.error instanceof ApiError
+      ? `Could not start checkout (${checkout.error.status}). Please try again.`
+      : "Could not start checkout. Please try again."
+    : null;
+
+  const portalLoading = portal.isPending;
+  const portalError = portal.isError
+    ? portal.error instanceof ApiError
+      ? `Could not open billing portal (${portal.error.status}). Please try again.`
+      : "Could not open billing portal. Please try again."
+    : null;
+
+  function handleUpgrade() {
+    checkout.mutate(undefined, {
+      onSuccess: (res) => {
+        if (res?.url) {
+          window.location.href = res.url;
+        }
+      },
+    });
   }
 
-  async function handlePortal() {
-    setPortalLoading(true);
-    setPortalError(null);
-    try {
-      const res = await apiClient.post<{ url: string }>("/api/billing/portal");
-      if (res?.url) {
-        window.open(res.url, "_blank", "noopener,noreferrer");
-      }
-    } catch (err) {
-      const msg = err instanceof ApiError
-        ? `Could not open billing portal (${err.status}). Please try again.`
-        : "Could not open billing portal. Please try again.";
-      setPortalError(msg);
-    } finally {
-      setPortalLoading(false);
-    }
+  function handlePortal() {
+    portal.mutate(undefined, {
+      onSuccess: (res) => {
+        if (res?.url) {
+          window.open(res.url, "_blank", "noopener,noreferrer");
+        }
+      },
+    });
   }
 
   return (
@@ -597,7 +592,7 @@ function BillingSettings() {
                   {checkoutLoading ? "Redirecting..." : "Upgrade to Pro"}
                 </Button>
                 {checkoutError && (
-                  <p className="text-xs text-destructive">{checkoutError}</p>
+                  <p className="text-xs text-orange-500">{checkoutError}</p>
                 )}
                 <p className="text-xs text-muted-foreground">
                   You're in control of your plan — cancel any time from your billing portal.
@@ -625,7 +620,7 @@ function BillingSettings() {
                   {portalLoading ? "Opening..." : "Manage subscription"}
                 </Button>
                 {portalError && (
-                  <p className="text-xs text-destructive">{portalError}</p>
+                  <p className="text-xs text-orange-500">{portalError}</p>
                 )}
               </div>
             </CardContent>

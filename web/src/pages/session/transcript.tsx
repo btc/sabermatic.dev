@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { useTranscript, useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { AnnotationType, AnnotationResponse, Message } from "@/api/types";
 
 // ---------------------------------------------------------------------------
@@ -278,7 +279,15 @@ export default function TranscriptPage() {
   }, []);
 
   if (!messages) {
-    return null;
+    return (
+      <div className="space-y-4 max-w-3xl mx-auto">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-16 w-3/4" />
+        <Skeleton className="h-16 w-1/2 ml-auto" />
+        <Skeleton className="h-16 w-3/4" />
+        <Skeleton className="h-16 w-1/2 ml-auto" />
+      </div>
+    );
   }
 
   const sorted = [...messages].sort((a, b) => a.seq - b.seq);

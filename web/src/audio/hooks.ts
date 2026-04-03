@@ -45,7 +45,10 @@ export function useAudioPlayer() {
     const player = new AudioPlayer();
     player.onComplete = () => setIsPlaying(false);
     playerRef.current = player;
-    return () => player.destroy();
+    return () => {
+      player.onComplete = null;
+      player.destroy();
+    };
   }, []);
 
   const initContext = useCallback(() => {

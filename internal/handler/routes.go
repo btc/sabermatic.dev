@@ -67,6 +67,10 @@ func SPAHandler(fsys embed.FS) http.Handler {
 		path := r.URL.Path
 		if path != "/" {
 			if _, err := fs.Stat(sub, strings.TrimPrefix(path, "/")); err == nil {
+				// Hashed asset files are immutable and can be cached forever
+				if strings.Contains(path, "/assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
 				fileServer.ServeHTTP(w, r)
 				return
 			}
