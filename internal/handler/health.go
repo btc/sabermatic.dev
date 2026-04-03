@@ -13,7 +13,7 @@ func Health(b *backend.Backend) http.HandlerFunc {
 		ctx := r.Context()
 
 		dbOK := true
-		if err := b.Pool.Ping(ctx); err != nil {
+		if err := b.Ping(ctx); err != nil {
 			dbOK = false
 		}
 

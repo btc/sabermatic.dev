@@ -20,17 +20,16 @@ func TestNewAndClose(t *testing.T) {
 	}
 
 	connStr := startPostgres(t)
-	cfg := loadTestConfig(t)
-	cfg.Database.URL = connStr
+	cfg := loadTestConfig(t, connStr)
 
 	b, err := New(cfg)
 	require.NoError(t, err)
-	require.NotNil(t, b.Pool)
-	require.NotNil(t, b.Jobs)
+	require.NotNil(t, b.pool)
+	require.NotNil(t, b.jobs)
 	require.Equal(t, cfg, b.Config())
 
-	// Pool is usable.
-	err = b.Pool.Ping(context.Background())
+	// Ping checks connectivity.
+	err = b.Ping(context.Background())
 	require.NoError(t, err)
 
 	// Close stops River and closes the pool.

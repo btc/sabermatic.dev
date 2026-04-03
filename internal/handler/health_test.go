@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/handler"
 	"github.com/stretchr/testify/require"
 )
@@ -16,8 +15,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := &backend.Backend{Pool: pool, Jobs: &backend.RecordingJobs{}}
+	b := newTestBackend(t)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 
