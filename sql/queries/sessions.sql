@@ -5,10 +5,15 @@ RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_
           config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at;
 
 -- name: GetSession :one
-SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled,
-       config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at
-FROM interview_sessions
-WHERE id = $1;
+SELECT s.id, s.user_id, s.question_id, s.status,
+       s.config_duration_minutes, s.config_tts_enabled,
+       s.config_coach_briefing, s.started_at, s.ended_at,
+       s.turn_count, s.archived, s.created_at, s.updated_at,
+       q.title AS question_title, q.prompt AS question_prompt,
+       q.difficulty AS question_difficulty, q.hints AS question_hints
+FROM interview_sessions s
+JOIN questions q ON q.id = s.question_id
+WHERE s.id = $1;
 
 -- name: ListSessionsByUser :many
 SELECT s.id, s.user_id, s.question_id, s.status, s.config_duration_minutes,

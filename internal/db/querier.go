@@ -30,7 +30,7 @@ type Querier interface {
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
-	GetSession(ctx context.Context, id uuid.UUID) (InterviewSession, error)
+	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
