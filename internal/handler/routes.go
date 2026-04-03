@@ -52,6 +52,16 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 
 	// Questions
 	mux.Handle("GET /api/questions", requireAuth(http.HandlerFunc(ListQuestions(b))))
+
+	// Billing
+	mux.Handle("POST /api/billing/checkout", requireAuth(http.HandlerFunc(PostCheckout(b))))
+	mux.Handle("POST /api/billing/portal", requireAuth(http.HandlerFunc(PostPortal(b))))
+	mux.Handle("GET /api/me/usage", requireAuth(http.HandlerFunc(GetUsage(b))))
+
+	// Stripe webhook — no auth, signature verified.
+	// Must be exempt from CSRF middleware. Registered here before any
+	// CSRF wrapping, or add to CSRF exemption filter.
+	mux.HandleFunc("POST /api/webhooks/stripe", PostStripeWebhook(b))
 }
 
 // SPAHandler serves the embedded SPA. Static assets served directly.
