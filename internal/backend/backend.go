@@ -6,14 +6,17 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -30,7 +33,7 @@ type Backend struct {
 // App migrations must be run before calling this (schema must exist).
 func New(cfg *config.Config) (*Backend, error) {
 	// Pool uses background context — must outlive any request or signal context.
-	pool, err := cfg.Database.NewPool(context.Background(), nil)
+	pool, err := cfg.Database.NewPool(context.Background(), otelpgx.NewTracer())
 	if err != nil {
 		return nil, fmt.Errorf("database: %w", err)
 	}
@@ -61,7 +64,8 @@ func New(cfg *config.Config) (*Backend, error) {
 			jobs.QueueAI:            {MaxWorkers: cfg.River.NumAIWorkers},
 			jobs.QueueMaintenance:   {MaxWorkers: cfg.River.NumMaintWorkers},
 		},
-		Workers: workers,
+		Workers:    workers,
+		Middleware: []rivertype.Middleware{&drilotel.JobTracer{}},
 	})
 	if err != nil {
 		pool.Close()
