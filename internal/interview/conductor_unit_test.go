@@ -11,7 +11,7 @@ func TestWarningMinutes(t *testing.T) {
 	tests := []struct {
 		name     string
 		duration time.Duration
-		want     float64
+		want     int
 	}{
 		{"45 min session", 45 * time.Minute, 5},  // round(45/9)=5
 		{"30 min session", 30 * time.Minute, 3},  // round(30/9)=3

@@ -105,45 +105,52 @@ func (a *TTSAccumulator) Close() {
 func (a *TTSAccumulator) ttsLoop() {
 	defer close(a.done)
 
-	for sentence := range a.sentCh {
-		if a.ctx.Err() != nil {
-			continue
-		}
-
-		rc, err := a.synth.Synthesize(a.ctx, sentence)
-		if err != nil {
-			continue
-		}
-
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := rc.Read(buf)
-			if n > 0 {
-				chunk := base64.StdEncoding.EncodeToString(buf[:n])
-				_ = a.ws.SendJSON(a.ctx, map[string]any{
-					"type":       "tts_chunk",
-					"data":       chunk,
-					"message_id": a.messageID.String(),
-					"seq":        a.seq,
-				})
-				a.seq++
+	for {
+		select {
+		case sentence, ok := <-a.sentCh:
+			if !ok {
+				// Channel closed (OnDone was called). Send tts_done if context still live.
+				if a.ctx.Err() == nil {
+					_ = a.ws.SendJSON(a.ctx, map[string]any{
+						"type":       "tts_done",
+						"message_id": a.messageID.String(),
+					})
+				}
+				return
 			}
-			if readErr == io.EOF {
-				break
+			if a.ctx.Err() != nil {
+				continue // drain channel but skip synthesis
 			}
-			if readErr != nil {
-				break
-			}
-		}
-		rc.Close()
-	}
 
-	// Only send tts_done if the context is still live. If Interrupt() was called
-	// (cancel_tts or disconnect), the client doesn't need this message.
-	if a.ctx.Err() == nil {
-		_ = a.ws.SendJSON(a.ctx, map[string]any{
-			"type":       "tts_done",
-			"message_id": a.messageID.String(),
-		})
+			rc, err := a.synth.Synthesize(a.ctx, sentence)
+			if err != nil {
+				continue
+			}
+
+			buf := make([]byte, 4096)
+			for {
+				n, readErr := rc.Read(buf)
+				if n > 0 {
+					chunk := base64.StdEncoding.EncodeToString(buf[:n])
+					_ = a.ws.SendJSON(a.ctx, map[string]any{
+						"type":       "tts_chunk",
+						"data":       chunk,
+						"message_id": a.messageID.String(),
+						"seq":        a.seq,
+					})
+					a.seq++
+				}
+				if readErr == io.EOF {
+					break
+				}
+				if readErr != nil {
+					break
+				}
+			}
+			rc.Close()
+
+		case <-a.ctx.Done():
+			return
+		}
 	}
 }

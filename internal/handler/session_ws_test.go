@@ -860,7 +860,7 @@ func TestWS_GracefulShutdown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 11: Transactional enqueue — session status and eval job in same tx
+// Test 10: Transactional enqueue — session status and eval job in same tx
 // ---------------------------------------------------------------------------
 
 func TestWS_TransactionalEnqueue(t *testing.T) {
@@ -912,7 +912,7 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 12: Abandoned cleanup — session left active, cleanup marks completed
+// Test 11: Abandoned cleanup — session left active, cleanup marks completed
 // ---------------------------------------------------------------------------
 
 func TestWS_AbandonedCleanup(t *testing.T) {
