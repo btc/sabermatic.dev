@@ -222,7 +222,7 @@ export default function Interview() {
         audioPlayer.done();
       }
     });
-  }, [setRawMessageHandler, audioPlayer.enqueue, audioPlayer.done]);
+  }, [setRawMessageHandler, audioPlayer, audioPlayer.enqueue, audioPlayer.done]);
 
   // ------ AudioContext init on first interaction ------
   const ensureAudioContext = useCallback(() => {
@@ -258,7 +258,7 @@ export default function Interview() {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("keyup", handleKeyUp);
     };
-  }, [inputFocused, audioRecorder.isRecording, audioRecorder.start, audioRecorder.stop, ensureAudioContext]);
+  }, [inputFocused, audioRecorder, audioRecorder.isRecording, audioRecorder.start, audioRecorder.stop, ensureAudioContext]);
 
   // ------ Escape to blur input ------
   useEffect(() => {
