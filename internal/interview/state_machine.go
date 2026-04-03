@@ -73,3 +73,20 @@ func warningMinutes(duration time.Duration) int {
 	minutes := duration.Minutes()
 	return int(math.Max(2, math.Min(5, math.Round(minutes/9))))
 }
+
+// warningDelay returns how long until the warning timer should fire.
+// Warning fires at: duration - clamp(2, 5, round(duration_minutes/9)) minutes.
+func warningDelay(duration, elapsed time.Duration) time.Duration {
+	w := time.Duration(warningMinutes(duration)) * time.Minute
+	return max(0, duration-w-elapsed)
+}
+
+// overtimeDelay returns how long until the overtime timer should fire.
+func overtimeDelay(duration, elapsed time.Duration) time.Duration {
+	return max(0, duration-elapsed)
+}
+
+// autoEndDelay returns how long until the session auto-ends (2 min after overtime).
+func autoEndDelay(duration, elapsed time.Duration) time.Duration {
+	return max(0, duration+2*time.Minute-elapsed)
+}

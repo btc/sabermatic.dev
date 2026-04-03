@@ -161,20 +161,15 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	// Timers -- all set declaratively, unconditionally. Timers that fire
 	// after the session ends are harmless (no one reads the channel).
 	elapsed := time.Since(c.sm.StartedAt())
-	warningTimer := time.After(max(0, c.duration-time.Duration(warningMinutes(c.duration))*time.Minute-elapsed))
-	overtimeTimer := time.After(max(0, c.duration-elapsed))
-	autoEndTimer := time.After(max(0, c.duration+2*time.Minute-elapsed))
+	warningTimer := time.After(warningDelay(c.duration, elapsed))
+	overtimeTimer := time.After(overtimeDelay(c.duration, elapsed))
+	autoEndTimer := time.After(autoEndDelay(c.duration, elapsed))
 	reconnectTimer := time.After(55 * time.Minute)
 
 	// Initial messages to client.
-	if c.isReconnect() {
-		c.sendReconnectState(serverCtx)
-	} else {
-		c.sendSessionLoaded(serverCtx)
-		if err := c.streamInterviewerResponse(serverCtx); err != nil {
-			slog.Error("conductor: opening stream", "error", err, "session_id", c.sessionID)
-			return
-		}
+	if err := c.sendInitialMessage(serverCtx); err != nil {
+		slog.Error("conductor: initial message", "error", err, "session_id", c.sessionID)
+		return
 	}
 
 	// Main loop -- all control flow visible here.
@@ -254,18 +249,16 @@ func (c *Conductor) loadSession(ctx context.Context) error {
 	return nil
 }
 
-// sendSessionLoaded sends the session_loaded event to the client.
-func (c *Conductor) sendSessionLoaded(ctx context.Context) {
-	c.send(ctx, msgSessionLoaded(c.sessionID, c.question, int(c.duration.Minutes()), c.ttsEnabled))
-}
-
-// sendReconnectState sends all messages after the client's last known seq.
-func (c *Conductor) sendReconnectState(ctx context.Context) {
-	lastSeq := 0
-	if c.initMsg.LastSeq != nil {
-		lastSeq = *c.initMsg.LastSeq
+// sendInitialMessage sends the appropriate first message to the client:
+// reconnect_state for reconnections, session_loaded + opening LLM stream for new connections.
+func (c *Conductor) sendInitialMessage(ctx context.Context) error {
+	if c.isReconnect() {
+		afterSeq := *c.initMsg.LastSeq // isReconnect already verified non-nil
+		c.send(ctx, msgReconnectState(afterSeq, c.messages))
+		return nil
 	}
-	c.send(ctx, msgReconnectState(lastSeq, c.messages))
+	c.send(ctx, msgSessionLoaded(c.sessionID, c.question, int(c.duration.Minutes()), c.ttsEnabled))
+	return c.streamInterviewerResponse(ctx)
 }
 
 // handleEndTurn processes a candidate's turn (text or voice).
@@ -338,12 +331,8 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 	messageID := uuid.New()
 
 	// Build prompt.
-	now := time.Now()
-	elapsed := now.Sub(c.sm.StartedAt())
-	remaining := c.duration - elapsed
-	if remaining < 0 {
-		remaining = 0
-	}
+	elapsed := time.Since(c.sm.StartedAt())
+	remaining := max(0, c.duration-elapsed)
 
 	system, promptMsgs := NewInterviewerPrompt().
 		WithSystemInstructions().
