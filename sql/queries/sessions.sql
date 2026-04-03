@@ -33,3 +33,11 @@ WHERE status = 'active'
 UPDATE interview_sessions
 SET status = 'completed', ended_at = NOW(), updated_at = NOW()
 WHERE id = $1;
+
+-- name: UpdateSessionStatusOnly :exec
+-- NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
+-- Used for status transitions after session completion (evaluating → reviewed,
+-- → evaluation_failed) where end time and turn count should not change.
+UPDATE interview_sessions
+SET status = $2, updated_at = NOW()
+WHERE id = $1;
