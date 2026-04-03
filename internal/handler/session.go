@@ -30,13 +30,20 @@ func CreateSession(b *backend.Backend) http.HandlerFunc {
 			QuestionID:      req.QuestionID,
 			DurationMinutes: req.DurationMinutes,
 			TTSEnabled:      req.TTSEnabled,
+			Plan:            user.Plan,
 		})
 		if err != nil {
 			switch {
 			case errors.Is(err, backend.ErrInvalidDuration):
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			case errors.Is(err, backend.ErrDurationExceedsPlan):
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			case errors.Is(err, backend.ErrQuestionNotFound):
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			case errors.Is(err, backend.ErrConcurrentSessionLimit):
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+			case errors.Is(err, backend.ErrInsufficientBalance):
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			default:
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
