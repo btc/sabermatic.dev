@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -305,13 +306,40 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 	}
 	defer tx.Rollback(ctx)
 
-	err = db.New(tx).UpdateSessionStatus(ctx, db.UpdateSessionStatusParams{
+	q := db.New(tx)
+
+	err = q.UpdateSessionStatus(ctx, db.UpdateSessionStatusParams{
 		ID:        sessionID,
 		Status:    "completed",
 		TurnCount: int32(turnCount),
 	})
 	if err != nil {
 		return fmt.Errorf("update session status: %w", err)
+	}
+
+	// Refund unused reserved minutes based on actual session duration.
+	session, err := q.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("get session for refund: %w", err)
+	}
+	if session.ReservedMinutes.Valid && session.ReservedMinutes.Int32 > 0 {
+		actualMinutes := 1 // minimum 1 minute
+		if session.EndedAt.Valid {
+			// StartedAt is time.Time (NOT NULL), EndedAt is pgtype.Timestamptz (nullable).
+			dur := session.EndedAt.Time.Sub(session.StartedAt)
+			// Integer ceiling: round up to nearest minute.
+			actualMinutes = int((dur + time.Minute - 1) / time.Minute)
+			if actualMinutes < 1 {
+				actualMinutes = 1
+			}
+		}
+		refund := int(session.ReservedMinutes.Int32) - actualMinutes
+		if refund > 0 {
+			if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, int32(refund)); err != nil {
+				slog.Warn("session refund failed", "session_id", sessionID, "error", err)
+				// Non-fatal: session still completes.
+			}
+		}
 	}
 
 	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, jobs.EvaluateSessionInsertOpts())
