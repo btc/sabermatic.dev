@@ -17,8 +17,7 @@ func TestGetMe_Authenticated(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 
@@ -76,8 +75,7 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 

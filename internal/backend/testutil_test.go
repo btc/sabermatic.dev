@@ -10,7 +10,6 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -66,33 +65,24 @@ func startPostgres(t *testing.T) string {
 	return connStr
 }
 
-// setupTestDB starts a Postgres 16 container, runs migrations, and returns a pool.
-func setupTestDB(t *testing.T) *pgxpool.Pool {
+// newTestBackend starts Postgres, creates a real Backend (with pool + River),
+// and returns it. The Backend is closed on test cleanup.
+func newTestBackend(t *testing.T) *Backend {
 	t.Helper()
 	connStr := startPostgres(t)
+	cfg := loadTestConfig(t, connStr)
 
-	pool, err := pgxpool.New(context.Background(), connStr)
-	if err != nil {
-		t.Fatalf("create pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	b, err := New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { b.Close() })
 
-	return pool
-}
-
-// newTestBackend creates a Backend for integration tests (no River client).
-func newTestBackend(t *testing.T, pool *pgxpool.Pool) (*Backend, *RecordingJobs) {
-	t.Helper()
-	rj := &RecordingJobs{}
-	b := &Backend{Pool: pool, Jobs: rj}
-	b.SetConfig(loadTestConfig(t))
-	return b, rj
+	return b
 }
 
 // loadTestConfig loads a config.Config suitable for backend integration tests.
-func loadTestConfig(t *testing.T) *config.Config {
+func loadTestConfig(t *testing.T, databaseURL string) *config.Config {
 	t.Helper()
-	t.Setenv("DATABASE_URL", "postgres://unused")
+	t.Setenv("DATABASE_URL", databaseURL)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")

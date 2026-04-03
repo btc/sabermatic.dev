@@ -17,8 +17,7 @@ func TestOAuthLogin_NewUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	res, err := b.OAuthLogin(ctx, OAuthLoginParams{
@@ -36,7 +35,7 @@ func TestOAuthLogin_NewUser(t *testing.T) {
 	require.False(t, res.NeedsProfile)
 
 	// Verify user exists in DB.
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, "newuser@example.com")
 	require.NoError(t, err)
 	require.Equal(t, "New User", user.DisplayName)
@@ -55,8 +54,7 @@ func TestOAuthLogin_NewUserNeedsProfile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	res, err := b.OAuthLogin(ctx, OAuthLoginParams{
@@ -78,8 +76,7 @@ func TestOAuthLogin_ExistingUserByEmail(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// Create user via Signup first.
@@ -100,7 +97,7 @@ func TestOAuthLogin_ExistingUserByEmail(t *testing.T) {
 	require.NotEmpty(t, res.Token)
 
 	// Verify OAuth account was linked to the existing user.
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	oauthAcct, err := queries.GetOAuthAccount(ctx, db.GetOAuthAccountParams{
 		Provider:   "google",
 		ProviderID: "google-existing-789",
@@ -113,8 +110,7 @@ func TestOAuthLogin_ExistingOAuthAccount(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	params := OAuthLoginParams{
@@ -143,10 +139,9 @@ func TestOAuthLogin_SoftDeletedUser_ReactivatedViaOAuth(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 
 	// Create user via OAuthLogin.
 	res1, err := b.OAuthLogin(ctx, OAuthLoginParams{
@@ -191,10 +186,9 @@ func TestOAuthLogin_ExistingUserByEmail_VerifiesEmail(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 
 	// Signup creates an unverified user.
 	signupRes := signupUser(t, b, "unverified@example.com", "strongpass1", "Unverified")
@@ -226,8 +220,7 @@ func TestOAuthLogin_EmailNormalization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	res, err := b.OAuthLogin(ctx, OAuthLoginParams{
@@ -242,7 +235,7 @@ func TestOAuthLogin_EmailNormalization(t *testing.T) {
 	require.Equal(t, "user@example.com", res.Email)
 
 	// Verify stored email is normalized.
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, "user@example.com")
 	require.NoError(t, err)
 	require.Equal(t, "user@example.com", user.Email)

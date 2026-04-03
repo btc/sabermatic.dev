@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,6 +14,24 @@ import (
 	"github.com/btc/drill/internal/jobs"
 )
 
+// riverJobs returns all river_job rows matching the given kind, newest first.
+func riverJobs(t *testing.T, b *Backend, kind string) []json.RawMessage {
+	t.Helper()
+	rows, err := b.pool.Query(context.Background(),
+		"SELECT args FROM river_job WHERE kind = $1 ORDER BY created_at DESC", kind)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var out []json.RawMessage
+	for rows.Next() {
+		var args json.RawMessage
+		require.NoError(t, rows.Scan(&args))
+		out = append(out, args)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Signup
 // ---------------------------------------------------------------------------
@@ -21,8 +40,7 @@ func TestSignup_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, rj := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	res, err := b.Signup(ctx, SignupParams{
@@ -34,11 +52,11 @@ func TestSignup_Success(t *testing.T) {
 	require.NotEmpty(t, res.UserID)
 	require.Equal(t, "alice@example.com", res.Email)
 
-	// Verification email should have been enqueued.
-	inserted := rj.Inserted()
-	require.Len(t, inserted, 1)
-	emailArgs, ok := inserted[0].(jobs.SendEmailArgs)
-	require.True(t, ok)
+	// Verification email should have been enqueued in River.
+	rows := riverJobs(t, b, "send_email")
+	require.Len(t, rows, 1)
+	var emailArgs jobs.SendEmailArgs
+	require.NoError(t, json.Unmarshal(rows[0], &emailArgs))
 	require.Equal(t, "alice@example.com", emailArgs.To)
 	require.Contains(t, emailArgs.Subject, "Verify")
 }
@@ -47,8 +65,7 @@ func TestSignup_MissingFields(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -71,8 +88,7 @@ func TestSignup_ShortPassword(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	_, err := b.Signup(ctx, SignupParams{
@@ -87,8 +103,7 @@ func TestSignup_LongPassword(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	longPass := make([]byte, MaxPasswordLen+1)
@@ -107,8 +122,7 @@ func TestSignup_DuplicateEmail(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	_, err := b.Signup(ctx, SignupParams{
@@ -130,8 +144,7 @@ func TestSignup_EmailNormalization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	res, err := b.Signup(ctx, SignupParams{
@@ -147,8 +160,7 @@ func TestSignup_DisplayNameTrimming(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	res, err := b.Signup(ctx, SignupParams{
@@ -159,7 +171,7 @@ func TestSignup_DisplayNameTrimming(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the display name was trimmed by reading back from DB.
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, res.Email)
 	require.NoError(t, err)
 	require.Equal(t, "Trimmed", user.DisplayName)
@@ -185,8 +197,7 @@ func TestLogin_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "login@example.com", "strongpass1", "Login")
@@ -204,7 +215,7 @@ func TestLogin_Success(t *testing.T) {
 
 	// Verify a session was created by looking it up.
 	tokenHash := auth.HashSessionToken(res.Token)
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	session, err := queries.GetAuthSessionByToken(ctx, tokenHash)
 	require.NoError(t, err)
 	require.Equal(t, res.UserID, session.UserID)
@@ -214,8 +225,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "wrong@example.com", "strongpass1", "Wrong")
@@ -231,8 +241,7 @@ func TestLogin_NonExistentUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	_, err := b.Login(ctx, LoginParams{
@@ -246,12 +255,11 @@ func TestLogin_OAuthOnlyUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// Create an OAuth-only user (no password_hash) directly via DB.
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	user, err := queries.CreateOAuthUser(ctx, db.CreateOAuthUserParams{
 		Email:       "oauth@example.com",
 		DisplayName: "OAuth User",
@@ -274,8 +282,7 @@ func TestLogout_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "logout@example.com", "strongpass1", "Logout")
@@ -292,7 +299,7 @@ func TestLogout_Success(t *testing.T) {
 
 	// Session should be deleted -- lookup by hash should fail.
 	tokenHash := auth.HashSessionToken(loginRes.Token)
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
 	require.Error(t, err) // pgx.ErrNoRows
 }
@@ -301,8 +308,7 @@ func TestLogout_NonExistentToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// Logging out with a bogus token should not error.
@@ -318,15 +324,14 @@ func TestVerifyEmail_ValidToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
 	res := signupUser(t, b, "verify@example.com", "strongpass1", "Verify")
 
 	// User should not be verified yet.
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, "verify@example.com")
 	require.NoError(t, err)
 	require.False(t, user.EmailVerified)
@@ -349,8 +354,7 @@ func TestVerifyEmail_InvalidToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	err := b.VerifyEmail(ctx, "invalid-token")
@@ -361,8 +365,7 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
@@ -385,25 +388,21 @@ func TestForgotPassword_ExistingUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, rj := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "forgot@example.com", "strongpass1", "Forgot")
 
-	// Clear jobs from signup.
-	_ = rj.Inserted()
-	rj.mu.Lock()
-	rj.inserted = nil
-	rj.mu.Unlock()
-
 	err := b.ForgotPassword(ctx, "forgot@example.com")
 	require.NoError(t, err)
 
-	inserted := rj.Inserted()
-	require.Len(t, inserted, 1)
-	emailArgs, ok := inserted[0].(jobs.SendEmailArgs)
-	require.True(t, ok)
+	// Should have 2 jobs total: 1 verification email from signup + 1 reset email.
+	rows := riverJobs(t, b, "send_email")
+	require.Len(t, rows, 2)
+
+	// Most recent (first in list) should be the reset email.
+	var emailArgs jobs.SendEmailArgs
+	require.NoError(t, json.Unmarshal(rows[0], &emailArgs))
 	require.Equal(t, "forgot@example.com", emailArgs.To)
 	require.Contains(t, emailArgs.Subject, "Reset")
 }
@@ -412,8 +411,7 @@ func TestForgotPassword_NonExistentUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	err := b.ForgotPassword(ctx, "nobody@example.com")
@@ -428,8 +426,7 @@ func TestResetPassword_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
@@ -456,7 +453,7 @@ func TestResetPassword_Success(t *testing.T) {
 
 	// Old session should be deleted.
 	tokenHash := auth.HashSessionToken(loginRes.Token)
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
 	require.Error(t, err) // session deleted
 
@@ -480,8 +477,7 @@ func TestResetPassword_InvalidToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	err := b.ResetPassword(ctx, ResetPasswordParams{
@@ -495,8 +491,7 @@ func TestResetPassword_ShortPassword(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
@@ -521,8 +516,7 @@ func TestLogin_EmailNormalization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "norm@example.com", "strongpass1", "Norm")
@@ -544,8 +538,7 @@ func TestSignup_PasswordBoundary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// Exactly MinPasswordLen chars: should succeed.
@@ -581,24 +574,19 @@ func TestForgotPassword_EmailNormalization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, rj := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "fnorm@example.com", "strongpass1", "FNorm")
 
-	// Clear signup job.
-	rj.mu.Lock()
-	rj.inserted = nil
-	rj.mu.Unlock()
-
 	err := b.ForgotPassword(ctx, "  FNORM@EXAMPLE.COM  ")
 	require.NoError(t, err)
 
-	inserted := rj.Inserted()
-	require.Len(t, inserted, 1)
-	emailArgs, ok := inserted[0].(jobs.SendEmailArgs)
-	require.True(t, ok)
+	// Most recent job should be the reset email to the normalized address.
+	rows := riverJobs(t, b, "send_email")
+	require.GreaterOrEqual(t, len(rows), 2) // signup verify + forgot reset
+	var emailArgs jobs.SendEmailArgs
+	require.NoError(t, json.Unmarshal(rows[0], &emailArgs))
 	require.Equal(t, "fnorm@example.com", emailArgs.To)
 }
 
@@ -610,11 +598,10 @@ func TestLogin_OAuthUserNoPassword(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	pool := setupTestDB(t)
-	b, _ := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
-	queries := db.New(pool)
+	queries := db.New(b.pool)
 	_, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:        "nopw@example.com",
 		PasswordHash: pgtype.Text{Valid: false},

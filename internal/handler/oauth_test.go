@@ -20,8 +20,7 @@ func TestOAuthLogin_NewUser(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	result, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
@@ -39,7 +38,7 @@ func TestOAuthLogin_NewUser(t *testing.T) {
 	require.False(t, result.NeedsProfile)
 
 	// Verify user was created with email_verified=true.
-	queries := db.New(pool)
+	queries := db.New(b.Pool())
 	user, err := queries.GetUserByEmail(ctx, "newuser@example.com")
 	require.NoError(t, err)
 	require.True(t, user.EmailVerified)
@@ -59,8 +58,7 @@ func TestOAuthLogin_NewUser_EmptyDisplayName(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	result, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
@@ -81,8 +79,7 @@ func TestOAuthLogin_ExistingOAuthAccount(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// First login creates the user.
@@ -115,8 +112,7 @@ func TestOAuthLogin_LinkToExistingPasswordUser(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// Create a user via Signup (password-based, email_verified=false).
@@ -128,7 +124,7 @@ func TestOAuthLogin_LinkToExistingPasswordUser(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify email_verified is false initially.
-	queries := db.New(pool)
+	queries := db.New(b.Pool())
 	user, err := queries.GetUserByEmail(ctx, "passworduser@example.com")
 	require.NoError(t, err)
 	require.False(t, user.EmailVerified)
@@ -162,8 +158,7 @@ func TestOAuthLogin_SecondProvider(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
 
 	// First login via Google.
@@ -190,7 +185,7 @@ func TestOAuthLogin_SecondProvider(t *testing.T) {
 	require.Equal(t, first.UserID, second.UserID, "same email should resolve to same user")
 
 	// Verify 2 oauth_accounts rows.
-	queries := db.New(pool)
+	queries := db.New(b.Pool())
 	oauthAccts, err := queries.GetOAuthAccountsByUser(ctx, first.UserID)
 	require.NoError(t, err)
 	require.Len(t, oauthAccts, 2)
@@ -208,10 +203,9 @@ func TestOAuthLogin_ReactivateDeletedUser(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
-	b := newTestBackend(t, pool)
+	b := newTestBackend(t)
 	ctx := context.Background()
-	queries := db.New(pool)
+	queries := db.New(b.Pool())
 
 	// Create a user via Signup, then soft-delete.
 	signupResult, err := b.Signup(ctx, backend.SignupParams{
@@ -254,7 +248,7 @@ func TestOAuthLogin_ReactivateDeletedUser(t *testing.T) {
 }
 
 func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
-	cfg := loadTestConfig(t)
+	cfg := loadTestConfig(t, "postgres://unused")
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
@@ -277,7 +271,7 @@ func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
 }
 
 func TestCSRF_AllowsGetRequests(t *testing.T) {
-	cfg := loadTestConfig(t)
+	cfg := loadTestConfig(t, "postgres://unused")
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,

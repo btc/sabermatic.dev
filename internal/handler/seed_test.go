@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,12 +15,14 @@ func TestSeedQuestions(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := setupTestDB(t)
+	connStr := startPostgres(t)
 	ctx := context.Background()
-	queries := db.New(pool)
 
-	// Get connection string for psql
-	connStr := pool.Config().ConnString()
+	pool, err := pgxpool.New(ctx, connStr)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	queries := db.New(pool)
 
 	// Run seed file
 	cmd := exec.Command("psql", connStr, "-f", "../../seed/questions.sql")

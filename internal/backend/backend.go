@@ -11,7 +11,9 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 
+	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/config"
+	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -19,8 +21,8 @@ import (
 // Backend holds shared dependencies and business logic. Handlers call its
 // methods; it owns the database pool and River client lifecycle.
 type Backend struct {
-	Pool *pgxpool.Pool
-	Jobs Jobs
+	pool *pgxpool.Pool
+	jobs Jobs
 	cfg  *config.Config
 }
 
@@ -72,8 +74,8 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	return &Backend{
-		Pool: pool,
-		Jobs: riverClient,
+		pool: pool,
+		jobs: riverClient,
 		cfg:  cfg,
 	}, nil
 }
@@ -85,18 +87,53 @@ func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 // Config returns the Backend's configuration.
 func (b *Backend) Config() *config.Config { return b.cfg }
 
+// Pool returns the underlying database pool.
+func (b *Backend) Pool() *pgxpool.Pool { return b.pool }
+
+// Ping checks connectivity to all backend dependencies.
+func (b *Backend) Ping(ctx context.Context) error {
+	return b.pool.Ping(ctx)
+}
+
+// AuthenticateSession validates a session token hash and returns the
+// authenticated user. It also touches the session's last_active timestamp
+// in the background.
+func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (*auth.AuthUser, error) {
+	queries := db.New(b.pool)
+	row, err := queries.GetAuthSessionByToken(ctx, tokenHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Touch session last_active (fire-and-forget, don't block the request).
+	go func() {
+		touchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		queries.TouchAuthSession(touchCtx, row.ID)
+	}()
+
+	return &auth.AuthUser{
+		ID:            row.UserID,
+		Email:         row.Email,
+		DisplayName:   row.DisplayName,
+		Role:          row.Role,
+		Plan:          row.Plan,
+		EmailVerified: row.EmailVerified,
+	}, nil
+}
+
 // Close stops River (finishing in-flight jobs) then closes the database pool.
 // Implements io.Closer.
 func (b *Backend) Close() error {
 	timeout := time.Duration(b.cfg.River.ShutdownTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := b.Jobs.Stop(ctx); err != nil {
+	if err := b.jobs.Stop(ctx); err != nil {
 		slog.Warn("river stop error", "error", err)
 	}
 	slog.Info("river stopped")
 
-	b.Pool.Close()
+	b.pool.Close()
 	slog.Info("database pool closed")
 	return nil
 }

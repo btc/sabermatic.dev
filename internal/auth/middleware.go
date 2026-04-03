@@ -4,12 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/btc/drill/internal/db"
 )
 
 // AuthUser is the authenticated user extracted from the session cookie.
@@ -40,10 +36,15 @@ func UserFromContext(ctx context.Context) *AuthUser {
 
 const SessionCookieName = "drill_session"
 
+// SessionAuthenticator validates a hashed session token and returns the
+// authenticated user. Implemented by *backend.Backend.
+type SessionAuthenticator interface {
+	AuthenticateSession(ctx context.Context, tokenHash string) (*AuthUser, error)
+}
+
 // RequireAuth returns middleware that validates the session cookie and
 // injects the authenticated user into the request context.
-// If pool is nil, authentication always fails (for unit testing).
-func RequireAuth(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+func RequireAuth(sa SessionAuthenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie(SessionCookieName)
@@ -52,33 +53,11 @@ func RequireAuth(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 				return
 			}
 
-			if pool == nil {
-				writeAuthError(w, http.StatusUnauthorized, "authentication required")
-				return
-			}
-
 			tokenHash := HashSessionToken(cookie.Value)
-			queries := db.New(pool)
-			row, err := queries.GetAuthSessionByToken(r.Context(), tokenHash)
+			user, err := sa.AuthenticateSession(r.Context(), tokenHash)
 			if err != nil {
 				writeAuthError(w, http.StatusUnauthorized, "invalid or expired session")
 				return
-			}
-
-			// Touch session last_active (fire-and-forget, don't block the request)
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				queries.TouchAuthSession(ctx, row.ID)
-			}()
-
-			user := &AuthUser{
-				ID:            row.UserID,
-				Email:         row.Email,
-				DisplayName:   row.DisplayName,
-				Role:          row.Role,
-				Plan:          row.Plan,
-				EmailVerified: row.EmailVerified,
 			}
 
 			next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))

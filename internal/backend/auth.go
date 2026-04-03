@@ -82,7 +82,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 	}
 
 	// Transaction: create user + enqueue verification email atomically.
-	tx, err := b.Pool.Begin(ctx)
+	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -108,7 +108,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 		return nil, fmt.Errorf("sign verification token: %w", err)
 	}
 	verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
-	_, err = b.Jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{
+	_, err = b.jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{
 		To:      user.Email,
 		Subject: "Verify your Drill account",
 		Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
@@ -134,7 +134,7 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (*LoginResult, error
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
 	// Look up user.
-	queries := db.New(b.Pool)
+	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, p.Email)
 	if err != nil {
 		// Constant-time: run dummy bcrypt to prevent timing oracle.
@@ -187,7 +187,7 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (*LoginResult, error
 // Errors are best-effort (always returns nil).
 func (b *Backend) Logout(ctx context.Context, sessionToken string) error {
 	tokenHash := auth.HashSessionToken(sessionToken)
-	queries := db.New(b.Pool)
+	queries := db.New(b.pool)
 
 	session, err := queries.GetAuthSessionByToken(ctx, tokenHash)
 	if err == nil {
@@ -207,7 +207,7 @@ func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
 		return ErrInvalidToken
 	}
 
-	queries := db.New(b.Pool)
+	queries := db.New(b.pool)
 	if err := queries.VerifyUserEmail(ctx, userID); err != nil {
 		return fmt.Errorf("verify email: %w", err)
 	}
@@ -220,7 +220,7 @@ func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
 func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 	email = strings.TrimSpace(strings.ToLower(email))
 
-	queries := db.New(b.Pool)
+	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -236,7 +236,7 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 	}
 	resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
 
-	_, err = b.Jobs.Insert(ctx, jobs.SendEmailArgs{
+	_, err = b.jobs.Insert(ctx, jobs.SendEmailArgs{
 		To:      user.Email,
 		Subject: "Reset your Drill password",
 		Text:    "Click here to reset your password: " + resetURL,
@@ -267,7 +267,7 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) erro
 		return fmt.Errorf("hash password: %w", err)
 	}
 
-	queries := db.New(b.Pool)
+	queries := db.New(b.pool)
 	if err := queries.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
 		ID:           userID,
 		PasswordHash: pgtype.Text{String: hash, Valid: true},

@@ -44,7 +44,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, isRetry bool) (*OAuthLoginResult, error) {
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
-	tx, err := b.Pool.Begin(ctx)
+	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("oauth login: begin tx: %w", err)
 	}

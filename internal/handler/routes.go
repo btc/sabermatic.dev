@@ -25,6 +25,6 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", OAuthCallback(b))
 
 	// User
-	requireAuth := auth.RequireAuth(b.Pool)
+	requireAuth := auth.RequireAuth(b)
 	mux.Handle("GET /api/me", requireAuth(http.HandlerFunc(GetMe(b))))
 }
