@@ -1,0 +1,4 @@
+project_id  = "drill-prod"
+region      = "us-central1"
+environment = "prod"
+github_repo = "btc/drill"
