@@ -270,10 +270,12 @@ func drainUntilDone(t *testing.T, ws *websocket.Conn) (string, []wsMsg) {
 // newWSTestBackend creates a Backend with real Postgres + River but fake AI deps.
 func newWSTestBackend(t *testing.T, anthropicURL string) *backend.Backend {
 	t.Helper()
-	b := newTestBackend(t) // from testutil_test.go — starts Postgres, runs migrations
-	b.SetLLM(ai.NewTestClient(anthropicURL, b.Pool()))
-	b.SetSTT(&fakeTranscriber{text: "I would use a hash-based approach."})
-	b.SetTTS(&fakeSynthesizer{})
+	b := newTestBackend(t) // from testutil_test.go -- starts Postgres, runs migrations
+	b.ApplyTestOverrides(backend.TestOverrides{
+		LLM: ai.NewTestClient(anthropicURL, b.Pool()),
+		STT: &fakeTranscriber{text: "I would use a hash-based approach."},
+		TTS: &fakeSynthesizer{},
+	})
 	return b
 }
 

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/interview"
+	"github.com/btc/drill/internal/interview/observer"
 )
 
 // SessionWS returns a handler that upgrades to WebSocket and runs the interview conductor.
@@ -61,27 +61,14 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 		ws.SetReadLimit(10 * 1024 * 1024) // 10MB for audio
 
 		// Acquire advisory lock (dedicated connection).
-		lockConn, err := b.Pool().Acquire(ctx)
+		lockConn, locked, err := b.AcquireSessionLock(ctx, sessionID)
 		if err != nil {
-			slog.Error("acquire lock conn", "error", err, "session_id", sessionID)
+			slog.Error("acquire session lock", "error", err, "session_id", sessionID)
 			ws.Close(websocket.StatusInternalError, "failed to acquire lock connection")
-			return
-		}
-
-		// pg_try_advisory_lock using two 32-bit halves of session UUID.
-		key1 := int32(binary.BigEndian.Uint32(sessionID[:4]))
-		key2 := int32(binary.BigEndian.Uint32(sessionID[4:8]))
-		var locked bool
-		err = lockConn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1, $2)", key1, key2).Scan(&locked)
-		if err != nil {
-			slog.Error("advisory lock query", "error", err, "session_id", sessionID)
-			lockConn.Release()
-			ws.Close(websocket.StatusInternalError, "failed to acquire advisory lock")
 			return
 		}
 		if !locked {
 			slog.Warn("session already locked", "session_id", sessionID)
-			lockConn.Release()
 			errMsg, _ := json.Marshal(map[string]string{
 				"type":    "error",
 				"code":    "session_locked",
@@ -114,20 +101,10 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 		// Build Conductor.
 		conn := &interview.Conn{WS: ws}
 
-		// Determine TTS synthesizer — nil if disabled.
-		var tts = b.TTS()
-		if !session.ConfigTtsEnabled {
-			tts = nil
-		}
-
 		conductor := interview.NewConductor(interview.ConductorParams{
 			WS:        conn,
-			Pool:      b.Pool(),
+			Backend:   b,
 			LockConn:  lockConn,
-			Jobs:      b.Jobs(),
-			LLM:       b.LLM(),
-			STT:       b.STT(),
-			TTS:       tts,
 			SessionID: sessionID,
 			UserID:    user.ID,
 			InitMsg:   initMsg,
@@ -138,8 +115,8 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 		// Launch conductor.Run in goroutine.
 		go conductor.Run(ctx)
 
-		// readLoop blocks this goroutine — closing msgCh signals the conductor.
-		readLoop(ctx, ws, conductor.MsgCh(), func() *interview.TokenFanOut {
+		// readLoop blocks this goroutine -- closing msgCh signals the conductor.
+		readLoop(ctx, ws, conductor.MsgCh(), func() *observer.TokenFanOut {
 			return conductor.Observer()
 		})
 	}
@@ -147,7 +124,7 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 
 // readLoop reads messages from the WebSocket and forwards them to the conductor.
 // On error (disconnect), it closes msgCh to signal the conductor.
-func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WSMessage, observer func() *interview.TokenFanOut) {
+func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WSMessage, observerFn func() *observer.TokenFanOut) {
 	defer close(msgCh)
 	for {
 		_, data, err := ws.Read(ctx)
@@ -165,7 +142,7 @@ func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WS
 			continue
 		}
 		if msg.Type == "cancel_tts" {
-			if obs := observer(); obs != nil {
+			if obs := observerFn(); obs != nil {
 				obs.Interrupt()
 			}
 			continue

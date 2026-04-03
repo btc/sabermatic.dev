@@ -1,4 +1,4 @@
-package interview_test
+package observer_test
 
 import (
 	"bytes"
@@ -10,7 +10,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	"github.com/btc/drill/internal/interview"
+
+	"github.com/btc/drill/internal/interview/observer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +48,7 @@ func (s *spy) Interrupt()                { s.interrupted = true }
 
 func TestTokenFanOut_DistributesToAll(t *testing.T) {
 	a, b := &spy{}, &spy{}
-	fan := interview.NewTokenFanOut(a, b)
+	fan := observer.NewTokenFanOut(a, b)
 
 	fan.OnToken("hello")
 	fan.OnToken(" world")
@@ -61,7 +62,7 @@ func TestTokenFanOut_DistributesToAll(t *testing.T) {
 
 func TestTokenFanOut_InterruptPropagates(t *testing.T) {
 	a, b := &spy{}, &spy{}
-	fan := interview.NewTokenFanOut(a, b)
+	fan := observer.NewTokenFanOut(a, b)
 
 	fan.Interrupt()
 
@@ -71,7 +72,7 @@ func TestTokenFanOut_InterruptPropagates(t *testing.T) {
 
 func TestTokenFanOut_ErrorPropagates(t *testing.T) {
 	a, b := &spy{}, &spy{}
-	fan := interview.NewTokenFanOut(a, b)
+	fan := observer.NewTokenFanOut(a, b)
 
 	testErr := assert.AnError
 	fan.OnError(testErr)
@@ -80,8 +81,29 @@ func TestTokenFanOut_ErrorPropagates(t *testing.T) {
 	assert.Equal(t, testErr, b.errVal)
 }
 
+func TestTokenFanOut_Close(t *testing.T) {
+	closed := false
+	closeable := &closeableSpy{onClose: func() { closed = true }}
+	nonCloseable := &spy{}
+	fan := observer.NewTokenFanOut(closeable, nonCloseable)
+
+	fan.Close()
+	assert.True(t, closed)
+}
+
+type closeableSpy struct {
+	spy
+	onClose func()
+}
+
+func (c *closeableSpy) Close() {
+	if c.onClose != nil {
+		c.onClose()
+	}
+}
+
 func TestMessageAccumulator(t *testing.T) {
-	acc := interview.NewMessageAccumulator()
+	acc := observer.NewMessageAccumulator()
 	acc.OnToken("hello")
 	acc.OnToken(" world")
 	acc.OnDone("hello world")
@@ -89,14 +111,14 @@ func TestMessageAccumulator(t *testing.T) {
 }
 
 func TestMessageAccumulator_EmptyStream(t *testing.T) {
-	acc := interview.NewMessageAccumulator()
+	acc := observer.NewMessageAccumulator()
 	acc.OnDone("")
 	assert.Equal(t, "", acc.Text())
 }
 
 func TestWSWriter_OnToken(t *testing.T) {
 	ws := &mockWSConn{}
-	writer := interview.NewWSWriter(ws, uuid.New())
+	writer := observer.NewWSWriter(ws, uuid.New())
 	writer.OnToken("hello")
 	require.Len(t, ws.sent, 1)
 	assert.Contains(t, string(ws.sent[0]), `"type":"interviewer_token"`)
@@ -106,7 +128,7 @@ func TestWSWriter_OnToken(t *testing.T) {
 func TestWSWriter_OnDone(t *testing.T) {
 	ws := &mockWSConn{}
 	msgID := uuid.New()
-	writer := interview.NewWSWriter(ws, msgID)
+	writer := observer.NewWSWriter(ws, msgID)
 	writer.OnDone("full message")
 	require.Len(t, ws.sent, 1)
 	assert.Contains(t, string(ws.sent[0]), `"type":"interviewer_done"`)
@@ -115,10 +137,10 @@ func TestWSWriter_OnDone(t *testing.T) {
 
 func TestWSWriter_IgnoresWriteErrors(t *testing.T) {
 	ws := &mockWSConn{err: fmt.Errorf("closed")}
-	writer := interview.NewWSWriter(ws, uuid.New())
+	writer := observer.NewWSWriter(ws, uuid.New())
 	writer.OnToken("hello")
 	writer.OnDone("hello")
-	// Should not panic — errors are logged and ignored
+	// Should not panic -- errors are logged and ignored
 }
 
 // fakeSynth returns a fixed audio payload immediately.
@@ -143,10 +165,11 @@ func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
 	synth := &fakeSynth{audio: []byte("fake-audio-bytes")}
 	ctx := context.Background()
 
-	acc := interview.NewTTSAccumulator(ctx, ws, synth, uuid.New())
+	acc := observer.NewTTSAccumulator(ctx, ws, synth, uuid.New())
 	acc.OnToken("Hello there. ")
 	acc.OnToken("How are you? ")
 	acc.OnDone("Hello there. How are you? ")
+	acc.Close() // wait for TTS goroutine
 
 	// Count tts_chunk messages.
 	var chunks int
@@ -168,9 +191,9 @@ func TestTTSAccumulator_Interrupt(t *testing.T) {
 	synth := &blockingSynth{}
 	ctx := context.Background()
 
-	acc := interview.NewTTSAccumulator(ctx, ws, synth, uuid.New())
+	acc := observer.NewTTSAccumulator(ctx, ws, synth, uuid.New())
 	acc.OnToken("First sentence. Second sentence. ")
 	acc.Interrupt()
 	acc.OnDone("First sentence. Second sentence. ")
-	// Should not hang — interrupt cancels context.
+	acc.Close() // should not hang -- interrupt cancels context
 }

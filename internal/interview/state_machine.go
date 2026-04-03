@@ -52,3 +52,10 @@ func (sm *StateMachine) Transition(next ConductorState) error {
 func (sm *StateMachine) State() ConductorState { return sm.state }
 func (sm *StateMachine) TurnCount() int         { return sm.turnCount }
 func (sm *StateMachine) StartedAt() time.Time   { return sm.startedAt }
+
+// ForceState sets the state without validation. Used only for error recovery
+// (e.g., STT failure, LLM failure) to reset the session to a usable state.
+// Normal transitions must use Transition().
+func (sm *StateMachine) ForceState(s ConductorState) {
+	sm.state = s
+}
