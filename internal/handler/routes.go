@@ -27,4 +27,12 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 	// User
 	requireAuth := auth.RequireAuth(b)
 	mux.Handle("GET /api/me", requireAuth(http.HandlerFunc(GetMe(b))))
+
+	// Sessions
+	mux.Handle("POST /api/sessions", requireAuth(http.HandlerFunc(CreateSession(b))))
+	mux.Handle("GET /api/sessions", requireAuth(http.HandlerFunc(ListSessions(b))))
+	mux.Handle("GET /api/sessions/{id}", requireAuth(http.HandlerFunc(GetSession(b))))
+
+	// Questions
+	mux.Handle("GET /api/questions", requireAuth(http.HandlerFunc(ListQuestions(b))))
 }
