@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app";
+import { initTelemetry } from "./telemetry/provider";
 import "./index.css";
+
+initTelemetry();
 
 const queryClient = new QueryClient({
   defaultOptions: {
