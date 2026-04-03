@@ -3,7 +3,7 @@ import { useLocation, useNavigate, Link } from "react-router-dom";
 import {
   useMe, useUsage, useLogout,
   useUpdateProfile, useExportData, useDeleteAccount,
-  useCheckout, usePortal,
+  useCheckout, usePortal, type CheckoutRequest,
 } from "@/api/queries";
 import { ApiError } from "@/api/client";
 import { useTheme } from "@/hooks/use-theme";
@@ -27,16 +27,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
 
 // ---------------------------------------------------------------------------
 // Section wrapper
@@ -435,33 +425,39 @@ function AccountSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// Usage bar
+// Minute balance display
 // ---------------------------------------------------------------------------
 
-interface UsageBarProps {
-  used: number;
-  limit: number;
+interface MinuteBalanceProps {
+  total: number;
+  free: number;
+  paid: number;
 }
 
-function UsageBar({ used, limit }: UsageBarProps) {
-  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
-  const isCritical = pct >= 90;
-  const isWarning = pct >= 70;
+function MinuteBalance({ total, free, paid }: MinuteBalanceProps) {
+  const isCritical = total < 10;
+  const isWarning = total < 30;
 
   return (
-    <div className="space-y-1.5">
-      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-        <div
+    <div className="space-y-2">
+      <div className="flex items-baseline gap-1.5">
+        <span
           className={cn(
-            "h-full rounded-full transition-all",
-            isCritical ? "bg-destructive" : isWarning ? "bg-amber-500" : "bg-primary",
+            "text-2xl font-semibold tabular-nums",
+            isCritical ? "text-destructive" : isWarning ? "text-amber-500" : "text-foreground",
           )}
-          style={{ width: `${pct}%` }}
-        />
+        >
+          {total}
+        </span>
+        <span className="text-sm text-muted-foreground">minutes available</span>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {used} of {limit} sessions used
-      </p>
+      {(free > 0 || paid > 0) && (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          {free > 0 && <span>{free} free</span>}
+          {free > 0 && paid > 0 && <span className="text-border">·</span>}
+          {paid > 0 && <span>{paid} purchased</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -471,7 +467,7 @@ function UsageBar({ used, limit }: UsageBarProps) {
 // ---------------------------------------------------------------------------
 
 const FREE_LIMITS = [
-  { feature: "Practice sessions", limit: "50 / month" },
+  { feature: "Practice sessions", limit: "60 min free grant" },
   { feature: "Session duration", limit: "Up to 45 min" },
   { feature: "Evaluation & scoring", limit: "Included" },
   { feature: "Educator analysis", limit: "Included" },
@@ -499,6 +495,16 @@ function FreeLimitsTable() {
 }
 
 // ---------------------------------------------------------------------------
+// Minute packs
+// ---------------------------------------------------------------------------
+
+const MINUTE_PACKS: { minutes: number; label: string }[] = [
+  { minutes: 120, label: "120 min" },
+  { minutes: 300, label: "300 min" },
+  { minutes: 600, label: "600 min" },
+];
+
+// ---------------------------------------------------------------------------
 // Billing page
 // ---------------------------------------------------------------------------
 
@@ -509,6 +515,9 @@ function BillingSettings() {
   const portal = usePortal();
 
   const isPro = user?.plan === "pro";
+
+  // Track which pack (if any) is being purchased, so we can show per-button loading.
+  const [pendingPack, setPendingPack] = useState<number | null>(null);
 
   const checkoutLoading = checkout.isPending;
   const checkoutError = checkout.isError
@@ -524,13 +533,18 @@ function BillingSettings() {
       : "Could not open billing portal. Please try again."
     : null;
 
-  function handleUpgrade() {
-    checkout.mutate(undefined, {
+  function handleCheckout(body: CheckoutRequest) {
+    if (body.type === "pack") {
+      setPendingPack(body.minutes);
+    }
+    checkout.mutate(body, {
       onSuccess: (res) => {
+        setPendingPack(null);
         if (res?.url) {
           window.location.href = res.url;
         }
       },
+      onError: () => setPendingPack(null),
     });
   }
 
@@ -546,28 +560,55 @@ function BillingSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Current plan */}
+      {/* Current plan + balance */}
       <Section title="Current plan">
         <Card>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium capitalize">
-                  {user?.plan ?? "Free"} plan
-                </span>
-                {isPro && (
-                  <Badge variant="default" className="text-xs">Pro</Badge>
-                )}
-              </div>
-              {usage?.period_end && (
-                <span className="text-xs text-muted-foreground">
-                  Renews {formatDate(usage.period_end)}
-                </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium capitalize">
+                {user?.plan ?? "Free"} plan
+              </span>
+              {isPro && (
+                <Badge variant="default" className="text-xs">Pro</Badge>
               )}
             </div>
 
-            {usage && (
-              <UsageBar used={usage.sessions_used} limit={usage.sessions_limit} />
+            {usage != null && (
+              <MinuteBalance
+                total={usage.total_balance}
+                free={usage.free_balance}
+                paid={usage.paid_balance}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </Section>
+
+      {/* Minute packs — available to all users */}
+      <Section
+        title="Buy minutes"
+        description="Top up your balance any time. Minutes never expire while your account is active."
+      >
+        <Card>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {MINUTE_PACKS.map(({ minutes, label }) => {
+                const isLoading = checkoutLoading && pendingPack === minutes;
+                return (
+                  <Button
+                    key={minutes}
+                    variant="outline"
+                    onClick={() => handleCheckout({ type: "pack", minutes })}
+                    disabled={checkoutLoading}
+                    className="min-w-[96px]"
+                  >
+                    {isLoading ? "Redirecting..." : label}
+                  </Button>
+                );
+              })}
+            </div>
+            {checkoutError && pendingPack !== null && (
+              <p className="text-xs text-orange-500">{checkoutError}</p>
             )}
           </CardContent>
         </Card>
@@ -577,7 +618,7 @@ function BillingSettings() {
       {!isPro && (
         <Section
           title="Upgrade to Pro"
-          description="Unlock unlimited sessions and priority support."
+          description="Get a monthly minute refill and priority support."
         >
           <Card>
             <CardContent className="space-y-4">
@@ -585,13 +626,13 @@ function BillingSettings() {
 
               <div className="space-y-2">
                 <Button
-                  onClick={handleUpgrade}
+                  onClick={() => handleCheckout({ type: "subscription", plan: "pro" })}
                   disabled={checkoutLoading}
                   className="w-full sm:w-auto"
                 >
-                  {checkoutLoading ? "Redirecting..." : "Upgrade to Pro"}
+                  {checkoutLoading && pendingPack === null ? "Redirecting..." : "Upgrade to Pro"}
                 </Button>
-                {checkoutError && (
+                {checkoutError && pendingPack === null && (
                   <p className="text-xs text-orange-500">{checkoutError}</p>
                 )}
                 <p className="text-xs text-muted-foreground">

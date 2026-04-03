@@ -125,10 +125,27 @@ export interface CoachAnalysis {
   created_at: string;
 }
 
-// --- Usage ---
+// --- Usage & Billing ---
+export interface Grant {
+  id: string;
+  source: "free_grant" | "subscription" | "purchase" | "admin";
+  initial_minutes: number;
+  remaining_minutes: number;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface LedgerEntry {
+  amount: number;
+  reason: string;
+  session_id: string | null;
+  created_at: string;
+}
+
 export interface Usage {
-  sessions_used: number;
-  sessions_limit: number;
-  period_start: string;
-  period_end: string;
+  total_balance: number;
+  free_balance: number;
+  paid_balance: number;
+  grants: Grant[];
+  recent_activity: LedgerEntry[];
 }
