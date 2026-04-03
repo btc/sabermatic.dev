@@ -14,6 +14,8 @@ import (
 type WorkerRefs struct {
 	Evaluate *EvaluateSessionWorker
 	Cleanup  *CleanupAbandonedSessionsWorker
+	Educator *GenerateEducatorContentWorker
+	Coach    *RunCoachAnalysisWorker
 }
 
 // RegisterWorkers creates a Workers bundle with all job workers registered.
@@ -25,5 +27,9 @@ func RegisterWorkers(cfg *config.Config, sender email.Sender, pool *pgxpool.Pool
 	river.AddWorker(workers, eval)
 	cleanup := &CleanupAbandonedSessionsWorker{Pool: pool}
 	river.AddWorker(workers, cleanup)
-	return workers, WorkerRefs{Evaluate: eval, Cleanup: cleanup}
+	edu := &GenerateEducatorContentWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM}
+	river.AddWorker(workers, edu)
+	coachWorker := &RunCoachAnalysisWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM}
+	river.AddWorker(workers, coachWorker)
+	return workers, WorkerRefs{Evaluate: eval, Cleanup: cleanup, Educator: edu, Coach: coachWorker}
 }
