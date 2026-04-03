@@ -53,6 +53,12 @@ func (sm *StateMachine) State() ConductorState { return sm.state }
 func (sm *StateMachine) TurnCount() int         { return sm.turnCount }
 func (sm *StateMachine) StartedAt() time.Time   { return sm.startedAt }
 
+// SetStartedAt records when the session started. Called by the conductor
+// after loading session state from the database.
+func (sm *StateMachine) SetStartedAt(t time.Time) {
+	sm.startedAt = t
+}
+
 // ForceState sets the state without validation. Used only for error recovery
 // (e.g., STT failure, LLM failure) to reset the session to a usable state.
 // Normal transitions must use Transition().
