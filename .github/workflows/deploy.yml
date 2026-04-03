@@ -1,0 +1,73 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write  # Required for WIF
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  SERVICE_NAME: drill
+  IMAGE_REPO: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/drill/drill
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEPLOYER_SA }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - name: Test
+        run: go test ./... -race -count=1 -timeout=300s
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build container image
+        run: docker build -t ${{ env.IMAGE_REPO }}:${{ github.sha }} .
+
+      - name: Push container image
+        run: docker push ${{ env.IMAGE_REPO }}:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.IMAGE_REPO }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --quiet
+
+      - name: Smoke test
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --format='value(status.url)')
+          echo "Service URL: ${SERVICE_URL}"
+
+          # Wait for the new revision to be serving
+          sleep 10
+
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/api/health")
+          if [ "${STATUS}" != "200" ]; then
+            echo "Smoke test failed: /api/health returned ${STATUS}"
+            exit 1
+          fi
+          echo "Smoke test passed: /api/health returned 200"
