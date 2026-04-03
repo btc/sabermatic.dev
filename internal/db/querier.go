@@ -21,7 +21,9 @@ type Querier interface {
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
+	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
+	GetEvaluationBySession(ctx context.Context, sessionID uuid.UUID) (Evaluation, error)
 	GetMaxSeqForSession(ctx context.Context, sessionID uuid.UUID) (int32, error)
 	GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]Message, error)
 	GetMessagesBySessionAfterSeq(ctx context.Context, arg GetMessagesBySessionAfterSeqParams) ([]Message, error)
@@ -33,6 +35,8 @@ type Querier interface {
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
+	InsertAnnotation(ctx context.Context, arg InsertAnnotationParams) error
+	InsertEvaluation(ctx context.Context, arg InsertEvaluationParams) (uuid.UUID, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (uuid.UUID, error)
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
@@ -44,6 +48,10 @@ type Querier interface {
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
 	UpdateSessionStatus(ctx context.Context, arg UpdateSessionStatusParams) error
+	// NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
+	// Used for status transitions after session completion (evaluating → reviewed,
+	// → evaluation_failed) where end time and turn count should not change.
+	UpdateSessionStatusOnly(ctx context.Context, arg UpdateSessionStatusOnlyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
 }

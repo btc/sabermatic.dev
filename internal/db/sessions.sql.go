@@ -192,3 +192,22 @@ func (q *Queries) UpdateSessionStatus(ctx context.Context, arg UpdateSessionStat
 	_, err := q.db.Exec(ctx, updateSessionStatus, arg.ID, arg.Status, arg.TurnCount)
 	return err
 }
+
+const updateSessionStatusOnly = `-- name: UpdateSessionStatusOnly :exec
+UPDATE interview_sessions
+SET status = $2, updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdateSessionStatusOnlyParams struct {
+	ID     uuid.UUID `json:"id"`
+	Status string    `json:"status"`
+}
+
+// NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
+// Used for status transitions after session completion (evaluating → reviewed,
+// → evaluation_failed) where end time and turn count should not change.
+func (q *Queries) UpdateSessionStatusOnly(ctx context.Context, arg UpdateSessionStatusOnlyParams) error {
+	_, err := q.db.Exec(ctx, updateSessionStatusOnly, arg.ID, arg.Status)
+	return err
+}
