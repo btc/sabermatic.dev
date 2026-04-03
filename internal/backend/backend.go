@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/riverqueue/river/rivertype"
 
+	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
@@ -27,6 +28,9 @@ type Backend struct {
 	pool *pgxpool.Pool
 	jobs Jobs
 	cfg  *config.Config
+	llm  *ai.Client
+	stt  ai.Transcriber
+	tts  ai.Synthesizer
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
@@ -53,6 +57,11 @@ func New(cfg *config.Config) (*Backend, error) {
 	for _, v := range riverRes.Versions {
 		slog.Info("river migration applied", "version", v.Version)
 	}
+
+	// AI clients
+	llmClient := ai.NewClient(cfg.LLM.APIKey, pool)
+	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.WhisperModel)
+	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
@@ -90,6 +99,9 @@ func New(cfg *config.Config) (*Backend, error) {
 		pool: pool,
 		jobs: riverClient,
 		cfg:  cfg,
+		llm:  llmClient,
+		stt:  stt,
+		tts:  tts,
 	}, nil
 }
 
@@ -105,6 +117,15 @@ func (b *Backend) Pool() *pgxpool.Pool { return b.pool }
 
 // Jobs returns the River job client.
 func (b *Backend) Jobs() Jobs { return b.jobs }
+
+// LLM returns the Anthropic LLM client.
+func (b *Backend) LLM() *ai.Client { return b.llm }
+
+// STT returns the speech-to-text transcriber.
+func (b *Backend) STT() ai.Transcriber { return b.stt }
+
+// TTS returns the text-to-speech synthesizer.
+func (b *Backend) TTS() ai.Synthesizer { return b.tts }
 
 // Ping checks connectivity to all backend dependencies.
 func (b *Backend) Ping(ctx context.Context) error {
