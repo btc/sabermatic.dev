@@ -145,6 +145,30 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const getUserByIDIncludingDeleted = `-- name: GetUserByIDIncludingDeleted :one
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
+WHERE id = $1
+`
+
+func (q *Queries) GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByIDIncludingDeleted, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const reactivateUser = `-- name: ReactivateUser :exec
 UPDATE users SET deleted_at = NULL, email_verified = TRUE, updated_at = NOW()
 WHERE id = $1

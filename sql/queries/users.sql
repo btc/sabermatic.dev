@@ -35,3 +35,7 @@ WHERE id = $1;
 -- name: GetUserByEmailIncludingDeleted :one
 SELECT * FROM users
 WHERE email = $1;
+
+-- name: GetUserByIDIncludingDeleted :one
+SELECT * FROM users
+WHERE id = $1;

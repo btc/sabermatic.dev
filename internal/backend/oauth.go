@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,8 +36,14 @@ type OAuthLoginResult struct {
 
 // OAuthLogin finds or creates a user from an OAuth provider callback.
 // All database operations are performed within a single transaction.
-// On unique-violation race conditions, the method retries once (recursive call).
+// On unique-violation race conditions, the method retries once.
 func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLoginResult, error) {
+	return b.oauthLoginWithRetry(ctx, p, false)
+}
+
+func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, isRetry bool) (*OAuthLoginResult, error) {
+	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+
 	tx, err := b.Pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("oauth login: begin tx: %w", err)
@@ -51,10 +58,17 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 		ProviderID: p.ProviderID,
 	})
 	if err == nil {
-		// Found existing OAuth account — load user, create session.
-		user, err := queries.GetUserByID(ctx, oauthAcct.UserID)
+		// Found existing OAuth account — load user (including soft-deleted).
+		user, err := queries.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("oauth login: get user by id: %w", err)
+		}
+		path := "existing_oauth"
+		if user.DeletedAt.Valid {
+			if err := queries.ReactivateUser(ctx, user.ID); err != nil {
+				return nil, fmt.Errorf("oauth login: reactivate user: %w", err)
+			}
+			path = "reactivated"
 		}
 		result, err := b.createSessionInTx(ctx, tx, queries, user, p)
 		if err != nil {
@@ -63,7 +77,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("oauth login: commit: %w", err)
 		}
-		slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", "existing_oauth", "user_id", user.ID)
+		slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", path, "user_id", user.ID)
 		return result, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -99,7 +113,10 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 				// Race condition: another request linked this provider_id first.
 				// Rollback and retry — will hit step 1 on retry.
 				tx.Rollback(ctx) //nolint:errcheck
-				return b.OAuthLogin(ctx, p)
+				if isRetry {
+					return nil, fmt.Errorf("oauth login: duplicate key after retry")
+				}
+				return b.oauthLoginWithRetry(ctx, p, true)
 			}
 			return nil, fmt.Errorf("oauth login: create oauth account: %w", err)
 		}
