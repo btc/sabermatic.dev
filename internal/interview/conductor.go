@@ -22,48 +22,125 @@ import (
 	"github.com/btc/drill/internal/interview/observer"
 )
 
-var (
-	ErrAudioValidation = fmt.Errorf("audio validation failed")
-	ErrTranscription   = fmt.Errorf("transcription failed")
-)
-
-// ConductorParams holds the dependencies for constructing a Conductor.
+// ConductorParams contains everything needed to construct a Conductor.
+// The handler creates these after auth, validation, WebSocket upgrade,
+// advisory lock acquisition, and reading the session_init message.
 type ConductorParams struct {
-	WS        *websocket.Conn
-	Backend   *backend.Backend
-	LockConn  *pgxpool.Conn
+	// WS is the upgraded WebSocket connection. The conductor wraps it
+	// in a WSConn for writes and uses it directly for readLoop reads.
+	WS *websocket.Conn
+
+	// Backend is the service layer for DB, LLM, STT, and TTS operations.
+	Backend *backend.Backend
+
+	// LockConn is the dedicated connection holding the advisory lock.
+	// The conductor releases it in cleanup().
+	LockConn *pgxpool.Conn
+
+	// SessionID identifies the interview session.
 	SessionID uuid.UUID
-	UserID    uuid.UUID
-	InitMsg   WSMessage
-	Model     string
-	Duration  time.Duration
+
+	// UserID identifies the authenticated user.
+	UserID uuid.UUID
+
+	// InitMsg is the parsed session_init message from the client.
+	InitMsg WSMessage
+
+	// Model is the LLM model name (e.g., "claude-sonnet-4-20250514").
+	Model string
+
+	// Duration is the configured interview duration. Zero means use the DB value.
+	Duration time.Duration
 }
 
 // Conductor owns all mutable state for one active interview session.
-// A single goroutine runs Run(), processing messages sequentially from msgCh.
+// A single goroutine runs the select loop; the readLoop runs in a separate
+// goroutine and communicates via msgCh. Run() blocks until the session ends.
 type Conductor struct {
-	sm     *StateMachine
-	msgCh  chan WSMessage
+	// sm is the interview state machine (pure logic, no I/O).
+	sm *StateMachine
+
+	// msgCh receives parsed WebSocket messages from the readLoop goroutine.
+	// Unbuffered -- provides natural backpressure.
+	msgCh chan WSMessage
+
+	// cancel cancels the readLoop's context, signaling it to exit.
+	// Called in cleanup(). Derived from context.Background() -- independent
+	// of the server context so readLoop lifetime is conductor-controlled.
 	cancel context.CancelFunc
-	rawWS  *websocket.Conn    // raw WebSocket for reading (readLoop)
-	ws     observer.WSConn    // wrapped WebSocket for writing (SendJSON/Close)
-	b        *backend.Backend
+
+	// rawWS is the underlying WebSocket connection. Used by readLoop for
+	// raw reads. Kept separate from ws because readLoop needs Read(), which
+	// is not on the WSConn interface.
+	rawWS *websocket.Conn
+
+	// ws is the write-side WebSocket interface. Used by the conductor and
+	// observers to send messages to the client. Thread-safe (coder/websocket).
+	ws observer.WSConn
+
+	// b is the backend service layer. The conductor calls Backend methods
+	// for all DB operations, LLM streaming, and STT/TTS -- never holds raw
+	// pool, jobs, or AI client references.
+	b *backend.Backend
+
+	// lockConn is the dedicated pgxpool connection holding the Postgres
+	// advisory lock for this session. Released in cleanup() when the
+	// conductor exits. Prevents concurrent conductors on the same session.
 	lockConn *pgxpool.Conn
-	obs      atomic.Pointer[observer.TokenFanOut]
-	model    string
 
-	sessionID  uuid.UUID
-	userID     uuid.UUID
-	question   db.Question
-	messages   []db.Message
-	sequence   int
+	// obs holds the current per-turn observer fan-out. Atomic because
+	// the readLoop goroutine reads it (for cancel_tts -> Interrupt) while
+	// the conductor goroutine writes it (new fan-out each turn).
+	// Always non-nil -- set to observer.Noop between turns (Null Object).
+	obs atomic.Pointer[observer.TokenFanOut]
+
+	// model is the LLM model name (e.g., "claude-sonnet-4-20250514").
+	model string
+
+	// --- Session state (loaded from DB, mutated during the session) ---
+
+	// sessionID is the interview session's UUID.
+	sessionID uuid.UUID
+
+	// userID is the authenticated user who owns this session.
+	userID uuid.UUID
+
+	// question is the interview question for this session.
+	question db.Question
+
+	// messages is the in-memory transcript, appended after each DB persist.
+	// Avoids re-querying the full transcript on every turn for prompt building.
+	messages []db.Message
+
+	// sequence is the last message sequence number. Incremented before each
+	// persist, rolled back on failure.
+	sequence int
+
+	// ttsEnabled controls whether TTSAccumulator is included in the fan-out.
 	ttsEnabled bool
-	duration   time.Duration
-	initMsg    WSMessage
 
+	// duration is the configured interview duration.
+	duration time.Duration
+
+	// initMsg is the client's session_init message, read by the handler
+	// before constructing the conductor. Contains LastSeq for reconnect.
+	initMsg WSMessage
+
+	// --- Timers ---
+
+	// reconnectPending is set when the 55-minute reconnect timer fires.
+	// Checked after each turn completes -- reconnect happens between turns.
 	reconnectPending bool
-	timerWarningCh   <-chan time.Time
-	timerOvertimeCh  <-chan time.Time
+
+	// timerWarningCh fires when the session approaches its time limit.
+	// Formula: duration - clamp(2, 5, round(duration/9)) minutes.
+	timerWarningCh <-chan time.Time
+
+	// timerOvertimeCh fires when the session exceeds its configured duration.
+	timerOvertimeCh <-chan time.Time
+
+	// reconnectTimerCh fires at 55 minutes into the WebSocket connection
+	// (Cloud Run's 60-minute request timeout). Not set for short sessions.
 	reconnectTimerCh <-chan time.Time
 }
 
@@ -89,8 +166,6 @@ func NewConductor(p ConductorParams) *Conductor {
 // lifecycle, loads session state, streams the opening if needed, then
 // processes messages until exit. Run blocks until the session ends.
 func (c *Conductor) Run(serverCtx context.Context) {
-	defer c.cleanup()
-
 	// Conductor owns its readLoop lifecycle.
 	readCtx, readCancel := context.WithCancel(context.Background())
 	c.cancel = readCancel
@@ -101,7 +176,11 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		defer wg.Done()
 		c.readLoop(readCtx)
 	}()
-	defer wg.Wait() // ensure readLoop exits before Run returns (no goroutine leak)
+
+	// LIFO order matters: wg.Wait runs last (confirms readLoop exited),
+	// cleanup runs first (cancels readCtx, closes WS, releases lock).
+	defer wg.Wait()
+	defer c.cleanup()
 
 	if err := c.loadSession(serverCtx); err != nil {
 		slog.Error("conductor: load session", "error", err, "session_id", c.sessionID)
@@ -128,7 +207,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		}
 	}
 
-	c.initTimers(serverCtx)
+	c.initTimers()
 	c.selectLoop(serverCtx)
 }
 
@@ -194,7 +273,7 @@ func WarningMinutes(duration time.Duration) float64 {
 }
 
 // initTimers sets up warning, overtime, and reconnect timers based on session start time.
-func (c *Conductor) initTimers(ctx context.Context) {
+func (c *Conductor) initTimers() {
 	now := time.Now()
 	sessionStart := c.sm.StartedAt()
 	elapsed := now.Sub(sessionStart)
