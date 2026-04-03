@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"time"
 
@@ -209,7 +210,10 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 			Subject: fmt.Sprintf("Evaluation: %s", question.Title),
 			Text:    fmt.Sprintf("Your evaluation for %q is ready. View it in the app.", question.Title),
 			HTML:    htmlBody,
-		}, SendEmailInsertOpts(&config.Email{}))
+		}, &river.InsertOpts{
+				Queue:       QueueNotifications,
+				MaxAttempts: 3,
+			})
 		if err != nil {
 			return fmt.Errorf("enqueue send_email: %w", err)
 		}
@@ -234,10 +238,10 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 func renderEvaluationEmail(questionTitle string, result *evaluation.EvaluationResult) string {
 	var strengthItems, gapItems string
 	for _, s := range result.Strengths {
-		strengthItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", s)
+		strengthItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", html.EscapeString(s))
 	}
 	for _, g := range result.Gaps {
-		gapItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", g)
+		gapItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", html.EscapeString(g))
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -270,7 +274,7 @@ func renderEvaluationEmail(questionTitle string, result *evaluation.EvaluationRe
   </p>
 </body>
 </html>`,
-		questionTitle,
+		html.EscapeString(questionTitle),
 		result.ScoreRequirements,
 		result.ScoreArchitecture,
 		result.ScoreDeepDive,
@@ -279,6 +283,6 @@ func renderEvaluationEmail(questionTitle string, result *evaluation.EvaluationRe
 		result.ScoreOverall,
 		strengthItems,
 		gapItems,
-		result.Advice,
+		html.EscapeString(result.Advice),
 	)
 }

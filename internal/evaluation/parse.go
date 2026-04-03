@@ -215,9 +215,16 @@ func Validate(result *EvaluationResult, seqMap map[int32]uuid.UUID) error {
 		}
 	}
 
+	validTypes := map[string]bool{
+		"strength": true, "gap": true, "missed_opportunity": true, "note": true,
+	}
+
 	for _, a := range result.Annotations {
 		if _, ok := seqMap[a.MessageSeq]; !ok {
 			return fmt.Errorf("evaluation: annotation references unknown message_seq: %d", a.MessageSeq)
+		}
+		if !validTypes[a.Type] {
+			return fmt.Errorf("evaluation: annotation has invalid type: %q", a.Type)
 		}
 	}
 
