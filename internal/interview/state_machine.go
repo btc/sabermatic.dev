@@ -2,6 +2,7 @@ package interview
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -64,4 +65,11 @@ func (sm *StateMachine) SetStartedAt(t time.Time) {
 // Normal transitions must use Transition().
 func (sm *StateMachine) ForceState(s ConductorState) {
 	sm.state = s
+}
+
+// warningMinutes calculates the number of minutes before session end to fire
+// the timer warning. Formula: clamp(2, 5, round(duration_minutes / 9)).
+func warningMinutes(duration time.Duration) float64 {
+	w := math.Round(duration.Minutes() / 9)
+	return math.Max(2, math.Min(5, w))
 }
