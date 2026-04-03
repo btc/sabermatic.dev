@@ -69,7 +69,7 @@ func (sm *StateMachine) ForceState(s ConductorState) {
 
 // warningMinutes calculates the number of minutes before session end to fire
 // the timer warning. Formula: clamp(2, 5, round(duration_minutes / 9)).
-func warningMinutes(duration time.Duration) float64 {
-	w := math.Round(duration.Minutes() / 9)
-	return math.Max(2, math.Min(5, w))
+func warningMinutes(duration time.Duration) int {
+	minutes := duration.Minutes()
+	return int(math.Max(2, math.Min(5, math.Round(minutes/9))))
 }

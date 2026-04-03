@@ -209,7 +209,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 
 		case <-warningTimer:
-			c.send(serverCtx, msgTimerWarning(int(warningMinutes(c.duration))))
+			c.send(serverCtx, msgTimerWarning(warningMinutes(c.duration)))
 
 		case <-overtimeTimer:
 			c.send(serverCtx, msgTimerOvertime)
@@ -378,6 +378,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 	})
 	if err != nil {
 		fanOut.OnError(err)
+		fanOut.Close()
 		c.obs.Store(observer.Noop)
 		return fmt.Errorf("start llm stream: %w", err)
 	}
