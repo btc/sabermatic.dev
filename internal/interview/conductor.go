@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -65,7 +66,7 @@ type Conductor struct {
 // NewConductor constructs a Conductor from the given params.
 func NewConductor(p ConductorParams) *Conductor {
 	c := &Conductor{
-		msgCh:     make(chan WSMessage, 8),
+		msgCh:     make(chan WSMessage, 1),
 		ws:        p.WS,
 		b:         p.Backend,
 		lockConn:  p.LockConn,
@@ -133,7 +134,7 @@ func (c *Conductor) loadSession(ctx context.Context) error {
 		c.duration = time.Duration(session.ConfigDurationMinutes) * time.Minute
 	}
 	c.sm = NewStateMachine(StateWaitingForInput)
-	c.sm.startedAt = session.StartedAt
+	c.sm.SetStartedAt(session.StartedAt)
 
 	if len(msgs) > 0 {
 		c.sequence = int(msgs[len(msgs)-1].Seq)
@@ -528,8 +529,12 @@ func (c *Conductor) sendStateError(ctx context.Context, err error) error {
 	})
 }
 
-// cleanup releases the advisory lock connection.
+// cleanup closes the WebSocket and releases the advisory lock connection.
+// Called via defer from Run(), ensuring all exit paths (endSession,
+// handleShutdown, handleDisconnect) close the WS. For disconnect the WS
+// is already closed; calling Close on a closed WS is safe.
 func (c *Conductor) cleanup() {
+	c.ws.Close(websocket.StatusNormalClosure, "session ended")
 	if c.lockConn != nil {
 		c.lockConn.Release()
 		c.lockConn = nil

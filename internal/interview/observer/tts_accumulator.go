@@ -138,8 +138,12 @@ func (a *TTSAccumulator) ttsLoop() {
 		rc.Close()
 	}
 
-	_ = a.ws.SendJSON(a.ctx, map[string]any{
-		"type":       "tts_done",
-		"message_id": a.messageID.String(),
-	})
+	// Only send tts_done if the context is still live. If Interrupt() was called
+	// (cancel_tts or disconnect), the client doesn't need this message.
+	if a.ctx.Err() == nil {
+		_ = a.ws.SendJSON(a.ctx, map[string]any{
+			"type":       "tts_done",
+			"message_id": a.messageID.String(),
+		})
+	}
 }

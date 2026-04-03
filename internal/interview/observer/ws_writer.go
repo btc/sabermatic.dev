@@ -15,6 +15,10 @@ type WSWriter struct {
 	ctx       context.Context
 }
 
+// NewWSWriter creates a WSWriter that sends interviewer tokens to the client.
+// NB: Uses context.Background() intentionally — writes must continue during
+// client disconnect so the LLM stream completes and MessageAccumulator can
+// persist the full response. Write errors are logged and ignored.
 func NewWSWriter(ws WSConn, messageID uuid.UUID) *WSWriter {
 	return &WSWriter{ws: ws, messageID: messageID, ctx: context.Background()}
 }
