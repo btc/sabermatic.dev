@@ -21,9 +21,9 @@ func makeQuestion() db.Question {
 
 func makeMessages() []db.Message {
 	return []db.Message{
-		{ID: uuid.New(), Seq: 1, Role: "assistant", Content: "Let's start. How would you design a URL shortener?"},
-		{ID: uuid.New(), Seq: 2, Role: "user", Content: "I'd use a hash function to generate short codes."},
-		{ID: uuid.New(), Seq: 3, Role: "assistant", Content: "How would you handle collisions?"},
+		{ID: uuid.New(), Seq: 1, Role: "interviewer", Content: "Let's start. How would you design a URL shortener?"},
+		{ID: uuid.New(), Seq: 2, Role: "candidate", Content: "I'd use a hash function to generate short codes."},
+		{ID: uuid.New(), Seq: 3, Role: "interviewer", Content: "How would you handle collisions?"},
 	}
 }
 

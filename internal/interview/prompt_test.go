@@ -6,6 +6,7 @@ import (
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/interview"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +51,10 @@ func TestPromptBuilder_WithCoachBriefingNil(t *testing.T) {
 
 func TestPromptBuilder_WithCoachBriefing(t *testing.T) {
 	ca := &db.CoachAnalysis{
-		Narrative: "Candidate struggles with distributed consensus and cache invalidation.",
+		Narrative:           "Candidate struggles with distributed consensus and cache invalidation.",
+		WeakestDimension:    pgtype.Text{String: "scalability", Valid: true},
+		ImprovingDimensions: []string{"requirements", "communication"},
+		TopicGaps:           []string{"consensus", "caching"},
 	}
 	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
@@ -60,6 +64,22 @@ func TestPromptBuilder_WithCoachBriefing(t *testing.T) {
 		Build()
 	assert.Contains(t, system, "Coach Briefing")
 	assert.Contains(t, system, "distributed consensus")
+	assert.Contains(t, system, "weakest area is scalability")
+	assert.Contains(t, system, "improving in: requirements, communication")
+	assert.Contains(t, system, "Topic gaps to probe if relevant: consensus, caching")
+}
+
+func TestPromptBuilder_WithCoachBriefingEmptyNarrative(t *testing.T) {
+	ca := &db.CoachAnalysis{
+		Narrative: "",
+	}
+	system, _ := interview.NewInterviewerPrompt().
+		WithSystemInstructions().
+		WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+		WithCoachBriefing(ca).
+		WithTimeContext(0, 30*time.Minute).
+		Build()
+	assert.NotContains(t, system, "Coach Briefing")
 }
 
 func TestPromptBuilder_TimeContextAlerts(t *testing.T) {

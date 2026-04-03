@@ -117,9 +117,9 @@ func buildEvaluationSummary(eval db.Evaluation) string {
 // roleLabel converts a db message role to a display label.
 func roleLabel(role string) string {
 	switch role {
-	case "assistant":
+	case "interviewer":
 		return "Interviewer"
-	case "user":
+	case "candidate":
 		return "Candidate"
 	default:
 		if len(role) == 0 {
