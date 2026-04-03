@@ -15,7 +15,15 @@ func GetCoachAnalysis(b *backend.Backend) http.HandlerFunc {
 
 		resp, err := b.GetLatestCoachAnalysis(r.Context(), user.ID)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			switch {
+			case errors.Is(err, backend.ErrNoPaidBalance):
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error":   "paid_balance_required",
+					"message": "Coach analysis requires a paid plan or minute balance",
+				})
+			default:
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			}
 			return
 		}
 		if resp == nil {
@@ -36,6 +44,11 @@ func RequestCoachAnalysis(b *backend.Backend) http.HandlerFunc {
 		err := b.RequestCoachAnalysis(r.Context(), user.ID, force)
 		if err != nil {
 			switch {
+			case errors.Is(err, backend.ErrNoPaidBalance):
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error":   "paid_balance_required",
+					"message": "Coach analysis requires a paid plan or minute balance",
+				})
 			case errors.Is(err, backend.ErrNoNewSessions):
 				writeJSON(w, http.StatusOK, map[string]string{"status": "up_to_date"})
 			default:
