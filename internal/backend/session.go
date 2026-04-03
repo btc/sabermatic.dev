@@ -335,7 +335,7 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		}
 		refund := int(session.ReservedMinutes.Int32) - actualMinutes
 		if refund > 0 {
-			if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, int32(refund)); err != nil {
+			if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, int32(refund), "session_refund"); err != nil {
 				slog.Warn("session refund failed", "session_id", sessionID, "error", err)
 				// Non-fatal: session still completes.
 			}
@@ -381,7 +381,7 @@ func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
 
 	// Full refund of reserved minutes.
 	if session.ReservedMinutes.Valid && session.ReservedMinutes.Int32 > 0 {
-		if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, session.ReservedMinutes.Int32); err != nil {
+		if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, session.ReservedMinutes.Int32, "error_refund"); err != nil {
 			slog.Warn("fail-session refund failed", "session_id", sessionID, "error", err)
 		}
 	}
