@@ -56,7 +56,7 @@ func New(cfg *config.Config) (*Backend, error) {
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
-	workers := jobs.RegisterWorkers(cfg, emailSender)
+	workers := jobs.RegisterWorkers(cfg, emailSender, pool)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:      {MaxWorkers: cfg.River.NumDefaultWorkers},
@@ -66,6 +66,15 @@ func New(cfg *config.Config) (*Backend, error) {
 		},
 		Workers:    workers,
 		Middleware: []rivertype.Middleware{&drilotel.JobTracer{}},
+		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(3*time.Minute),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return jobs.CleanupAbandonedSessionsArgs{}, nil
+				},
+				nil,
+			),
+		},
 	})
 	if err != nil {
 		pool.Close()
