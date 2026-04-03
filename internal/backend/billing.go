@@ -82,14 +82,10 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planNam
 //
 // Returns ErrInsufficientBalance if the user's total available minutes are
 // less than the requested amount.
-func (b *Backend) ReserveMinutes(ctx context.Context, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
-	tx, err := b.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin reserve tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	q := db.New(tx)
+// The caller must have already locked the grants via SelectGrantsForReservation
+// within the provided transaction.
+func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
+	q := db.New(dbtx)
 
 	// Lock grants FOR UPDATE to prevent concurrent reservation races.
 	grants, err := q.SelectGrantsForReservation(ctx, userID)
@@ -141,37 +137,12 @@ func (b *Backend) ReserveMinutes(ctx context.Context, userID uuid.UUID, sessionI
 		remaining -= debit
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit reserve tx: %w", err)
-	}
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// RefundMinutes
+// refundMinutesTx
 // ---------------------------------------------------------------------------
-
-// RefundMinutes credits back the given number of minutes for a session. It
-// reconstructs the per-grant debit amounts from ledger entries and credits
-// back in reverse order (most-recently-debited first). If a grant credit
-// fails (e.g., the grant has expired), the error is logged and processing
-// continues with the next grant.
-func (b *Backend) RefundMinutes(ctx context.Context, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
-	tx, err := b.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin refund tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if err := b.refundMinutesTx(ctx, tx, userID, sessionID, minutes, "session_refund"); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit refund tx: %w", err)
-	}
-	return nil
-}
 
 // refundMinutesTx performs the refund logic within an existing transaction.
 // Used by CompleteSession (Task 8) to refund within the completion transaction.
@@ -209,10 +180,12 @@ func (b *Backend) refundMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid
 			RemainingMinutes: credit,
 		})
 		if err != nil {
-			// Grant may have expired or been deleted. Log and continue.
+			// Grant may have expired or credit exceeds initial_minutes. Log and continue.
 			slog.Warn("credit grant failed during refund",
 				"grant_id", entry.GrantID,
-				"credit", credit,
+				"credit_attempted", credit,
+				"original_debit", maxRefund,
+				"session_id", sessionID,
 				"error", err,
 			)
 			continue

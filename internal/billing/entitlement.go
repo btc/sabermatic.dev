@@ -1,15 +1,14 @@
 package billing
 
-import "context"
-
-func DetermineEducatorAccess(_ context.Context, paidBalance int, freeUsed int, freeLimit int) (EducatorAccessLevel, error) {
+// DetermineEducatorAccess decides what level of educator content to show.
+func DetermineEducatorAccess(paidBalance int, freeUsed int, freeLimit int) EducatorAccessLevel {
 	if paidBalance > 0 {
-		return Full, nil
+		return Full
 	}
 	if freeUsed < freeLimit {
-		return FreeTaste, nil
+		return FreeTaste
 	}
-	return Preview, nil
+	return Preview
 }
 
 func CanAccessCoach(paidBalance int) bool {
