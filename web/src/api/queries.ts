@@ -226,8 +226,9 @@ export function useUpdateProfile() {
 // --- Data export ---
 
 export function useExportData() {
+  // POST because the backend queues an async export job (side effect, not idempotent read)
   return useMutation({
-    mutationFn: () => apiClient.get("/api/me/export"),
+    mutationFn: () => apiClient.post("/api/me/export"),
   });
 }
 

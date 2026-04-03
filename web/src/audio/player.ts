@@ -10,6 +10,8 @@ export class AudioPlayer {
   private _isPlaying = false;
   private isDone = false;
   private nextExpectedSeq = 0;
+  private activeSource: AudioBufferSourceNode | null = null;
+  private generation = 0;
 
   onComplete: (() => void) | null = null;
 
@@ -75,8 +77,12 @@ export class AudioPlayer {
         const source = this.ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(this.ctx.destination);
+        this.activeSource = source;
+        const capturedGeneration = this.generation;
         source.onended = () => {
-          this.playNext();
+          if (this.generation === capturedGeneration) {
+            this.playNext();
+          }
         };
         source.start();
       },
@@ -96,6 +102,9 @@ export class AudioPlayer {
   }
 
   cancel(): void {
+    this.generation++;
+    this.activeSource?.stop();
+    this.activeSource = null;
     this.queue = [];
     this._isPlaying = false;
     this.isDone = false;

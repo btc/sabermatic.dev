@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Outlet, NavLink, useParams, useNavigate, Navigate } from "react-router-dom";
 import { useSession, useEvaluation } from "@/api/queries";
+import type { Session } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
 
@@ -80,7 +81,7 @@ function SessionLayoutInner({ id }: { id: string }) {
 
   const { data: session } = useSession(id, {
     refetchInterval: (query) => {
-      const s = query.state.data as import("@/api/types").Session | undefined;
+      const s = query.state.data as Session | undefined;
       if (s?.status === "completed" || s?.status === "evaluating") return 3000;
       return false;
     },
