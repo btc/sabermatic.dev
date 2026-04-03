@@ -15,7 +15,7 @@ The landing page is a single-scroll showcase that walks visitors through a real 
 3. Optionally clicks "See a real evaluation" → `/sample` → full session replay
 4. Clicks CTA "Start practicing" → `/signup` (Google/GitHub OAuth or email)
 5. Lands on home dashboard → free tier, picks a question, starts first session
-6. After 3+ reviewed sessions → coach card appears on home (UI progressive disclosure); educator and coach features gated by billing entitlements (see billing spec)
+6. After 3+ reviewed sessions → coach card appears on home (UI progressive disclosure). On free tier, the coach card renders as an upgrade prompt ("Get strategic coaching — available on Pro") since coach access requires paid balance (see billing spec). On paid tier, the card shows the full coach analysis.
 
 **No anonymous sessions.** Signup required. Free tier is the trial. Simpler engineering (no session migration, no IP-based rate limiting, no orphaned data), cleaner usage tracking, better conversion (the person who won't do one-click OAuth wasn't converting anyway).
 
@@ -169,7 +169,7 @@ Three endpoints mirroring the authenticated session detail pattern:
 
 One additional endpoint for the landing page:
 
-- **`GET /api/sample/coach`** — returns coach analysis data (trend, weakest dimension, recommendations) for the landing page coaching section (Section 6). Not used by the `/sample` session detail page — coach data is user-level, not session-level.
+- **`GET /api/sample/coach`** — returns coach analysis data (weakest dimension, improving dimensions, topic gaps, suggested question, narrative) for the landing page coaching section (Section 6). Not used by the `/sample` session detail page — coach data is user-level, not session-level. Does NOT include trend sparkline data — the sparkline is computed client-side from evaluation scores across sessions. For the landing page illustration, the sparkline uses pre-computed score data bundled in the session fixture (an array of `{date, overall_score}` pairs from the v0 user's session history).
 
 The JSON fixtures are generated once from v0 database exports and committed to the repo (e.g., `internal/sample/session.json`, `internal/sample/coach.json`). The Go handler serves them directly — no database queries.
 
@@ -260,3 +260,7 @@ Free tier removes all friction. "Try a session right now, free, no credit card."
 - Authenticated home page, interview experience, evaluation, billing — existing UI spec
 - Pricing — existing billing spec
 - Brand identity, domain, taglines — existing naming spec
+
+**Known cross-spec issues to resolve before implementation:**
+- The UI spec says concurrent session limit is "pro: 2" but the billing spec updated this to "pro: 3". The UI spec should be updated to match the billing spec.
+- The UI spec uses "DRILL" throughout — must be updated to "Sabermetric" per the naming spec (noted in prerequisite above).
