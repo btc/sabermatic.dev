@@ -142,9 +142,7 @@ func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WS
 			continue
 		}
 		if msg.Type == "cancel_tts" {
-			if obs := observerFn(); obs != nil {
-				obs.Interrupt()
-			}
+			observerFn().Interrupt()
 			continue
 		}
 		msgCh <- msg

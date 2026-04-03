@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -186,7 +187,7 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 
 	if err := stream.CloseWithTx(ctx, tx); err != nil {
 		// Non-fatal: the LLM call logging failed but we still persist the message.
-		// Log this in the caller.
+		slog.Warn("persist llm_call record failed", "error", err, "session_id", p.SessionID)
 	}
 
 	msg, err := db.New(tx).InsertMessage(ctx, db.InsertMessageParams{

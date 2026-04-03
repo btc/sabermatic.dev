@@ -5,6 +5,10 @@ type TokenFanOut struct {
 	observers []TokenObserver
 }
 
+// Noop is an empty fan-out with no observers. Used between turns so the
+// observer pointer is never nil — Interrupt() on Noop is a safe no-op.
+var Noop = &TokenFanOut{}
+
 func NewTokenFanOut(observers ...TokenObserver) *TokenFanOut {
 	return &TokenFanOut{observers: observers}
 }

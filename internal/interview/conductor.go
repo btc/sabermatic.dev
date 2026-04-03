@@ -64,8 +64,7 @@ type Conductor struct {
 
 // NewConductor constructs a Conductor from the given params.
 func NewConductor(p ConductorParams) *Conductor {
-	return &Conductor{
-		sm:        NewStateMachine(StateInterviewerSpeaking),
+	c := &Conductor{
 		msgCh:     make(chan WSMessage, 8),
 		ws:        p.WS,
 		b:         p.Backend,
@@ -76,12 +75,14 @@ func NewConductor(p ConductorParams) *Conductor {
 		duration:  p.Duration,
 		initMsg:   p.InitMsg,
 	}
+	c.obs.Store(observer.Noop)
+	return c
 }
 
 // MsgCh returns the channel that the read loop sends messages to.
 func (c *Conductor) MsgCh() chan WSMessage { return c.msgCh }
 
-// Observer returns the current TokenFanOut (may be nil between turns).
+// Observer returns the current TokenFanOut (never nil; Noop between turns).
 func (c *Conductor) Observer() *observer.TokenFanOut { return c.obs.Load() }
 
 // Run is the main loop for the conductor goroutine. It loads session state,
@@ -308,6 +309,9 @@ func (c *Conductor) handleEndTurn(ctx context.Context, msg WSMessage) error {
 			slog.Error("conductor: transcription failed", "error", err, "session_id", c.sessionID)
 			return fmt.Errorf("transcription: %w", err)
 		}
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("transcription returned empty text")
+		}
 
 		_ = c.ws.SendJSON(ctx, map[string]string{"type": "transcription_result", "text": text})
 		candidateContent = text
@@ -396,7 +400,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 	})
 	if err != nil {
 		fanOut.OnError(err)
-		c.obs.Store(nil)
+		c.obs.Store(observer.Noop)
 		return fmt.Errorf("start llm stream: %w", err)
 	}
 
@@ -416,7 +420,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 
 	fullText := accumulator.Text()
 	fanOut.OnDone(fullText)
-	c.obs.Store(nil)
+	c.obs.Store(observer.Noop)
 
 	// Persist interviewer message and LLM call atomically.
 	c.sequence++
@@ -478,10 +482,8 @@ func (c *Conductor) endSession(ctx context.Context) error {
 func (c *Conductor) handleDisconnect(ctx context.Context) {
 	slog.Info("conductor: client disconnected", "session_id", c.sessionID, "state", c.sm.State())
 
-	// If we have an active observer (mid-stream), interrupt TTS.
-	if obs := c.obs.Load(); obs != nil {
-		obs.Interrupt()
-	}
+	// Interrupt TTS if mid-stream (Noop.Interrupt is a safe no-op between turns).
+	c.obs.Load().Interrupt()
 	// The LLM stream continues to completion in streamInterviewerResponse;
 	// the message is persisted when that method returns. The disconnect is
 	// detected on the *next* iteration of the select loop, so by the time
