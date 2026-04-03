@@ -2,6 +2,7 @@ package interview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/btc/drill/internal/ai"
@@ -64,14 +66,15 @@ type Conductor struct {
 	obs atomic.Pointer[observer.TokenFanOut]
 
 	// Session state loaded from DB.
-	sessionID  uuid.UUID
-	userID     uuid.UUID
-	question   db.Question
-	messages   []db.Message // in-memory transcript, appended after each persist
-	sequence   int          // last message seq number
-	ttsEnabled bool
-	duration   time.Duration
-	model      string
+	sessionID     uuid.UUID
+	userID        uuid.UUID
+	question      db.Question
+	coachBriefing *db.CoachAnalysis // nil if disabled or no analysis available
+	messages      []db.Message      // in-memory transcript, appended after each persist
+	sequence      int               // last message seq number
+	ttsEnabled    bool
+	duration      time.Duration
+	model         string
 
 	// The client's session_init message (contains LastSeq for reconnect detection).
 	initMsg WSMessage
@@ -264,6 +267,18 @@ func (c *Conductor) loadSession(ctx context.Context) error {
 		c.sequence = int(msgs[len(msgs)-1].Seq)
 	}
 
+	// Load coach briefing if enabled.
+	if row.ConfigCoachBriefing {
+		q := db.New(c.backend.Pool())
+		ca, err := q.GetLatestCoachAnalysis(ctx, row.UserID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("get coach analysis: %w", err)
+		}
+		if err == nil {
+			c.coachBriefing = &ca
+		}
+	}
+
 	return nil
 }
 
@@ -355,6 +370,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 	system, promptMsgs := NewInterviewerPrompt().
 		WithSystemInstructions().
 		WithQuestion(c.question).
+		WithCoachBriefing(c.coachBriefing).
 		WithTimeContext(elapsed, remaining).
 		WithTranscript(c.messages).
 		Build()
