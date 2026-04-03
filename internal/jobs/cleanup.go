@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
@@ -19,6 +20,7 @@ func (CleanupAbandonedSessionsArgs) Kind() string { return "cleanup_abandoned_se
 type CleanupAbandonedSessionsWorker struct {
 	river.WorkerDefaults[CleanupAbandonedSessionsArgs]
 	Pool *pgxpool.Pool
+	Jobs *river.Client[pgx.Tx] // set after river.NewClient returns
 }
 
 func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Job[CleanupAbandonedSessionsArgs]) error {
