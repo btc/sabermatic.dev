@@ -7,12 +7,15 @@ import {
   Volume2,
   X,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { apiClient } from "@/api/client";
 import { useInterview } from "@/ws/hooks";
 import { useTimer } from "@/hooks/use-timer";
 import { useAudioRecorder } from "@/audio/hooks";
 import { useAudioPlayer } from "@/audio/hooks";
 import { useSession } from "@/api/queries";
 import { ConnectionState } from "@/ws/connection";
+import type { Session } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -93,6 +96,83 @@ function ProcessingIndicator() {
 }
 
 // ---------------------------------------------------------------------------
+// WaitingView — shown after session ends while evaluation is processing
+// ---------------------------------------------------------------------------
+
+const WAITING_MESSAGES = [
+  "Reviewing your requirements gathering...",
+  "Analyzing architecture decisions...",
+  "Assessing depth of technical discussion...",
+  "Evaluating scalability reasoning...",
+  "Reviewing communication clarity...",
+];
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+interface WaitingViewProps {
+  sessionId: string;
+  questionTitle: string | undefined;
+  messageCount: number;
+  elapsed: number;
+}
+
+function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: WaitingViewProps) {
+  const navigate = useNavigate();
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  // Cycle through status messages every 4 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMessageIndex((i) => (i + 1) % WAITING_MESSAGES.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll for evaluation completion
+  const { data: session } = useQuery({
+    queryKey: ["sessions", sessionId],
+    queryFn: () => apiClient.get<Session>(`/api/sessions/${sessionId}`),
+    enabled: !!sessionId,
+    refetchInterval: 3000,
+  });
+
+  // Navigate when evaluation is done
+  useEffect(() => {
+    if (session?.status === "reviewed" || session?.status === "evaluation_failed") {
+      navigate(`/sessions/${sessionId}/overview`);
+    }
+  }, [session?.status, sessionId, navigate]);
+
+  const candidateTurns = Math.ceil(messageCount / 2);
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-8 px-4">
+      {/* Breathing pulse indicator */}
+      <div className="size-3 rounded-full bg-primary animate-pulse" />
+
+      {/* Cycling status message */}
+      <p className="text-sm text-muted-foreground text-center max-w-xs">
+        {WAITING_MESSAGES[messageIndex]}
+      </p>
+
+      {/* Session stats */}
+      <div className="flex flex-col items-center gap-1.5 text-center">
+        {questionTitle && (
+          <p className="text-base font-medium">{questionTitle}</p>
+        )}
+        <p className="text-sm text-muted-foreground tabular-nums">
+          {formatElapsed(elapsed)} &middot; {candidateTurns} {candidateTurns === 1 ? "response" : "responses"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -117,7 +197,7 @@ export default function Interview() {
   const audioRecorder = useAudioRecorder();
   const audioPlayer = useAudioPlayer();
 
-  const { display: timerDisplay, phase: timerPhase } = useTimer(
+  const { display: timerDisplay, phase: timerPhase, elapsed } = useTimer(
     session?.started_at ?? null,
     sessionInfo?.duration ?? 0,
   );
@@ -237,6 +317,18 @@ export default function Interview() {
       : timerPhase === "warning"
         ? "text-amber-500"
         : "text-foreground";
+
+  // ------ Post-interview waiting state ------
+  if (isEnded) {
+    return (
+      <WaitingView
+        sessionId={sessionId!}
+        questionTitle={sessionInfo?.question.title}
+        messageCount={messages.length}
+        elapsed={elapsed}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
