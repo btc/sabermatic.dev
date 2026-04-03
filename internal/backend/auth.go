@@ -71,8 +71,8 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 	if p.Email == "" || p.Password == "" || p.DisplayName == "" {
 		return nil, ErrMissingFields
 	}
-	if len(p.Password) < 8 || len(p.Password) > 128 {
-		return nil, ErrPasswordLength
+	if err := ValidatePasswordLength(p.Password); err != nil {
+		return nil, err
 	}
 
 	// Hash password.
@@ -252,8 +252,8 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 // all sessions for the user. Returns ErrPasswordLength or ErrInvalidToken on
 // validation failures.
 func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) error {
-	if len(p.NewPassword) < 8 || len(p.NewPassword) > 128 {
-		return ErrPasswordLength
+	if err := ValidatePasswordLength(p.NewPassword); err != nil {
+		return err
 	}
 
 	signer := auth.NewTokenSigner(auth.DeriveKey(b.cfg.Auth.TokenSecret, "hmac-tokens"))
