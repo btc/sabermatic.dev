@@ -12,12 +12,17 @@ import (
 )
 
 type Querier interface {
+	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountSeedQuestions(ctx context.Context) (int64, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
+	CreateFreeGrant(ctx context.Context, arg CreateFreeGrantParams) (Grant, error)
+	CreateGrantFromStripe(ctx context.Context, arg CreateGrantFromStripeParams) (Grant, error)
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) (OauthAccount, error)
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
-	CreateSession(ctx context.Context, arg CreateSessionParams) (InterviewSession, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreditGrant(ctx context.Context, arg CreditGrantParams) (int32, error)
+	DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, error)
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
@@ -26,6 +31,7 @@ type Querier interface {
 	GetEducatorAnalysisBySession(ctx context.Context, sessionID uuid.UUID) (EducatorAnalysis, error)
 	GetEvaluationBySession(ctx context.Context, sessionID uuid.UUID) (Evaluation, error)
 	GetEvaluationsBySessionIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Evaluation, error)
+	GetFreeGrantForMonth(ctx context.Context, arg GetFreeGrantForMonthParams) (uuid.UUID, error)
 	GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (CoachAnalysis, error)
 	GetMaxSeqForSession(ctx context.Context, sessionID uuid.UUID) (int32, error)
 	GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]Message, error)
@@ -34,21 +40,31 @@ type Querier interface {
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
 	GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]Question, error)
+	GetRecentLedgerEntries(ctx context.Context, arg GetRecentLedgerEntriesParams) ([]GetRecentLedgerEntriesRow, error)
 	GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	GetReviewedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]InterviewSession, error)
 	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
+	GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error)
+	GetSessionReservationEntries(ctx context.Context, sessionID pgtype.UUID) ([]GetSessionReservationEntriesRow, error)
+	GetUserBalance(ctx context.Context, userID uuid.UUID) (int32, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
+	GetUserByStripeCustomerID(ctx context.Context, stripeCustomerID pgtype.Text) (User, error)
+	GetUserPaidBalance(ctx context.Context, userID uuid.UUID) (int32, error)
+	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
+	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
 	InsertAnnotation(ctx context.Context, arg InsertAnnotationParams) error
 	InsertCoachAnalysis(ctx context.Context, arg InsertCoachAnalysisParams) (uuid.UUID, error)
 	InsertEducatorAnalysis(ctx context.Context, sessionID uuid.UUID) (uuid.UUID, error)
 	InsertEvaluation(ctx context.Context, arg InsertEvaluationParams) (uuid.UUID, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (uuid.UUID, error)
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
+	InsertLedgerEntry(ctx context.Context, arg InsertLedgerEntryParams) (LedgerEntry, error)
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
+	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
@@ -57,17 +73,21 @@ type Querier interface {
 	MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
+	SelectGrantsForReservation(ctx context.Context, userID uuid.UUID) ([]SelectGrantsForReservationRow, error)
 	SetAudioURL(ctx context.Context, arg SetAudioURLParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
 	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
+	UpdateSessionReservedMinutes(ctx context.Context, arg UpdateSessionReservedMinutesParams) error
 	UpdateSessionStatus(ctx context.Context, arg UpdateSessionStatusParams) error
 	// NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
 	// Used for status transitions after session completion (evaluating → reviewed,
 	// → evaluation_failed) where end time and turn count should not change.
 	UpdateSessionStatusOnly(ctx context.Context, arg UpdateSessionStatusOnlyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
+	UpdateUserPlan(ctx context.Context, arg UpdateUserPlanParams) error
+	UpdateUserStripeCustomerID(ctx context.Context, arg UpdateUserStripeCustomerIDParams) error
 	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
 }
 

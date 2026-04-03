@@ -68,6 +68,17 @@ type Evaluation struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
+type Grant struct {
+	ID               uuid.UUID          `json:"id"`
+	UserID           uuid.UUID          `json:"user_id"`
+	Source           string             `json:"source"`
+	StripeEventID    pgtype.Text        `json:"stripe_event_id"`
+	InitialMinutes   int32              `json:"initial_minutes"`
+	RemainingMinutes int32              `json:"remaining_minutes"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt        time.Time          `json:"created_at"`
+}
+
 type InterviewSession struct {
 	ID                    uuid.UUID          `json:"id"`
 	UserID                uuid.UUID          `json:"user_id"`
@@ -82,6 +93,17 @@ type InterviewSession struct {
 	Archived              bool               `json:"archived"`
 	CreatedAt             time.Time          `json:"created_at"`
 	UpdatedAt             time.Time          `json:"updated_at"`
+	ReservedMinutes       pgtype.Int4        `json:"reserved_minutes"`
+}
+
+type LedgerEntry struct {
+	ID        uuid.UUID   `json:"id"`
+	UserID    uuid.UUID   `json:"user_id"`
+	GrantID   uuid.UUID   `json:"grant_id"`
+	Amount    int32       `json:"amount"`
+	Reason    string      `json:"reason"`
+	SessionID pgtype.UUID `json:"session_id"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
 type LlmCall struct {
@@ -136,26 +158,19 @@ type Question struct {
 	UpdatedAt      time.Time   `json:"updated_at"`
 }
 
-type UsagePeriod struct {
-	ID           uuid.UUID `json:"id"`
-	UserID       uuid.UUID `json:"user_id"`
-	PeriodStart  time.Time `json:"period_start"`
-	PeriodEnd    time.Time `json:"period_end"`
-	SessionsUsed int32     `json:"sessions_used"`
-}
-
 type User struct {
-	ID               uuid.UUID          `json:"id"`
-	Email            string             `json:"email"`
-	EmailVerified    bool               `json:"email_verified"`
-	PasswordHash     pgtype.Text        `json:"password_hash"`
-	DisplayName      string             `json:"display_name"`
-	Role             string             `json:"role"`
-	StripeCustomerID pgtype.Text        `json:"stripe_customer_id"`
-	Plan             string             `json:"plan"`
-	CreatedAt        time.Time          `json:"created_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
-	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
+	ID                    uuid.UUID          `json:"id"`
+	Email                 string             `json:"email"`
+	EmailVerified         bool               `json:"email_verified"`
+	PasswordHash          pgtype.Text        `json:"password_hash"`
+	DisplayName           string             `json:"display_name"`
+	Role                  string             `json:"role"`
+	StripeCustomerID      pgtype.Text        `json:"stripe_customer_id"`
+	Plan                  string             `json:"plan"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
+	FreeFullEducatorsUsed int32              `json:"free_full_educators_used"`
 }
 
 type UserEvent struct {
