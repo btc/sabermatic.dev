@@ -100,7 +100,7 @@ type Providers struct {
 2. Build the OTel `resource.Resource` with `service.name=cfg.ServiceName` and `service.version` (from build info or `"dev"`).
 
 3. Select exporter based on `cfg.Exporter`:
-   - `"stdout"`: `stdouttrace.New(stdouttrace.WithWriter(os.Stderr))` and `stdoutmetric.New(stdoutmetric.WithWriter(os.Stderr))` — explicitly write to stderr (the default is stdout, which would mix with application JSON logs).
+   - `"stdout"`: `stdouttrace.New()` and `stdoutmetric.New()` — write to stdout (the default). Application JSON logs go to stderr (Section 6.4), so the two streams are separated: `stdout` for OTel dev output, `stderr` for structured application logs.
    - `"google"`: `cloudtrace.New()` from `github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace` and `cloudmetric.New()` from `.../exporter/metric`. Both auto-detect project ID and credentials from the environment.
    - Anything else: return an error.
 
@@ -118,7 +118,7 @@ type Providers struct {
    - `otel.SetMeterProvider(mp)`
    - `otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))` — enables W3C `traceparent` header propagation for distributed tracing.
 
-7. Return `Providers` with `Shutdown` that calls `tp.Shutdown(ctx)` and `mp.Shutdown(ctx)`, flushing any buffered data.
+7. Return `Providers` with `Shutdown` that calls both `tp.Shutdown(ctx)` and `mp.Shutdown(ctx)` unconditionally (even if the first fails), flushing any buffered data. Returns the first non-nil error (use `errors.Join` to aggregate both if desired).
 
 **Partial failure cleanup:** If any step after exporter creation fails (e.g., `MeterProvider` creation fails after `TracerProvider` was created), `Init` must shut down already-created resources before returning the error. Use a cleanup slice or defer pattern: each successfully created resource registers a cleanup func; on error, run all cleanups in reverse order. This prevents orphaned providers and leaked goroutines (the batcher and periodic reader both start background goroutines).
 
@@ -133,7 +133,9 @@ if err != nil {
 defer func() {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
-    providers.Shutdown(ctx)
+    if err := providers.Shutdown(ctx); err != nil {
+        slog.Warn("otel shutdown error", "error", err)
+    }
 }()
 
 // Backend.New(cfg) — pool now has otelpgx tracer active
@@ -154,21 +156,35 @@ OTel shuts down last so that spans from Backend.Close() (River draining, pool cl
 
 ## 5. SQL Tracing
 
-`otelpgx` implements pgx v5's `pgx.QueryTracer` interface. Adding it to the pool config is a one-line change in `config.Database.NewPool()`:
+`otelpgx` implements pgx v5's `pgx.QueryTracer` interface. Rather than importing `otelpgx` in the `config` package (which should remain a pure configuration layer), `NewPool` accepts an optional tracer via a new parameter:
 
 ```go
-import "github.com/exaring/otelpgx"
+// config/config.go
+import "github.com/jackc/pgx/v5"
 
-func (d *Database) NewPool(ctx context.Context) (*pgxpool.Pool, error) {
+func (d *Database) NewPool(ctx context.Context, tracer pgx.QueryTracer) (*pgxpool.Pool, error) {
     poolCfg, err := pgxpool.ParseConfig(d.URL)
     if err != nil {
         return nil, fmt.Errorf("parse database url: %w", err)
     }
     poolCfg.MaxConns = d.MaxPoolConns
-    poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+    if tracer != nil {
+        poolCfg.ConnConfig.Tracer = tracer
+    }
     // ... rest unchanged
 }
 ```
+
+The caller (`backend.New`) injects the tracer:
+
+```go
+// backend/backend.go
+import "github.com/exaring/otelpgx"
+
+pool, err := cfg.Database.NewPool(context.Background(), otelpgx.NewTracer())
+```
+
+This keeps instrumentation wiring in `backend` (where all other dependency assembly happens) and the `config` package free of instrumentation imports. The `pgx.QueryTracer` interface is already in the pgx dependency — no new import for `config`.
 
 ### What appears in traces
 
