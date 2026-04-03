@@ -1,0 +1,8 @@
+terraform/
+docs/
+.git/
+.github/
+coverage.out
+.env*
+*.md
+scripts/
