@@ -20,10 +20,10 @@
 | Session reservation | Reserve full configured duration upfront, refund unused on completion | Prevents mid-session balance exhaustion. Clean debit/credit ledger entries. |
 | Failed session handling | Full refund of reserved minutes | Goodwill-maximizing. Platform errors should be rare; cost is negligible. |
 | Educator access (paid) | Full analysis included with session | Educator LLM cost is small relative to session cost. No double-charge UX. |
-| Educator access (free) | One free full analysis, then preview | Conversion hook — users experience the best feature before hitting the gate. Preview uses a shorter prompt (not truncated full output), saving tokens. |
+| Educator access (free) | One free full analysis (lifetime), then preview | Conversion hook — users experience the best feature before hitting the gate. Lifetime limit, not per-period. Preview uses a shorter prompt (not truncated full output), saving tokens. |
 | Coach access | Paid balance required | Feature gate: has non-free grant with remaining > 0. |
 | Multi-grant debit | Single code path | FIFO walk handles one grant (base case) and multiple grants (general case) identically. No branching. |
-| Existing `usage_periods` table | Superseded by grants + ledger | The ledger provides strictly more granularity. Migration drops `usage_periods`. |
+| Existing `usage_periods` table | Superseded by grants + ledger | The ledger provides strictly more granularity for usage tracking. Migration drops `usage_periods`. |
 | `users.plan` column | Kept, updated by webhooks | Quick read for feature gates without joining grants. Webhook sets to plan name on subscription create/change, resets to `free` on subscription delete. |
 | Free grant creation | Lazy (on first session of month), not cron | Simpler than a periodic River job. No missed-execution risk. Protected against races by a partial unique index. |
 | Concurrent sessions limit | 3 for pro (changed from 2 in original spec) | More generous limit appropriate for a platform where sessions can be short. |
@@ -83,9 +83,15 @@ CREATE INDEX idx_ledger_session ON ledger_entries(session_id)
 
 ```sql
 ALTER TABLE interview_sessions ADD COLUMN reserved_minutes INT;
+
+ALTER TABLE interview_sessions DROP CONSTRAINT interview_sessions_status_check;
+ALTER TABLE interview_sessions ADD CONSTRAINT interview_sessions_status_check
+    CHECK (status IN ('active', 'completed', 'evaluating', 'reviewed', 'evaluation_failed', 'failed'));
 ```
 
-Stores how many minutes were reserved at session creation, used to calculate refund on completion or error. NULL for sessions created before billing was implemented.
+`reserved_minutes` stores how many minutes were reserved at session creation, used to calculate refund on completion or error. NULL for sessions created before billing was implemented.
+
+`failed` status is added for sessions that encounter platform errors (AI service down, etc.) and trigger a full minute refund.
 
 ### Schema Changes to `users`
 
@@ -168,6 +174,7 @@ const (
 )
 
 // Map key is the programmatic identifier (stored in users.plan). Name is the display label.
+// Effectively immutable after init — do not modify at runtime.
 var Plans = map[string]Plan{
     "free": {
         Name:               "Free",
@@ -200,6 +207,7 @@ type MinutePack struct {
 }
 
 // Keyed by minute count for stable API lookup (client sends {minutes: 120}, not an array index).
+// Effectively immutable after init — do not modify at runtime.
 var MinutePacks = map[int]MinutePack{
     120: {Minutes: 120, StripePriceID: "price_pack_120"},
     300: {Minutes: 300, StripePriceID: "price_pack_300"},
@@ -240,7 +248,7 @@ All price IDs configured via environment or hardcoded — code deploy to change.
 Handler verifies Stripe signature, parses event, dispatches by type:
 
 **`checkout.session.completed`**:
-1. Check `session.mode`. If not `"payment"`, return 200 (subscription grants are handled by `invoice.paid`, not here).
+1. Check `session.mode`. If `mode != "payment"`, return 200 (subscription and setup modes are handled elsewhere — subscription grants come from `invoice.paid`).
 2. Extract `user_id` and `pack_minutes` from metadata.
 3. Create grant + ledger entry in a single transaction. Idempotent via `stripe_event_id`.
 
@@ -261,6 +269,8 @@ Handler verifies Stripe signature, parses event, dispatches by type:
 
 All other events: log and return 200 (ignore gracefully).
 
+**Unknown `stripe_customer_id`:** If `GetUserByStripeCustomerID` returns no rows (e.g., a Stripe customer created outside the app), log a warning and return 200. Returning a non-2xx would cause Stripe to retry indefinitely for a user that will never exist in the system.
+
 ### Portal Flow
 
 1. Client sends `POST /api/billing/portal`.
@@ -277,23 +287,23 @@ All other events: log and return 200 (ignore gracefully).
 ```
 1. Look up plan config for user's plan.
 2. Validate config_duration_minutes <= plan.MaxDurationMinutes.
-3. Check concurrent sessions: COUNT(active) < plan.ConcurrentSessions.
-4. Get available balance:
-   SELECT COALESCE(SUM(remaining_minutes), 0)
-   FROM grants
-   WHERE user_id = $1
-     AND remaining_minutes > 0
-     AND (expires_at IS NULL OR expires_at > NOW())
-5. If balance < config_duration_minutes → 403 with balance info and upgrade message.
-6. Ensure current-month free grant exists (lazy creation).
-7. Begin transaction:
-   a. SELECT grants FOR UPDATE, ordered by expires_at ASC NULLS LAST, remaining > 0
-   b. Walk grants, decrement remaining_minutes until reservation fulfilled
-   c. INSERT ledger_entry per grant touched (reason: session_reserve)
-   d. INSERT interview_sessions row
-   e. Commit
-8. Return session.
+3. Optimistic pre-checks (advisory — avoids opening a transaction just to fail):
+   a. Check concurrent sessions: COUNT(active) < plan.ConcurrentSessions.
+   b. Get available balance: SUM(remaining_minutes) from non-expired grants.
+   c. If balance < config_duration_minutes → 403 with balance info and upgrade message.
+4. Ensure current-month free grant exists (lazy creation via CreateFreeGrant).
+5. Begin transaction (this is the authoritative enforcement):
+   a. Re-check concurrent sessions under the transaction.
+   b. SELECT grants FOR UPDATE, ordered by expires_at ASC NULLS LAST, remaining > 0.
+   c. If SUM(remaining from locked grants) < config_duration_minutes → rollback, 403.
+   d. Walk grants, decrement remaining_minutes until reservation fulfilled.
+   e. INSERT ledger_entry per grant touched (reason: session_reserve).
+   f. INSERT interview_sessions row.
+   g. Commit.
+6. Return session.
 ```
+
+Step 3 is an optimistic pre-check to avoid unnecessary transactions. Step 5 is the authoritative enforcement — if the FIFO walk cannot fulfill the reservation after locking, the transaction rolls back and returns 403. Both the concurrent session check and the balance check must run inside the transaction to prevent TOCTOU races.
 
 ### Session Completion (conductor end-of-session)
 
@@ -312,10 +322,21 @@ Reserved minutes stored on `interview_sessions.reserved_minutes` (added in migra
 
 **Edge case — refund to expired grant:** If a session reserved minutes from a free grant that expires during the session, the refund credits back to the expired grant row. The balance query's `expires_at > NOW()` filter excludes it, so the refunded minutes are effectively lost. This is correct — you cannot un-expire minutes. The ledger still records the refund for auditability.
 
-### Session Failure (status → failed/error)
+### Session Failure
+
+The existing session status CHECK constraint (`active`, `completed`, `evaluating`, `reviewed`, `evaluation_failed`) does not include a `failed` status. The billing migration adds `failed` to the constraint:
+
+```sql
+ALTER TABLE interview_sessions DROP CONSTRAINT interview_sessions_status_check;
+ALTER TABLE interview_sessions ADD CONSTRAINT interview_sessions_status_check
+    CHECK (status IN ('active', 'completed', 'evaluating', 'reviewed', 'evaluation_failed', 'failed'));
+```
+
+When a session transitions to `failed` (platform error, AI service down, etc.):
 
 ```
 1. Full refund of reserved_minutes back to original grant(s)
+   (reconstruct per-grant amounts from ledger, same as completion refund)
 2. INSERT ledger_entries (reason: error_refund)
 ```
 
@@ -347,7 +368,7 @@ Preview prompt generates a brief summary highlighting 2-3 key areas, with a note
 
 ## 7. Key Queries (sqlc)
 
-### Get Balance
+### Get Balance (session creation pre-check)
 
 ```sql
 -- name: GetUserBalance :one
@@ -358,7 +379,7 @@ WHERE user_id = $1
   AND (expires_at IS NULL OR expires_at > NOW());
 ```
 
-### Get Balance by Type (paid vs free)
+### Get Paid Balance (educator/coach feature gate)
 
 ```sql
 -- name: GetUserPaidBalance :one
@@ -428,7 +449,7 @@ ON CONFLICT (stripe_event_id) DO NOTHING
 RETURNING *;
 ```
 
-Returns no rows if the `stripe_event_id` already exists (duplicate webhook delivery). Caller checks for empty result and treats as success. Not used for free grants — those use `GetFreeGrantForMonth` as their idempotency check.
+Returns no rows if the `stripe_event_id` already exists (duplicate webhook delivery). Caller checks for empty result and treats as success. Not used for free grants — those use `CreateFreeGrant` which has its own `ON CONFLICT DO NOTHING` clause against the partial unique index.
 
 ### Create Free Grant (idempotent via partial unique index)
 
@@ -454,7 +475,7 @@ WHERE user_id = $1
 LIMIT 1;
 ```
 
-Uses `expires_at` (end of month) as the period identifier rather than `created_at` ranges, since free grants are semantically defined by when they expire.
+Informational query only — used by the usage endpoint to show the current free grant, not for idempotency. The authoritative deduplication is the partial unique index on `CreateFreeGrant`. Uses `expires_at` (end of month) as the period identifier since free grants are semantically defined by when they expire.
 
 ### Get User by Stripe Customer ID (webhook lookup)
 
@@ -514,7 +535,7 @@ WHERE session_id = $1 AND reason = 'session_reserve'
 ORDER BY created_at DESC;
 ```
 
-### Get User Usage Summary
+### Get User Usage Summary (GET /api/me/usage endpoint)
 
 ```sql
 -- name: GetUserUsageSummary :one
@@ -555,8 +576,8 @@ cmd/drill/
 
 - **`internal/backend/session.go`** — `CreateSession` gains entitlement check + minute reservation. `EndSession` gains refund logic.
 - **`internal/handler/session.go`** — error responses for insufficient balance.
-- **`internal/handler/educator.go`** — educator access check (full vs preview) before generation.
-- **`internal/handler/coach.go`** — paid balance check before allowing coach analysis.
+- **Educator handler** (currently in `internal/handler/evaluation.go`) — educator access check (full vs preview) before generation.
+- **Coach handler** (currently in `internal/backend/coach.go` / handler TBD) — paid balance check before allowing coach analysis.
 - **`internal/jobs/evaluate.go`** — no change (evaluation runs regardless of tier).
 - **`internal/auth/middleware.go`** — no change (AuthUser already carries `Plan`).
 - **`cmd/drill/main.go`** — register new routes, pass Stripe config to Backend.
