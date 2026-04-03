@@ -42,6 +42,7 @@ type ConductorParams struct {
 type Conductor struct {
 	sm       *StateMachine
 	msgCh    chan WSMessage
+	done     chan struct{}
 	ws       observer.WSConn
 	b        *backend.Backend
 	lockConn *pgxpool.Conn
@@ -66,7 +67,8 @@ type Conductor struct {
 // NewConductor constructs a Conductor from the given params.
 func NewConductor(p ConductorParams) *Conductor {
 	c := &Conductor{
-		msgCh:     make(chan WSMessage, 1),
+		msgCh:     make(chan WSMessage),
+		done:      make(chan struct{}),
 		ws:        p.WS,
 		b:         p.Backend,
 		lockConn:  p.LockConn,
@@ -82,6 +84,10 @@ func NewConductor(p ConductorParams) *Conductor {
 
 // MsgCh returns the channel that the read loop sends messages to.
 func (c *Conductor) MsgCh() chan WSMessage { return c.msgCh }
+
+// Done returns a channel that is closed when the conductor exits,
+// allowing the readLoop to unblock from a msgCh send.
+func (c *Conductor) Done() <-chan struct{} { return c.done }
 
 // Observer returns the current TokenFanOut (never nil; Noop between turns).
 func (c *Conductor) Observer() *observer.TokenFanOut { return c.obs.Load() }
@@ -534,7 +540,8 @@ func (c *Conductor) sendStateError(ctx context.Context, err error) error {
 // handleShutdown, handleDisconnect) close the WS. For disconnect the WS
 // is already closed; calling Close on a closed WS is safe.
 func (c *Conductor) cleanup() {
-	c.ws.Close(websocket.StatusNormalClosure, "session ended")
+	close(c.done)                                          // unblocks readLoop's select
+	c.ws.Close(websocket.StatusNormalClosure, "session ended") // unblocks readLoop's ws.Read
 	if c.lockConn != nil {
 		c.lockConn.Release()
 		c.lockConn = nil
