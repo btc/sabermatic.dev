@@ -22,6 +22,7 @@ type Config struct {
 	OAuth    OAuth
 	Otel     Otel
 	Storage  Storage
+	Stripe   Stripe
 }
 
 type Server struct {
@@ -121,6 +122,15 @@ type Storage struct {
 	Backend  string `env:"STORAGE_BACKEND,default=local"`
 	Bucket   string `env:"STORAGE_BUCKET"`
 	LocalDir string `env:"STORAGE_LOCAL_DIR,default=data/audio"`
+}
+
+type Stripe struct {
+	SecretKey      string `env:"STRIPE_SECRET_KEY"`
+	WebhookSecret  string `env:"STRIPE_WEBHOOK_SECRET"`
+	ProPriceID     string `env:"STRIPE_PRO_PRICE_ID"`
+	Pack120PriceID string `env:"STRIPE_PACK_120_PRICE_ID"`
+	Pack300PriceID string `env:"STRIPE_PACK_300_PRICE_ID"`
+	Pack600PriceID string `env:"STRIPE_PACK_600_PRICE_ID"`
 }
 
 // SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
