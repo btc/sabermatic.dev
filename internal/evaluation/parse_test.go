@@ -144,3 +144,34 @@ func TestValidate_ScoreZero(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
 }
+
+func TestParse_NullStrengths(t *testing.T) {
+	// JSON with strengths: null (not [])
+	raw := []byte(`{"scores":{"requirements":3,"architecture":3,"deep_dive":3,"scalability":3,"communication":3,"overall":3},"strengths":null,"gaps":["a gap"],"advice":"advice","annotations":[]}`)
+	result, err := Parse(raw)
+	require.NoError(t, err)
+	assert.NotNil(t, result.Strengths) // should be [] not nil
+	assert.Empty(t, result.Strengths)
+}
+
+func TestParse_NullGaps(t *testing.T) {
+	raw := []byte(`{"scores":{"requirements":3,"architecture":3,"deep_dive":3,"scalability":3,"communication":3,"overall":3},"strengths":["good"],"gaps":null,"advice":"advice","annotations":[]}`)
+	result, err := Parse(raw)
+	require.NoError(t, err)
+	assert.NotNil(t, result.Gaps)
+	assert.Empty(t, result.Gaps)
+}
+
+func TestValidate_InvalidAnnotationType(t *testing.T) {
+	result := &EvaluationResult{
+		ScoreRequirements: 3, ScoreArchitecture: 3, ScoreDeepDive: 3,
+		ScoreScalability: 3, ScoreCommunication: 3, ScoreOverall: 3,
+		Annotations: []AnnotationResult{
+			{MessageSeq: 1, Type: "invalid_type", Content: "bad type"},
+		},
+	}
+	seqMap := map[int32]uuid.UUID{1: uuid.New()}
+	err := Validate(result, seqMap)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid type")
+}
