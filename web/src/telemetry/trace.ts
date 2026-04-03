@@ -4,6 +4,7 @@ import type { TraceContext } from "@/ws/protocol";
 
 const tracer = trace.getTracer("drill-web");
 
+// TODO: Wire createTurnSpan / closeTurnSpan into useInterview when tracing is integrated
 export function createTurnSpan(inputMethod: "text" | "voice"): { span: Span; traceContext: TraceContext } {
   const span = tracer.startSpan("turn.submit", {
     attributes: { "turn.input_method": inputMethod },
