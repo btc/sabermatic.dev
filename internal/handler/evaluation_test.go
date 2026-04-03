@@ -240,6 +240,31 @@ func TestGetEvaluation_WrongUser(t *testing.T) {
 	assert.Contains(t, body["error"], "does not belong")
 }
 
+func TestGetEvaluation_ReviewedButMissingEvaluation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	env := newEvalTestEnv(t)
+
+	// Seed data: session with status "reviewed" but NO evaluation row.
+	userID := createTestUser(t, env.pool)
+	question := createTestQuestion(t, env.pool)
+	session := createTestSession(t, env.pool, userID, question.ID)
+	setSessionStatus(t, env.pool, session.ID, "reviewed")
+
+	cookie := createAuthCookie(t, env.pool, userID)
+
+	rec := env.doRequest(t, http.MethodGet, "/api/sessions/"+session.ID.String()+"/evaluation", cookie)
+
+	// Backend returns ErrEvaluationNotReady when status=reviewed but no eval row exists.
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
+	assert.Contains(t, body["error"], "not ready")
+}
+
 func TestRetryEvaluation_Success(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
