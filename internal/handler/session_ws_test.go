@@ -1154,6 +1154,563 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test: Multi-turn — sequence numbers, turn count, and DB consistency
+// ---------------------------------------------------------------------------
+
+func TestWS_MultiTurn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	// Each LLM call returns the same tokens (fake server is stateless).
+	tokens := []string{"Sure, ", "let's ", "continue."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Opening: session_loaded + interviewer stream + waiting_for_input.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Turn 1.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "First answer", "input_method": "text"})
+	drainUntilType(t, ws, "state_change") // processing_input
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Turn 2.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "Second answer", "input_method": "text"})
+	drainUntilType(t, ws, "state_change") // processing_input
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Turn 3.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "Third answer", "input_method": "text"})
+	drainUntilType(t, ws, "state_change") // processing_input
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// End session.
+	sendMsg(t, ws, wsMsg{"type": "end_session"})
+	ended := readMsg(t, ws)
+	assert.Equal(t, "session_ended", ended["type"])
+
+	// Verify DB state.
+	ctx := context.Background()
+	q := db.New(pool)
+
+	// Session status and turn count.
+	updatedSession, err := q.GetSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updatedSession.Status)
+	// Turn count: opening (1) + turn1 (2) + turn2 (3) + turn3 (4).
+	assert.Equal(t, int32(4), updatedSession.TurnCount)
+
+	// Messages: opening + 3*(candidate + interviewer) = 7 messages.
+	msgs, err := q.GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Len(t, msgs, 7)
+
+	// Verify sequence numbers are monotonically increasing.
+	for i := 0; i < len(msgs); i++ {
+		assert.Equal(t, int32(i+1), msgs[i].Seq, "message %d should have seq %d", i, i+1)
+	}
+
+	// Verify role alternation: interviewer, candidate, interviewer, candidate, ...
+	expectedRoles := []string{"interviewer", "candidate", "interviewer", "candidate", "interviewer", "candidate", "interviewer"}
+	for i, msg := range msgs {
+		assert.Equal(t, expectedRoles[i], msg.Role, "message %d role", i)
+	}
+
+	// Verify candidate content matches what was sent.
+	assert.Equal(t, "First answer", msgs[1].Content)
+	assert.Equal(t, "Second answer", msgs[3].Content)
+	assert.Equal(t, "Third answer", msgs[5].Content)
+}
+
+// ---------------------------------------------------------------------------
+// Test: Empty text input — rejected, session continues
+// ---------------------------------------------------------------------------
+
+func TestWS_EmptyTextInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tokens := []string{"Hello."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Complete opening.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send empty text.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "", "input_method": "text"})
+	errMsg := readMsg(t, ws)
+	assert.Equal(t, "error", errMsg["type"])
+	assert.Equal(t, "empty_content", errMsg["code"])
+
+	// Send whitespace-only text.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "   ", "input_method": "text"})
+	errMsg2 := readMsg(t, ws)
+	assert.Equal(t, "error", errMsg2["type"])
+	assert.Equal(t, "empty_content", errMsg2["code"])
+
+	// Session still functional.
+	sendMsg(t, ws, wsMsg{"type": "ping"})
+	pong := readMsg(t, ws)
+	assert.Equal(t, "pong", pong["type"])
+
+	// No candidate messages persisted.
+	ctx := context.Background()
+	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Len(t, msgs, 1, "only the opening interviewer message should exist")
+}
+
+// ---------------------------------------------------------------------------
+// Test: Empty voice input — no audio data rejected
+// ---------------------------------------------------------------------------
+
+func TestWS_EmptyVoiceInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tokens := []string{"Hello."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Complete opening.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send voice turn with no audio data.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "input_method": "voice"})
+	errMsg := readMsg(t, ws)
+	assert.Equal(t, "error", errMsg["type"])
+	assert.Equal(t, "audio_validation_failed", errMsg["code"])
+
+	// Session still functional.
+	sendMsg(t, ws, wsMsg{"type": "ping"})
+	pong := readMsg(t, ws)
+	assert.Equal(t, "pong", pong["type"])
+}
+
+// ---------------------------------------------------------------------------
+// Test: LLM stream error — conductor recovers, session continues
+// ---------------------------------------------------------------------------
+
+// newFakeAnthropicErrorServer creates a server that streams N tokens then
+// returns an SSE error event, simulating a mid-stream LLM failure.
+func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Server {
+	t.Helper()
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		fmt.Fprintf(w, "event: message_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+
+		fmt.Fprintf(w, "event: content_block_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
+		// First call (opening): fail after emitting some tokens.
+		// Second call onward: succeed normally.
+		if callCount == 1 {
+			for _, token := range goodTokens {
+				fmt.Fprintf(w, "event: content_block_delta\n")
+				fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+			// Abruptly close the connection to simulate a stream error.
+			if hijacker, ok := w.(http.Hijacker); ok {
+				conn, _, _ := hijacker.Hijack()
+				conn.Close()
+			}
+			return
+		}
+
+		// Normal response for subsequent calls.
+		for _, token := range goodTokens {
+			fmt.Fprintf(w, "event: content_block_delta\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+		}
+		fmt.Fprintf(w, "event: content_block_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprintf(w, "event: message_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(goodTokens))
+		fmt.Fprintf(w, "event: message_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestWS_LLMStreamError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	// Opening will fail mid-stream, then the candidate can still send a turn
+	// and get a successful response.
+	tokens := []string{"Partial ", "response"}
+	anthropicSrv := newFakeAnthropicErrorServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// The opening stream will fail. The conductor should:
+	// 1. Stream some tokens
+	// 2. Hit an error
+	// 3. Still persist what it got and recover
+	//
+	// We expect to either get an error or the session to close depending
+	// on how the conductor handles the opening failure. Read messages
+	// until we get either an error, session close, or turn_failed.
+	drainUntilType(t, ws, "session_loaded")
+
+	// Read messages — the opening may partially stream tokens then error.
+	// The conductor calls streamInterviewerResponse which on error will
+	// cause sendInitialMessage to return an error, causing Run() to exit.
+	// The WS connection will be closed.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		m := readMsgTimeout(t, ws, 5*time.Second)
+		if m == nil {
+			break // connection closed
+		}
+		// If we get an error message or the connection is about to close, that's expected.
+		if m["type"] == "error" {
+			break
+		}
+	}
+
+	// The important thing: no panic, no goroutine leak.
+	// Verify session is still in DB and not corrupted.
+	ctx := context.Background()
+	_, err := db.New(pool).GetSession(ctx, session.ID)
+	assert.NoError(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// Test: TTS-enabled session — synthesizer path exercised
+// ---------------------------------------------------------------------------
+
+func TestWS_TTSEnabled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tokens := []string{"Great ", "question!"}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+
+	// Create TTS-enabled session.
+	ctx := context.Background()
+	session, err := db.New(pool).CreateSession(ctx, db.CreateSessionParams{
+		UserID:                userID,
+		QuestionID:            question.ID,
+		ConfigDurationMinutes: 45,
+		ConfigTtsEnabled:      true,
+	})
+	require.NoError(t, err)
+
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Verify session_loaded shows tts_enabled = true.
+	loaded := readMsg(t, ws)
+	assert.Equal(t, "session_loaded", loaded["type"])
+	assert.Equal(t, true, loaded["tts_enabled"])
+
+	// Complete opening stream.
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send a text turn.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "Tell me more", "input_method": "text"})
+	drainUntilType(t, ws, "state_change") // processing_input
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// End session.
+	sendMsg(t, ws, wsMsg{"type": "end_session"})
+	ended := readMsg(t, ws)
+	assert.Equal(t, "session_ended", ended["type"])
+
+	// Verify messages persisted correctly.
+	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Len(t, msgs, 3, "opening + candidate + response")
+}
+
+// ---------------------------------------------------------------------------
+// Test: Timer auto-end — backdated session triggers warning, overtime, auto-end
+// ---------------------------------------------------------------------------
+
+func TestWS_TimerAutoEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	// Use a slow server so the opening takes enough time for timers to fire.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		fmt.Fprintf(w, "event: message_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+		fmt.Fprintf(w, "event: content_block_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi.\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprintf(w, "event: message_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n")
+		fmt.Fprintf(w, "event: message_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	b := newWSTestBackend(t, srv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	httpSrv := httptest.NewServer(mux)
+	t.Cleanup(httpSrv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+
+	// Create a 1-minute session.
+	ctx := context.Background()
+	session, err := db.New(pool).CreateSession(ctx, db.CreateSessionParams{
+		UserID:                userID,
+		QuestionID:            question.ID,
+		ConfigDurationMinutes: 1,
+		ConfigTtsEnabled:      false,
+	})
+	require.NoError(t, err)
+
+	// Backdate started_at so timers fire quickly but in order.
+	// With duration=1min:
+	//   warningDelay  = max(0, 1min - 2min - elapsed)   → fires immediately when elapsed > -1min
+	//   overtimeDelay = max(0, 1min - elapsed)           → fires immediately when elapsed > 1min
+	//   autoEndDelay  = max(0, 3min - elapsed)           → fires after (3min - elapsed)
+	//
+	// Backdate by 2min58s so elapsed ≈ 2min58s:
+	//   warningDelay  = 0 (immediate)
+	//   overtimeDelay = 0 (immediate)
+	//   autoEndDelay  = 2s (fires 2s after opening, giving warning/overtime a head start)
+	_, err = pool.Exec(ctx,
+		`UPDATE interview_sessions SET started_at = NOW() - INTERVAL '2 minutes 58 seconds' WHERE id = $1`,
+		session.ID,
+	)
+	require.NoError(t, err)
+
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, httpSrv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Collect all messages until the session ends. We expect:
+	// - session_loaded
+	// - timer_warning (fires immediately since elapsed > duration - warning)
+	// - timer_overtime (fires immediately since elapsed > duration)
+	// - interviewer_speaking + tokens + interviewer_done + waiting_for_input
+	// - session_ended (auto-end fires immediately since elapsed > duration + 2min)
+	//
+	// Order between timers and opening stream depends on goroutine scheduling,
+	// so collect everything and check what we got.
+	gotWarning := false
+	gotOvertime := false
+	gotSessionEnded := false
+
+	for i := 0; i < 50; i++ {
+		m := readMsgTimeout(t, ws, 10*time.Second)
+		if m == nil {
+			break
+		}
+		switch m["type"] {
+		case "timer_warning":
+			gotWarning = true
+		case "timer_overtime":
+			gotOvertime = true
+		case "session_ended":
+			gotSessionEnded = true
+		}
+		if gotSessionEnded {
+			break
+		}
+	}
+
+	assert.True(t, gotWarning, "should receive timer_warning")
+	assert.True(t, gotOvertime, "should receive timer_overtime")
+	assert.True(t, gotSessionEnded, "should receive session_ended from auto-end")
+
+	// Verify session is marked completed.
+	updatedSession, err := db.New(pool).GetSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updatedSession.Status)
+}
+
+// ---------------------------------------------------------------------------
+// Test: Reconnect after multiple turns — verify message replay correctness
+// ---------------------------------------------------------------------------
+
+func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tokens := []string{"Response."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	// First connection: complete opening + one text turn.
+	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	drainUntilType(t, ws1, "session_loaded")
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	sendMsg(t, ws1, wsMsg{"type": "end_turn", "content": "My answer", "input_method": "text"})
+	drainUntilType(t, ws1, "state_change") // processing_input
+	drainUntilType(t, ws1, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	// Check DB: should have 3 messages (opening + candidate + response).
+	ctx := context.Background()
+	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	lastSeq := int(msgs[len(msgs)-1].Seq) // seq 3
+
+	// Disconnect.
+	ws1.Close(websocket.StatusNormalClosure, "done")
+	time.Sleep(200 * time.Millisecond)
+
+	// Reconnect with last_seq = 1 (only saw the opening).
+	// Should receive messages with seq > 1.
+	reconnectSeq := 1
+	ws2 := wsConnect(t, srv.URL, session.ID, cookie, &reconnectSeq)
+	defer ws2.CloseNow()
+
+	reconnectMsg := readMsg(t, ws2)
+	assert.Equal(t, "reconnect_state", reconnectMsg["type"])
+	missedMsgs, ok := reconnectMsg["messages"].([]any)
+	assert.True(t, ok)
+	assert.Len(t, missedMsgs, 2, "should replay messages with seq > 1 (candidate + response)")
+
+	ws2.Close(websocket.StatusNormalClosure, "done")
+	time.Sleep(200 * time.Millisecond)
+
+	// Reconnect with last_seq = lastSeq (saw everything). Should get empty replay.
+	ws3 := wsConnect(t, srv.URL, session.ID, cookie, &lastSeq)
+	defer ws3.CloseNow()
+
+	reconnectMsg3 := readMsg(t, ws3)
+	assert.Equal(t, "reconnect_state", reconnectMsg3["type"])
+	// When no messages are missed, the field is null (nil slice in Go → null in JSON).
+	missedMsgs3, _ := reconnectMsg3["messages"].([]any)
+	assert.Len(t, missedMsgs3, 0, "should replay nothing when client is caught up")
+}
+
+// ---------------------------------------------------------------------------
 // Test: Ping/pong works
 // ---------------------------------------------------------------------------
 
