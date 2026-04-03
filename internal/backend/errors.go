@@ -14,6 +14,11 @@ var (
 	ErrPasswordLength     = fmt.Errorf("password must be between %d and %d characters", MinPasswordLen, MaxPasswordLen)
 	ErrMissingFields      = fmt.Errorf("email, password, and display_name are required")
 	ErrUserNotFound       = fmt.Errorf("user not found")
+	ErrSessionNotFound    = fmt.Errorf("session not found")
+	ErrSessionNotActive   = fmt.Errorf("session is not active")
+	ErrSessionNotOwned    = fmt.Errorf("session does not belong to user")
+	ErrQuestionNotFound   = fmt.Errorf("question not found")
+	ErrInvalidDuration    = fmt.Errorf("duration must be between 1 and 180 minutes")
 )
 
 // ValidatePasswordLength returns ErrPasswordLength if the password is too short or too long.

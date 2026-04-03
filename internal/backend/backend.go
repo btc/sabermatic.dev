@@ -94,6 +94,9 @@ func (b *Backend) Config() *config.Config { return b.cfg }
 // Pool returns the underlying database pool.
 func (b *Backend) Pool() *pgxpool.Pool { return b.pool }
 
+// Jobs returns the River job client.
+func (b *Backend) Jobs() Jobs { return b.jobs }
+
 // Ping checks connectivity to all backend dependencies.
 func (b *Backend) Ping(ctx context.Context) error {
 	return b.pool.Ping(ctx)
