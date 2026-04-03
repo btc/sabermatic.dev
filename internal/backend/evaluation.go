@@ -72,8 +72,12 @@ func (b *Backend) GetEvaluation(ctx context.Context, sessionID, userID uuid.UUID
 	}
 
 	var strengths, gaps []string
-	json.Unmarshal(eval.Strengths, &strengths)
-	json.Unmarshal(eval.Gaps, &gaps)
+	if err := json.Unmarshal(eval.Strengths, &strengths); err != nil {
+		return nil, fmt.Errorf("unmarshal strengths: %w", err)
+	}
+	if err := json.Unmarshal(eval.Gaps, &gaps); err != nil {
+		return nil, fmt.Errorf("unmarshal gaps: %w", err)
+	}
 
 	annotations := make([]AnnotationResponse, len(annRows))
 	for i, a := range annRows {
