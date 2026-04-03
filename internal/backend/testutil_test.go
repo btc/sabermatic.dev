@@ -1,4 +1,4 @@
-package handler_test
+package backend
 
 import (
 	"context"
@@ -16,12 +16,12 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 )
 
-// setupTestDB starts a Postgres container, runs migrations, and returns a pool.
-func setupTestDB(t *testing.T) *pgxpool.Pool {
+// startPostgres starts a Postgres 16 container, runs app migrations, and
+// returns the connection string. The container is terminated on test cleanup.
+func startPostgres(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 
@@ -46,7 +46,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("get connection string: %v", err)
 	}
 
-	// Run migrations
+	// Run app migrations from canonical sql/migrations/.
 	d, err := iofs.New(os.DirFS("../../sql/migrations"), ".")
 	if err != nil {
 		t.Fatalf("create migration source: %v", err)
@@ -63,8 +63,15 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("migrate up: %v", err)
 	}
 
-	// Create pool
-	pool, err := pgxpool.New(ctx, connStr)
+	return connStr
+}
+
+// setupTestDB starts a Postgres 16 container, runs migrations, and returns a pool.
+func setupTestDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	connStr := startPostgres(t)
+
+	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
 		t.Fatalf("create pool: %v", err)
 	}
@@ -74,20 +81,22 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 }
 
 // newTestBackend creates a Backend for integration tests (no River client).
-func newTestBackend(t *testing.T, pool *pgxpool.Pool) *backend.Backend {
+func newTestBackend(t *testing.T, pool *pgxpool.Pool) (*Backend, *RecordingJobs) {
 	t.Helper()
-	b := &backend.Backend{Pool: pool, Jobs: &backend.RecordingJobs{}}
+	rj := &RecordingJobs{}
+	b := &Backend{Pool: pool, Jobs: rj}
 	b.SetConfig(loadTestConfig(t))
-	return b
+	return b, rj
 }
 
-// loadTestConfig loads a config.Config suitable for handler integration tests.
+// loadTestConfig loads a config.Config suitable for backend integration tests.
 func loadTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://unused")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+	t.Setenv("AUTH_BCRYPT_COST", "4")
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	return cfg
