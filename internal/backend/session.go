@@ -354,6 +354,41 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 	return nil
 }
 
+// FailSession transitions a session to "failed" and refunds all reserved minutes.
+func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin fail-session tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := db.New(tx)
+	session, err := q.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("get session: %w", err)
+	}
+	if session.Status != "active" {
+		return ErrSessionNotActive
+	}
+
+	// Use UpdateSessionStatusOnly to avoid overwriting turn_count or ended_at.
+	if err := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
+		ID:     sessionID,
+		Status: "failed",
+	}); err != nil {
+		return fmt.Errorf("update session status: %w", err)
+	}
+
+	// Full refund of reserved minutes.
+	if session.ReservedMinutes.Valid && session.ReservedMinutes.Int32 > 0 {
+		if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, session.ReservedMinutes.Int32); err != nil {
+			slog.Warn("fail-session refund failed", "session_id", sessionID, "error", err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
 // Transcribe delegates to the STT provider.
 func (b *Backend) Transcribe(ctx context.Context, audio []byte, format string) (string, error) {
 	return b.stt.Transcribe(ctx, audio, format)
