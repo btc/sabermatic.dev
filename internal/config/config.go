@@ -133,6 +133,32 @@ type Stripe struct {
 	Pack600PriceID string `env:"STRIPE_PACK_600_PRICE_ID"`
 }
 
+// PriceIDForPlan returns the Stripe price ID for the named plan, or "" if
+// not configured. Only "pro" has a price; "free" returns "".
+func (s *Stripe) PriceIDForPlan(plan string) string {
+	switch plan {
+	case "pro":
+		return s.ProPriceID
+	default:
+		return ""
+	}
+}
+
+// PriceIDForPack returns the Stripe price ID for the given minute-pack size,
+// or "" if not configured.
+func (s *Stripe) PriceIDForPack(minutes int) string {
+	switch minutes {
+	case 120:
+		return s.Pack120PriceID
+	case 300:
+		return s.Pack300PriceID
+	case 600:
+		return s.Pack600PriceID
+	default:
+		return ""
+	}
+}
+
 // SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
 // should have the Secure flag set.
 func (a *Auth) SecureCookies() bool {

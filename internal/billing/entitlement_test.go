@@ -51,13 +51,11 @@ func TestPlanByName(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestPackByMinutes(t *testing.T) {
-	pack, ok := billing.PackByMinutes(120)
-	require.True(t, ok)
-	assert.Equal(t, 120, pack.Minutes)
-
-	_, ok = billing.PackByMinutes(999)
-	assert.False(t, ok)
+func TestValidPackSize(t *testing.T) {
+	assert.True(t, billing.ValidPackSize(120))
+	assert.True(t, billing.ValidPackSize(300))
+	assert.True(t, billing.ValidPackSize(600))
+	assert.False(t, billing.ValidPackSize(999))
 }
 
 func TestEndOfMonth(t *testing.T) {

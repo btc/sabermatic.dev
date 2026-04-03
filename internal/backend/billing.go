@@ -333,24 +333,22 @@ func (b *Backend) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, e
 	switch checkoutType {
 	case "subscription":
 		mode = string(stripe.CheckoutSessionModeSubscription)
-		plan, ok := billing.PlanByName(planName)
-		if !ok {
+		if _, ok := billing.PlanByName(planName); !ok {
 			return "", fmt.Errorf("unknown plan %q", planName)
 		}
-		if plan.StripePriceID == "" {
+		priceID = b.cfg.Stripe.PriceIDForPlan(planName)
+		if priceID == "" {
 			return "", fmt.Errorf("plan %q has no Stripe price configured", planName)
 		}
-		priceID = plan.StripePriceID
 	case "pack":
 		mode = string(stripe.CheckoutSessionModePayment)
-		pack, ok := billing.PackByMinutes(packMinutes)
-		if !ok {
+		if !billing.ValidPackSize(packMinutes) {
 			return "", fmt.Errorf("unknown pack size %d", packMinutes)
 		}
-		if pack.StripePriceID == "" {
+		priceID = b.cfg.Stripe.PriceIDForPack(packMinutes)
+		if priceID == "" {
 			return "", fmt.Errorf("pack %d has no Stripe price configured", packMinutes)
 		}
-		priceID = pack.StripePriceID
 		metadata["pack_minutes"] = strconv.Itoa(packMinutes)
 	default:
 		return "", fmt.Errorf("invalid checkout type %q", checkoutType)
