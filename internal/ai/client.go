@@ -110,6 +110,102 @@ func (c *Client) StreamAndLog(ctx context.Context, p StreamParams) (*TokenStream
 	}, nil
 }
 
+// CallToolParams configures a blocking LLM call with forced tool use.
+type CallToolParams struct {
+	Model      string
+	System     string
+	Messages   []anthropic.MessageParam
+	MaxTokens  int64
+	UserID     uuid.UUID
+	Role       string
+	SessionID  uuid.UUID
+	Tools      []anthropic.ToolUnionParam
+	ToolChoice anthropic.ToolChoiceUnionParam
+}
+
+// CallToolAndLog makes a blocking Anthropic request with forced tool_choice and
+// returns the raw tool input JSON. Persists the call within the caller's transaction.
+func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams) (json.RawMessage, error) {
+	maxTokens := p.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 4096
+	}
+
+	params := anthropic.MessageNewParams{
+		Model:      anthropic.Model(p.Model),
+		MaxTokens:  maxTokens,
+		Messages:   p.Messages,
+		Tools:      p.Tools,
+		ToolChoice: p.ToolChoice,
+	}
+	if p.System != "" {
+		params.System = []anthropic.TextBlockParam{{Text: p.System}}
+	}
+
+	start := time.Now()
+	resp, err := c.anthropic.Messages.New(ctx, params)
+	latency := time.Since(start)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic messages.new: %w", err)
+	}
+
+	// Find the tool_use content block.
+	var toolInput json.RawMessage
+	for _, block := range resp.Content {
+		if block.Type == "tool_use" {
+			toolInput = block.Input
+			break
+		}
+	}
+	if toolInput == nil {
+		return nil, fmt.Errorf("no tool_use block in response")
+	}
+
+	// Persist if we have a transaction.
+	if tx != nil {
+		respJSON, marshalErr := json.Marshal(resp)
+		if marshalErr != nil {
+			return toolInput, fmt.Errorf("marshal response: %w", marshalErr)
+		}
+
+		cost := estimateCost(p.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+		sessionID := pgtype.UUID{}
+		if p.SessionID != uuid.Nil {
+			sessionID = pgtype.UUID{Bytes: p.SessionID, Valid: true}
+		}
+
+		callID, insertErr := db.New(tx).InsertLLMCall(ctx, db.InsertLLMCallParams{
+			SessionID:     sessionID,
+			UserID:        p.UserID,
+			Role:          p.Role,
+			Model:         p.Model,
+			InputTokens:   int32(resp.Usage.InputTokens),
+			OutputTokens:  int32(resp.Usage.OutputTokens),
+			EstimatedCost: numericFromFloat(cost),
+			LatencyMs:     int32(latency.Milliseconds()),
+		})
+		if insertErr != nil {
+			return toolInput, fmt.Errorf("insert llm_call: %w", insertErr)
+		}
+
+		promptJSON, marshalErr := json.Marshal(params)
+		if marshalErr != nil {
+			return toolInput, fmt.Errorf("marshal prompt: %w", marshalErr)
+		}
+
+		insertErr = db.New(tx).InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
+			LlmCallID: callID,
+			Prompt:    promptJSON,
+			Response:  respJSON,
+		})
+		if insertErr != nil {
+			return toolInput, fmt.Errorf("insert llm_call_content: %w", insertErr)
+		}
+	}
+
+	return toolInput, nil
+}
+
 // CallAndLog makes a blocking Anthropic request and persists the call within
 // the caller's transaction. Returns the concatenated text response.
 func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (string, error) {
