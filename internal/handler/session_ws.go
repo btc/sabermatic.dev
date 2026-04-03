@@ -1,12 +1,9 @@
 package handler
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -59,54 +56,13 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 		}
 		ws.SetReadLimit(10 * 1024 * 1024) // 10MB for audio
 
-		// Acquire advisory lock (dedicated connection).
-		lockConn, locked, err := b.AcquireSessionLock(ctx, sessionID)
-		if err != nil {
-			slog.Error("acquire session lock", "error", err, "session_id", sessionID)
-			ws.Close(websocket.StatusInternalError, "failed to acquire lock connection")
-			return
-		}
-		if !locked {
-			slog.Warn("session already locked", "session_id", sessionID)
-			errMsg, _ := json.Marshal(map[string]string{
-				"type":    "error",
-				"code":    "session_locked",
-				"message": "another connection is already active for this session",
-			})
-			ws.Write(ctx, websocket.MessageText, errMsg)
-			ws.Close(websocket.StatusPolicyViolation, "session already locked")
-			return
-		}
-
-		// Read session_init with 10s timeout.
-		initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, data, err := ws.Read(initCtx)
-		cancel()
-		if err != nil {
-			slog.Error("read session_init", "error", err, "session_id", sessionID)
-			lockConn.Release()
-			ws.Close(websocket.StatusProtocolError, "expected session_init")
-			return
-		}
-
-		initMsg, err := interview.ParseWSMessage(data)
-		if err != nil || initMsg.Type != "session_init" {
-			slog.Error("parse session_init", "error", err, "session_id", sessionID)
-			lockConn.Release()
-			ws.Close(websocket.StatusProtocolError, "expected session_init message")
-			return
-		}
-
-		// Hand everything to the conductor. Run blocks until done.
+		// Hand off to the conductor. Run acquires the lock, reads session_init,
+		// and blocks until the session ends.
 		conductor := interview.NewConductor(interview.ConductorParams{
 			WS:        ws,
 			Backend:   b,
-			LockConn:  lockConn,
 			SessionID: sessionID,
 			UserID:    user.ID,
-			InitMsg:   initMsg,
-			Model:     b.Config().LLM.InterviewerModel,
-			Duration:  time.Duration(session.ConfigDurationMinutes) * time.Minute,
 		})
 		conductor.Run(r.Context())
 	}
