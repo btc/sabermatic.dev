@@ -16,11 +16,13 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/gorilla/csrf"
+	stripe "github.com/stripe/stripe-go/v82"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	drill "github.com/btc/drill"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
@@ -73,6 +75,16 @@ func runWithContext(ctx context.Context) error {
 			slog.Warn("otel shutdown error", "error", err)
 		}
 	}()
+
+	// Initialize Stripe — set API key once (package-level global, must not be set per-request).
+	if cfg.Stripe.SecretKey != "" {
+		stripe.Key = cfg.Stripe.SecretKey
+		billing.SetProPriceID(cfg.Stripe.ProPriceID)
+		billing.SetPackPriceIDs(cfg.Stripe.Pack120PriceID, cfg.Stripe.Pack300PriceID, cfg.Stripe.Pack600PriceID)
+		slog.Info("stripe configured")
+	} else {
+		slog.Warn("stripe not configured — billing endpoints will return errors")
+	}
 
 	b, err := backend.New(cfg)
 	if err != nil {
