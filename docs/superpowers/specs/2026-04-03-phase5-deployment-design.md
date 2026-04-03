@@ -31,7 +31,7 @@ This phase delivers:
 | Secrets | Google Secret Manager | Audit trail, rotation support, IAM-scoped. Too many sensitive values for plain env vars. |
 | Container registry | Artifact Registry | GCP-native, replaces deprecated Container Registry. |
 | CI/CD | GitHub Actions | Already on GitHub. WIF for keyless auth to GCP. |
-| Deploy strategy | Full cutover (no canary) | No users yet. Add canary when there's traffic to test against. |
+| Deploy strategy | Full cutover (no canary) | Deviates from master spec Section 14 which specifies canary (5%/10min/100%). No users yet — add canary when there's real traffic. |
 | Cloud Run deploys | `gcloud run deploy` in CI | Terraform defines the service (env vars, scaling, IAM); CI updates the image. Avoids `terraform apply` on every push. |
 | GCP project | Created manually | Avoids chicken-and-egg with Terraform state and permissions. |
 
@@ -54,6 +54,7 @@ Before Terraform runs, a one-time bootstrap creates the foundation. A `scripts/b
    - `iam.googleapis.com`
    - `iamcredentials.googleapis.com`
    - `cloudtrace.googleapis.com`
+   - `monitoring.googleapis.com`
 3. **Create Terraform state bucket** — `${PROJECT_ID}-tfstate`, versioning enabled, uniform bucket-level access
 4. **Create Terraform service account** — `terraform@${PROJECT_ID}.iam.gserviceaccount.com` with roles:
    - `roles/editor`
@@ -117,8 +118,8 @@ terraform/
 - Request timeout: 3600s (1 hour, for WebSocket interview sessions)
 - Container port: 8080
 - Cloud SQL connection annotation (enables Auth Proxy sidecar)
-- Startup probe: HTTP GET `/healthz` on port 8080
-- Termination grace period: 30s (graceful shutdown persists state and sends `reconnect_please` before exit)
+- Startup probe: HTTP GET `/api/health` on port 8080
+- Termination grace period: 60s (must exceed worst-case shutdown cascade: HTTP drain 30s + River stop 15s + OTel flush 10s = 55s)
 
 **Cloud Run environment variables (non-secret):**
 
@@ -172,6 +173,7 @@ postgres://drill:PASSWORD@/drill?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME
   - `roles/storage.objectAdmin` on the audio bucket
   - `roles/secretmanager.secretAccessor`
   - `roles/cloudtrace.agent` (OTel Cloud Trace exporter)
+  - `roles/monitoring.metricWriter` (OTel Cloud Monitoring metric exporter)
   - `roles/logging.logWriter` (structured logs to Cloud Logging)
 - Cloud Run service identity set to `drill-app@`
 
@@ -241,10 +243,11 @@ scripts/
 Steps:
 1. actions/checkout
 2. actions/setup-go (1.25)
-3. go vet ./...
-4. staticcheck ./...
-5. sqlc diff (fail if generated code is stale)
-6. go test ./... -race -count=1
+3. Install tools: go install honnef.co/go/tools/cmd/staticcheck@latest && go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+4. go vet ./...
+5. staticcheck ./...
+6. sqlc diff (fail if generated code is stale)
+7. go test ./... -race -count=1
 ```
 
 Testcontainers spins up Postgres in the GitHub Actions runner (Docker available by default). No need for a `services:` block.
@@ -264,14 +267,14 @@ Steps:
 7. docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/drill/drill:${GITHUB_SHA::7} .
 8. docker push <tagged image>
 9. gcloud run deploy drill --image <tagged image> --region ${REGION}
-10. Smoke test: curl GET ${SERVICE_URL}/healthz, expect 200
+10. Smoke test: curl GET ${SERVICE_URL}/api/health, expect 200
 ```
 
 **Key design points:**
 - Image tagged with short git SHA — every deploy traces to a commit
 - Tests run again (not relying on the PR check) — main could have a broken merge
 - No canary — full traffic cutover
-- Smoke test: if `/healthz` returns non-200, the workflow fails. Manual rollback for now.
+- Smoke test: if `/api/health` returns non-200, the workflow fails. Manual rollback for now.
 - Workflow environment variables (`PROJECT_ID`, `REGION`, `SERVICE_URL`) stored as GitHub Actions variables (not secrets — they're not sensitive)
 - WIF provider details stored as GitHub Actions secrets
 
@@ -281,9 +284,9 @@ Steps:
 
 ### Health Check
 
-The existing `/healthz` endpoint (Phase 1) returns `200 OK` with `{"status":"ok"}` when the app is serving and the database pool is connected.
+The existing `/api/health` endpoint (Phase 1) returns `200 OK` with `{"status":"ok"}` when the app is serving and the database pool is connected.
 
-Cloud Run's startup probe hits `/healthz` on port 8080. If the app can't start (migration failure, pool creation failure), it exits non-zero before serving — Cloud Run sees the crash and doesn't route traffic.
+Cloud Run's startup probe hits `/api/health` on port 8080. If the app can't start (migration failure, pool creation failure), it exits non-zero before serving — Cloud Run sees the crash and doesn't route traffic.
 
 No separate readiness/liveness probes — Cloud Run doesn't support the Kubernetes-style probe model beyond startup.
 
@@ -298,7 +301,7 @@ Already implemented in `cmd/drill/main.go`:
 5. OTel providers flush and shut down
 6. Process exits
 
-The 30-second grace period is sufficient — on deploy, interview conductors (Conductor phase, built after this) will persist state to Postgres and send `reconnect_please` to WebSocket clients within seconds. The session continues on the new revision. The grace period doesn't need to match session duration.
+The Cloud Run termination grace period is set to 60 seconds. Worst-case shutdown cascade: HTTP drain (30s) + River stop (15s) + OTel flush (10s) = 55s, which fits within the 60s window. In practice, shutdown is much faster — interview conductors (Conductor phase, built after this) will persist state to Postgres and send `reconnect_please` to WebSocket clients within seconds. The session continues on the new revision. The grace period doesn't need to match session duration.
 
 ---
 
@@ -316,7 +319,7 @@ Phase 4 is complete and merged to main. No parallel work coordination needed.
 
 **What this phase wires up:**
 - Terraform sets `OTEL_ENABLED=true`, `OTEL_EXPORTER=google` on the Cloud Run service
-- IAM grants `roles/cloudtrace.agent` and `roles/logging.logWriter` to the runtime SA
+- IAM grants `roles/cloudtrace.agent`, `roles/monitoring.metricWriter`, and `roles/logging.logWriter` to the runtime SA
 - `GOOGLE_CLOUD_PROJECT` is auto-injected by Cloud Run — no Terraform config needed
 
 When the app starts on Cloud Run, traces flow to Cloud Trace and logs flow to Cloud Logging automatically.
