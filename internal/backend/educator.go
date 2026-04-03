@@ -8,9 +8,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 )
+
+const previewModelAnswerLen = 200
 
 // EducatorResponse is the API response for educator analysis.
 type EducatorResponse struct {
@@ -29,6 +32,20 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 		return nil, ErrEvaluationNotReady
 	}
 
+	// Determine educator access level.
+	paidBal, err := db.New(b.pool).GetUserPaidBalance(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get paid balance: %w", err)
+	}
+
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	plan, _ := billing.PlanByName(user.Plan)
+	accessLevel, _ := billing.DetermineEducatorAccess(ctx, int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
+
 	q := db.New(b.pool)
 	ea, err := q.GetEducatorAnalysisBySession(ctx, sessionID)
 	if err != nil {
@@ -44,14 +61,41 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 	case "failed":
 		return &EducatorResponse{Status: "failed"}, nil
 	case "completed":
-		return &EducatorResponse{
+		if accessLevel == billing.Preview {
+			return &EducatorResponse{
+				Status:      "completed",
+				ModelAnswer: truncateRunes(ea.ModelAnswer.String, previewModelAnswerLen),
+			}, nil
+		}
+		resp := &EducatorResponse{
 			Status:       "completed",
 			ModelAnswer:  ea.ModelAnswer.String,
 			GapDeepDives: ea.GapDeepDives.String,
-		}, nil
+		}
+		if accessLevel == billing.FreeTaste {
+			if _, err := q.IncrementFreeEducatorUsed(ctx, db.IncrementFreeEducatorUsedParams{
+				ID:                    userID,
+				FreeFullEducatorsUsed: int32(plan.FreeEducatorLimit),
+			}); err != nil {
+				return nil, fmt.Errorf("increment free educator used: %w", err)
+			}
+		}
+		return resp, nil
 	default:
 		return &EducatorResponse{Status: ea.Status}, nil
 	}
+}
+
+// truncateRunes returns s truncated to at most n runes.
+func truncateRunes(s string, n int) string {
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i]
+		}
+		count++
+	}
+	return s
 }
 
 // RequestEducatorAnalysis enqueues educator content generation for a session.
@@ -62,6 +106,24 @@ func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID
 	}
 	if session.Status != "reviewed" {
 		return ErrEvaluationNotReady
+	}
+
+	// Determine educator access level.
+	paidBal, err := db.New(b.pool).GetUserPaidBalance(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get paid balance: %w", err)
+	}
+
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	plan, _ := billing.PlanByName(user.Plan)
+	accessLevel, _ := billing.DetermineEducatorAccess(ctx, int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
+
+	if accessLevel == billing.Preview {
+		return ErrNoPaidBalance
 	}
 
 	q := db.New(b.pool)
