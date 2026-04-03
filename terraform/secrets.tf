@@ -23,8 +23,21 @@ resource "google_secret_manager_secret" "secrets" {
 }
 
 # Auto-populate DATABASE_URL with the Cloud SQL Auth Proxy socket path.
-# Other secrets must be set manually via gcloud or the console.
 resource "google_secret_manager_secret_version" "db_password" {
   secret      = google_secret_manager_secret.secrets["database-url"].id
   secret_data = "postgres://drill:${random_password.db_password.result}@/drill?host=/cloudsql/${google_sql_database_instance.drill.connection_name}"
+}
+
+# Placeholder versions so Cloud Run can mount "latest" on first deploy.
+# Replace with real values via gcloud or the console before the app will work.
+locals {
+  placeholder_secret_ids = toset([
+    for id in local.secret_ids : id if id != "database-url"
+  ])
+}
+
+resource "google_secret_manager_secret_version" "placeholders" {
+  for_each    = local.placeholder_secret_ids
+  secret      = google_secret_manager_secret.secrets[each.key].id
+  secret_data = "REPLACE_ME"
 }
