@@ -1,9 +1,11 @@
 package interview_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/coder/websocket"
@@ -117,4 +119,58 @@ func TestWSWriter_IgnoresWriteErrors(t *testing.T) {
 	writer.OnToken("hello")
 	writer.OnDone("hello")
 	// Should not panic — errors are logged and ignored
+}
+
+// fakeSynth returns a fixed audio payload immediately.
+type fakeSynth struct {
+	audio []byte
+}
+
+func (f *fakeSynth) Synthesize(_ context.Context, _ string) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(f.audio)), nil
+}
+
+// blockingSynth blocks until the context is cancelled.
+type blockingSynth struct{}
+
+func (b *blockingSynth) Synthesize(ctx context.Context, _ string) (io.ReadCloser, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
+	ws := &mockWSConn{}
+	synth := &fakeSynth{audio: []byte("fake-audio-bytes")}
+	ctx := context.Background()
+
+	acc := interview.NewTTSAccumulator(ctx, ws, synth, uuid.New())
+	acc.OnToken("Hello there. ")
+	acc.OnToken("How are you? ")
+	acc.OnDone("Hello there. How are you? ")
+
+	// Count tts_chunk messages.
+	var chunks int
+	for _, msg := range ws.sent {
+		if bytes.Contains(msg, []byte(`"tts_chunk"`)) {
+			chunks++
+		}
+	}
+	assert.GreaterOrEqual(t, chunks, 2)
+
+	// Should have tts_done at the end.
+	require.NotEmpty(t, ws.sent)
+	lastMsg := ws.sent[len(ws.sent)-1]
+	assert.Contains(t, string(lastMsg), `"tts_done"`)
+}
+
+func TestTTSAccumulator_Interrupt(t *testing.T) {
+	ws := &mockWSConn{}
+	synth := &blockingSynth{}
+	ctx := context.Background()
+
+	acc := interview.NewTTSAccumulator(ctx, ws, synth, uuid.New())
+	acc.OnToken("First sentence. Second sentence. ")
+	acc.Interrupt()
+	acc.OnDone("First sentence. Second sentence. ")
+	// Should not hang — interrupt cancels context.
 }

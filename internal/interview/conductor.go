@@ -377,7 +377,11 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 		NewWSWriter(c.ws, messageID),
 		accumulator,
 	}
-	// TTSAccumulator would be added here when implemented (Task 16).
+	if c.ttsEnabled && c.tts != nil {
+		ttsAcc := NewTTSAccumulator(ctx, c.ws, c.tts, messageID)
+		observers = append(observers, ttsAcc)
+		defer ttsAcc.Wait() // ensure TTS completes before we return
+	}
 	c.observer = NewTokenFanOut(observers...)
 
 	// Stream LLM.
