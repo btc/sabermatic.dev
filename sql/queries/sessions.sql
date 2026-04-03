@@ -65,3 +65,14 @@ ORDER BY created_at;
 SELECT id FROM interview_sessions
 WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
 ORDER BY created_at;
+
+-- name: CountActiveSessionsByUser :one
+SELECT COUNT(*)::int AS count
+FROM interview_sessions
+WHERE user_id = $1 AND status = 'active';
+
+-- name: UpdateSessionReservedMinutes :exec
+UPDATE interview_sessions SET reserved_minutes = $2 WHERE id = $1;
+
+-- name: GetSessionByID :one
+SELECT * FROM interview_sessions WHERE id = $1;

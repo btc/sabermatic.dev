@@ -15,7 +15,7 @@ import (
 const createOAuthUser = `-- name: CreateOAuthUser :one
 INSERT INTO users (email, email_verified, display_name)
 VALUES ($1, TRUE, $2)
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
 `
 
 type CreateOAuthUserParams struct {
@@ -38,6 +38,7 @@ func (q *Queries) CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
 	)
 	return i, err
 }
@@ -45,7 +46,7 @@ func (q *Queries) CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name)
 VALUES ($1, $2, $3)
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
 `
 
 type CreateUserParams struct {
@@ -69,12 +70,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -93,12 +95,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
 	)
 	return i, err
 }
 
 const getUserByEmailIncludingDeleted = `-- name: GetUserByEmailIncludingDeleted :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
 WHERE email = $1
 `
 
@@ -117,12 +120,13 @@ func (q *Queries) GetUserByEmailIncludingDeleted(ctx context.Context, email stri
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -141,12 +145,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
 	)
 	return i, err
 }
 
 const getUserByIDIncludingDeleted = `-- name: GetUserByIDIncludingDeleted :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
 WHERE id = $1
 `
 
@@ -165,8 +170,53 @@ func (q *Queries) GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
 	)
 	return i, err
+}
+
+const getUserByStripeCustomerID = `-- name: GetUserByStripeCustomerID :one
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+WHERE stripe_customer_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetUserByStripeCustomerID(ctx context.Context, stripeCustomerID pgtype.Text) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByStripeCustomerID, stripeCustomerID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
+	)
+	return i, err
+}
+
+const incrementFreeEducatorUsed = `-- name: IncrementFreeEducatorUsed :one
+UPDATE users
+SET free_full_educators_used = free_full_educators_used + 1
+WHERE id = $1 AND free_full_educators_used < $2
+RETURNING free_full_educators_used
+`
+
+type IncrementFreeEducatorUsedParams struct {
+	ID                    uuid.UUID `json:"id"`
+	FreeFullEducatorsUsed int32     `json:"free_full_educators_used"`
+}
+
+func (q *Queries) IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementFreeEducatorUsed, arg.ID, arg.FreeFullEducatorsUsed)
+	var free_full_educators_used int32
+	err := row.Scan(&free_full_educators_used)
+	return free_full_educators_used, err
 }
 
 const reactivateUser = `-- name: ReactivateUser :exec
@@ -201,6 +251,34 @@ type UpdateUserPasswordParams struct {
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	return err
+}
+
+const updateUserPlan = `-- name: UpdateUserPlan :exec
+UPDATE users SET plan = $2, updated_at = NOW() WHERE id = $1
+`
+
+type UpdateUserPlanParams struct {
+	ID   uuid.UUID `json:"id"`
+	Plan string    `json:"plan"`
+}
+
+func (q *Queries) UpdateUserPlan(ctx context.Context, arg UpdateUserPlanParams) error {
+	_, err := q.db.Exec(ctx, updateUserPlan, arg.ID, arg.Plan)
+	return err
+}
+
+const updateUserStripeCustomerID = `-- name: UpdateUserStripeCustomerID :exec
+UPDATE users SET stripe_customer_id = $2, updated_at = NOW() WHERE id = $1
+`
+
+type UpdateUserStripeCustomerIDParams struct {
+	ID               uuid.UUID   `json:"id"`
+	StripeCustomerID pgtype.Text `json:"stripe_customer_id"`
+}
+
+func (q *Queries) UpdateUserStripeCustomerID(ctx context.Context, arg UpdateUserStripeCustomerIDParams) error {
+	_, err := q.db.Exec(ctx, updateUserStripeCustomerID, arg.ID, arg.StripeCustomerID)
 	return err
 }
 
