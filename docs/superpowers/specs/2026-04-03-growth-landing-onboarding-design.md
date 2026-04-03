@@ -80,7 +80,7 @@ The landing page (`/`) and sample session (`/sample`) are the two public routes 
 
 - Feature copy: feedback is grounded in what you actually said, tied to specific moments in your conversation
 - Illustration: a short transcript snippet (3-5 messages) from session 27 with real annotation callouts appearing one by one
-- Green (strength), orange (gap), purple (missed opportunity), blue (note) — whichever annotation types are present in the selected session 27 excerpt. Show only the types that appear naturally; don't force all four.
+- Green (strength), orange (gap), violet (missed opportunity), blue (note) — whichever annotation types are present in the selected session 27 excerpt. Show only the types that appear naturally; don't force all four.
 
 ### Section 5: Deep Dive
 
@@ -161,14 +161,21 @@ Renders the real session detail UI (overview, transcript, deep dive tabs) with s
 
 The sample session data is bundled as static JSON fixtures served by the Go backend at a public (no-auth) endpoint:
 
-- **`GET /api/sample/session`** — returns session metadata, transcript messages, evaluation (scores, strengths, gaps, advice), annotations, and educator deep dive content. Same response shape as the authenticated session detail endpoints, so the frontend session detail component can consume it without modification.
-- **`GET /api/sample/coach`** — returns coach analysis data (trend, weakest dimension, recommendations) for the landing page coaching section and the sample session.
+Three endpoints mirroring the authenticated session detail pattern:
+
+- **`GET /api/sample/session`** — returns session metadata and transcript messages. Same response shape as `GET /api/sessions/:id`.
+- **`GET /api/sample/evaluation`** — returns scores, strengths, gaps, advice, and annotations. Same response shape as `GET /api/sessions/:id/evaluation`.
+- **`GET /api/sample/educator`** — returns educator deep dive content. Same response shape as `GET /api/sessions/:id/educator`.
+
+One additional endpoint for the landing page:
+
+- **`GET /api/sample/coach`** — returns coach analysis data (trend, weakest dimension, recommendations) for the landing page coaching section (Section 6). Not used by the `/sample` session detail page — coach data is user-level, not session-level.
 
 The JSON fixtures are generated once from v0 database exports and committed to the repo (e.g., `internal/sample/session.json`, `internal/sample/coach.json`). The Go handler serves them directly — no database queries.
 
 **Audio files:** Migrated from v0 storage to GCS with public-read ACLs, or served as static assets from the Go binary. The `audio_url` fields in the fixture JSON point to these locations.
 
-**Frontend integration:** The session detail component receives a `dataSource` prop — either `"api"` (authenticated, fetches from `/api/sessions/:id/*`) or `"sample"` (public, fetches from `/api/sample/*`). Same component, same rendering, different data source. The landing page sections also read from the sample fixture data for their illustrations.
+**Frontend integration:** The session detail component receives a `dataSource` prop — either `"api"` (authenticated, fetches from `/api/sessions/:id/*`) or `"sample"` (public, fetches from `/api/sample/*`). Same component, same rendering, same fetch pattern (3 parallel calls), different base URL. The landing page sections also read from the sample endpoints for their illustrations.
 
 ## Show HN Launch Strategy
 
