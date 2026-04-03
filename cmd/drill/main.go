@@ -16,10 +16,12 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/gorilla/csrf"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
 )
 
@@ -27,13 +29,8 @@ import (
 var migrations embed.FS
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
 	if err := run(); err != nil {
-		slog.Error("fatal", "error", err)
+		fmt.Fprintf(os.Stderr, "fatal: %s\n", err)
 		os.Exit(1)
 	}
 }
@@ -52,26 +49,42 @@ func runWithContext(ctx context.Context) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// App migrations run before Backend (schema must exist for pool/River).
+	// Structured logger with trace correlation (must be after config load for GCPProjectID).
+	jsonHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	logger := slog.New(drilotel.NewTraceHandler(jsonHandler, cfg.Otel.GCPProjectID))
+	slog.SetDefault(logger)
+
 	if err := runMigrations(cfg.Database.URL); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 
-	// Backend owns pool + River lifecycle.
+	// OTel providers (must be before Backend so pool tracer is active).
+	providers, err := drilotel.Init(&cfg.Otel)
+	if err != nil {
+		return fmt.Errorf("init otel: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := providers.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("otel shutdown error", "error", err)
+		}
+	}()
+
 	b, err := backend.New(cfg)
 	if err != nil {
 		return fmt.Errorf("create backend: %w", err)
 	}
 	defer b.Close()
 
-	// OAuth providers (optional — unconfigured providers return 404).
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
 
-	// CSRF protection wraps the entire mux.
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
@@ -82,9 +95,10 @@ func runWithContext(ctx context.Context) error {
 		csrf.SameSite(csrf.SameSiteLaxMode),
 	)
 
+	otelHandler := otelhttp.NewMiddleware("drill")(mux)
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: csrfMiddleware(mux),
+		Handler: csrfMiddleware(otelHandler),
 	}
 
 	errCh := make(chan error, 1)
@@ -107,7 +121,6 @@ func runWithContext(ctx context.Context) error {
 			slog.Warn("http shutdown error", "error", err)
 		}
 		slog.Info("http server stopped")
-		// b.Close() runs via defer: stops River, then closes pool.
 		return nil
 	}
 }
