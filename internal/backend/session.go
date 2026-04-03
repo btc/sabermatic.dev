@@ -225,7 +225,7 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		return fmt.Errorf("update session status: %w", err)
 	}
 
-	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, nil)
+	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, jobs.EvaluateSessionInsertOpts())
 	if err != nil {
 		return fmt.Errorf("enqueue evaluate_session: %w", err)
 	}

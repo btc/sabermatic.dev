@@ -68,7 +68,7 @@ func New(cfg *config.Config) (*Backend, error) {
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
-	workers := jobs.RegisterWorkers(cfg, emailSender, pool)
+	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:      {MaxWorkers: cfg.River.NumDefaultWorkers},
@@ -92,6 +92,8 @@ func New(cfg *config.Config) (*Backend, error) {
 		pool.Close()
 		return nil, fmt.Errorf("create river client: %w", err)
 	}
+	workerRefs.Evaluate.Jobs = riverClient
+	workerRefs.Cleanup.Jobs = riverClient
 	if err := riverClient.Start(context.Background()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start river: %w", err)
