@@ -108,32 +108,27 @@ func (e evalTestEnv) doRequest(t *testing.T, method, path string, cookie *http.C
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// GET /api/sessions/{id}/evaluation — HTTP concerns only
 // ---------------------------------------------------------------------------
 
-func TestGetEvaluation_Reviewed(t *testing.T) {
+func TestGetEvaluation_Returns200WithJSON(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
 	env := newEvalTestEnv(t)
 
-	// Seed data.
 	userID := createTestUser(t, env.pool)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
 
 	msg1 := seedMessage(t, env.pool, session.ID, 1, "interviewer", "Tell me about requirements.")
-	msg2 := seedMessage(t, env.pool, session.ID, 2, "candidate", "We need to handle 10k RPS.")
-
 	evalID := seedEvaluation(t, env.pool, session.ID)
 	seedAnnotation(t, env.pool, evalID, msg1.ID, "strength", "Good opening question.")
-	seedAnnotation(t, env.pool, evalID, msg2.ID, "gap", "Did not discuss caching.")
 
 	cookie := createAuthCookie(t, env.pool, userID)
 
-	// Hit endpoint.
 	rec := env.doRequest(t, http.MethodGet, "/api/sessions/"+session.ID.String()+"/evaluation", cookie)
 
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -141,81 +136,16 @@ func TestGetEvaluation_Reviewed(t *testing.T) {
 	var resp backend.EvaluationResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 
+	// Verify JSON shape — detailed value assertions live in backend tests.
 	assert.Equal(t, "reviewed", resp.Status)
-
-	require.NotNil(t, resp.Scores)
-	assert.Equal(t, int32(3), resp.Scores.Requirements)
-	assert.Equal(t, int32(4), resp.Scores.Architecture)
-	assert.Equal(t, int32(2), resp.Scores.DeepDive)
-	assert.Equal(t, int32(3), resp.Scores.Scalability)
-	assert.Equal(t, int32(4), resp.Scores.Communication)
-	assert.Equal(t, int32(3), resp.Scores.Overall)
-
-	assert.Equal(t, []string{"Good requirements gathering"}, resp.Strengths)
-	assert.Equal(t, []string{"Missing cache layer"}, resp.Gaps)
-	assert.Equal(t, "Focus on depth.", resp.Advice)
-
-	require.Len(t, resp.Annotations, 2)
-	assert.Equal(t, int32(1), resp.Annotations[0].MessageSeq)
-	assert.Equal(t, "strength", resp.Annotations[0].Type)
-	assert.Equal(t, "Good opening question.", resp.Annotations[0].Content)
-	assert.Equal(t, int32(2), resp.Annotations[1].MessageSeq)
-	assert.Equal(t, "gap", resp.Annotations[1].Type)
-	assert.Equal(t, "Did not discuss caching.", resp.Annotations[1].Content)
+	assert.NotNil(t, resp.Scores)
+	assert.NotEmpty(t, resp.Strengths)
+	assert.NotEmpty(t, resp.Gaps)
+	assert.NotEmpty(t, resp.Advice)
+	assert.NotEmpty(t, resp.Annotations)
 }
 
-func TestGetEvaluation_Failed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	env := newEvalTestEnv(t)
-
-	userID := createTestUser(t, env.pool)
-	question := createTestQuestion(t, env.pool)
-	session := createTestSession(t, env.pool, userID, question.ID)
-	setSessionStatus(t, env.pool, session.ID, "evaluation_failed")
-
-	cookie := createAuthCookie(t, env.pool, userID)
-
-	rec := env.doRequest(t, http.MethodGet, "/api/sessions/"+session.ID.String()+"/evaluation", cookie)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-
-	var resp backend.EvaluationResponse
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-
-	assert.Equal(t, "evaluation_failed", resp.Status)
-	assert.Nil(t, resp.Scores)
-	assert.Empty(t, resp.Strengths)
-	assert.Empty(t, resp.Gaps)
-	assert.Empty(t, resp.Advice)
-	assert.Empty(t, resp.Annotations)
-}
-
-func TestGetEvaluation_NotReady(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	env := newEvalTestEnv(t)
-
-	userID := createTestUser(t, env.pool)
-	question := createTestQuestion(t, env.pool)
-	session := createTestSession(t, env.pool, userID, question.ID) // status=active by default
-
-	cookie := createAuthCookie(t, env.pool, userID)
-
-	rec := env.doRequest(t, http.MethodGet, "/api/sessions/"+session.ID.String()+"/evaluation", cookie)
-
-	require.Equal(t, http.StatusNotFound, rec.Code)
-
-	var body map[string]string
-	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
-	assert.Contains(t, body["error"], "not ready")
-}
-
-func TestGetEvaluation_WrongUser(t *testing.T) {
+func TestGetEvaluation_Returns403ForWrongUser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -228,7 +158,6 @@ func TestGetEvaluation_WrongUser(t *testing.T) {
 	session := createTestSession(t, env.pool, ownerID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
 
-	// Authenticate as the other user, not the session owner.
 	cookie := createAuthCookie(t, env.pool, otherID)
 
 	rec := env.doRequest(t, http.MethodGet, "/api/sessions/"+session.ID.String()+"/evaluation", cookie)
@@ -240,24 +169,21 @@ func TestGetEvaluation_WrongUser(t *testing.T) {
 	assert.Contains(t, body["error"], "does not belong")
 }
 
-func TestGetEvaluation_ReviewedButMissingEvaluation(t *testing.T) {
+func TestGetEvaluation_Returns404WhenNotReady(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
 	env := newEvalTestEnv(t)
 
-	// Seed data: session with status "reviewed" but NO evaluation row.
 	userID := createTestUser(t, env.pool)
 	question := createTestQuestion(t, env.pool)
-	session := createTestSession(t, env.pool, userID, question.ID)
-	setSessionStatus(t, env.pool, session.ID, "reviewed")
+	session := createTestSession(t, env.pool, userID, question.ID) // status=active
 
 	cookie := createAuthCookie(t, env.pool, userID)
 
 	rec := env.doRequest(t, http.MethodGet, "/api/sessions/"+session.ID.String()+"/evaluation", cookie)
 
-	// Backend returns ErrEvaluationNotReady when status=reviewed but no eval row exists.
 	require.Equal(t, http.StatusNotFound, rec.Code)
 
 	var body map[string]string
@@ -265,7 +191,11 @@ func TestGetEvaluation_ReviewedButMissingEvaluation(t *testing.T) {
 	assert.Contains(t, body["error"], "not ready")
 }
 
-func TestRetryEvaluation_Success(t *testing.T) {
+// ---------------------------------------------------------------------------
+// POST /api/sessions/{id}/evaluate — HTTP concerns only
+// ---------------------------------------------------------------------------
+
+func TestRetryEvaluation_Returns202(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -286,14 +216,9 @@ func TestRetryEvaluation_Success(t *testing.T) {
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&body))
 	assert.Equal(t, "evaluating", body["status"])
-
-	// Verify session status was updated in DB.
-	updated, err := db.New(env.pool).GetSession(context.Background(), session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "evaluating", updated.Status)
 }
 
-func TestRetryEvaluation_NotFailed(t *testing.T) {
+func TestRetryEvaluation_Returns409WhenNotFailed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
