@@ -75,7 +75,10 @@ export default function SessionConfig() {
   const [coachBriefing, setCoachBriefing] = useState(true);
   const [micState, setMicState] = useState<MicState>("idle");
 
-  // Redirect if no question param
+  // Redirect if no question param.
+  // NOTE: the hooks above fire before this guard runs (React rules of hooks).
+  // The in-flight requests will be cancelled by React Query cleanup on unmount,
+  // so this is a minor inefficiency rather than a correctness issue.
   if (!questionId) {
     return <Navigate to="/" replace />;
   }

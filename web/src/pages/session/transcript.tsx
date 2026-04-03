@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Navigate } from "react-router-dom";
 import { useTranscript, useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -252,8 +252,13 @@ function NoAnnotationsView() {
 
 export default function TranscriptPage() {
   const { id: sessionId } = useParams<{ id: string }>();
-  const { data: messages } = useTranscript(sessionId!);
-  const { data: evaluation } = useEvaluation(sessionId!);
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <TranscriptInner sessionId={sessionId} />;
+}
+
+function TranscriptInner({ sessionId }: { sessionId: string }) {
+  const { data: messages } = useTranscript(sessionId);
+  const { data: evaluation } = useEvaluation(sessionId);
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 

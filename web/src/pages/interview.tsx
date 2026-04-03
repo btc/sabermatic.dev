@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Navigate } from "react-router-dom";
 import {
   ArrowLeft,
   Mic,
@@ -165,6 +165,11 @@ function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: Waitin
 
 export default function Interview() {
   const { id: sessionId } = useParams<{ id: string }>();
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <InterviewInner sessionId={sessionId} />;
+}
+
+function InterviewInner({ sessionId }: { sessionId: string }) {
   const navigate = useNavigate();
 
   // Hooks
@@ -179,9 +184,9 @@ export default function Interview() {
     endSession,
     cancelTts,
     setRawMessageHandler,
-  } = useInterview(sessionId!);
+  } = useInterview(sessionId);
 
-  const { data: session } = useSession(sessionId!);
+  const { data: session } = useSession(sessionId);
   const audioRecorder = useAudioRecorder();
   const audioPlayer = useAudioPlayer();
 
@@ -319,7 +324,7 @@ export default function Interview() {
   if (isEnded) {
     return (
       <WaitingView
-        sessionId={sessionId!}
+        sessionId={sessionId}
         questionTitle={sessionInfo?.question.title}
         messageCount={messages.length}
         elapsed={elapsed}
