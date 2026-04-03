@@ -43,6 +43,9 @@ type Querier interface {
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
+	// Batch-marks all abandoned sessions as completed and returns their IDs.
+	// A session is abandoned if it's active and past its duration + 5 min buffer.
+	MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error

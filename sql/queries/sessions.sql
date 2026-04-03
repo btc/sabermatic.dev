@@ -39,6 +39,15 @@ UPDATE interview_sessions
 SET status = 'completed', ended_at = NOW(), updated_at = NOW()
 WHERE id = $1;
 
+-- name: MarkAbandonedSessionsCompleted :many
+-- Batch-marks all abandoned sessions as completed and returns their IDs.
+-- A session is abandoned if it's active and past its duration + 5 min buffer.
+UPDATE interview_sessions
+SET status = 'completed', ended_at = NOW(), updated_at = NOW()
+WHERE status = 'active'
+  AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
+RETURNING id;
+
 -- name: UpdateSessionStatusOnly :exec
 -- NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
 -- Used for status transitions after session completion (evaluating → reviewed,

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -38,10 +39,12 @@ func TestCleanupAbandonedSessions_MarksCompleted(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "active", session.Status)
 
-	// Construct the worker with Jobs = nil (enqueue is skipped).
+	// Construct worker with a real River client (not started — no workers run).
+	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
 	worker := &jobs.CleanupAbandonedSessionsWorker{
 		Pool: pool,
-		Jobs: nil,
+		Jobs: riverClient,
 	}
 
 	err = worker.Work(ctx, &river.Job[jobs.CleanupAbandonedSessionsArgs]{
@@ -74,9 +77,11 @@ func TestCleanupAbandonedSessions_RecentSessionNotAffected(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	riverClient2, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
 	worker := &jobs.CleanupAbandonedSessionsWorker{
 		Pool: pool,
-		Jobs: nil,
+		Jobs: riverClient2,
 	}
 
 	err = worker.Work(ctx, &river.Job[jobs.CleanupAbandonedSessionsArgs]{
