@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/csrf"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	drill "github.com/btc/drill"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
@@ -84,6 +85,7 @@ func runWithContext(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux, b)
+	mux.Handle("/", handler.SPAHandler(drill.WebFS))
 
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(

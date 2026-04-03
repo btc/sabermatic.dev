@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"embed"
+	"fmt"
+	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
@@ -48,4 +52,27 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 
 	// Questions
 	mux.Handle("GET /api/questions", requireAuth(http.HandlerFunc(ListQuestions(b))))
+}
+
+// SPAHandler serves the embedded SPA. Static assets served directly.
+// All other paths return index.html for client-side routing.
+func SPAHandler(fsys embed.FS) http.Handler {
+	sub, err := fs.Sub(fsys, "web/dist")
+	if err != nil {
+		panic(fmt.Sprintf("embed sub: %v", err))
+	}
+	fileServer := http.FileServer(http.FS(sub))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path != "/" {
+			if _, err := fs.Stat(sub, strings.TrimPrefix(path, "/")); err == nil {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// Fall back to index.html for client-side routing
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
