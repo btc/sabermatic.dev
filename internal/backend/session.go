@@ -83,23 +83,8 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 		return db.CreateSessionRow{}, fmt.Errorf("get question: %w", err)
 	}
 
-	// Lock grants and check balance.
-	grants, err := q.SelectGrantsForReservation(ctx, p.UserID)
-	if err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("select grants for reservation: %w", err)
-	}
-
-	var totalAvailable int32
-	for _, g := range grants {
-		totalAvailable += g.RemainingMinutes
-	}
+	// Create session first (need ID for ledger entries).
 	duration := int32(p.DurationMinutes)
-	if totalAvailable < duration {
-		return db.CreateSessionRow{}, ErrInsufficientBalance
-	}
-
-	// Walk grants FIFO, debit each, write ledger entries.
-	// We need the session ID for ledger entries, so create the session first.
 	session, err := q.CreateSession(ctx, db.CreateSessionParams{
 		UserID:                p.UserID,
 		QuestionID:            p.QuestionID,
@@ -110,37 +95,9 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 		return db.CreateSessionRow{}, fmt.Errorf("create session: %w", err)
 	}
 
-	sid := pgtype.UUID{Bytes: session.ID, Valid: true}
-	remaining := duration
-
-	for _, g := range grants {
-		if remaining <= 0 {
-			break
-		}
-
-		debit := g.RemainingMinutes
-		if debit > remaining {
-			debit = remaining
-		}
-
-		if _, err := q.DebitGrant(ctx, db.DebitGrantParams{
-			ID:               g.ID,
-			RemainingMinutes: debit,
-		}); err != nil {
-			return db.CreateSessionRow{}, fmt.Errorf("debit grant %s: %w", g.ID, err)
-		}
-
-		if _, err := q.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
-			UserID:    p.UserID,
-			GrantID:   g.ID,
-			Amount:    -debit,
-			Reason:    "session_reserve",
-			SessionID: sid,
-		}); err != nil {
-			return db.CreateSessionRow{}, fmt.Errorf("insert ledger entry for grant %s: %w", g.ID, err)
-		}
-
-		remaining -= debit
+	// Reserve minutes via shared FIFO walk (locks grants, checks balance, debits).
+	if err := b.reserveMinutesTx(ctx, tx, p.UserID, session.ID, duration); err != nil {
+		return db.CreateSessionRow{}, err
 	}
 
 	// Set reserved_minutes on the session.

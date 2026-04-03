@@ -112,12 +112,14 @@ func PostStripeWebhook(b *backend.Backend) http.HandlerFunc {
 		}
 
 		if err := b.HandleStripeWebhook(r.Context(), event); err != nil {
+			// Return 500 so Stripe retries on transient errors (DB down, etc.).
+			// HandleStripeWebhook returns nil for permanent non-errors (unknown
+			// customer, duplicate event) so those get 200.
 			slog.Error("handle stripe webhook", "error", err, "event_type", event.Type, "event_id", event.ID)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
-		// Always 200 — Stripe retries on non-2xx, and we only want retries for
-		// transient errors (which we return from HandleStripeWebhook as errors
-		// for logging, but still acknowledge the webhook).
 		w.WriteHeader(http.StatusOK)
 	}
 }
