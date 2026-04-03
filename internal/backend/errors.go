@@ -21,6 +21,8 @@ var (
 	ErrInvalidDuration    = fmt.Errorf("duration must be between 1 and 180 minutes")
 	ErrEvaluationNotReady  = fmt.Errorf("evaluation not ready")
 	ErrNotEvaluationFailed = fmt.Errorf("session is not in evaluation_failed status")
+	ErrAlreadyExists       = fmt.Errorf("educator analysis already exists")
+	ErrNoNewSessions       = fmt.Errorf("no new sessions since last analysis")
 )
 
 // ValidatePasswordLength returns ErrPasswordLength if the password is too short or too long.
