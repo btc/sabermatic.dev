@@ -20,6 +20,7 @@ import (
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/storage"
 )
 
 // Backend holds shared dependencies and business logic. Handlers call its
@@ -28,12 +29,13 @@ import (
 // The fields below are intentionally unexported. Do not add accessor methods
 // that expose them -- consumers should call Backend methods instead.
 type Backend struct {
-	pool *pgxpool.Pool
-	jobs Jobs
-	cfg  *config.Config
-	llm  *ai.Client
-	stt  ai.Transcriber
-	tts  ai.Synthesizer
+	pool  *pgxpool.Pool
+	jobs  Jobs
+	cfg   *config.Config
+	llm   *ai.Client
+	stt   ai.Transcriber
+	tts   ai.Synthesizer
+	store storage.ObjectStore
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
@@ -65,6 +67,25 @@ func New(cfg *config.Config) (*Backend, error) {
 	llmClient := ai.NewClient(cfg.LLM.APIKey, pool)
 	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.WhisperModel)
 	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
+
+	// Object storage
+	var store storage.ObjectStore
+	switch cfg.Storage.Backend {
+	case "gcs":
+		store, err = storage.NewGCS(context.Background(), cfg.Storage.Bucket)
+		if err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("gcs storage: %w", err)
+		}
+		slog.Info("storage: gcs", "bucket", cfg.Storage.Bucket)
+	case "local":
+		store, err = storage.NewLocal(cfg.Storage.LocalDir)
+		if err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("local storage: %w", err)
+		}
+		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
+	}
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
@@ -102,12 +123,13 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	return &Backend{
-		pool: pool,
-		jobs: riverClient,
-		cfg:  cfg,
-		llm:  llmClient,
-		stt:  stt,
-		tts:  tts,
+		pool:  pool,
+		jobs:  riverClient,
+		cfg:   cfg,
+		llm:   llmClient,
+		stt:   stt,
+		tts:   tts,
+		store: store,
 	}, nil
 }
 
@@ -117,9 +139,10 @@ func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 
 // TestOverrides replaces AI dependencies for testing. Only call from tests.
 type TestOverrides struct {
-	LLM *ai.Client
-	STT ai.Transcriber
-	TTS ai.Synthesizer
+	LLM   *ai.Client
+	STT   ai.Transcriber
+	TTS   ai.Synthesizer
+	Store storage.ObjectStore
 }
 
 // ApplyTestOverrides replaces AI dependencies for testing. Only call from tests.
@@ -132,6 +155,9 @@ func (b *Backend) ApplyTestOverrides(o TestOverrides) {
 	}
 	if o.TTS != nil {
 		b.tts = o.TTS
+	}
+	if o.Store != nil {
+		b.store = o.Store
 	}
 }
 
@@ -184,6 +210,12 @@ func (b *Backend) Close() error {
 		slog.Warn("river stop error", "error", err)
 	}
 	slog.Info("river stopped")
+
+	if c, ok := b.store.(interface{ Close() error }); ok {
+		if err := c.Close(); err != nil {
+			slog.Warn("storage close error", "error", err)
+		}
+	}
 
 	b.pool.Close()
 	slog.Info("database pool closed")
