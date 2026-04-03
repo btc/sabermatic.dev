@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	pgx "github.com/jackc/pgx/v5"
@@ -24,35 +25,31 @@ type CleanupAbandonedSessionsWorker struct {
 }
 
 func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Job[CleanupAbandonedSessionsArgs]) error {
-	q := db.New(w.Pool)
-	ids, err := q.FindAbandonedSessions(ctx)
+	tx, err := w.Pool.Begin(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("begin cleanup tx: %w", err)
 	}
+	defer tx.Rollback(ctx)
+
+	// Batch-mark all abandoned sessions as completed in a single UPDATE.
+	ids, err := db.New(tx).MarkAbandonedSessionsCompleted(ctx)
+	if err != nil {
+		return fmt.Errorf("mark abandoned sessions: %w", err)
+	}
+
+	// Enqueue evaluation for each within the same transaction.
 	for _, id := range ids {
-		tx, err := w.Pool.Begin(ctx)
-		if err != nil {
-			slog.Warn("failed to begin tx for abandoned session", "session_id", id, "error", err)
-			continue
-		}
-
-		if err := db.New(tx).MarkSessionCompleted(ctx, id); err != nil {
-			tx.Rollback(ctx)
-			slog.Warn("failed to mark abandoned session completed", "session_id", id, "error", err)
-			continue
-		}
-
 		if _, err := w.Jobs.InsertTx(ctx, tx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts()); err != nil {
-			tx.Rollback(ctx)
-			slog.Warn("failed to enqueue evaluation for abandoned session", "session_id", id, "error", err)
-			continue
+			return fmt.Errorf("enqueue evaluation for session %s: %w", id, err)
 		}
+	}
 
-		if err := tx.Commit(ctx); err != nil {
-			slog.Warn("failed to commit abandoned session cleanup", "session_id", id, "error", err)
-			continue
-		}
-		slog.Info("marked abandoned session completed", "session_id", id)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit cleanup: %w", err)
+	}
+
+	if len(ids) > 0 {
+		slog.Info("cleaned up abandoned sessions", "count", len(ids))
 	}
 	return nil
 }

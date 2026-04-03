@@ -194,6 +194,36 @@ func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]L
 	return items, nil
 }
 
+const markAbandonedSessionsCompleted = `-- name: MarkAbandonedSessionsCompleted :many
+UPDATE interview_sessions
+SET status = 'completed', ended_at = NOW(), updated_at = NOW()
+WHERE status = 'active'
+  AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
+RETURNING id
+`
+
+// Batch-marks all abandoned sessions as completed and returns their IDs.
+// A session is abandoned if it's active and past its duration + 5 min buffer.
+func (q *Queries) MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, markAbandonedSessionsCompleted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markSessionCompleted = `-- name: MarkSessionCompleted :exec
 UPDATE interview_sessions
 SET status = 'completed', ended_at = NOW(), updated_at = NOW()
