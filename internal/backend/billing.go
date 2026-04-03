@@ -37,8 +37,14 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planNam
 	now := time.Now().UTC()
 	expiresAt := billing.EndOfMonth(now)
 
-	q := db.New(b.pool)
-	_, err := q.CreateFreeGrant(ctx, db.CreateFreeGrantParams{
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin free grant tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := db.New(tx)
+	grant, err := q.CreateFreeGrant(ctx, db.CreateFreeGrantParams{
 		UserID:         userID,
 		InitialMinutes: int32(plan.MinutesPerMonth),
 		ExpiresAt:      pgtype.Timestamptz{Time: expiresAt, Valid: true},
@@ -51,7 +57,19 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planNam
 		}
 		return fmt.Errorf("create free grant: %w", err)
 	}
-	return nil
+
+	// Record the grant creation in the ledger for auditability.
+	if _, err := q.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
+		UserID:    userID,
+		GrantID:   grant.ID,
+		Amount:    int32(plan.MinutesPerMonth),
+		Reason:    "free_monthly",
+		SessionID: pgtype.UUID{},
+	}); err != nil {
+		return fmt.Errorf("insert free grant ledger entry: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +163,7 @@ func (b *Backend) RefundMinutes(ctx context.Context, userID uuid.UUID, sessionID
 	}
 	defer tx.Rollback(ctx)
 
-	if err := b.refundMinutesTx(ctx, tx, userID, sessionID, minutes); err != nil {
+	if err := b.refundMinutesTx(ctx, tx, userID, sessionID, minutes, "session_refund"); err != nil {
 		return err
 	}
 
@@ -157,7 +175,7 @@ func (b *Backend) RefundMinutes(ctx context.Context, userID uuid.UUID, sessionID
 
 // refundMinutesTx performs the refund logic within an existing transaction.
 // Used by CompleteSession (Task 8) to refund within the completion transaction.
-func (b *Backend) refundMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
+func (b *Backend) refundMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32, reason string) error {
 	q := db.New(dbtx)
 	sid := pgtype.UUID{Bytes: sessionID, Valid: true}
 
@@ -204,7 +222,7 @@ func (b *Backend) refundMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid
 			UserID:    userID,
 			GrantID:   entry.GrantID,
 			Amount:    credit,
-			Reason:    "session_refund",
+			Reason:    reason,
 			SessionID: sid,
 		})
 		if err != nil {
@@ -228,7 +246,7 @@ type UsageSummary struct {
 	FreeBalance  int32                       `json:"free_balance"`
 	PaidBalance  int32                       `json:"paid_balance"`
 	Grants       []db.ListActiveGrantsRow    `json:"grants"`
-	LedgerLog    []db.GetRecentLedgerEntriesRow `json:"ledger_log"`
+	RecentActivity []db.GetRecentLedgerEntriesRow `json:"recent_activity"`
 }
 
 // GetUsageSummary returns the user's balance breakdown, active grants, and
@@ -259,7 +277,7 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*Usage
 		FreeBalance:  summary.FreeBalance,
 		PaidBalance:  summary.PaidBalance,
 		Grants:       grants,
-		LedgerLog:    entries,
+		RecentActivity: entries,
 	}, nil
 }
 
@@ -542,7 +560,7 @@ func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) err
 		UserID:    user.ID,
 		GrantID:   grant.ID,
 		Amount:    int32(plan.MinutesPerMonth),
-		Reason:    "subscription",
+		Reason:    "subscription_renewal",
 		SessionID: pgtype.UUID{}, // NULL
 	})
 	if err != nil {

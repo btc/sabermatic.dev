@@ -48,7 +48,10 @@ func PostPortal(b *backend.Backend) http.HandlerFunc {
 		url, err := b.CreatePortalSession(r.Context(), user.ID)
 		if err != nil {
 			if errors.Is(err, backend.ErrNoStripeAccount) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error":   "no_billing_account",
+					"message": "No billing account. Subscribe or purchase minutes first.",
+				})
 				return
 			}
 			slog.Error("create portal session", "error", err, "user_id", user.ID)
