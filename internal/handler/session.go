@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -43,7 +44,10 @@ func CreateSession(b *backend.Backend) http.HandlerFunc {
 			case errors.Is(err, backend.ErrConcurrentSessionLimit):
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			case errors.Is(err, backend.ErrInsufficientBalance):
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+				writeJSON(w, http.StatusForbidden, map[string]any{
+					"error":   "insufficient_balance",
+					"message": fmt.Sprintf("You need %d minutes but don't have enough available.", req.DurationMinutes),
+				})
 			default:
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
