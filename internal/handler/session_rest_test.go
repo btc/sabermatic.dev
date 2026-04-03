@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 )
 
@@ -370,7 +372,10 @@ func TestCreateSession_BoundaryDurations(t *testing.T) {
 	question := createTestQuestion(t, pool)
 	cookie := createAuthCookie(t, pool, userID)
 
-	for _, dur := range []int{1, 180} {
+	// Free plan allows max 30 min and 60 min/month.
+	// Test boundaries within plan limits: 1 (min valid) and 30 (plan max).
+	// Each session is completed before the next to avoid concurrent limit.
+	for _, dur := range []int{1, 30} {
 		t.Run(fmt.Sprintf("duration_%d", dur), func(t *testing.T) {
 			req := authedRequest(t, http.MethodPost, "/api/sessions", map[string]any{
 				"question_id":      question.ID,
@@ -380,6 +385,12 @@ func TestCreateSession_BoundaryDurations(t *testing.T) {
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusCreated, w.Code)
+
+			// Mark the session completed so the next iteration doesn't hit the concurrent limit.
+			var resp map[string]any
+			json.Unmarshal(w.Body.Bytes(), &resp)
+			sessionID, _ := uuid.Parse(resp["id"].(string))
+			db.New(pool).MarkSessionCompleted(context.Background(), sessionID)
 		})
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -24,33 +25,135 @@ type CreateSessionParams struct {
 	QuestionID      uuid.UUID
 	DurationMinutes int
 	TTSEnabled      bool
+	Plan            string
 }
 
-// CreateSession creates a new interview session after validating duration and
-// verifying the question exists.
+// CreateSession creates a new interview session after validating duration,
+// enforcing plan limits (max duration, concurrent sessions, minute balance),
+// and reserving minutes from the user's grants.
 func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.CreateSessionRow, error) {
 	if p.DurationMinutes < 1 || p.DurationMinutes > 180 {
 		return db.CreateSessionRow{}, ErrInvalidDuration
 	}
 
-	queries := db.New(b.pool)
+	// Look up plan; fall back to "free" if unset or unknown.
+	planName := p.Plan
+	if planName == "" {
+		planName = "free"
+	}
+	plan, ok := billing.PlanByName(planName)
+	if !ok {
+		plan, _ = billing.PlanByName("free")
+	}
 
-	if _, err := queries.GetQuestion(ctx, p.QuestionID); err != nil {
+	// Enforce plan duration limit.
+	if p.DurationMinutes > plan.MaxDurationMinutes {
+		return db.CreateSessionRow{}, ErrDurationExceedsPlan
+	}
+
+	// Ensure the current-month free grant exists (idempotent, outside tx).
+	if err := b.EnsureFreeGrant(ctx, p.UserID, planName); err != nil {
+		return db.CreateSessionRow{}, fmt.Errorf("ensure free grant: %w", err)
+	}
+
+	// Begin transaction for all remaining checks and mutations.
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return db.CreateSessionRow{}, fmt.Errorf("begin create-session tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	q := db.New(tx)
+
+	// Check concurrent session limit.
+	activeCount, err := q.CountActiveSessionsByUser(ctx, p.UserID)
+	if err != nil {
+		return db.CreateSessionRow{}, fmt.Errorf("count active sessions: %w", err)
+	}
+	if int(activeCount) >= plan.ConcurrentSessions {
+		return db.CreateSessionRow{}, ErrConcurrentSessionLimit
+	}
+
+	// Verify the question exists (within tx for consistency).
+	if _, err := q.GetQuestion(ctx, p.QuestionID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.CreateSessionRow{}, ErrQuestionNotFound
 		}
 		return db.CreateSessionRow{}, fmt.Errorf("get question: %w", err)
 	}
 
-	session, err := queries.CreateSession(ctx, db.CreateSessionParams{
+	// Lock grants and check balance.
+	grants, err := q.SelectGrantsForReservation(ctx, p.UserID)
+	if err != nil {
+		return db.CreateSessionRow{}, fmt.Errorf("select grants for reservation: %w", err)
+	}
+
+	var totalAvailable int32
+	for _, g := range grants {
+		totalAvailable += g.RemainingMinutes
+	}
+	duration := int32(p.DurationMinutes)
+	if totalAvailable < duration {
+		return db.CreateSessionRow{}, ErrInsufficientBalance
+	}
+
+	// Walk grants FIFO, debit each, write ledger entries.
+	// We need the session ID for ledger entries, so create the session first.
+	session, err := q.CreateSession(ctx, db.CreateSessionParams{
 		UserID:                p.UserID,
 		QuestionID:            p.QuestionID,
-		ConfigDurationMinutes: int32(p.DurationMinutes),
+		ConfigDurationMinutes: duration,
 		ConfigTtsEnabled:      p.TTSEnabled,
 	})
 	if err != nil {
 		return db.CreateSessionRow{}, fmt.Errorf("create session: %w", err)
 	}
+
+	sid := pgtype.UUID{Bytes: session.ID, Valid: true}
+	remaining := duration
+
+	for _, g := range grants {
+		if remaining <= 0 {
+			break
+		}
+
+		debit := g.RemainingMinutes
+		if debit > remaining {
+			debit = remaining
+		}
+
+		if _, err := q.DebitGrant(ctx, db.DebitGrantParams{
+			ID:               g.ID,
+			RemainingMinutes: debit,
+		}); err != nil {
+			return db.CreateSessionRow{}, fmt.Errorf("debit grant %s: %w", g.ID, err)
+		}
+
+		if _, err := q.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
+			UserID:    p.UserID,
+			GrantID:   g.ID,
+			Amount:    -debit,
+			Reason:    "session_reserve",
+			SessionID: sid,
+		}); err != nil {
+			return db.CreateSessionRow{}, fmt.Errorf("insert ledger entry for grant %s: %w", g.ID, err)
+		}
+
+		remaining -= debit
+	}
+
+	// Set reserved_minutes on the session.
+	if err := q.UpdateSessionReservedMinutes(ctx, db.UpdateSessionReservedMinutesParams{
+		ID:              session.ID,
+		ReservedMinutes: pgtype.Int4{Int32: duration, Valid: true},
+	}); err != nil {
+		return db.CreateSessionRow{}, fmt.Errorf("set reserved minutes: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.CreateSessionRow{}, fmt.Errorf("commit create-session tx: %w", err)
+	}
+
 	return session, nil
 }
 
