@@ -1,0 +1,215 @@
+# Growth, Landing Page, Onboarding & Launch Design Spec
+
+## Overview
+
+This spec covers the public-facing landing page, conversion funnel, session replay feature, sample session, and launch strategy for Sabermetric. It builds on the existing naming/branding spec and the authenticated UI spec.
+
+The landing page is a single-scroll showcase that walks visitors through a real evaluated session (v0 session 27), demonstrating every major feature with real data. The goal: share something genuinely useful, let people see what it does, and not go broke running it.
+
+## Conversion Funnel
+
+1. Visitor lands on `sabermetric.dev` (from Show HN, Product Hunt, search, referral)
+2. Scrolls through animated feature sections — real data from session 27
+3. Optionally clicks "See a real evaluation" → `/sample` → full session replay
+4. Clicks CTA "Start practicing" → `/signup` (Google/GitHub OAuth or email)
+5. Lands on home dashboard → free tier, picks a question, starts first session
+6. After 3+ sessions → coach, educator preview, paid tier available for heavier usage
+
+**No anonymous sessions.** Signup required. Free tier is the trial. Simpler engineering (no session migration, no IP-based rate limiting, no orphaned data), cleaner usage tracking, better conversion (the person who won't do one-click OAuth wasn't converting anyway).
+
+**Authenticated users** who visit `sabermetric.dev` are redirected to `/` (home dashboard). They never see the landing page again.
+
+## Landing Page
+
+**URL:** `sabermetric.dev` (unauthenticated visitors only)
+**Tech:** same React app, public route. No separate marketing site.
+**Animation:** scroll-triggered reveals (fade + slide up as sections enter viewport). No scroll hijacking.
+
+### Section 1: Hero
+
+- "sabermetric" lowercase wordmark, large
+- Rotating tagline (typewriter/fade, ~3s per line, holds on final):
+  1. "system design, measured."
+  2. "measure what matters."
+  3. "practice with precision."
+  4. "the science of system design prep."
+  5. "data-driven system design prep." ← holds
+- "Start practicing" primary amber CTA
+- Warm stone background, minimal, confident
+
+### Section 2: Scoring
+
+- Feature copy: what the scoring system is and why it matters (multi-dimensional, rigorous, no pass/fail)
+- Illustration: session 27's real scores — five dimension bars animate from 0 to their values, overall score lands last
+- Dimension labels: Requirements, Architecture, Deep Dive, Scalability, Communication
+- Session 27's question title shown here to establish context for the walkthrough
+
+### Section 3: Strengths, Gaps, Advice
+
+- Feature copy: the evaluator breaks down your performance into specific strengths, gaps, and actionable advice
+- Illustration: session 27's real evaluator output — green strength cards fade in, then orange gap cards, then advice narrative
+- Real excerpts, not placeholders
+
+### Section 4: Annotations
+
+- Feature copy: feedback is grounded in what you actually said, tied to specific moments in your conversation
+- Illustration: a short transcript snippet (3-5 messages) from session 27 with real annotation callouts appearing one by one
+- Green (strength), orange (gap), purple (missed opportunity) — each attaches to a specific message
+
+### Section 5: Deep Dive
+
+- Feature copy: after each session, learn what you should have known — model answers and gap analysis with real-world examples
+- Illustration: real educator output from session 27 — model answer excerpt with architecture and code, then a gap analysis showing how this works at a real company
+
+### Section 6: Coaching
+
+- Feature copy: tracks your growth across sessions, identifies thinking patterns, recommends what to practice next
+- Illustration: real coach output from v0 user profile — trend sparkline, weakest dimension badge, recommended next question
+
+### Section 7: Voice → Transcript → Analysis
+
+- Feature copy: speak naturally, the system handles the rest — live voice interviews, transcribed and analyzed
+- Illustration: audio waveform pulses, resolves into a transcript line, then annotation markers land on it — three stages, one continuous animation
+- Conveys the full pipeline: voice in → transcription → multi-layered analysis
+
+### Section 8: Sample Session
+
+- "See a real evaluation" — brief context (question title, duration, score preview)
+- "View full session" link → `/sample`
+- Opens the real session detail UI with session 27 data and audio replay
+
+### Section 9: Credits
+
+Clean, quiet list at the bottom. No logos, no "powered by" badges. Just what's inside.
+
+- Interviewer — Claude Sonnet
+- Evaluator — Claude Sonnet
+- Educator — Claude Opus
+- Coach — Claude Sonnet
+- Speech-to-text — Whisper
+- Text-to-speech — OpenAI TTS
+- Backend — Go on Google Cloud Run
+- Database — PostgreSQL
+- Payments — Stripe
+
+### Section 10: CTA Repeat
+
+- "Start practicing" primary amber CTA
+- "No credit card required" muted text below
+
+## Session Replay Feature
+
+A general product feature available on any reviewed session and on the sample session.
+
+### Mechanic
+
+- "Replay" button on session detail page (transcript tab)
+- Plays back the interview in real time with speed controls (1x, 1.5x, 2x)
+- Audio plays for both interviewer (TTS) and candidate (recorded) segments
+- Transcript messages appear in sync with audio playback
+- Annotations reveal as their associated message plays
+- Seekable timeline scrubber — jump to any point
+- Play/pause controls
+
+### Data Requirements Per Session
+
+- Ordered audio segments with timestamps (candidate recordings + interviewer TTS)
+- Transcript messages with timestamps
+- Annotations mapped to message indices
+
+### Text-Only Fallback
+
+Sessions without preserved audio still get transcript replay — messages appear in timed sequence without audio playback.
+
+## Sample Session
+
+**URL:** `/sample`
+**Data source:** v0 session 27 (all data present: transcript, evaluation, educator deep dive, coach analysis, candidate audio files, interviewer audio files)
+
+Renders the real session detail UI (overview, transcript, deep dive tabs) with session 27 data. Replay auto-prompts on the transcript tab. Not a marketing mockup — the actual product UI with real data.
+
+Audio files migrated from v0 storage as static assets or GCS objects.
+
+## Show HN Launch Strategy
+
+### Post Format
+
+```
+Show HN: Sabermetric – system design interview practice with real scoring
+
+I built this for myself. I've been prepping for system design interviews
+and wanted practice that actually measured what matters and tightened the
+loop between doing a session and knowing exactly what to work on next.
+
+It's a voice conversation with an AI interviewer, then separate AI roles
+score you across 5 dimensions, annotate your transcript with specific
+strengths and gaps, and generate a deep dive on what you should have
+known — grounded in how real systems work at real companies.
+
+Think Moneyball for interview prep — find the 2% you're missing instead
+of grinding the same generic questions.
+
+Stack: Go on Cloud Run, PostgreSQL, various LLMs handling different
+parts (interviewing, evaluation, education, coaching), Whisper for
+STT, OpenAI TTS for voice responses.
+
+You can explore a real evaluated session here: [sample link]
+
+It's been genuinely helpful for me so I'm sharing it. Free tier
+available. There's a paid plan because LLMs are expensive and I'd
+like to not go broke running it.
+```
+
+### What Appeals to HN
+
+- "I built this for myself and it's been helpful" — not a product launch, just sharing a tool. Most credible framing on HN.
+- Technical architecture as content — which models for which roles, why Go, why River, sparks good comment threads
+- The Moneyball framing — engineers know the reference, it precisely describes the approach
+- Anti-hype tone — say what it does, not what it "revolutionizes"
+- The scoring rubric — posting the 5 dimensions and what a 3 vs 5 looks like generates debate. Debate is free distribution.
+- Real output via sample session — HN commenters will stress-test eval quality and give feedback
+- Honest about costs — "I'd like to not go broke" is refreshing vs startup speak
+- End with genuine feedback request on the hardest problem (evaluation quality)
+
+### What to Avoid on HN
+
+- "AI-powered" in the title
+- Claims about job placement or success rates
+- Comparisons to competitors by name
+- Asking for upvotes
+
+## Product Hunt Launch Strategy
+
+### Timing
+
+After Show HN. Use HN feedback to refine before broader launch. Tuesday-Thursday, early morning PT.
+
+### Materials
+
+- **Tagline:** "The science of system design prep" or "Moneyball for system design interviews"
+- **Gallery (5 images):**
+  1. Hero with brand and tagline
+  2. Scoring dimensions (GIF/video of bars animating)
+  3. Annotated transcript with strength + gap callouts
+  4. Deep dive excerpt — model answer with code
+  5. Coach card with trend and recommendation
+- **Maker comment:** personal story — why you built it for yourself, what you learned, what's next. More emotional than HN, still authentic. Not a product pitch — sharing something useful.
+
+### Conversion
+
+Free tier removes all friction. "Try a session right now, free, no credit card." PH audiences click impulsively — they should be interviewing within 60 seconds of landing.
+
+## Scope Boundaries
+
+**This spec covers:**
+- Landing page (10 sections, scroll-triggered, session 27 data)
+- Sample session (`/sample` with replay)
+- Session replay (general feature)
+- Conversion funnel (landing → signup → free tier → home)
+- Show HN + Product Hunt launch strategy
+- Credits section
+
+**Out of scope (designed elsewhere):**
+- Authenticated home page, interview experience, evaluation, billing — existing UI spec
+- Pricing — existing billing spec
+- Brand identity, domain, taglines — existing naming spec
