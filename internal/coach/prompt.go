@@ -3,6 +3,7 @@ package coach
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -195,7 +196,7 @@ func buildHistorySummary(sessions []db.InterviewSession, evaluations []db.Evalua
 		}
 	}
 	if len(uncovered) > 0 {
-		sortStrings(uncovered)
+		slices.Sort(uncovered)
 		fmt.Fprintf(&sb, "- Uncovered topics: %s\n", strings.Join(uncovered, ", "))
 	} else {
 		sb.WriteString("- All available topics have been attempted\n")
@@ -223,15 +224,6 @@ func sortedKeys(m map[string]bool) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	sortStrings(keys)
+	slices.Sort(keys)
 	return keys
-}
-
-// sortStrings sorts a string slice in place.
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
 }

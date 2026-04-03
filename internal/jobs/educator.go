@@ -81,11 +81,14 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 		return nil
 	}
 
-	// 3. Load question, messages, evaluation.
-	question, err := q.GetQuestion(ctx, session.QuestionID)
-	if err != nil {
-		return fmt.Errorf("get question: %w", err)
+	// 3. Build question from session JOIN data (GetSession already JOINs questions).
+	question := db.Question{
+		ID:         session.QuestionID,
+		Title:      session.QuestionTitle,
+		Prompt:     session.QuestionPrompt,
+		Difficulty: session.QuestionDifficulty,
 	}
+
 	messages, err := q.GetMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get messages: %w", err)

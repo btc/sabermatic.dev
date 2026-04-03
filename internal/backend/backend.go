@@ -77,7 +77,7 @@ func New(cfg *config.Config) (*Backend, error) {
 			jobs.QueueMaintenance:   {MaxWorkers: cfg.River.NumMaintWorkers},
 		},
 		Workers:      workers,
-		ErrorHandler: &jobs.EvalErrorHandler{Pool: pool},
+		ErrorHandler: &jobs.ErrorHandler{Pool: pool},
 		Middleware:   []rivertype.Middleware{&drilotel.JobTracer{}},
 		PeriodicJobs: []*river.PeriodicJob{
 			river.NewPeriodicJob(

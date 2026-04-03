@@ -76,13 +76,22 @@ func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID
 		case "generating":
 			return nil // idempotent
 		case "failed":
-			// Allow retry: update status to generating and re-enqueue.
-			if err := q.UpdateEducatorAnalysisStatus(ctx, db.UpdateEducatorAnalysisStatusParams{
+			// Retry: reset status and enqueue atomically.
+			tx, txErr := b.pool.Begin(ctx)
+			if txErr != nil {
+				return fmt.Errorf("begin retry tx: %w", txErr)
+			}
+			defer tx.Rollback(ctx) //nolint:errcheck
+			if err := db.New(tx).UpdateEducatorAnalysisStatus(ctx, db.UpdateEducatorAnalysisStatusParams{
 				ID:     ea.ID,
 				Status: "generating",
 			}); err != nil {
 				return fmt.Errorf("reset educator status: %w", err)
 			}
+			if _, err := b.jobs.InsertTx(ctx, tx, jobs.GenerateEducatorContentArgs{SessionID: sessionID}, jobs.GenerateEducatorContentInsertOpts()); err != nil {
+				return fmt.Errorf("enqueue educator job: %w", err)
+			}
+			return tx.Commit(ctx)
 		}
 	}
 
