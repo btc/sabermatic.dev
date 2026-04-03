@@ -100,7 +100,13 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 
 		// Build Conductor.
 		conn := &interview.Conn{WS: ws}
-		conductorCtx, conductorCancel := context.WithCancel(r.Context())
+
+		// Conductor-scoped context: NOT derived from request context.
+		// The conductor cancels this on exit to tear down the readLoop.
+		// Server context (r.Context()) is passed separately to Run() for
+		// SIGTERM detection. This prevents a race between handleShutdown
+		// and handleDisconnect when the server shuts down.
+		conductorCtx, conductorCancel := context.WithCancel(context.Background())
 
 		conductor := interview.NewConductor(interview.ConductorParams{
 			WS:        conn,
@@ -114,10 +120,10 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 			Cancel:    conductorCancel,
 		})
 
-		// Launch conductor.Run in goroutine.
-		go conductor.Run(conductorCtx)
+		// Conductor receives the SERVER context for SIGTERM detection.
+		go conductor.Run(r.Context())
 
-		// readLoop blocks this goroutine -- closing msgCh signals the conductor.
+		// readLoop receives the CONDUCTOR context for lifecycle management.
 		readLoop(conductorCtx, ws, conductor.MsgCh(), func() *observer.TokenFanOut {
 			return conductor.Observer()
 		})
