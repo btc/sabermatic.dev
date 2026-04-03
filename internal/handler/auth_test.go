@@ -1,3 +1,7 @@
+// Handler auth tests verify the HTTP contract: status codes, cookies, JSON
+// response shape. Business logic (validation, error types, DB state, job
+// enqueuing) is tested in internal/backend/auth_test.go. Don't duplicate
+// those concerns here — just verify the HTTP wiring.
 package handler_test
 
 import (
