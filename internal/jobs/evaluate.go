@@ -196,21 +196,25 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 		return fmt.Errorf("set reviewed status: %w", err)
 	}
 
-	// 12. Enqueue email with pre-rendered HTML.
-	user, err := txq.GetUserByID(ctx, session.UserID)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
-	}
+	// 12. Enqueue email with pre-rendered HTML (skipped if Jobs client not wired).
+	if w.Jobs != nil {
+		user, err := txq.GetUserByID(ctx, session.UserID)
+		if err != nil {
+			return fmt.Errorf("get user: %w", err)
+		}
 
-	htmlBody := renderEvaluationEmail(question.Title, result)
-	_, err = w.Jobs.InsertTx(ctx, tx, SendEmailArgs{
-		To:      user.Email,
-		Subject: fmt.Sprintf("Evaluation: %s", question.Title),
-		Text:    fmt.Sprintf("Your evaluation for %q is ready. View it in the app.", question.Title),
-		HTML:    htmlBody,
-	}, SendEmailInsertOpts(&config.Email{}))
-	if err != nil {
-		return fmt.Errorf("enqueue send_email: %w", err)
+		htmlBody := renderEvaluationEmail(question.Title, result)
+		_, err = w.Jobs.InsertTx(ctx, tx, SendEmailArgs{
+			To:      user.Email,
+			Subject: fmt.Sprintf("Evaluation: %s", question.Title),
+			Text:    fmt.Sprintf("Your evaluation for %q is ready. View it in the app.", question.Title),
+			HTML:    htmlBody,
+		}, SendEmailInsertOpts(&config.Email{}))
+		if err != nil {
+			return fmt.Errorf("enqueue send_email: %w", err)
+		}
+	} else {
+		slog.Warn("Jobs client not set, skipping email enqueue", "session_id", sessionID)
 	}
 
 	// 13. Commit.
