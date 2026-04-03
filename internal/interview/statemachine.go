@@ -20,7 +20,7 @@ const (
 
 var transitions = map[ConductorState]map[ConductorState]bool{
 	StateInterviewerSpeaking: {StateWaitingForInput: true, StateEnding: true},
-	StateWaitingForInput:     {StateTranscribing: true, StateProcessingInput: true, StateEnding: true},
+	StateWaitingForInput:     {StateInterviewerSpeaking: true, StateTranscribing: true, StateProcessingInput: true, StateEnding: true},
 	StateTranscribing:        {StateProcessingInput: true, StateEnding: true},
 	StateProcessingInput:     {StateInterviewerSpeaking: true, StateEnding: true},
 	StateEnding:              {StateEnded: true},

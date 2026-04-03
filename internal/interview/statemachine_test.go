@@ -16,6 +16,7 @@ func TestStateMachine_ValidTransitions(t *testing.T) {
 	}{
 		{"speaking to waiting", interview.StateInterviewerSpeaking, interview.StateWaitingForInput},
 		{"speaking to ending", interview.StateInterviewerSpeaking, interview.StateEnding},
+		{"waiting to speaking", interview.StateWaitingForInput, interview.StateInterviewerSpeaking},
 		{"waiting to transcribing", interview.StateWaitingForInput, interview.StateTranscribing},
 		{"waiting to processing", interview.StateWaitingForInput, interview.StateProcessingInput},
 		{"waiting to ending", interview.StateWaitingForInput, interview.StateEnding},
@@ -42,7 +43,7 @@ func TestStateMachine_InvalidTransitions(t *testing.T) {
 		to   interview.ConductorState
 	}{
 		{"ended is terminal", interview.StateEnded, interview.StateWaitingForInput},
-		{"waiting cannot go to speaking", interview.StateWaitingForInput, interview.StateInterviewerSpeaking},
+		{"waiting cannot go to ended", interview.StateWaitingForInput, interview.StateEnded},
 		{"transcribing cannot go to waiting", interview.StateTranscribing, interview.StateWaitingForInput},
 		{"speaking cannot go to processing", interview.StateInterviewerSpeaking, interview.StateProcessingInput},
 		{"ending cannot go to waiting", interview.StateEnding, interview.StateWaitingForInput},
