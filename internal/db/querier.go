@@ -23,23 +23,32 @@ type Querier interface {
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
+	GetEducatorAnalysisBySession(ctx context.Context, sessionID uuid.UUID) (EducatorAnalysis, error)
 	GetEvaluationBySession(ctx context.Context, sessionID uuid.UUID) (Evaluation, error)
+	GetEvaluationsBySessionIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Evaluation, error)
+	GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (CoachAnalysis, error)
 	GetMaxSeqForSession(ctx context.Context, sessionID uuid.UUID) (int32, error)
 	GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]Message, error)
 	GetMessagesBySessionAfterSeq(ctx context.Context, arg GetMessagesBySessionAfterSeqParams) ([]Message, error)
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
+	GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]Question, error)
+	GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+	GetReviewedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]InterviewSession, error)
 	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
 	InsertAnnotation(ctx context.Context, arg InsertAnnotationParams) error
+	InsertCoachAnalysis(ctx context.Context, arg InsertCoachAnalysisParams) (uuid.UUID, error)
+	InsertEducatorAnalysis(ctx context.Context, sessionID uuid.UUID) (uuid.UUID, error)
 	InsertEvaluation(ctx context.Context, arg InsertEvaluationParams) (uuid.UUID, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (uuid.UUID, error)
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
+	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
@@ -50,6 +59,8 @@ type Querier interface {
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
+	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
+	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
 	UpdateSessionStatus(ctx context.Context, arg UpdateSessionStatusParams) error
 	// NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
 	// Used for status transitions after session completion (evaluating → reviewed,

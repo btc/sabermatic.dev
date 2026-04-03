@@ -55,3 +55,13 @@ RETURNING id;
 UPDATE interview_sessions
 SET status = $2, updated_at = NOW()
 WHERE id = $1;
+
+-- name: GetReviewedSessionsForUser :many
+SELECT * FROM interview_sessions
+WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+ORDER BY created_at;
+
+-- name: GetReviewedSessionIDsForUser :many
+SELECT id FROM interview_sessions
+WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+ORDER BY created_at;

@@ -23,3 +23,9 @@ FROM annotations a
 JOIN messages m ON m.id = a.message_id
 WHERE a.evaluation_id = $1
 ORDER BY m.seq, a.annotation_type;
+
+-- name: GetEvaluationsBySessionIDs :many
+SELECT id, session_id, score_requirements, score_architecture,
+       score_deep_dive, score_scalability, score_communication,
+       score_overall, strengths, gaps, advice, created_at
+FROM evaluations WHERE session_id = ANY($1::uuid[]);

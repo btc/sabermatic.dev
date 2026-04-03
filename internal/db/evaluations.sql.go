@@ -83,6 +83,46 @@ func (q *Queries) GetEvaluationBySession(ctx context.Context, sessionID uuid.UUI
 	return i, err
 }
 
+const getEvaluationsBySessionIDs = `-- name: GetEvaluationsBySessionIDs :many
+SELECT id, session_id, score_requirements, score_architecture,
+       score_deep_dive, score_scalability, score_communication,
+       score_overall, strengths, gaps, advice, created_at
+FROM evaluations WHERE session_id = ANY($1::uuid[])
+`
+
+func (q *Queries) GetEvaluationsBySessionIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Evaluation, error) {
+	rows, err := q.db.Query(ctx, getEvaluationsBySessionIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Evaluation
+	for rows.Next() {
+		var i Evaluation
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ScoreRequirements,
+			&i.ScoreArchitecture,
+			&i.ScoreDeepDive,
+			&i.ScoreScalability,
+			&i.ScoreCommunication,
+			&i.ScoreOverall,
+			&i.Strengths,
+			&i.Gaps,
+			&i.Advice,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertAnnotation = `-- name: InsertAnnotation :exec
 INSERT INTO annotations (evaluation_id, message_id, annotation_type, content)
 VALUES ($1, $2, $3, $4)

@@ -17,3 +17,13 @@ SELECT id, user_id, title, prompt, difficulty, tags, hints, source, created_at
 FROM questions
 WHERE (source = 'seed' AND user_id IS NULL) OR user_id = $1
 ORDER BY created_at;
+
+-- name: GetQuestionsForUser :many
+SELECT * FROM questions
+WHERE user_id IS NULL OR user_id = $1
+ORDER BY created_at;
+
+-- name: InsertQuestion :one
+INSERT INTO questions (user_id, title, prompt, difficulty, tags, source, coach_rationale)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id;
