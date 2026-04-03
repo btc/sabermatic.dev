@@ -28,18 +28,18 @@ type CreateSessionParams struct {
 
 // CreateSession creates a new interview session after validating duration and
 // verifying the question exists.
-func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.InterviewSession, error) {
+func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.CreateSessionRow, error) {
 	if p.DurationMinutes < 1 || p.DurationMinutes > 180 {
-		return db.InterviewSession{}, ErrInvalidDuration
+		return db.CreateSessionRow{}, ErrInvalidDuration
 	}
 
 	queries := db.New(b.pool)
 
 	if _, err := queries.GetQuestion(ctx, p.QuestionID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.InterviewSession{}, ErrQuestionNotFound
+			return db.CreateSessionRow{}, ErrQuestionNotFound
 		}
-		return db.InterviewSession{}, fmt.Errorf("get question: %w", err)
+		return db.CreateSessionRow{}, fmt.Errorf("get question: %w", err)
 	}
 
 	session, err := queries.CreateSession(ctx, db.CreateSessionParams{
@@ -49,7 +49,7 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 		ConfigTtsEnabled:      p.TTSEnabled,
 	})
 	if err != nil {
-		return db.InterviewSession{}, fmt.Errorf("create session: %w", err)
+		return db.CreateSessionRow{}, fmt.Errorf("create session: %w", err)
 	}
 	return session, nil
 }
