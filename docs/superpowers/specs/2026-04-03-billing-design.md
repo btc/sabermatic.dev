@@ -25,12 +25,15 @@
 | Multi-grant debit | Single code path | FIFO walk handles one grant (base case) and multiple grants (general case) identically. No branching. |
 | Existing `usage_periods` table | Superseded by grants + ledger | The ledger provides strictly more granularity. Migration drops `usage_periods`. |
 | `users.plan` column | Kept, updated by webhooks | Quick read for feature gates without joining grants. Webhook sets to plan name on subscription create/change, resets to `free` on subscription delete. |
+| Free grant creation | Lazy (on first session of month), not cron | Simpler than a periodic River job. No missed-execution risk. Protected against races by a partial unique index. |
+| Concurrent sessions limit | 3 for pro (changed from 2 in original spec) | More generous limit appropriate for a platform where sessions can be short. |
+| Billing unit vs FR-008 | Minutes replace "sessions per month" | Original FR-008 specified sessions/month. Minutes are a strictly better unit — they correlate with actual cost and allow variable session lengths. The original requirement's intent (limit usage per period) is preserved. |
 
 ---
 
 ## 2. Data Model
 
-### New Tables (migration `004_billing.up.sql`)
+### New Tables (next available migration, e.g. `NNN_billing.up.sql`)
 
 ```sql
 CREATE TABLE grants (
@@ -42,11 +45,20 @@ CREATE TABLE grants (
     initial_minutes   INT NOT NULL CHECK (initial_minutes > 0),
     remaining_minutes INT NOT NULL CHECK (remaining_minutes >= 0),
     expires_at        TIMESTAMPTZ,  -- NULL = never expires
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (remaining_minutes <= initial_minutes)
 );
 
 CREATE INDEX idx_grants_user_balance ON grants(user_id)
     WHERE remaining_minutes > 0;
+
+-- Prevents duplicate free grants per calendar month per user.
+CREATE UNIQUE INDEX idx_grants_free_per_month
+    ON grants(user_id, date_trunc('month', created_at))
+    WHERE source = 'free_grant';
+
+CREATE INDEX idx_users_stripe_customer ON users(stripe_customer_id)
+    WHERE stripe_customer_id IS NOT NULL;
 
 CREATE TABLE ledger_entries (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -56,8 +68,7 @@ CREATE TABLE ledger_entries (
     reason      TEXT NOT NULL
                 CHECK (reason IN (
                     'free_monthly', 'subscription_renewal', 'purchase', 'admin_grant',
-                    'session_reserve', 'session_refund', 'session_settle', 'error_refund',
-                    'expiry_void'
+                    'session_reserve', 'session_refund', 'error_refund'
                 )),
     session_id  UUID REFERENCES interview_sessions(id),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -101,7 +112,7 @@ grants: source=free_grant, initial_minutes=60, remaining_minutes=60, expires_at=
 ledger: amount=+60, reason=free_monthly
 ```
 
-Triggered by: a River periodic job that runs monthly, or lazily on first session of the month (check if current-month free grant exists, create if not). Lazy approach is simpler — no cron job, no missed-execution risk.
+Triggered lazily on first session of the month (or on signup). `CreateFreeGrant` uses `ON CONFLICT DO NOTHING` against the partial unique index `idx_grants_free_per_month`, so concurrent calls are race-safe — one wins, the other gets a no-op. No cron job needed.
 
 ### Subscription Grant
 
@@ -112,7 +123,7 @@ grants: source=subscription, initial_minutes=per_plan_config, remaining_minutes=
 ledger: amount=+N, reason=subscription_renewal
 ```
 
-Idempotent via `stripe_event_id` UNIQUE constraint.
+Idempotent via `stripe_event_id` UNIQUE constraint. Grant creation and ledger insertion execute within a single database transaction — if either fails, neither persists. On Stripe retry, `ON CONFLICT DO NOTHING` returns no rows and the caller treats it as already-processed success.
 
 ### Purchase Grant
 
@@ -123,7 +134,7 @@ grants: source=purchase, initial_minutes=per_pack_config, remaining_minutes=same
 ledger: amount=+N, reason=purchase
 ```
 
-Idempotent via `stripe_event_id` UNIQUE constraint.
+Idempotent via `stripe_event_id` UNIQUE constraint. Same transactional guarantee as subscription grants.
 
 ### Admin Grant
 
@@ -156,6 +167,7 @@ const (
     Full
 )
 
+// Map key is the programmatic identifier (stored in users.plan). Name is the display label.
 var Plans = map[string]Plan{
     "free": {
         Name:               "Free",
@@ -187,10 +199,11 @@ type MinutePack struct {
     StripePriceID string
 }
 
-var MinutePacks = []MinutePack{
-    {Minutes: 120, StripePriceID: "price_pack_120"},
-    {Minutes: 300, StripePriceID: "price_pack_300"},
-    {Minutes: 600, StripePriceID: "price_pack_600"},
+// Keyed by minute count for stable API lookup (client sends {minutes: 120}, not an array index).
+var MinutePacks = map[int]MinutePack{
+    120: {Minutes: 120, StripePriceID: "price_pack_120"},
+    300: {Minutes: 300, StripePriceID: "price_pack_300"},
+    600: {Minutes: 600, StripePriceID: "price_pack_600"},
 }
 ```
 
@@ -211,8 +224,8 @@ All price IDs configured via environment or hardcoded — code deploy to change.
 
 ### Checkout Flow
 
-1. Client sends `POST /api/billing/checkout` with `{type: "subscription", plan: "pro"}` or `{type: "pack", pack_index: 0}`.
-2. Handler looks up Stripe price ID from plan config or pack config.
+1. Client sends `POST /api/billing/checkout` with `{type: "subscription", plan: "pro"}` or `{type: "pack", minutes: 120}`.
+2. Handler looks up Stripe price ID from plan config or pack config (keyed by minute count, not array index — stable across reordering).
 3. If user has no `stripe_customer_id`, create a Stripe Customer and store it.
 4. Create `stripe.Checkout.Session` with:
    - `customer`: user's Stripe customer ID
@@ -226,9 +239,10 @@ All price IDs configured via environment or hardcoded — code deploy to change.
 
 Handler verifies Stripe signature, parses event, dispatches by type:
 
-**`checkout.session.completed`** (mode=payment only — one-time packs):
-1. Extract `user_id` and `pack_minutes` from metadata.
-2. Create grant + ledger entry. Idempotent via `stripe_event_id`.
+**`checkout.session.completed`**:
+1. Check `session.mode`. If not `"payment"`, return 200 (subscription grants are handled by `invoice.paid`, not here).
+2. Extract `user_id` and `pack_minutes` from metadata.
+3. Create grant + ledger entry in a single transaction. Idempotent via `stripe_event_id`.
 
 **`invoice.paid`** (subscriptions — initial and renewal):
 1. Look up user by `stripe_customer_id`.
@@ -250,8 +264,9 @@ All other events: log and return 200 (ignore gracefully).
 ### Portal Flow
 
 1. Client sends `POST /api/billing/portal`.
-2. Handler creates `stripe.BillingPortal.Session` with user's `stripe_customer_id`.
-3. Return `{url: session.URL}` — client redirects.
+2. If user has no `stripe_customer_id` → return 400 `{"error": "no_billing_account", "message": "No billing account. Subscribe or purchase minutes first."}`.
+3. Handler creates `stripe.BillingPortal.Session` with user's `stripe_customer_id`.
+4. Return `{url: session.URL}` — client redirects.
 
 ---
 
@@ -283,11 +298,14 @@ All other events: log and return 200 (ignore gracefully).
 ### Session Completion (conductor end-of-session)
 
 ```
-1. actual_minutes = ceil((end_time - start_time) / 60)
+1. actual_minutes = ceil((ended_at - started_at) / 60)  -- wall-clock time
 2. refund = reserved_minutes - actual_minutes
 3. If refund > 0:
-   a. Credit back to same grant(s), reverse order
-   b. INSERT ledger_entries (reason: session_refund)
+   a. Query ledger_entries WHERE session_id = $1 AND reason = 'session_reserve'
+      to reconstruct per-grant reservation amounts.
+   b. Walk grants in reverse order, credit back up to each grant's original
+      debit amount until refund is fully distributed.
+   c. INSERT ledger_entry per grant credited (reason: session_refund)
 ```
 
 Reserved minutes stored on `interview_sessions.reserved_minutes` (added in migration).
@@ -305,11 +323,18 @@ Reserved minutes stored on `interview_sessions.reserved_minutes` (added in migra
 
 ```
 1. Has non-free grant with remaining > 0? → generate full analysis
-2. No paid balance + free_full_educators_used < plan.FreeEducatorLimit? → generate full, increment counter
+2. No paid balance? → attempt atomic increment:
+   UPDATE users SET free_full_educators_used = free_full_educators_used + 1
+   WHERE id = $1 AND free_full_educators_used < $limit
+   RETURNING free_full_educators_used
+   If row returned → generate full analysis (free taste)
+   If zero rows → generate preview
 3. Otherwise → generate preview (shorter prompt, teaser output)
 ```
 
 Preview prompt generates a brief summary highlighting 2-3 key areas, with a note that full deep-dive analysis is available to paid users.
+
+**Note:** Educator access is balance-based, not plan-based. A pro user who has exhausted all purchased and subscription minutes (paid balance = 0) will see the preview, even though `users.plan = "pro"`. This is intentional — it creates a natural nudge to purchase more minutes. The user's subscription will renew and restore access on the next billing cycle.
 
 ### Coach Access (`POST /api/coach/analyze`, `GET /api/coach/latest`)
 
@@ -369,6 +394,8 @@ WHERE id = $1
 RETURNING remaining_minutes;
 ```
 
+The `remaining_minutes >= $2` guard is defense-in-depth. Under normal operation, the grant is already locked via `FOR UPDATE` in `SelectGrantsForReservation`, so concurrent modification is impossible. If `DebitGrant` returns zero rows despite the lock, it indicates a logic bug in the FIFO walk — the caller must roll back the transaction and return an internal error.
+
 ### Credit Grant (refund)
 
 ```sql
@@ -376,8 +403,11 @@ RETURNING remaining_minutes;
 UPDATE grants
 SET remaining_minutes = remaining_minutes + $2
 WHERE id = $1
+  AND remaining_minutes + $2 <= initial_minutes
 RETURNING remaining_minutes;
 ```
+
+The `remaining_minutes + $2 <= initial_minutes` guard (backed by the table-level CHECK constraint) prevents refunds from exceeding the original grant size. Zero rows returned indicates a bug — caller must roll back.
 
 ### Insert Ledger Entry
 
@@ -400,16 +430,18 @@ RETURNING *;
 
 Returns no rows if the `stripe_event_id` already exists (duplicate webhook delivery). Caller checks for empty result and treats as success. Not used for free grants — those use `GetFreeGrantForMonth` as their idempotency check.
 
-### Create Free Grant
+### Create Free Grant (idempotent via partial unique index)
 
 ```sql
 -- name: CreateFreeGrant :one
 INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
 VALUES ($1, 'free_grant', $2, $2, $3)
+ON CONFLICT (user_id, date_trunc('month', created_at)) WHERE source = 'free_grant'
+DO NOTHING
 RETURNING *;
 ```
 
-Called only after `GetFreeGrantForMonth` confirms no grant exists for the current period.
+Returns no rows if a free grant already exists for this calendar month (protected by `idx_grants_free_per_month`). Race-safe — concurrent calls both attempt the insert, one wins, the other gets a no-op.
 
 ### Check Free Grant Exists for Period
 
@@ -418,9 +450,68 @@ Called only after `GetFreeGrantForMonth` confirms no grant exists for the curren
 SELECT id FROM grants
 WHERE user_id = $1
   AND source = 'free_grant'
-  AND created_at >= $2
-  AND created_at < $3
+  AND expires_at = $2
 LIMIT 1;
+```
+
+Uses `expires_at` (end of month) as the period identifier rather than `created_at` ranges, since free grants are semantically defined by when they expire.
+
+### Get User by Stripe Customer ID (webhook lookup)
+
+```sql
+-- name: GetUserByStripeCustomerID :one
+SELECT * FROM users
+WHERE stripe_customer_id = $1 AND deleted_at IS NULL;
+```
+
+### Update User Plan
+
+```sql
+-- name: UpdateUserPlan :exec
+UPDATE users SET plan = $2, updated_at = NOW() WHERE id = $1;
+```
+
+### Increment Free Educator Counter (atomic)
+
+```sql
+-- name: IncrementFreeEducatorUsed :one
+UPDATE users
+SET free_full_educators_used = free_full_educators_used + 1
+WHERE id = $1 AND free_full_educators_used < $2
+RETURNING free_full_educators_used;
+```
+
+### List Active Grants (for usage endpoint)
+
+```sql
+-- name: ListActiveGrants :many
+SELECT id, source, initial_minutes, remaining_minutes, expires_at, created_at
+FROM grants
+WHERE user_id = $1
+  AND remaining_minutes > 0
+  AND (expires_at IS NULL OR expires_at > NOW())
+ORDER BY expires_at ASC NULLS LAST;
+```
+
+### Get Recent Ledger Entries (for usage endpoint)
+
+```sql
+-- name: GetRecentLedgerEntries :many
+SELECT amount, reason, session_id, created_at
+FROM ledger_entries
+WHERE user_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
+```
+
+### Get Session Reservation Ledger Entries (for refund reconstruction)
+
+```sql
+-- name: GetSessionReservationEntries :many
+SELECT grant_id, amount
+FROM ledger_entries
+WHERE session_id = $1 AND reason = 'session_reserve'
+ORDER BY created_at DESC;
 ```
 
 ### Get User Usage Summary
@@ -451,13 +542,13 @@ internal/
                       # GetBalance, GetUsageSummary, EnsureFreeGrant
   handler/
     billing.go        # PostCheckout, PostPortal, PostStripeWebhook, GetUsage
-  db/queries/
-    grants.sql        # All grant queries from Section 7
-    ledger.sql        # Ledger insert + query by user/session
+sql/queries/
+  grants.sql          # All grant queries from Section 7
+  ledger.sql          # Ledger insert + query by user/session
 cmd/drill/
   migrations/
-    004_billing.up.sql    # grants, ledger_entries, alter users, drop usage_periods
-    004_billing.down.sql
+    NNN_billing.up.sql    # grants, ledger_entries, alter users, drop usage_periods
+    NNN_billing.down.sql  # (NNN = next available migration number)
 ```
 
 ### Integration Points (changes to existing code)
@@ -510,7 +601,7 @@ cmd/drill/
 
 ### `POST /api/billing/checkout`
 
-Request: `{"type": "subscription", "plan": "pro"}` or `{"type": "pack", "pack_index": 0}`
+Request: `{"type": "subscription", "plan": "pro"}` or `{"type": "pack", "minutes": 120}`
 Response: `{"url": "https://checkout.stripe.com/..."}`
 
 ### `POST /api/billing/portal`
@@ -535,7 +626,7 @@ Response: `{"url": "https://billing.stripe.com/..."}`
 | FR | Requirement | Design |
 |---|---|---|
 | FR-007 | Plan structures modifiable without architectural changes | Plans are a Go map compiled into the binary. Code deploy to change, no schema changes. See Section 4. |
-| FR-008 | Plans gate sessions/month, duration, features, concurrency | Minutes-based gating via grant balance. Duration validated against plan max. Coach/educator gated by paid balance. Concurrent sessions via COUNT(active). See Section 6. |
+| FR-008 | Plans gate sessions/month, duration, features, concurrency | **Changed from sessions/month to minutes/month** — minutes correlate with actual cost and allow variable session lengths, preserving the original intent (limit usage per period). Duration validated against plan max. Coach/educator gated by paid balance. Concurrent sessions via COUNT(active). See Section 6. |
 | FR-009 | Free tier same quality as paid | Same AI model, prompts, voice I/O. Only minute allowance and feature access differ. |
 | FR-010 | Educator: full for paid, preview for free | Paid balance → full. Free tier gets one full analysis (conversion hook), then preview via shorter prompt. See Section 6. |
 | FR-011 | Real-time entitlement enforcement | Reserve minutes atomically at session creation via SELECT FOR UPDATE + decrement. 403 with balance info if insufficient. See Section 6. |
@@ -548,12 +639,12 @@ Response: `{"url": "https://billing.stripe.com/..."}`
 New environment variables:
 
 ```
-STRIPE_SECRET_KEY       # Stripe API key
-STRIPE_WEBHOOK_SECRET   # Webhook endpoint signing secret
-STRIPE_PRO_PRICE_ID     # Price ID for pro subscription
-STRIPE_PACK_120_PRICE   # Price ID for 120-minute pack
-STRIPE_PACK_300_PRICE   # Price ID for 300-minute pack
-STRIPE_PACK_600_PRICE   # Price ID for 600-minute pack
+STRIPE_SECRET_KEY          # Stripe API key
+STRIPE_WEBHOOK_SECRET      # Webhook endpoint signing secret
+STRIPE_PRO_PRICE_ID        # Price ID for pro subscription
+STRIPE_PACK_120_PRICE_ID   # Price ID for 120-minute pack
+STRIPE_PACK_300_PRICE_ID   # Price ID for 300-minute pack
+STRIPE_PACK_600_PRICE_ID   # Price ID for 600-minute pack
 ```
 
 Added to `internal/config/config.go` as a `Stripe` sub-struct.
