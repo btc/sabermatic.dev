@@ -23,6 +23,12 @@ var (
 	ErrNotEvaluationFailed = fmt.Errorf("session is not in evaluation_failed status")
 	ErrAlreadyExists       = fmt.Errorf("educator analysis already exists")
 	ErrNoNewSessions       = fmt.Errorf("no new sessions since last analysis")
+
+	ErrInsufficientBalance    = fmt.Errorf("insufficient minute balance")
+	ErrConcurrentSessionLimit = fmt.Errorf("concurrent session limit reached")
+	ErrDurationExceedsPlan    = fmt.Errorf("duration exceeds plan maximum")
+	ErrNoPaidBalance          = fmt.Errorf("paid minute balance required")
+	ErrNoStripeAccount        = fmt.Errorf("no billing account")
 )
 
 // ValidatePasswordLength returns ErrPasswordLength if the password is too short or too long.
