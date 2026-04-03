@@ -14,7 +14,6 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/interview"
-	"github.com/btc/drill/internal/interview/observer"
 )
 
 // SessionWS returns a handler that upgrades to WebSocket and runs the interview conductor.
@@ -98,18 +97,9 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		// Build Conductor.
-		conn := &interview.Conn{WS: ws}
-
-		// Conductor-scoped context: NOT derived from request context.
-		// The conductor cancels this on exit to tear down the readLoop.
-		// Server context (r.Context()) is passed separately to Run() for
-		// SIGTERM detection. This prevents a race between handleShutdown
-		// and handleDisconnect when the server shuts down.
-		conductorCtx, conductorCancel := context.WithCancel(context.Background())
-
+		// Hand everything to the conductor. Run blocks until done.
 		conductor := interview.NewConductor(interview.ConductorParams{
-			WS:        conn,
+			WS:        ws,
 			Backend:   b,
 			LockConn:  lockConn,
 			SessionID: sessionID,
@@ -117,46 +107,7 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 			InitMsg:   initMsg,
 			Model:     b.Config().LLM.InterviewerModel,
 			Duration:  time.Duration(session.ConfigDurationMinutes) * time.Minute,
-			Cancel:    conductorCancel,
 		})
-
-		// Conductor receives the SERVER context for SIGTERM detection.
-		go conductor.Run(r.Context())
-
-		// readLoop receives the CONDUCTOR context for lifecycle management.
-		readLoop(conductorCtx, ws, conductor.MsgCh(), func() *observer.TokenFanOut {
-			return conductor.Observer()
-		})
-	}
-}
-
-// readLoop reads messages from the WebSocket and forwards them to the conductor.
-// On error (disconnect), it closes msgCh to signal the conductor.
-func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WSMessage, observerFn func() *observer.TokenFanOut) {
-	defer close(msgCh)
-	for {
-		_, data, err := ws.Read(ctx)
-		if err != nil {
-			return
-		}
-		msg, err := interview.ParseWSMessage(data)
-		if err != nil {
-			errJSON, _ := json.Marshal(map[string]string{
-				"type":    "error",
-				"code":    "malformed_message",
-				"message": err.Error(),
-			})
-			ws.Write(ctx, websocket.MessageText, errJSON)
-			continue
-		}
-		if msg.Type == "cancel_tts" {
-			observerFn().Interrupt()
-			continue
-		}
-		select {
-		case msgCh <- msg:
-		case <-ctx.Done():
-			return
-		}
+		conductor.Run(r.Context())
 	}
 }

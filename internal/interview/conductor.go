@@ -2,11 +2,13 @@ package interview
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"math"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,7 +29,7 @@ var (
 
 // ConductorParams holds the dependencies for constructing a Conductor.
 type ConductorParams struct {
-	WS        observer.WSConn
+	WS        *websocket.Conn
 	Backend   *backend.Backend
 	LockConn  *pgxpool.Conn
 	SessionID uuid.UUID
@@ -35,7 +37,6 @@ type ConductorParams struct {
 	InitMsg   WSMessage
 	Model     string
 	Duration  time.Duration
-	Cancel    context.CancelFunc
 }
 
 // Conductor owns all mutable state for one active interview session.
@@ -44,7 +45,8 @@ type Conductor struct {
 	sm     *StateMachine
 	msgCh  chan WSMessage
 	cancel context.CancelFunc
-	ws     observer.WSConn
+	rawWS  *websocket.Conn    // raw WebSocket for reading (readLoop)
+	ws     observer.WSConn    // wrapped WebSocket for writing (SendJSON/Close)
 	b        *backend.Backend
 	lockConn *pgxpool.Conn
 	obs      atomic.Pointer[observer.TokenFanOut]
@@ -68,9 +70,9 @@ type Conductor struct {
 // NewConductor constructs a Conductor from the given params.
 func NewConductor(p ConductorParams) *Conductor {
 	c := &Conductor{
-		msgCh:  make(chan WSMessage),
-		cancel: p.Cancel,
-		ws:     p.WS,
+		msgCh:     make(chan WSMessage),
+		rawWS:     p.WS,
+		ws:        &Conn{WS: p.WS},
 		b:         p.Backend,
 		lockConn:  p.LockConn,
 		model:     p.Model,
@@ -83,44 +85,51 @@ func NewConductor(p ConductorParams) *Conductor {
 	return c
 }
 
-// MsgCh returns the channel that the read loop sends messages to.
-func (c *Conductor) MsgCh() chan WSMessage { return c.msgCh }
-
-// Observer returns the current TokenFanOut (never nil; Noop between turns).
-func (c *Conductor) Observer() *observer.TokenFanOut { return c.obs.Load() }
-
-// Run is the main loop for the conductor goroutine. It loads session state,
-// streams the opening if needed, then processes messages until exit.
-func (c *Conductor) Run(ctx context.Context) {
+// Run is the single entry point for the conductor. It owns the readLoop
+// lifecycle, loads session state, streams the opening if needed, then
+// processes messages until exit. Run blocks until the session ends.
+func (c *Conductor) Run(serverCtx context.Context) {
 	defer c.cleanup()
 
-	if err := c.loadSession(ctx); err != nil {
+	// Conductor owns its readLoop lifecycle.
+	readCtx, readCancel := context.WithCancel(context.Background())
+	c.cancel = readCancel
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.readLoop(readCtx)
+	}()
+	defer wg.Wait() // ensure readLoop exits before Run returns (no goroutine leak)
+
+	if err := c.loadSession(serverCtx); err != nil {
 		slog.Error("conductor: load session", "error", err, "session_id", c.sessionID)
-		_ = c.ws.SendJSON(ctx, map[string]string{"type": "error", "code": "load_failed", "message": "failed to load session"})
+		_ = c.ws.SendJSON(serverCtx, map[string]string{"type": "error", "code": "load_failed", "message": "failed to load session"})
 		return
 	}
 
 	isReconnect := len(c.messages) > 0 && c.initMsg.LastSeq != nil
 
 	if isReconnect {
-		if err := c.sendReconnectState(ctx); err != nil {
+		if err := c.sendReconnectState(serverCtx); err != nil {
 			slog.Error("conductor: send reconnect state", "error", err, "session_id", c.sessionID)
 			return
 		}
 	} else {
-		if err := c.sendSessionLoaded(ctx); err != nil {
+		if err := c.sendSessionLoaded(serverCtx); err != nil {
 			slog.Error("conductor: send session_loaded", "error", err, "session_id", c.sessionID)
 			return
 		}
 		// Stream interviewer opening for new sessions.
-		if err := c.streamInterviewerResponse(ctx); err != nil {
+		if err := c.streamInterviewerResponse(serverCtx); err != nil {
 			slog.Error("conductor: opening stream", "error", err, "session_id", c.sessionID)
 			return
 		}
 	}
 
-	c.initTimers(ctx)
-	c.selectLoop(ctx)
+	c.initTimers(serverCtx)
+	c.selectLoop(serverCtx)
 }
 
 // loadSession loads the session, question, and existing messages from DB.
@@ -530,6 +539,35 @@ func (c *Conductor) sendStateError(ctx context.Context, err error) error {
 		"code":    "invalid_state_transition",
 		"message": err.Error(),
 	})
+}
+
+// readLoop reads messages from the raw WebSocket and forwards them to msgCh.
+// On error (disconnect), it closes msgCh to signal the conductor's selectLoop.
+func (c *Conductor) readLoop(ctx context.Context) {
+	defer close(c.msgCh)
+	for {
+		_, data, err := c.rawWS.Read(ctx)
+		if err != nil {
+			return
+		}
+		msg, err := ParseWSMessage(data)
+		if err != nil {
+			errJSON, _ := json.Marshal(map[string]string{
+				"type": "error", "code": "malformed_message", "message": err.Error(),
+			})
+			c.rawWS.Write(ctx, websocket.MessageText, errJSON)
+			continue
+		}
+		if msg.Type == "cancel_tts" {
+			c.obs.Load().Interrupt()
+			continue
+		}
+		select {
+		case c.msgCh <- msg:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // cleanup closes the WebSocket and releases the advisory lock connection.
