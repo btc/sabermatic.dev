@@ -109,6 +109,15 @@ func New(cfg *config.Config) (*Backend, error) {
 // Backend is constructed manually (without New).
 func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 
+// SetLLM overrides the LLM client. Used in tests to inject a fake.
+func (b *Backend) SetLLM(c *ai.Client) { b.llm = c }
+
+// SetSTT overrides the STT transcriber. Used in tests to inject a fake.
+func (b *Backend) SetSTT(s ai.Transcriber) { b.stt = s }
+
+// SetTTS overrides the TTS synthesizer. Used in tests to inject a fake.
+func (b *Backend) SetTTS(s ai.Synthesizer) { b.tts = s }
+
 // Config returns the Backend's configuration.
 func (b *Backend) Config() *config.Config { return b.cfg }
 
