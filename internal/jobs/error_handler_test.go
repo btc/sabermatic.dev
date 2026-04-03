@@ -15,7 +15,7 @@ import (
 	"github.com/btc/drill/internal/jobs"
 )
 
-func TestEvalErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
+func TestErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -44,7 +44,7 @@ func TestEvalErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
 		EncodedArgs: encodedArgs,
 	}
 
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	handler.HandleError(ctx, jobRow, fmt.Errorf("some LLM error"))
 
 	// Assert: session status is now evaluation_failed.
@@ -53,7 +53,7 @@ func TestEvalErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
 	assert.Equal(t, "evaluation_failed", session.Status)
 }
 
-func TestEvalErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
+func TestErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -82,7 +82,7 @@ func TestEvalErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
 		EncodedArgs: encodedArgs,
 	}
 
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	handler.HandleError(ctx, jobRow, fmt.Errorf("transient error"))
 
 	// Assert: session status is still "evaluating" (unchanged).
@@ -91,7 +91,7 @@ func TestEvalErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
 	assert.Equal(t, "evaluating", session.Status)
 }
 
-func TestEvalErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
+func TestErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -120,7 +120,7 @@ func TestEvalErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
 		EncodedArgs: encodedArgs,
 	}
 
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	handler.HandleError(ctx, jobRow, fmt.Errorf("email error"))
 
 	// Assert: session status is still "evaluating" (no change for non-evaluate_session).
@@ -129,7 +129,7 @@ func TestEvalErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
 	assert.Equal(t, "evaluating", session.Status)
 }
 
-func TestEvalErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
+func TestErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -156,7 +156,7 @@ func TestEvalErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
 		EncodedArgs: encodedArgs,
 	}
 
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	handler.HandlePanic(ctx, jobRow, "nil pointer dereference", "goroutine 1 [running]:\n...")
 
 	// Assert: session status is evaluation_failed even for panics on final attempt.
@@ -165,7 +165,7 @@ func TestEvalErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
 	assert.Equal(t, "evaluation_failed", session.Status)
 }
 
-func TestEvalErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
+func TestErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -192,7 +192,7 @@ func TestEvalErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
 		EncodedArgs: encodedArgs,
 	}
 
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	handler.HandlePanic(ctx, jobRow, "some panic", "stack trace")
 
 	// Assert: non-final panic does not change status.
@@ -201,7 +201,7 @@ func TestEvalErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
 	assert.Equal(t, "evaluating", session.Status)
 }
 
-func TestEvalErrorHandler_InvalidEncodedArgs(t *testing.T) {
+func TestErrorHandler_InvalidEncodedArgs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -226,7 +226,7 @@ func TestEvalErrorHandler_InvalidEncodedArgs(t *testing.T) {
 		EncodedArgs: []byte(`{invalid json`),
 	}
 
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	result := handler.HandleError(ctx, jobRow, fmt.Errorf("some error"))
 	assert.Nil(t, result)
 
@@ -236,7 +236,7 @@ func TestEvalErrorHandler_InvalidEncodedArgs(t *testing.T) {
 	assert.Equal(t, "evaluating", session.Status)
 }
 
-func TestEvalErrorHandler_NonExistentSession(t *testing.T) {
+func TestErrorHandler_NonExistentSession(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -257,7 +257,7 @@ func TestEvalErrorHandler_NonExistentSession(t *testing.T) {
 	}
 
 	// Should not panic — the UpdateSessionStatusOnly will silently affect 0 rows.
-	handler := &jobs.EvalErrorHandler{Pool: pool}
+	handler := &jobs.ErrorHandler{Pool: pool}
 	result := handler.HandleError(ctx, jobRow, fmt.Errorf("some error"))
 	assert.Nil(t, result)
 }

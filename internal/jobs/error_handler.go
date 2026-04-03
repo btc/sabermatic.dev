@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,14 +13,14 @@ import (
 	"github.com/btc/drill/internal/db"
 )
 
-// EvalErrorHandler sets failure status when jobs exhaust all retries.
+// ErrorHandler sets failure status when jobs exhaust all retries.
 // Handles evaluate_session and generate_educator_content.
 // Implements river.ErrorHandler.
-type EvalErrorHandler struct {
+type ErrorHandler struct {
 	Pool *pgxpool.Pool
 }
 
-func (h *EvalErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRow, err error) *river.ErrorHandlerResult {
+func (h *ErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRow, err error) *river.ErrorHandlerResult {
 	if job.Attempt < job.MaxAttempts {
 		return nil
 	}
@@ -78,12 +79,13 @@ func (h *EvalErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRo
 	return nil
 }
 
-func (h *EvalErrorHandler) HandlePanic(ctx context.Context, job *rivertype.JobRow, panicVal any, trace string) *river.ErrorHandlerResult {
+func (h *ErrorHandler) HandlePanic(ctx context.Context, job *rivertype.JobRow, panicVal any, trace string) *river.ErrorHandlerResult {
 	if job.Attempt >= job.MaxAttempts {
 		switch job.Kind {
 		case "evaluate_session", "generate_educator_content":
+			panicErr := fmt.Errorf("panic: %v", panicVal)
 			slog.Error("job panicked on final attempt", "kind", job.Kind, "panic", panicVal)
-			return h.HandleError(ctx, job, nil)
+			return h.HandleError(ctx, job, panicErr)
 		}
 	}
 	return nil

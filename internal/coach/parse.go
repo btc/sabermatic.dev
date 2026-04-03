@@ -105,6 +105,9 @@ func Parse(raw json.RawMessage) (*CoachResult, error) {
 	}
 	if input.GeneratedQuestion != nil && input.GeneratedQuestion.Title != "" {
 		gq := input.GeneratedQuestion
+		if gq.Prompt == "" {
+			return nil, fmt.Errorf("coach: generated question prompt is empty")
+		}
 		if gq.Difficulty != "medium" && gq.Difficulty != "hard" {
 			return nil, fmt.Errorf("coach: generated question difficulty must be medium or hard, got %q", gq.Difficulty)
 		}

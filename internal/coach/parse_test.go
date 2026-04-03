@@ -82,6 +82,22 @@ func TestParse_EmptyNarrative(t *testing.T) {
 	assert.Contains(t, err.Error(), "narrative")
 }
 
+func TestParse_EmptyPromptOnGeneratedQuestion(t *testing.T) {
+	input := validToolInput()
+	input["generated_question"] = map[string]any{
+		"title":      "Some Question",
+		"prompt":     "",
+		"difficulty": "medium",
+		"tags":       []any{},
+	}
+	raw, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	_, err = Parse(json.RawMessage(raw))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prompt")
+}
+
 func TestParse_InvalidDifficulty(t *testing.T) {
 	input := validToolInput()
 	input["generated_question"] = map[string]any{
