@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEducator, useRequestEducator, useMe } from "@/api/queries";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,7 @@ function childrenToString(children: React.ReactNode): string {
 // react-markdown custom components
 // ---------------------------------------------------------------------------
 
-const markdownComponents = {
+const markdownComponents: Components = {
   h1: ({ children, ...props }: React.HTMLAttributes<HTMLHeadingElement>) => (
     <h1 id={slugify(childrenToString(children))} {...props} className="text-xl font-semibold mt-8 mb-3">
       {children}
@@ -235,12 +235,12 @@ export default function DeepDive() {
       <TOC headings={headings} />
       <div className="flex-1 min-w-0 prose-sm">
         {educator.model_answer && (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {educator.model_answer}
           </ReactMarkdown>
         )}
         {educator.gap_deep_dives && (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {educator.gap_deep_dives}
           </ReactMarkdown>
         )}
