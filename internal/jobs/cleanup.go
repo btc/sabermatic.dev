@@ -34,7 +34,12 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 			slog.Warn("failed to mark abandoned session completed", "session_id", id, "error", err)
 			continue
 		}
-		// TODO: enqueue EvaluateSession for each abandoned session (Phase 7)
+		if w.Jobs != nil {
+			_, err := w.Jobs.Insert(ctx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts())
+			if err != nil {
+				slog.Warn("failed to enqueue evaluation for abandoned session", "session_id", id, "error", err)
+			}
+		}
 		slog.Info("marked abandoned session completed", "session_id", id)
 	}
 	return nil
