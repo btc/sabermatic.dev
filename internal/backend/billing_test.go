@@ -108,3 +108,108 @@ func TestRefundMinutes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int32(40), balance)
 }
+
+// ---------------------------------------------------------------------------
+// CreateSession entitlement enforcement
+// ---------------------------------------------------------------------------
+
+func TestCreateSession_EnforcesBalance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+
+	// No grants created (the free grant from EnsureFreeGrant gives 60 min).
+	// Request a session longer than the free plan max (30 min) to test
+	// ErrDurationExceedsPlan, then request within plan max but with 0 balance.
+	// First, exhaust balance by reserving all 60 free minutes via a direct session.
+	seedFreeGrant(t, b, userID, 10) // Only 10 minutes available.
+
+	_, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 30, // Need 30 but only have 10.
+		Plan:            "free",
+	})
+	require.ErrorIs(t, err, ErrInsufficientBalance)
+}
+
+func TestCreateSession_WithSufficientBalance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 30,
+		Plan:            "free",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), session.ConfigDurationMinutes)
+
+	// Balance should be 60 - 30 = 30.
+	balance, err := db.New(b.pool).GetUserBalance(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), balance)
+}
+
+func TestCreateSession_EnforcesDurationLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+
+	// Free plan max is 30 minutes. Request 60.
+	_, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 60,
+		Plan:            "free",
+	})
+	require.ErrorIs(t, err, ErrDurationExceedsPlan)
+}
+
+func TestCreateSession_EnforcesConcurrentLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	// Free plan allows 1 concurrent session. Create one first.
+	_, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 10,
+		Plan:            "free",
+	})
+	require.NoError(t, err)
+
+	// Second session should fail.
+	_, err = b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 10,
+		Plan:            "free",
+	})
+	require.ErrorIs(t, err, ErrConcurrentSessionLimit)
+}
