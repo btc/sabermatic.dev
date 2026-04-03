@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "./auth-layout";
-import { apiClient } from "@/api/client";
+import { useResetPassword } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,9 +15,9 @@ export default function ResetPassword() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [isPending, setIsPending] = useState(false);
+  const resetPassword = useResetPassword();
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -31,16 +31,16 @@ export default function ResetPassword() {
       return;
     }
 
-    setIsPending(true);
-    try {
-      await apiClient.post("/api/auth/reset-password", { token, password });
-      setDone(true);
-    } catch {
-      setError("The reset link may have expired. Please request a new one.");
-    } finally {
-      setIsPending(false);
-    }
+    resetPassword.mutate(
+      { token, password },
+      {
+        onSuccess: () => setDone(true),
+        onError: () => setError("The reset link may have expired. Please request a new one."),
+      },
+    );
   }
+
+  const isPending = resetPassword.isPending;
 
   if (done) {
     return (

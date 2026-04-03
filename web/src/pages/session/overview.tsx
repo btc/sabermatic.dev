@@ -1,6 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useSession, useEvaluation, useRetryEvaluation } from "@/api/queries";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { EvaluationScores } from "@/api/types";
 
@@ -125,7 +126,18 @@ export default function Overview() {
   const retryEvaluation = useRetryEvaluation(sessionId!);
 
   if (!session || !evaluation) {
-    return null;
+    return (
+      <div className="space-y-6 max-w-2xl">
+        <Skeleton className="h-6 w-32" />
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+        </div>
+      </div>
+    );
   }
 
   // Evaluation failed state

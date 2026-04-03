@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMe, useLogout, useSessions } from "@/api/queries";
+import { useRequireAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -7,6 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export function AppLayout() {
+  const { isLoading, isAuthenticated } = useRequireAuth();
   const { data: user } = useMe();
   const { data: sessions } = useSessions();
   const logout = useLogout();
@@ -20,6 +22,14 @@ export function AppLayout() {
   const handleLogout = () => {
     logout.mutate(undefined, { onSuccess: () => navigate("/login") });
   };
+
+  if (isLoading || !isAuthenticated) {
+    return (
+      <div className="flex h-screen items-center justify-center text-muted-foreground bg-background">
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">

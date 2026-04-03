@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthLayout } from "./auth-layout";
-import { apiClient } from "@/api/client";
+import { useForgotPassword } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,21 +11,21 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
-  const [isPending, setIsPending] = useState(false);
+  const forgotPassword = useForgotPassword();
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setIsPending(true);
-    try {
-      await apiClient.post("/api/auth/forgot-password", { email });
-      setSent(true);
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setIsPending(false);
-    }
+    forgotPassword.mutate(
+      { email },
+      {
+        onSuccess: () => setSent(true),
+        onError: () => setError("Something went wrong. Please try again."),
+      },
+    );
   }
+
+  const isPending = forgotPassword.isPending;
 
   if (sent) {
     return (

@@ -21,7 +21,13 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   if (response.status === 204) {
     return null as T;
   }
-  const data = await response.json();
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    const text = await response.text().catch(() => "");
+    throw new ApiError(response.status, text || `Non-JSON response (${response.status})`);
+  }
   if (!response.ok) {
     throw new ApiError(response.status, data);
   }
