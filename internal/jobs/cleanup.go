@@ -42,12 +42,10 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 			continue
 		}
 
-		if w.Jobs != nil {
-			if _, err := w.Jobs.InsertTx(ctx, tx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts()); err != nil {
-				tx.Rollback(ctx)
-				slog.Warn("failed to enqueue evaluation for abandoned session", "session_id", id, "error", err)
-				continue
-			}
+		if _, err := w.Jobs.InsertTx(ctx, tx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts()); err != nil {
+			tx.Rollback(ctx)
+			slog.Warn("failed to enqueue evaluation for abandoned session", "session_id", id, "error", err)
+			continue
 		}
 
 		if err := tx.Commit(ctx); err != nil {

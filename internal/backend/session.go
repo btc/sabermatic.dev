@@ -54,16 +54,16 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 	return session, nil
 }
 
-// GetSession returns the interview session with the given ID.
-// Returns ErrSessionNotFound if no such session exists.
-func (b *Backend) GetSession(ctx context.Context, id uuid.UUID) (db.InterviewSession, error) {
+// GetSession returns the interview session with the given ID, including the
+// joined question fields. Returns ErrSessionNotFound if no such session exists.
+func (b *Backend) GetSession(ctx context.Context, id uuid.UUID) (db.GetSessionRow, error) {
 	queries := db.New(b.pool)
 	session, err := queries.GetSession(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.InterviewSession{}, ErrSessionNotFound
+			return db.GetSessionRow{}, ErrSessionNotFound
 		}
-		return db.InterviewSession{}, fmt.Errorf("get session: %w", err)
+		return db.GetSessionRow{}, fmt.Errorf("get session: %w", err)
 	}
 	return session, nil
 }
@@ -71,13 +71,13 @@ func (b *Backend) GetSession(ctx context.Context, id uuid.UUID) (db.InterviewSes
 // GetSessionForUser returns the session only if it belongs to the given user.
 // Returns ErrSessionNotFound if the session does not exist, ErrSessionNotOwned
 // if it belongs to a different user.
-func (b *Backend) GetSessionForUser(ctx context.Context, id, userID uuid.UUID) (db.InterviewSession, error) {
+func (b *Backend) GetSessionForUser(ctx context.Context, id, userID uuid.UUID) (db.GetSessionRow, error) {
 	session, err := b.GetSession(ctx, id)
 	if err != nil {
-		return db.InterviewSession{}, err
+		return db.GetSessionRow{}, err
 	}
 	if session.UserID != userID {
-		return db.InterviewSession{}, ErrSessionNotOwned
+		return db.GetSessionRow{}, ErrSessionNotOwned
 	}
 	return session, nil
 }
@@ -121,27 +121,13 @@ func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (
 	return lockConn, true, nil
 }
 
-// LoadSessionForConductor loads everything the conductor needs to start:
-// session, question, and messages.
-func (b *Backend) LoadSessionForConductor(ctx context.Context, sessionID uuid.UUID) (db.InterviewSession, db.Question, []db.Message, error) {
-	q := db.New(b.pool)
-
-	session, err := q.GetSession(ctx, sessionID)
+// GetMessagesBySession returns all messages for the given session.
+func (b *Backend) GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]db.Message, error) {
+	msgs, err := db.New(b.pool).GetMessagesBySession(ctx, sessionID)
 	if err != nil {
-		return db.InterviewSession{}, db.Question{}, nil, fmt.Errorf("get session: %w", err)
+		return nil, fmt.Errorf("get messages: %w", err)
 	}
-
-	question, err := q.GetQuestion(ctx, session.QuestionID)
-	if err != nil {
-		return db.InterviewSession{}, db.Question{}, nil, fmt.Errorf("get question: %w", err)
-	}
-
-	msgs, err := q.GetMessagesBySession(ctx, sessionID)
-	if err != nil {
-		return db.InterviewSession{}, db.Question{}, nil, fmt.Errorf("get messages: %w", err)
-	}
-
-	return session, question, msgs, nil
+	return msgs, nil
 }
 
 // PersistMessageParams holds the data for persisting a message.

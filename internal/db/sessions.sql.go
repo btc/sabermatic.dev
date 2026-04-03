@@ -80,15 +80,40 @@ func (q *Queries) FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled,
-       config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at
-FROM interview_sessions
-WHERE id = $1
+SELECT s.id, s.user_id, s.question_id, s.status,
+       s.config_duration_minutes, s.config_tts_enabled,
+       s.config_coach_briefing, s.started_at, s.ended_at,
+       s.turn_count, s.archived, s.created_at, s.updated_at,
+       q.title AS question_title, q.prompt AS question_prompt,
+       q.difficulty AS question_difficulty, q.hints AS question_hints
+FROM interview_sessions s
+JOIN questions q ON q.id = s.question_id
+WHERE s.id = $1
 `
 
-func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (InterviewSession, error) {
+type GetSessionRow struct {
+	ID                    uuid.UUID          `json:"id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	QuestionID            uuid.UUID          `json:"question_id"`
+	Status                string             `json:"status"`
+	ConfigDurationMinutes int32              `json:"config_duration_minutes"`
+	ConfigTtsEnabled      bool               `json:"config_tts_enabled"`
+	ConfigCoachBriefing   bool               `json:"config_coach_briefing"`
+	StartedAt             time.Time          `json:"started_at"`
+	EndedAt               pgtype.Timestamptz `json:"ended_at"`
+	TurnCount             int32              `json:"turn_count"`
+	Archived              bool               `json:"archived"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+	QuestionTitle         string             `json:"question_title"`
+	QuestionPrompt        string             `json:"question_prompt"`
+	QuestionDifficulty    string             `json:"question_difficulty"`
+	QuestionHints         pgtype.Text        `json:"question_hints"`
+}
+
+func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error) {
 	row := q.db.QueryRow(ctx, getSession, id)
-	var i InterviewSession
+	var i GetSessionRow
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -103,6 +128,10 @@ func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (InterviewSessio
 		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QuestionTitle,
+		&i.QuestionPrompt,
+		&i.QuestionDifficulty,
+		&i.QuestionHints,
 	)
 	return i, err
 }

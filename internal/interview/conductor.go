@@ -239,18 +239,26 @@ func (c *Conductor) Run(serverCtx context.Context) {
 
 // loadSession loads the session, question, and existing messages from DB.
 func (c *Conductor) loadSession(ctx context.Context) error {
-	session, question, msgs, err := c.backend.LoadSessionForConductor(ctx, c.sessionID)
+	row, err := c.backend.GetSession(ctx, c.sessionID)
 	if err != nil {
 		return err
 	}
 
-	c.question = question
+	msgs, err := c.backend.GetMessagesBySession(ctx, c.sessionID)
+	if err != nil {
+		return err
+	}
+
+	c.question = db.Question{
+		Title:  row.QuestionTitle,
+		Prompt: row.QuestionPrompt,
+	}
 	c.messages = msgs
-	c.ttsEnabled = session.ConfigTtsEnabled
-	c.duration = time.Duration(session.ConfigDurationMinutes) * time.Minute
+	c.ttsEnabled = row.ConfigTtsEnabled
+	c.duration = time.Duration(row.ConfigDurationMinutes) * time.Minute
 	c.model = c.backend.Config().LLM.InterviewerModel
 	c.sm = NewStateMachine(StateWaitingForInput)
-	c.sm.SetStartedAt(session.StartedAt)
+	c.sm.SetStartedAt(row.StartedAt)
 
 	if len(msgs) > 0 {
 		c.sequence = int(msgs[len(msgs)-1].Seq)

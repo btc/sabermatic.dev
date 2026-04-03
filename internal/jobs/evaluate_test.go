@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivermigrate"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -75,6 +77,12 @@ func startTestPostgres(t *testing.T) *pgxpool.Pool {
 	pool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+
+	// Run River migrations (River needs its own internal tables).
+	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
+	require.NoError(t, err)
+	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
+	require.NoError(t, err)
 
 	return pool
 }
@@ -198,17 +206,23 @@ func newFakeEvalServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-// newEvalWorker constructs an EvaluateSessionWorker for testing.
-func newEvalWorker(pool *pgxpool.Pool, srvURL string) *jobs.EvaluateSessionWorker {
-	return &jobs.EvaluateSessionWorker{
+// newEvalWorker constructs an EvaluateSessionWorker with a real River client for testing.
+func newEvalWorker(t *testing.T, pool *pgxpool.Pool, srvURL string) *jobs.EvaluateSessionWorker {
+	t.Helper()
+	worker := &jobs.EvaluateSessionWorker{
 		Pool: pool,
 		LLM:  ai.NewTestClient(srvURL, pool),
 		Cfg: &config.LLM{
 			EvaluatorModel:     "claude-opus-4-20250514",
 			EvaluatorMaxTokens: 4096,
 		},
-		// Jobs is nil — email enqueue is skipped (nil guard in worker).
 	}
+
+	// Create a River client so InsertTx works (client not started — no workers run).
+	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+	worker.Jobs = riverClient
+	return worker
 }
 
 // ---------------- tests ----------------
@@ -224,7 +238,7 @@ func TestEvaluateSessionWorker_HappyPath(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 4)
-	worker := newEvalWorker(pool, srv.URL)
+	worker := newEvalWorker(t, pool, srv.URL)
 
 	// Run the worker directly.
 	err := worker.Work(ctx, &river.Job[jobs.EvaluateSessionArgs]{
@@ -311,7 +325,7 @@ func TestEvaluateSessionWorker_Idempotent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	worker := newEvalWorker(pool, srv.URL)
+	worker := newEvalWorker(t, pool, srv.URL)
 
 	// Run the worker — should return nil without creating a duplicate.
 	err = worker.Work(ctx, &river.Job[jobs.EvaluateSessionArgs]{
@@ -341,7 +355,7 @@ func TestEvaluateSessionWorker_EmptyTranscript(t *testing.T) {
 
 	// Seed a session with zero messages.
 	seed := seedSessionWithMessages(t, ctx, pool, 0)
-	worker := newEvalWorker(pool, srv.URL)
+	worker := newEvalWorker(t, pool, srv.URL)
 
 	// Run the worker.
 	err := worker.Work(ctx, &river.Job[jobs.EvaluateSessionArgs]{

@@ -66,15 +66,10 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 		return fmt.Errorf("check existing evaluation: %w", err)
 	}
 
-	// 2. Load session, question, messages.
-	session, err := q.GetSession(ctx, sessionID)
+	// 2. Load session data.
+	row, err := q.GetSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
-	}
-
-	question, err := q.GetQuestion(ctx, session.QuestionID)
-	if err != nil {
-		return fmt.Errorf("get question: %w", err)
 	}
 
 	messages, err := q.GetMessagesBySession(ctx, sessionID)
@@ -109,7 +104,12 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	}
 
 	// 6. Build prompt.
-	system, userMsgs := evaluation.BuildPrompt(question, messages)
+	system, userMsgs := evaluation.BuildPrompt(db.Question{
+		Title:      row.QuestionTitle,
+		Prompt:     row.QuestionPrompt,
+		Difficulty: row.QuestionDifficulty,
+		Hints:      row.QuestionHints,
+	}, messages)
 
 	// 7. Begin transaction.
 	tx, err := w.Pool.Begin(ctx)
@@ -125,7 +125,7 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 		System:     system,
 		Messages:   userMsgs,
 		MaxTokens:  w.Cfg.EvaluatorMaxTokens,
-		UserID:     session.UserID,
+		UserID:     row.UserID,
 		Role:       "evaluator",
 		SessionID:  sessionID,
 		Tools:      []anthropic.ToolUnionParam{{OfTool: &toolSchema}},
@@ -197,28 +197,24 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 		return fmt.Errorf("set reviewed status: %w", err)
 	}
 
-	// 12. Enqueue email with pre-rendered HTML (skipped if Jobs client not wired).
-	if w.Jobs != nil {
-		user, err := txq.GetUserByID(ctx, session.UserID)
-		if err != nil {
-			return fmt.Errorf("get user: %w", err)
-		}
+	// 12. Enqueue email with pre-rendered HTML.
+	user, err := txq.GetUserByID(ctx, row.UserID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
 
-		htmlBody := renderEvaluationEmail(question.Title, result)
-		_, err = w.Jobs.InsertTx(ctx, tx, SendEmailArgs{
-			To:      user.Email,
-			Subject: fmt.Sprintf("Evaluation: %s", question.Title),
-			Text:    fmt.Sprintf("Your evaluation for %q is ready. View it in the app.", question.Title),
-			HTML:    htmlBody,
-		}, &river.InsertOpts{
-				Queue:       QueueNotifications,
-				MaxAttempts: 3,
-			})
-		if err != nil {
-			return fmt.Errorf("enqueue send_email: %w", err)
-		}
-	} else {
-		slog.Warn("Jobs client not set, skipping email enqueue", "session_id", sessionID)
+	htmlBody := renderEvaluationEmail(row.QuestionTitle, result)
+	_, err = w.Jobs.InsertTx(ctx, tx, SendEmailArgs{
+		To:      user.Email,
+		Subject: fmt.Sprintf("Evaluation: %s", row.QuestionTitle),
+		Text:    fmt.Sprintf("Your evaluation for %q is ready. View it in the app.", row.QuestionTitle),
+		HTML:    htmlBody,
+	}, &river.InsertOpts{
+		Queue:       QueueNotifications,
+		MaxAttempts: 3,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue send_email: %w", err)
 	}
 
 	// 13. Commit.
