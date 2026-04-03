@@ -213,3 +213,43 @@ func TestCreateSession_EnforcesConcurrentLimit(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrConcurrentSessionLimit)
 }
+
+// ---------------------------------------------------------------------------
+// CompleteSession refund
+// ---------------------------------------------------------------------------
+
+func TestCompleteSession_RefundsUnusedMinutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	// Create a 30-min session (reserves 30 from the 60-min grant).
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 30,
+		Plan:            "free",
+	})
+	require.NoError(t, err)
+
+	// Balance after reservation: 60 - 30 = 30.
+	balance, err := db.New(b.pool).GetUserBalance(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), balance)
+
+	// Complete immediately (wall-clock ~0 seconds -> actualMinutes = 1).
+	// Refund should be 30 - 1 = 29.
+	err = b.CompleteSession(ctx, session.ID, 5)
+	require.NoError(t, err)
+
+	// Final balance: 30 + 29 = 59 (or 60 - 1 = 59).
+	balance, err = db.New(b.pool).GetUserBalance(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(59), balance)
+}
