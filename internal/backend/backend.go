@@ -24,6 +24,9 @@ import (
 
 // Backend holds shared dependencies and business logic. Handlers call its
 // methods; it owns the database pool and River client lifecycle.
+//
+// The fields below are intentionally unexported. Do not add accessor methods
+// that expose them -- consumers should call Backend methods instead.
 type Backend struct {
 	pool *pgxpool.Pool
 	jobs Jobs
@@ -36,7 +39,7 @@ type Backend struct {
 // New creates a pool, runs River migrations, and starts the River client.
 // App migrations must be run before calling this (schema must exist).
 func New(cfg *config.Config) (*Backend, error) {
-	// Pool uses background context — must outlive any request or signal context.
+	// Pool uses background context -- must outlive any request or signal context.
 	pool, err := cfg.Database.NewPool(context.Background(), otelpgx.NewTracer())
 	if err != nil {
 		return nil, fmt.Errorf("database: %w", err)
@@ -109,32 +112,32 @@ func New(cfg *config.Config) (*Backend, error) {
 // Backend is constructed manually (without New).
 func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 
-// SetLLM overrides the LLM client. Used in tests to inject a fake.
-func (b *Backend) SetLLM(c *ai.Client) { b.llm = c }
+// TestOverrides replaces AI dependencies for testing. Only call from tests.
+type TestOverrides struct {
+	LLM *ai.Client
+	STT ai.Transcriber
+	TTS ai.Synthesizer
+}
 
-// SetSTT overrides the STT transcriber. Used in tests to inject a fake.
-func (b *Backend) SetSTT(s ai.Transcriber) { b.stt = s }
-
-// SetTTS overrides the TTS synthesizer. Used in tests to inject a fake.
-func (b *Backend) SetTTS(s ai.Synthesizer) { b.tts = s }
+// ApplyTestOverrides replaces AI dependencies for testing. Only call from tests.
+func (b *Backend) ApplyTestOverrides(o TestOverrides) {
+	if o.LLM != nil {
+		b.llm = o.LLM
+	}
+	if o.STT != nil {
+		b.stt = o.STT
+	}
+	if o.TTS != nil {
+		b.tts = o.TTS
+	}
+}
 
 // Config returns the Backend's configuration.
 func (b *Backend) Config() *config.Config { return b.cfg }
 
-// Pool returns the underlying database pool.
+// Pool returns the underlying database pool. Used by tests and the auth
+// middleware for direct DB queries. Prefer Backend methods for new code.
 func (b *Backend) Pool() *pgxpool.Pool { return b.pool }
-
-// Jobs returns the River job client.
-func (b *Backend) Jobs() Jobs { return b.jobs }
-
-// LLM returns the Anthropic LLM client.
-func (b *Backend) LLM() *ai.Client { return b.llm }
-
-// STT returns the speech-to-text transcriber.
-func (b *Backend) STT() ai.Transcriber { return b.stt }
-
-// TTS returns the text-to-speech synthesizer.
-func (b *Backend) TTS() ai.Synthesizer { return b.tts }
 
 // Ping checks connectivity to all backend dependencies.
 func (b *Backend) Ping(ctx context.Context) error {

@@ -7,18 +7,17 @@ import (
 	"fmt"
 
 	"github.com/coder/websocket"
+
+	"github.com/btc/drill/internal/interview/observer"
 )
 
-// WSConn is the write interface for the WebSocket connection.
-type WSConn interface {
-	SendJSON(ctx context.Context, v any) error
-	Close(code websocket.StatusCode, reason string) error
-}
-
-// Conn wraps a *websocket.Conn to implement WSConn.
+// Conn wraps a *websocket.Conn to implement observer.WSConn.
 type Conn struct {
 	WS *websocket.Conn
 }
+
+// Verify Conn implements observer.WSConn at compile time.
+var _ observer.WSConn = (*Conn)(nil)
 
 func (c *Conn) SendJSON(ctx context.Context, v any) error {
 	data, err := json.Marshal(v)

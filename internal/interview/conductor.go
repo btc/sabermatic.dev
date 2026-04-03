@@ -6,16 +6,17 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/interview/observer"
 )
 
 var (
@@ -25,13 +26,9 @@ var (
 
 // ConductorParams holds the dependencies for constructing a Conductor.
 type ConductorParams struct {
-	WS        WSConn
-	Pool      *pgxpool.Pool
+	WS        observer.WSConn
+	Backend   *backend.Backend
 	LockConn  *pgxpool.Conn
-	Jobs      backend.Jobs
-	LLM       *ai.Client
-	STT       ai.Transcriber
-	TTS       ai.Synthesizer // nil if TTS disabled
 	SessionID uuid.UUID
 	UserID    uuid.UUID
 	InitMsg   WSMessage
@@ -44,14 +41,10 @@ type ConductorParams struct {
 type Conductor struct {
 	sm       *StateMachine
 	msgCh    chan WSMessage
-	ws       WSConn
-	pool     *pgxpool.Pool
+	ws       observer.WSConn
+	b        *backend.Backend
 	lockConn *pgxpool.Conn
-	jobs     backend.Jobs
-	llm      *ai.Client
-	stt      ai.Transcriber
-	tts      ai.Synthesizer
-	observer *TokenFanOut
+	obs      atomic.Pointer[observer.TokenFanOut]
 	model    string
 
 	sessionID  uuid.UUID
@@ -75,12 +68,8 @@ func NewConductor(p ConductorParams) *Conductor {
 		sm:        NewStateMachine(StateInterviewerSpeaking),
 		msgCh:     make(chan WSMessage, 8),
 		ws:        p.WS,
-		pool:      p.Pool,
+		b:         p.Backend,
 		lockConn:  p.LockConn,
-		jobs:      p.Jobs,
-		llm:       p.LLM,
-		stt:       p.STT,
-		tts:       p.TTS,
 		model:     p.Model,
 		sessionID: p.SessionID,
 		userID:    p.UserID,
@@ -93,7 +82,7 @@ func NewConductor(p ConductorParams) *Conductor {
 func (c *Conductor) MsgCh() chan WSMessage { return c.msgCh }
 
 // Observer returns the current TokenFanOut (may be nil between turns).
-func (c *Conductor) Observer() *TokenFanOut { return c.observer }
+func (c *Conductor) Observer() *observer.TokenFanOut { return c.obs.Load() }
 
 // Run is the main loop for the conductor goroutine. It loads session state,
 // streams the opening if needed, then processes messages until exit.
@@ -131,21 +120,9 @@ func (c *Conductor) Run(ctx context.Context) {
 
 // loadSession loads the session, question, and existing messages from DB.
 func (c *Conductor) loadSession(ctx context.Context) error {
-	q := db.New(c.pool)
-
-	session, err := q.GetSession(ctx, c.sessionID)
+	session, question, msgs, err := c.b.LoadSessionForConductor(ctx, c.sessionID)
 	if err != nil {
-		return fmt.Errorf("get session: %w", err)
-	}
-
-	question, err := q.GetQuestion(ctx, session.QuestionID)
-	if err != nil {
-		return fmt.Errorf("get question: %w", err)
-	}
-
-	msgs, err := q.GetMessagesBySession(ctx, c.sessionID)
-	if err != nil {
-		return fmt.Errorf("get messages: %w", err)
+		return err
 	}
 
 	c.question = question
@@ -195,15 +172,21 @@ func (c *Conductor) sendReconnectState(ctx context.Context) error {
 	})
 }
 
+// WarningMinutes calculates the number of minutes before session end to fire
+// the timer warning. Formula: clamp(2, 5, round(duration_minutes / 9)).
+func WarningMinutes(duration time.Duration) float64 {
+	w := math.Round(duration.Minutes() / 9)
+	return math.Max(2, math.Min(5, w))
+}
+
 // initTimers sets up warning, overtime, and reconnect timers based on session start time.
 func (c *Conductor) initTimers(ctx context.Context) {
 	now := time.Now()
 	sessionStart := c.sm.StartedAt()
 	elapsed := now.Sub(sessionStart)
 
-	// Warning timer: fires at duration - clamp(2, 5, round(duration/9)) minutes.
-	warningMinutes := math.Round(c.duration.Minutes() / 9)
-	warningMinutes = math.Max(2, math.Min(5, warningMinutes))
+	// Warning timer: fires at duration - WarningMinutes.
+	warningMinutes := WarningMinutes(c.duration)
 	warningAt := c.duration - time.Duration(warningMinutes)*time.Minute
 	if remaining := warningAt - elapsed; remaining > 0 {
 		c.timerWarningCh = time.After(remaining)
@@ -224,7 +207,7 @@ func (c *Conductor) initTimers(ctx context.Context) {
 
 // selectLoop is the main event loop.
 func (c *Conductor) selectLoop(ctx context.Context) {
-	// autoEndCh is set after overtime fires — 2-minute grace period.
+	// autoEndCh is set after overtime fires -- 2-minute grace period.
 	var autoEndCh <-chan time.Time
 
 	for {
@@ -272,7 +255,20 @@ func (c *Conductor) selectLoop(ctx context.Context) {
 func (c *Conductor) dispatch(ctx context.Context, msg WSMessage) error {
 	switch msg.Type {
 	case "end_turn":
-		return c.handleEndTurn(ctx, msg)
+		if err := c.handleEndTurn(ctx, msg); err != nil {
+			// Error recovery: force-reset to WaitingForInput so the session
+			// remains usable. Matches v0's pattern where the orchestrator
+			// force-resets state on InterviewError.
+			slog.Error("conductor: end_turn failed, recovering", "error", err, "session_id", c.sessionID)
+			c.sm.ForceState(StateWaitingForInput)
+			_ = c.ws.SendJSON(ctx, map[string]string{
+				"type":    "error",
+				"code":    "turn_failed",
+				"message": "failed to process turn, please try again",
+			})
+			return err
+		}
+		return nil
 	case "end_session":
 		return c.endSession(ctx)
 	case "ping":
@@ -307,20 +303,23 @@ func (c *Conductor) handleEndTurn(ctx context.Context, msg WSMessage) error {
 		_ = c.ws.SendJSON(ctx, map[string]string{"type": "state_change", "state": string(StateTranscribing)})
 
 		// STT.
-		text, err := c.stt.Transcribe(ctx, msg.Audio, "webm")
+		text, err := c.b.Transcribe(ctx, msg.Audio, "webm")
 		if err != nil {
 			slog.Error("conductor: transcription failed", "error", err, "session_id", c.sessionID)
-			return c.ws.SendJSON(ctx, map[string]string{
-				"type":    "error",
-				"code":    "transcription_failed",
-				"message": "transcription failed",
-			})
+			return fmt.Errorf("transcription: %w", err)
 		}
 
 		_ = c.ws.SendJSON(ctx, map[string]string{"type": "transcription_result", "text": text})
 		candidateContent = text
 	} else {
-		// Text input.
+		// Text input -- reject empty content.
+		if strings.TrimSpace(msg.Content) == "" {
+			return c.ws.SendJSON(ctx, map[string]string{
+				"type":    "error",
+				"code":    "empty_content",
+				"message": "text content cannot be empty",
+			})
+		}
 		candidateContent = msg.Content
 	}
 
@@ -372,20 +371,22 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 		Build()
 
 	// Create observer fan-out.
-	accumulator := NewMessageAccumulator()
-	observers := []TokenObserver{
-		NewWSWriter(c.ws, messageID),
+	accumulator := observer.NewMessageAccumulator()
+	observers := []observer.TokenObserver{
+		observer.NewWSWriter(c.ws, messageID),
 		accumulator,
 	}
-	if c.ttsEnabled && c.tts != nil {
-		ttsAcc := NewTTSAccumulator(ctx, c.ws, c.tts, messageID)
-		observers = append(observers, ttsAcc)
-		defer ttsAcc.Wait() // ensure TTS completes before we return
+	if c.ttsEnabled {
+		synth, err := c.b.Synthesizer()
+		if err == nil && synth != nil {
+			observers = append(observers, observer.NewTTSAccumulator(ctx, c.ws, synth, messageID))
+		}
 	}
-	c.observer = NewTokenFanOut(observers...)
+	fanOut := observer.NewTokenFanOut(observers...)
+	c.obs.Store(fanOut)
 
 	// Stream LLM.
-	stream, err := c.llm.StreamAndLog(ctx, ai.StreamParams{
+	stream, err := c.b.StreamLLM(ctx, ai.StreamParams{
 		Model:     c.model,
 		System:    system,
 		Messages:  promptMsgs,
@@ -394,8 +395,8 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 		SessionID: c.sessionID,
 	})
 	if err != nil {
-		c.observer.OnError(err)
-		c.observer = nil
+		fanOut.OnError(err)
+		c.obs.Store(nil)
 		return fmt.Errorf("start llm stream: %w", err)
 	}
 
@@ -406,44 +407,38 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 			break
 		}
 		if err != nil {
-			c.observer.OnError(err)
+			fanOut.OnError(err)
 			slog.Error("conductor: stream token", "error", err, "session_id", c.sessionID)
 			break
 		}
-		c.observer.OnToken(token)
+		fanOut.OnToken(token)
 	}
 
 	fullText := accumulator.Text()
-	c.observer.OnDone(fullText)
-	c.observer = nil
+	fanOut.OnDone(fullText)
+	c.obs.Store(nil)
 
 	// Persist interviewer message and LLM call atomically.
-	tx, err := c.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx for interviewer msg: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	if err := stream.CloseWithTx(ctx, tx); err != nil {
-		slog.Error("conductor: close stream with tx", "error", err, "session_id", c.sessionID)
-		// Non-fatal: the LLM call logging failed but we still persist the message.
-	}
-
 	c.sequence++
-	interviewerMsg, err := db.New(tx).InsertMessage(ctx, db.InsertMessageParams{
-		ID:        messageID,
-		SessionID: c.sessionID,
-		Seq:       int32(c.sequence),
-		Role:      "interviewer",
-		Content:   fullText,
+	interviewerMsg, err := c.b.PersistInterviewerTurn(ctx, stream, backend.PersistMessageParams{
+		MessageID:   messageID,
+		SessionID:   c.sessionID,
+		Seq:         c.sequence,
+		Role:        "interviewer",
+		Content:     fullText,
+		InputMethod: "",
 	})
 	if err != nil {
-		return fmt.Errorf("insert interviewer message: %w", err)
+		c.sequence-- // rollback sequence on insert failure
+		// Close fan-out even on error to wait for TTS goroutine.
+		fanOut.Close()
+		return fmt.Errorf("persist interviewer turn: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit interviewer message: %w", err)
-	}
+	// Close fan-out after persistence: waits for TTS goroutine to finish
+	// writing all TTS chunks. Persistence must happen first because the
+	// conductor needs MessageAccumulator's text for the message content.
+	fanOut.Close()
 
 	c.messages = append(c.messages, interviewerMsg)
 
@@ -467,28 +462,8 @@ func (c *Conductor) endSession(ctx context.Context) error {
 		return c.sendStateError(ctx, err)
 	}
 
-	tx, err := c.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin end-session tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	err = db.New(tx).UpdateSessionStatus(ctx, db.UpdateSessionStatusParams{
-		ID:        c.sessionID,
-		Status:    "completed",
-		TurnCount: int32(c.sm.TurnCount()),
-	})
-	if err != nil {
-		return fmt.Errorf("update session status: %w", err)
-	}
-
-	_, err = c.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: c.sessionID}, nil)
-	if err != nil {
-		return fmt.Errorf("enqueue evaluate_session: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit end-session: %w", err)
+	if err := c.b.CompleteSession(ctx, c.sessionID, c.sm.TurnCount()); err != nil {
+		return fmt.Errorf("complete session: %w", err)
 	}
 
 	if err := c.sm.Transition(StateEnded); err != nil {
@@ -504,8 +479,8 @@ func (c *Conductor) handleDisconnect(ctx context.Context) {
 	slog.Info("conductor: client disconnected", "session_id", c.sessionID, "state", c.sm.State())
 
 	// If we have an active observer (mid-stream), interrupt TTS.
-	if c.observer != nil {
-		c.observer.Interrupt()
+	if obs := c.obs.Load(); obs != nil {
+		obs.Interrupt()
 	}
 	// The LLM stream continues to completion in streamInterviewerResponse;
 	// the message is persisted when that method returns. The disconnect is
@@ -527,18 +502,13 @@ func (c *Conductor) handleShutdown(ctx context.Context) {
 func (c *Conductor) persistMessage(ctx context.Context, role, content, inputMethod string) (db.Message, error) {
 	c.sequence++
 
-	var im pgtype.Text
-	if inputMethod != "" {
-		im = pgtype.Text{String: inputMethod, Valid: true}
-	}
-
-	msg, err := db.New(c.pool).InsertMessage(ctx, db.InsertMessageParams{
-		ID:          uuid.New(),
+	msg, err := c.b.PersistMessage(ctx, backend.PersistMessageParams{
+		MessageID:   uuid.New(),
 		SessionID:   c.sessionID,
-		Seq:         int32(c.sequence),
+		Seq:         c.sequence,
 		Role:        role,
 		Content:     content,
-		InputMethod: im,
+		InputMethod: inputMethod,
 	})
 	if err != nil {
 		c.sequence-- // rollback sequence on failure

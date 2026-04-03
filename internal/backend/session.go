@@ -2,13 +2,19 @@ package backend
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/jobs"
 )
 
 // CreateSessionParams holds the parameters for CreateSession.
@@ -84,4 +90,170 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) ([]db.List
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 	return rows, nil
+}
+
+// ---------------------------------------------------------------------------
+// Conductor-facing methods
+// ---------------------------------------------------------------------------
+
+// AcquireSessionLock acquires a Postgres advisory lock for the given session.
+// Returns the dedicated connection (caller must release it) and whether the
+// lock was acquired. If acquired is false, no lock is held and conn is nil.
+func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (*pgxpool.Conn, bool, error) {
+	lockConn, err := b.pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire lock conn: %w", err)
+	}
+
+	key1 := int32(binary.BigEndian.Uint32(sessionID[:4]))
+	key2 := int32(binary.BigEndian.Uint32(sessionID[4:8]))
+	var locked bool
+	err = lockConn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1, $2)", key1, key2).Scan(&locked)
+	if err != nil {
+		lockConn.Release()
+		return nil, false, fmt.Errorf("advisory lock query: %w", err)
+	}
+	if !locked {
+		lockConn.Release()
+		return nil, false, nil
+	}
+	return lockConn, true, nil
+}
+
+// LoadSessionForConductor loads everything the conductor needs to start:
+// session, question, and messages.
+func (b *Backend) LoadSessionForConductor(ctx context.Context, sessionID uuid.UUID) (db.InterviewSession, db.Question, []db.Message, error) {
+	q := db.New(b.pool)
+
+	session, err := q.GetSession(ctx, sessionID)
+	if err != nil {
+		return db.InterviewSession{}, db.Question{}, nil, fmt.Errorf("get session: %w", err)
+	}
+
+	question, err := q.GetQuestion(ctx, session.QuestionID)
+	if err != nil {
+		return db.InterviewSession{}, db.Question{}, nil, fmt.Errorf("get question: %w", err)
+	}
+
+	msgs, err := q.GetMessagesBySession(ctx, sessionID)
+	if err != nil {
+		return db.InterviewSession{}, db.Question{}, nil, fmt.Errorf("get messages: %w", err)
+	}
+
+	return session, question, msgs, nil
+}
+
+// PersistMessageParams holds the data for persisting a message.
+type PersistMessageParams struct {
+	MessageID   uuid.UUID
+	SessionID   uuid.UUID
+	Seq         int
+	Role        string
+	Content     string
+	InputMethod string
+}
+
+// PersistMessage inserts a message and returns it.
+func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (db.Message, error) {
+	var im pgtype.Text
+	if p.InputMethod != "" {
+		im = pgtype.Text{String: p.InputMethod, Valid: true}
+	}
+
+	msg, err := db.New(b.pool).InsertMessage(ctx, db.InsertMessageParams{
+		ID:          p.MessageID,
+		SessionID:   p.SessionID,
+		Seq:         int32(p.Seq),
+		Role:        p.Role,
+		Content:     p.Content,
+		InputMethod: im,
+	})
+	if err != nil {
+		return db.Message{}, fmt.Errorf("insert message: %w", err)
+	}
+	return msg, nil
+}
+
+// PersistInterviewerTurn atomically persists the interviewer message AND the
+// LLM call record. The TokenStream's CloseWithTx is called within the
+// transaction.
+func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p PersistMessageParams) (db.Message, error) {
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return db.Message{}, fmt.Errorf("begin tx for interviewer msg: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if err := stream.CloseWithTx(ctx, tx); err != nil {
+		// Non-fatal: the LLM call logging failed but we still persist the message.
+		// Log this in the caller.
+	}
+
+	msg, err := db.New(tx).InsertMessage(ctx, db.InsertMessageParams{
+		ID:        p.MessageID,
+		SessionID: p.SessionID,
+		Seq:       int32(p.Seq),
+		Role:      p.Role,
+		Content:   p.Content,
+	})
+	if err != nil {
+		return db.Message{}, fmt.Errorf("insert interviewer message: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.Message{}, fmt.Errorf("commit interviewer message: %w", err)
+	}
+
+	return msg, nil
+}
+
+// CompleteSession atomically updates session status to completed, sets turn
+// count, and enqueues EvaluateSession.
+func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turnCount int) error {
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin end-session tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	err = db.New(tx).UpdateSessionStatus(ctx, db.UpdateSessionStatusParams{
+		ID:        sessionID,
+		Status:    "completed",
+		TurnCount: int32(turnCount),
+	})
+	if err != nil {
+		return fmt.Errorf("update session status: %w", err)
+	}
+
+	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, nil)
+	if err != nil {
+		return fmt.Errorf("enqueue evaluate_session: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit end-session: %w", err)
+	}
+
+	return nil
+}
+
+// Transcribe delegates to the STT provider.
+func (b *Backend) Transcribe(ctx context.Context, audio []byte, format string) (string, error) {
+	return b.stt.Transcribe(ctx, audio, format)
+}
+
+// Synthesizer returns the TTS synthesizer, or nil if not configured.
+// The conductor uses this to construct a TTSAccumulator.
+func (b *Backend) Synthesizer() (ai.Synthesizer, error) {
+	return b.tts, nil
+}
+
+// Synthesize delegates to the TTS provider.
+func (b *Backend) Synthesize(ctx context.Context, text string) (io.ReadCloser, error) {
+	return b.tts.Synthesize(ctx, text)
+}
+
+// StreamLLM creates a streaming LLM call via the Anthropic SDK.
+func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (*ai.TokenStream, error) {
+	return b.llm.StreamAndLog(ctx, p)
 }
