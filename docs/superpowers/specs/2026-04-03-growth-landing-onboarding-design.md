@@ -42,6 +42,15 @@ These routes extend the UI spec's routing table:
 **Tech:** same React app, public route. No separate marketing site.
 **Animation:** scroll-triggered reveals (fade + slide up as sections enter viewport). No scroll hijacking.
 
+### SEO & Social Previews
+
+The landing page (`/`) and sample session (`/sample`) are the two public routes that will be shared on HN, Product Hunt, Slack, Twitter, etc. The SPA serves a single `index.html` from `embed.FS`, which returns empty HTML to social crawlers.
+
+**Solution:** The Go backend injects OpenGraph and meta tags into `index.html` before serving for these two routes. A simple template approach — the Go handler detects `/` or `/sample`, injects route-specific `<meta>` tags (og:title, og:description, og:image) into the HTML `<head>`, then serves it. All other routes serve the unmodified `index.html`.
+
+- **`/` (landing page):** og:title "Sabermetric", og:description "data-driven system design prep", og:image a static preview image of the scoring section
+- **`/sample`:** og:title "Sabermetric — sample evaluation", og:description "See a real system design interview evaluated across 5 dimensions", og:image a static preview image of the session overview
+
 ### Section 1: Hero
 
 - "sabermetric" lowercase wordmark, large
@@ -71,7 +80,7 @@ These routes extend the UI spec's routing table:
 
 - Feature copy: feedback is grounded in what you actually said, tied to specific moments in your conversation
 - Illustration: a short transcript snippet (3-5 messages) from session 27 with real annotation callouts appearing one by one
-- Green (strength), orange (gap), purple (missed opportunity) — each attaches to a specific message
+- Green (strength), orange (gap), purple (missed opportunity), blue (note) — whichever annotation types are present in the selected session 27 excerpt. Show only the types that appear naturally; don't force all four.
 
 ### Section 5: Deep Dive
 
@@ -92,8 +101,7 @@ These routes extend the UI spec's routing table:
 ### Section 8: Sample Session
 
 - "See a real evaluation" — brief context (question title, duration, score preview)
-- "View full session" link → `/sample`
-- Opens the real session detail UI with session 27 data and audio replay
+- "View full session" link navigates to `/sample`, which renders the real session detail UI with session 27 data and audio replay
 
 ### Section 9: Credits
 
@@ -149,7 +157,18 @@ Sessions without preserved audio still get transcript replay — messages appear
 
 Renders the real session detail UI (overview, transcript, deep dive tabs) with session 27 data. Replay auto-prompts on the transcript tab. Not a marketing mockup — the actual product UI with real data.
 
-Audio files migrated from v0 storage as static assets or GCS objects.
+### Data Packaging
+
+The sample session data is bundled as static JSON fixtures served by the Go backend at a public (no-auth) endpoint:
+
+- **`GET /api/sample/session`** — returns session metadata, transcript messages, evaluation (scores, strengths, gaps, advice), annotations, and educator deep dive content. Same response shape as the authenticated session detail endpoints, so the frontend session detail component can consume it without modification.
+- **`GET /api/sample/coach`** — returns coach analysis data (trend, weakest dimension, recommendations) for the landing page coaching section and the sample session.
+
+The JSON fixtures are generated once from v0 database exports and committed to the repo (e.g., `internal/sample/session.json`, `internal/sample/coach.json`). The Go handler serves them directly — no database queries.
+
+**Audio files:** Migrated from v0 storage to GCS with public-read ACLs, or served as static assets from the Go binary. The `audio_url` fields in the fixture JSON point to these locations.
+
+**Frontend integration:** The session detail component receives a `dataSource` prop — either `"api"` (authenticated, fetches from `/api/sessions/:id/*`) or `"sample"` (public, fetches from `/api/sample/*`). Same component, same rendering, different data source. The landing page sections also read from the sample fixture data for their illustrations.
 
 ## Show HN Launch Strategy
 
@@ -184,7 +203,7 @@ like to not go broke running it.
 ### What Appeals to HN
 
 - "I built this for myself and it's been helpful" — not a product launch, just sharing a tool. Most credible framing on HN.
-- Technical architecture as content — which models for which roles, why Go, why River, sparks good comment threads
+- Technical architecture as content — which models for which roles, why Go, why Postgres-backed job queue (River), sparks good comment threads. River is worth mentioning in HN comments (Go audience knows it) even if not in the post itself.
 - The Moneyball framing — engineers know the reference, it precisely describes the approach
 - Anti-hype tone — say what it does, not what it "revolutionizes"
 - The scoring rubric — posting the 5 dimensions and what a 3 vs 5 looks like generates debate. Debate is free distribution.
