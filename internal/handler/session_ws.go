@@ -116,7 +116,7 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 		go conductor.Run(ctx)
 
 		// readLoop blocks this goroutine -- closing msgCh signals the conductor.
-		readLoop(ctx, ws, conductor.MsgCh(), func() *observer.TokenFanOut {
+		readLoop(ctx, ws, conductor.MsgCh(), conductor.Done(), func() *observer.TokenFanOut {
 			return conductor.Observer()
 		})
 	}
@@ -124,7 +124,7 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 
 // readLoop reads messages from the WebSocket and forwards them to the conductor.
 // On error (disconnect), it closes msgCh to signal the conductor.
-func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WSMessage, observerFn func() *observer.TokenFanOut) {
+func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WSMessage, done <-chan struct{}, observerFn func() *observer.TokenFanOut) {
 	defer close(msgCh)
 	for {
 		_, data, err := ws.Read(ctx)
@@ -145,6 +145,10 @@ func readLoop(ctx context.Context, ws *websocket.Conn, msgCh chan<- interview.WS
 			observerFn().Interrupt()
 			continue
 		}
-		msgCh <- msg
+		select {
+		case msgCh <- msg:
+		case <-done:
+			return
+		}
 	}
 }
