@@ -1,3 +1,658 @@
+import { useState, useRef, KeyboardEvent } from "react";
+import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useMe, useUsage, useLogout } from "@/api/queries";
+import { apiClient, ApiError } from "@/api/client";
+import { useTheme } from "@/hooks/use-theme";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// ---------------------------------------------------------------------------
+// Section wrapper
+// ---------------------------------------------------------------------------
+
+interface SectionProps {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}
+
+function Section({ title, description, children }: SectionProps) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-sm font-medium text-foreground">{title}</h2>
+        {description && (
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Nav tabs
+// ---------------------------------------------------------------------------
+
+interface NavTabsProps {
+  isBilling: boolean;
+}
+
+function NavTabs({ isBilling }: NavTabsProps) {
+  return (
+    <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5 gap-0.5 w-fit">
+      <Link
+        to="/settings"
+        className={cn(
+          "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+          !isBilling
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        Account
+      </Link>
+      <Link
+        to="/settings/billing"
+        className={cn(
+          "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+          isBilling
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        Billing
+      </Link>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Theme toggle
+// ---------------------------------------------------------------------------
+
+type Theme = "light" | "dark" | "system";
+const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5 gap-0.5 w-fit">
+      {THEME_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => setTheme(opt.value)}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
+            theme === opt.value
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Profile section
+// ---------------------------------------------------------------------------
+
+function ProfileSection() {
+  const { data: user } = useMe();
+  const [displayName, setDisplayName] = useState(user?.display_name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function saveName() {
+    if (!displayName.trim() || displayName === user?.display_name) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await apiClient.patch("/api/me", { display_name: displayName.trim() });
+    } catch (err) {
+      const msg = err instanceof ApiError ? `Save failed (${err.status})` : "Save failed";
+      setSaveError(msg);
+      setDisplayName(user?.display_name ?? "");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Profile</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="display-name">
+            Display name
+          </label>
+          <Input
+            id="display-name"
+            ref={inputRef}
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={handleKeyDown}
+            disabled={saving}
+            className="max-w-sm"
+            placeholder="Your name"
+          />
+          {saveError && <p className="text-xs text-destructive">{saveError}</p>}
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">
+            Email
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-foreground">{user?.email}</span>
+            {user?.email_verified ? (
+              <Badge variant="secondary" className="text-xs">Verified</Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs text-muted-foreground">Unverified</Badge>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Linked accounts section
+// ---------------------------------------------------------------------------
+
+function LinkedAccountsSection() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Linked accounts</CardTitle>
+        <CardDescription>Connect third-party accounts for faster sign-in.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Google</span>
+          </div>
+          <a href="/api/auth/oauth/google" className={cn(
+            "inline-flex shrink-0 items-center justify-center rounded-lg border border-border bg-background px-2.5 h-8 text-sm font-medium transition-colors hover:bg-muted",
+          )}>
+            Connect
+          </a>
+        </div>
+
+        <Separator />
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">GitHub</span>
+          </div>
+          <a href="/api/auth/oauth/github" className={cn(
+            "inline-flex shrink-0 items-center justify-center rounded-lg border border-border bg-background px-2.5 h-8 text-sm font-medium transition-colors hover:bg-muted",
+          )}>
+            Connect
+          </a>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Preferences section
+// ---------------------------------------------------------------------------
+
+function PreferencesSection() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Preferences</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Theme</p>
+            <p className="text-xs text-muted-foreground">Choose how the interface appears.</p>
+          </div>
+          <ThemeToggle />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data export section
+// ---------------------------------------------------------------------------
+
+function DataExportSection() {
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  async function handleExport() {
+    setStatus("loading");
+    setErrorMsg(null);
+    try {
+      await apiClient.get("/api/me/export");
+      setStatus("done");
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? `Export request failed (${err.status})`
+        : "Export request failed. Please try again.";
+      setErrorMsg(msg);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Data export</CardTitle>
+        <CardDescription>Download a copy of all your sessions, transcripts, and evaluations.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {status === "done" ? (
+          <p className="text-sm text-muted-foreground">
+            We'll email you a download link when your export is ready.
+          </p>
+        ) : (
+          <>
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={status === "loading"}
+            >
+              {status === "loading" ? "Requesting..." : "Export my data"}
+            </Button>
+            {status === "error" && errorMsg && (
+              <p className="text-xs text-destructive">{errorMsg}</p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Account deletion section
+// ---------------------------------------------------------------------------
+
+function AccountDeletionSection() {
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const logout = useLogout();
+  const navigate = useNavigate();
+
+  async function handleDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiClient.delete("/api/auth/account");
+      logout.mutate(undefined, {
+        onSuccess: () => navigate("/login"),
+        onError: () => navigate("/login"),
+      });
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? `Deletion failed (${err.status})`
+        : "Deletion failed. Please try again.";
+      setDeleteError(msg);
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Danger zone</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Deleting your account begins a 30-day grace period. Your data remains
+            recoverable during that window by contacting support.
+          </p>
+          <Button
+            variant="outline"
+            className="text-destructive border-destructive/30 hover:bg-destructive/10"
+            onClick={() => setOpen(true)}
+          >
+            Delete account
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent showCloseButton={!deleting}>
+          <DialogHeader>
+            <DialogTitle>Delete account?</DialogTitle>
+            <DialogDescription>
+              This starts a 30-day grace period. During that time, your sessions,
+              transcripts, and evaluations are preserved and recoverable. After 30 days,
+              all data is permanently deleted and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleteError && (
+            <p className="text-xs text-destructive px-0.5">{deleteError}</p>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Yes, delete my account"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Account settings page
+// ---------------------------------------------------------------------------
+
+function AccountSettings() {
+  return (
+    <div className="space-y-6">
+      <Section title="Profile">
+        <ProfileSection />
+      </Section>
+
+      <Section title="Linked accounts">
+        <LinkedAccountsSection />
+      </Section>
+
+      <Section title="Appearance">
+        <PreferencesSection />
+      </Section>
+
+      <Section title="Your data">
+        <DataExportSection />
+      </Section>
+
+      <Section title="Account">
+        <AccountDeletionSection />
+      </Section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Usage bar
+// ---------------------------------------------------------------------------
+
+interface UsageBarProps {
+  used: number;
+  limit: number;
+}
+
+function UsageBar({ used, limit }: UsageBarProps) {
+  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
+  const isCritical = pct >= 90;
+  const isWarning = pct >= 70;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            isCritical ? "bg-destructive" : isWarning ? "bg-amber-500" : "bg-primary",
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {used} of {limit} sessions used
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Free plan limits table
+// ---------------------------------------------------------------------------
+
+const FREE_LIMITS = [
+  { feature: "Practice sessions", limit: "50 / month" },
+  { feature: "Session duration", limit: "Up to 45 min" },
+  { feature: "Evaluation & scoring", limit: "Included" },
+  { feature: "Educator analysis", limit: "Included" },
+  { feature: "Coach analysis", limit: "3 sessions minimum" },
+  { feature: "Audio playback", limit: "Included" },
+];
+
+function FreeLimitsTable() {
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      {FREE_LIMITS.map((row, i) => (
+        <div
+          key={row.feature}
+          className={cn(
+            "flex items-center justify-between px-4 py-2.5 text-sm",
+            i !== 0 && "border-t border-border",
+          )}
+        >
+          <span className="text-muted-foreground">{row.feature}</span>
+          <span className="font-medium">{row.limit}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Billing page
+// ---------------------------------------------------------------------------
+
+function BillingSettings() {
+  const { data: user } = useMe();
+  const { data: usage } = useUsage();
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+
+  const isPro = user?.plan === "pro";
+
+  async function handleUpgrade() {
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const res = await apiClient.post<{ url: string }>("/api/billing/checkout");
+      if (res?.url) {
+        window.location.href = res.url;
+      }
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? `Could not start checkout (${err.status}). Please try again.`
+        : "Could not start checkout. Please try again.";
+      setCheckoutError(msg);
+      setCheckoutLoading(false);
+    }
+  }
+
+  async function handlePortal() {
+    setPortalLoading(true);
+    setPortalError(null);
+    try {
+      const res = await apiClient.post<{ url: string }>("/api/billing/portal");
+      if (res?.url) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      }
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? `Could not open billing portal (${err.status}). Please try again.`
+        : "Could not open billing portal. Please try again.";
+      setPortalError(msg);
+    } finally {
+      setPortalLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Current plan */}
+      <Section title="Current plan">
+        <Card>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium capitalize">
+                  {user?.plan ?? "Free"} plan
+                </span>
+                {isPro && (
+                  <Badge variant="default" className="text-xs">Pro</Badge>
+                )}
+              </div>
+              {usage?.period_end && (
+                <span className="text-xs text-muted-foreground">
+                  Renews {formatDate(usage.period_end)}
+                </span>
+              )}
+            </div>
+
+            {usage && (
+              <UsageBar used={usage.sessions_used} limit={usage.sessions_limit} />
+            )}
+          </CardContent>
+        </Card>
+      </Section>
+
+      {/* Free tier info + upgrade */}
+      {!isPro && (
+        <Section
+          title="Upgrade to Pro"
+          description="Unlock unlimited sessions and priority support."
+        >
+          <Card>
+            <CardContent className="space-y-4">
+              <FreeLimitsTable />
+
+              <div className="space-y-2">
+                <Button
+                  onClick={handleUpgrade}
+                  disabled={checkoutLoading}
+                  className="w-full sm:w-auto"
+                >
+                  {checkoutLoading ? "Redirecting..." : "Upgrade to Pro"}
+                </Button>
+                {checkoutError && (
+                  <p className="text-xs text-destructive">{checkoutError}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  You're in control of your plan — cancel any time from your billing portal.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </Section>
+      )}
+
+      {/* Pro subscription management */}
+      {isPro && (
+        <Section title="Subscription">
+          <Card>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Manage your payment method, invoices, and cancellation from the Stripe billing portal.
+              </p>
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  onClick={handlePortal}
+                  disabled={portalLoading}
+                >
+                  {portalLoading ? "Opening..." : "Manage subscription"}
+                </Button>
+                {portalError && (
+                  <p className="text-xs text-destructive">{portalError}</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings root
+// ---------------------------------------------------------------------------
+
 export default function Settings() {
-  return <div>Settings</div>;
+  const location = useLocation();
+  const isBilling = location.pathname === "/settings/billing";
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-base font-medium">Settings</h1>
+      </div>
+
+      <NavTabs isBilling={isBilling} />
+
+      {isBilling ? <BillingSettings /> : <AccountSettings />}
+    </div>
+  );
 }
