@@ -154,14 +154,14 @@ type PersistMessageParams struct {
 	InputMethod string
 }
 
-// PersistMessage inserts a message and returns it.
-func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (db.Message, error) {
+// persistMessage is the internal helper that inserts a message using any DBTX (pool or tx).
+func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMessageParams) (db.Message, error) {
 	var im pgtype.Text
 	if p.InputMethod != "" {
 		im = pgtype.Text{String: p.InputMethod, Valid: true}
 	}
 
-	msg, err := db.New(b.pool).InsertMessage(ctx, db.InsertMessageParams{
+	msg, err := db.New(dbtx).InsertMessage(ctx, db.InsertMessageParams{
 		ID:          p.MessageID,
 		SessionID:   p.SessionID,
 		Seq:         int32(p.Seq),
@@ -175,6 +175,11 @@ func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (d
 	return msg, nil
 }
 
+// PersistMessage inserts a message using the pool.
+func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (db.Message, error) {
+	return b.persistMessage(ctx, b.pool, p)
+}
+
 // PersistInterviewerTurn atomically persists the interviewer message AND the
 // LLM call record. The TokenStream's CloseWithTx is called within the
 // transaction.
@@ -185,20 +190,14 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 	}
 	defer tx.Rollback(ctx)
 
-	if err := stream.CloseWithTx(ctx, tx); err != nil {
-		// Non-fatal: the LLM call logging failed but we still persist the message.
-		slog.Warn("persist llm_call record failed", "error", err, "session_id", p.SessionID)
+	msg, err := b.persistMessage(ctx, tx, p)
+	if err != nil {
+		return db.Message{}, fmt.Errorf("persist interviewer message: %w", err)
 	}
 
-	msg, err := db.New(tx).InsertMessage(ctx, db.InsertMessageParams{
-		ID:        p.MessageID,
-		SessionID: p.SessionID,
-		Seq:       int32(p.Seq),
-		Role:      p.Role,
-		Content:   p.Content,
-	})
-	if err != nil {
-		return db.Message{}, fmt.Errorf("insert interviewer message: %w", err)
+	if err := stream.CloseWithTx(ctx, tx); err != nil {
+		// Non-fatal: the LLM call logging failed but we still persist the message.
+		slog.Warn("persist llm_call record", "error", err, "session_id", p.SessionID)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

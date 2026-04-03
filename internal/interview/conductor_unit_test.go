@@ -54,6 +54,68 @@ func TestWarningMinutes_WarningAt(t *testing.T) {
 	}
 }
 
+func TestWarningDelay(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		elapsed  time.Duration
+		want     time.Duration
+	}{
+		{"45min session, 5min elapsed", 45 * time.Minute, 5 * time.Minute, 35 * time.Minute},  // warning at 40min, 40-5=35
+		{"45min session, past warning", 45 * time.Minute, 42 * time.Minute, 0},                 // already past warning point
+		{"10min session, zero elapsed", 10 * time.Minute, 0, 8 * time.Minute},                  // warning at 8min (10-2)
+		{"5min session, zero elapsed", 5 * time.Minute, 0, 3 * time.Minute},                    // warning at 3min (5-2)
+		{"45min session, zero elapsed", 45 * time.Minute, 0, 40 * time.Minute},                 // warning at 40min (45-5)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := warningDelay(tt.duration, tt.elapsed)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestOvertimeDelay(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		elapsed  time.Duration
+		want     time.Duration
+	}{
+		{"45min session, 5min elapsed", 45 * time.Minute, 5 * time.Minute, 40 * time.Minute},
+		{"45min session, past end", 45 * time.Minute, 50 * time.Minute, 0},
+		{"10min session, zero elapsed", 10 * time.Minute, 0, 10 * time.Minute},
+		{"5min session, 5min elapsed", 5 * time.Minute, 5 * time.Minute, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := overtimeDelay(tt.duration, tt.elapsed)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAutoEndDelay(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		elapsed  time.Duration
+		want     time.Duration
+	}{
+		{"45min session, 5min elapsed", 45 * time.Minute, 5 * time.Minute, 42 * time.Minute},
+		{"45min session, past auto-end", 45 * time.Minute, 50 * time.Minute, 0},
+		{"10min session, zero elapsed", 10 * time.Minute, 0, 12 * time.Minute},
+		{"5min session, zero elapsed", 5 * time.Minute, 0, 7 * time.Minute},
+		{"45min session, at overtime", 45 * time.Minute, 45 * time.Minute, 2 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := autoEndDelay(tt.duration, tt.elapsed)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestForceState(t *testing.T) {
 	sm := NewStateMachine(StateTranscribing)
 
