@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // AuthUser is the authenticated user extracted from the session cookie.
@@ -59,6 +61,9 @@ func RequireAuth(sa SessionAuthenticator) func(http.Handler) http.Handler {
 				writeAuthError(w, http.StatusUnauthorized, "invalid or expired session")
 				return
 			}
+
+			span := trace.SpanFromContext(r.Context())
+			span.SetAttributes(attribute.String("user_id", user.ID.String()))
 
 			next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
 		})
