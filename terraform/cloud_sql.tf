@@ -22,6 +22,7 @@ resource "google_sql_database_instance" "drill" {
 
     ip_configuration {
       ipv4_enabled = true
+      require_ssl  = true
     }
   }
 

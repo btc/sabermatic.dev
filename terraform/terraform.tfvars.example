@@ -1,3 +1,8 @@
+# After editing, run:
+#   terraform init -backend-config="bucket=<project_id>-tfstate"
+#   terraform plan
+#   terraform apply
+
 project_id  = "drill-prod"
 region      = "us-central1"
 environment = "prod"

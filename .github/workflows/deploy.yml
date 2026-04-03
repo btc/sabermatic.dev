@@ -62,12 +62,14 @@ jobs:
             --format='value(status.url)')
           echo "Service URL: ${SERVICE_URL}"
 
-          # Wait for the new revision to be serving
-          sleep 10
-
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/api/health")
-          if [ "${STATUS}" != "200" ]; then
-            echo "Smoke test failed: /api/health returned ${STATUS}"
-            exit 1
-          fi
-          echo "Smoke test passed: /api/health returned 200"
+          for i in 1 2 3; do
+            sleep 10
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${SERVICE_URL}/api/health")
+            if [ "${STATUS}" = "200" ]; then
+              echo "Smoke test passed: /api/health returned 200"
+              exit 0
+            fi
+            echo "Attempt ${i}: /api/health returned ${STATUS}, retrying..."
+          done
+          echo "Smoke test failed after 3 attempts"
+          exit 1
