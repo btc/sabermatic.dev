@@ -107,11 +107,6 @@ func NewConductor(p ConductorParams) *Conductor {
 	return c
 }
 
-// isReconnect returns true if the client sent a last_seq in session_init.
-func (c *Conductor) isReconnect() bool {
-	return c.initMsg.LastSeq != nil
-}
-
 // Run is the single entry point for the conductor. It owns the readLoop
 // lifecycle, loads session state, sends initial messages, sets timers, and
 // runs the main event loop. Run blocks until the session ends.
@@ -182,7 +177,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 			switch msg.Type {
 			case "end_turn":
-				if err := c.handleEndTurn(serverCtx, msg); err != nil {
+				if err := c.endTurn(serverCtx, msg); err != nil {
 					slog.Error("conductor: end_turn", "error", err, "session_id", c.sessionID)
 					c.sm.ForceState(StateWaitingForInput)
 					c.send(serverCtx, msgError("turn_failed", "failed to process turn, please try again"))
@@ -261,8 +256,8 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) error {
 	return c.streamInterviewerResponse(ctx)
 }
 
-// handleEndTurn processes a candidate's turn (text or voice).
-func (c *Conductor) handleEndTurn(ctx context.Context, msg WSMessage) error {
+// endTurn processes a candidate's turn (text or voice).
+func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 	var candidateContent string
 
 	if msg.InputMethod == "voice" {
@@ -464,6 +459,11 @@ func (c *Conductor) send(ctx context.Context, v any) {
 	if err := c.ws.SendJSON(ctx, v); err != nil {
 		slog.Debug("conductor: send failed", "error", err, "session_id", c.sessionID)
 	}
+}
+
+// isReconnect returns true if the client sent a last_seq in session_init.
+func (c *Conductor) isReconnect() bool {
+	return c.initMsg.LastSeq != nil
 }
 
 // close closes the WebSocket and releases the advisory lock connection.
