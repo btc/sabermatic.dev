@@ -4,7 +4,7 @@
 
 This spec covers the public-facing landing page, conversion funnel, session replay feature, sample session, and launch strategy for Sabermetric. It builds on the existing naming/branding spec and the authenticated UI spec.
 
-**Prerequisite:** The UI spec still references "DRILL" throughout — it predates the naming decision. The UI spec must be updated to use "Sabermetric" / "sabermetric" per the naming spec before implementing any auth or layout pages.
+**Note:** The UI spec and codebase use "Drill" as the internal project codename. "Sabermetric" is the user-facing product name. No need to update existing specs or code to say "Sabermetric" — the rename applies to user-visible UI text (wordmark, browser tab, meta tags) at implementation time.
 
 The landing page is a single-scroll showcase that walks visitors through a real evaluated session (v0 session 27), demonstrating every major feature with real data. The goal: share something genuinely useful, let people see what it does, and not go broke running it.
 
@@ -261,6 +261,5 @@ Free tier removes all friction. "Try a session right now, free, no credit card."
 - Pricing — existing billing spec
 - Brand identity, domain, taglines — existing naming spec
 
-**Known cross-spec issues to resolve before implementation:**
-- The UI spec says concurrent session limit is "pro: 2" but the billing spec updated this to "pro: 3". The UI spec should be updated to match the billing spec.
-- The UI spec uses "DRILL" throughout — must be updated to "Sabermetric" per the naming spec (noted in prerequisite above).
+**Known cross-spec issue:**
+- The UI spec says concurrent session limit is "pro: 2" but the billing spec updated this to "pro: 3". The billing spec is authoritative.
