@@ -44,7 +44,7 @@ func SetTraceMetadata(ctx context.Context, opts *river.InsertOpts) {
 // SetTraceMetadata at enqueue time), the span includes a link to the
 // originating trace.
 type JobTracer struct {
-	river.WorkerMiddlewareDefaults
+	river.MiddlewareDefaults
 }
 
 func (*JobTracer) Work(ctx context.Context, job *rivertype.JobRow, doInner func(ctx context.Context) error) error {
