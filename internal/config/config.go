@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sethvargo/go-envconfig"
 )
@@ -19,8 +18,6 @@ type Config struct {
 	Email    Email
 	River    River
 	Auth     Auth
-	OAuth    OAuth
-	Otel     Otel
 }
 
 type Server struct {
@@ -34,16 +31,12 @@ type Database struct {
 }
 
 // NewPool creates a pgxpool connected to the configured database.
-// Pass a pgx.QueryTracer to instrument queries (e.g. otelpgx.NewTracer()), or nil for none.
-func (d *Database) NewPool(ctx context.Context, tracer pgx.QueryTracer) (*pgxpool.Pool, error) {
+func (d *Database) NewPool(ctx context.Context) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(d.URL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
 	poolCfg.MaxConns = d.MaxPoolConns
-	if tracer != nil {
-		poolCfg.ConnConfig.Tracer = tracer
-	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
@@ -63,8 +56,10 @@ type LLM struct {
 	InterviewerModel   string `env:"INTERVIEWER_MODEL,default=claude-sonnet-4-20250514"`
 	EvaluatorModel     string `env:"EVALUATOR_MODEL,default=claude-opus-4-20250514"`
 	EvaluatorMaxTokens int64  `env:"EVALUATOR_MAX_TOKENS,default=4096"`
-	EducatorModel      string `env:"EDUCATOR_MODEL,default=claude-sonnet-4-20250514"`
+	EducatorModel      string `env:"EDUCATOR_MODEL,default=claude-opus-4-20250514"`
+	EducatorMaxTokens  int64  `env:"EDUCATOR_MAX_TOKENS,default=8192"`
 	CoachModel         string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
+	CoachMaxTokens     int64  `env:"COACH_MAX_TOKENS,default=4096"`
 }
 
 type Speech struct {
@@ -97,21 +92,6 @@ type Auth struct {
 	ResetTokenTTL  time.Duration `env:"AUTH_RESET_TOKEN_TTL,default=1h"`
 	BcryptCost     int           `env:"AUTH_BCRYPT_COST,default=12"`
 	BaseURL        string        `env:"BASE_URL,default=http://localhost:3000"`
-}
-
-type OAuth struct {
-	GoogleClientID     string `env:"OAUTH_GOOGLE_CLIENT_ID"`
-	GoogleClientSecret string `env:"OAUTH_GOOGLE_CLIENT_SECRET"`
-	GitHubClientID     string `env:"OAUTH_GITHUB_CLIENT_ID"`
-	GitHubClientSecret string `env:"OAUTH_GITHUB_CLIENT_SECRET"`
-}
-
-type Otel struct {
-	Enabled      bool    `env:"OTEL_ENABLED,default=false"`
-	Exporter     string  `env:"OTEL_EXPORTER,default=stdout"`
-	SampleRate   float64 `env:"OTEL_SAMPLE_RATE,default=1.0"`
-	ServiceName  string  `env:"OTEL_SERVICE_NAME,default=drill"`
-	GCPProjectID string  `env:"GOOGLE_CLOUD_PROJECT"`
 }
 
 // SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
