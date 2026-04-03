@@ -30,15 +30,29 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 		return err
 	}
 	for _, id := range ids {
-		if err := q.MarkSessionCompleted(ctx, id); err != nil {
+		tx, err := w.Pool.Begin(ctx)
+		if err != nil {
+			slog.Warn("failed to begin tx for abandoned session", "session_id", id, "error", err)
+			continue
+		}
+
+		if err := db.New(tx).MarkSessionCompleted(ctx, id); err != nil {
+			tx.Rollback(ctx)
 			slog.Warn("failed to mark abandoned session completed", "session_id", id, "error", err)
 			continue
 		}
+
 		if w.Jobs != nil {
-			_, err := w.Jobs.Insert(ctx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts())
-			if err != nil {
+			if _, err := w.Jobs.InsertTx(ctx, tx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts()); err != nil {
+				tx.Rollback(ctx)
 				slog.Warn("failed to enqueue evaluation for abandoned session", "session_id", id, "error", err)
+				continue
 			}
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			slog.Warn("failed to commit abandoned session cleanup", "session_id", id, "error", err)
+			continue
 		}
 		slog.Info("marked abandoned session completed", "session_id", id)
 	}
