@@ -48,7 +48,7 @@ export function useInterview(sessionId: string) {
       case "reconnect_state": {
         const msgs = msg.messages;
         if (msgs.length > 0) {
-          lastSeqRef.current = msgs[msgs.length - 1].seq;
+          lastSeqRef.current = msgs[msgs.length - 1]!.seq;
         }
         setMessages(
           msgs.map((m) => ({
@@ -81,7 +81,7 @@ export function useInterview(sessionId: string) {
         streamingTextRef.current = "";
         setStreamingText("");
         setMessages((prev) => {
-          const seq = prev.length > 0 ? prev[prev.length - 1].seq + 1 : 1;
+          const seq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
           lastSeqRef.current = seq;
           return [...prev, { id: msg.message_id, seq, role: "interviewer", content: finalText }];
         });

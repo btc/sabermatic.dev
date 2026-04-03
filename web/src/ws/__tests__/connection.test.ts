@@ -35,7 +35,8 @@ describe("ConnectionManager", () => {
 
     await vi.advanceTimersByTimeAsync(0);
     expect(onStateChange).toHaveBeenCalledWith(ConnectionState.Connected);
-    const sent = JSON.parse(cm.ws!.send.mock.calls[0][0]);
+    const mockSend = cm.ws!.send as ReturnType<typeof vi.fn>;
+    const sent = JSON.parse(mockSend.mock.calls[0]![0] as string);
     expect(sent).toEqual({ type: "session_init", last_seq: null });
   });
 
@@ -48,7 +49,7 @@ describe("ConnectionManager", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     // Simulate unexpected close (code 1006)
-    cm.ws!.onclose?.({ code: 1006 });
+    cm.ws!.onclose?.({ code: 1006 } as CloseEvent);
     expect(onStateChange).toHaveBeenCalledWith(ConnectionState.Reconnecting);
 
     // First retry fires at 750ms (jitter: 1000 * (0.5 + 0.5*0.5) = 750ms)
@@ -65,10 +66,10 @@ describe("ConnectionManager", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     // Receive reconnect_please
-    cm.ws!.onmessage?.({ data: JSON.stringify({ type: "reconnect_please" }) });
+    cm.ws!.onmessage?.({ data: JSON.stringify({ type: "reconnect_please" }) } as MessageEvent);
 
     // reconnect_please calls ws.close(1000), which triggers onclose
-    cm.ws!.onclose?.({ code: 1000 });
+    cm.ws!.onclose?.({ code: 1000 } as CloseEvent);
 
     // Should reconnect immediately
     await vi.advanceTimersByTimeAsync(0);
@@ -83,7 +84,7 @@ describe("ConnectionManager", () => {
     cm.connect(null);
     await vi.advanceTimersByTimeAsync(0);
 
-    cm.ws!.onclose?.({ code: 1000 });
+    cm.ws!.onclose?.({ code: 1000 } as CloseEvent);
     expect(onStateChange).toHaveBeenCalledWith(ConnectionState.Disconnected);
 
     // No reconnect attempt
