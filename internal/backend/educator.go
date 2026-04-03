@@ -44,7 +44,7 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 	}
 
 	plan, _ := billing.PlanByName(user.Plan)
-	accessLevel, _ := billing.DetermineEducatorAccess(ctx, int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
+	accessLevel := billing.DetermineEducatorAccess(int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
 
 	q := db.New(b.pool)
 	ea, err := q.GetEducatorAnalysisBySession(ctx, sessionID)
@@ -67,20 +67,13 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 				ModelAnswer: truncateRunes(ea.ModelAnswer.String, previewModelAnswerLen),
 			}, nil
 		}
-		resp := &EducatorResponse{
+		// FreeTaste users see full content on GET — the increment happens at
+		// request time (POST /educator) to avoid double-counting on page refresh.
+		return &EducatorResponse{
 			Status:       "completed",
 			ModelAnswer:  ea.ModelAnswer.String,
 			GapDeepDives: ea.GapDeepDives.String,
-		}
-		if accessLevel == billing.FreeTaste {
-			if _, err := q.IncrementFreeEducatorUsed(ctx, db.IncrementFreeEducatorUsedParams{
-				ID:                    userID,
-				FreeFullEducatorsUsed: int32(plan.FreeEducatorLimit),
-			}); err != nil {
-				return nil, fmt.Errorf("increment free educator used: %w", err)
-			}
-		}
-		return resp, nil
+		}, nil
 	default:
 		return &EducatorResponse{Status: ea.Status}, nil
 	}
@@ -120,10 +113,21 @@ func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID
 	}
 
 	plan, _ := billing.PlanByName(user.Plan)
-	accessLevel, _ := billing.DetermineEducatorAccess(ctx, int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
+	accessLevel := billing.DetermineEducatorAccess(int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
 
 	if accessLevel == billing.Preview {
 		return ErrNoPaidBalance
+	}
+
+	// Consume the free taste on request (POST), not on read (GET).
+	// The atomic increment ensures concurrent requests don't double-consume.
+	if accessLevel == billing.FreeTaste {
+		if _, err := db.New(b.pool).IncrementFreeEducatorUsed(ctx, db.IncrementFreeEducatorUsedParams{
+			ID:                    userID,
+			FreeFullEducatorsUsed: int32(plan.FreeEducatorLimit),
+		}); err != nil {
+			return fmt.Errorf("increment free educator used: %w", err)
+		}
 	}
 
 	q := db.New(b.pool)

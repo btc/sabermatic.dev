@@ -1,7 +1,6 @@
 package billing_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -12,20 +11,17 @@ import (
 )
 
 func TestCanAccessEducator_PaidBalance(t *testing.T) {
-	level, err := billing.DetermineEducatorAccess(context.Background(), 100, 0, 1)
-	require.NoError(t, err)
+	level := billing.DetermineEducatorAccess(100, 0, 1)
 	assert.Equal(t, billing.Full, level)
 }
 
 func TestCanAccessEducator_FreeTasteAvailable(t *testing.T) {
-	level, err := billing.DetermineEducatorAccess(context.Background(), 0, 0, 1)
-	require.NoError(t, err)
+	level := billing.DetermineEducatorAccess(0, 0, 1)
 	assert.Equal(t, billing.FreeTaste, level)
 }
 
 func TestCanAccessEducator_FreeTasteExhausted(t *testing.T) {
-	level, err := billing.DetermineEducatorAccess(context.Background(), 0, 1, 1)
-	require.NoError(t, err)
+	level := billing.DetermineEducatorAccess(0, 1, 1)
 	assert.Equal(t, billing.Preview, level)
 }
 
