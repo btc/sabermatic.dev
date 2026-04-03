@@ -1,0 +1,362 @@
+# Phase 5: Deployment — Design Spec
+
+**Date**: 2026-04-03
+**Status**: Draft
+**Depends on**: Phase 4 (Observability) — merged to main
+**Purpose**: Dockerfile, Terraform IaC for GCP (Cloud Run, Cloud SQL, GCS, Secret Manager, Artifact Registry, IAM), GitHub Actions CI/CD, and a bootstrap script for one-time project setup.
+
+---
+
+## 1. Overview
+
+Phases 1–4 built the application and its observability layer. Nothing is deployed. Phase 5 creates the infrastructure and pipeline to ship the Go monolith to Google Cloud Run with a single `git push` to main.
+
+This phase delivers:
+
+1. **Dockerfile** — multi-stage build producing a minimal distroless container
+2. **Terraform configuration** — all GCP resources in a single root module with GCS-backed state
+3. **GitHub Actions workflows** — CI on PRs (test/lint/sqlc check), CD on main push (build/push/deploy)
+4. **Bootstrap script** — one-time setup of APIs, state bucket, service accounts, and Workload Identity Federation
+5. **Secret Manager integration** — sensitive config stored in GCP, referenced by Cloud Run at runtime
+
+---
+
+## 2. Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| IaC tool | Terraform | Reproducible, version-controlled infra. Industry standard for GCP. |
+| Terraform state | GCS backend | Remote state with locking, same GCP project. |
+| Terraform structure | Single root module | Solo operator, monolith. Split later if needed. |
+| Secrets | Google Secret Manager | Audit trail, rotation support, IAM-scoped. Too many sensitive values for plain env vars. |
+| Container registry | Artifact Registry | GCP-native, replaces deprecated Container Registry. |
+| CI/CD | GitHub Actions | Already on GitHub. WIF for keyless auth to GCP. |
+| Deploy strategy | Full cutover (no canary) | No users yet. Add canary when there's traffic to test against. |
+| Cloud Run deploys | `gcloud run deploy` in CI | Terraform defines the service (env vars, scaling, IAM); CI updates the image. Avoids `terraform apply` on every push. |
+| GCP project | Created manually | Avoids chicken-and-egg with Terraform state and permissions. |
+
+---
+
+## 3. Manual Bootstrap
+
+Before Terraform runs, a one-time bootstrap creates the foundation. A `scripts/bootstrap.sh` script automates steps 2–5 given a project ID.
+
+### Steps
+
+1. **Create GCP project** — manually via console (e.g. `drill-prod`)
+2. **Enable APIs**:
+   - `run.googleapis.com`
+   - `sqladmin.googleapis.com`
+   - `secretmanager.googleapis.com`
+   - `artifactregistry.googleapis.com`
+   - `storage.googleapis.com`
+   - `cloudresourcemanager.googleapis.com`
+   - `iam.googleapis.com`
+   - `iamcredentials.googleapis.com`
+   - `cloudtrace.googleapis.com`
+3. **Create Terraform state bucket** — `${PROJECT_ID}-tfstate`, versioning enabled, uniform bucket-level access
+4. **Create Terraform service account** — `terraform@${PROJECT_ID}.iam.gserviceaccount.com` with roles:
+   - `roles/editor`
+   - `roles/secretmanager.admin`
+   - `roles/iam.securityAdmin` (needed to bind IAM on service accounts)
+5. **Create deployer service account** — `deployer@${PROJECT_ID}.iam.gserviceaccount.com` with roles:
+   - `roles/artifactregistry.writer`
+   - `roles/run.developer`
+   - `roles/iam.serviceAccountUser` (to act as the Cloud Run runtime SA)
+
+### Workload Identity Federation
+
+GitHub Actions authenticates to GCP without service account keys via WIF:
+
+- **WIF pool**: `github-actions`
+- **WIF provider**: `github` (OIDC, issuer `https://token.actions.githubusercontent.com`)
+- **Attribute mapping**: `google.subject` = `assertion.sub`, `attribute.repository` = `assertion.repository`
+- **IAM bindings**:
+  - `terraform@` SA: bound to the repo for Terraform operations (manual or future CI)
+  - `deployer@` SA: bound to the repo for CI/CD deploys
+
+The bootstrap script creates the WIF pool, provider, and bindings.
+
+---
+
+## 4. Terraform Resources
+
+All Terraform lives in `terraform/` at the repo root. Single state file in GCS.
+
+### File Structure
+
+```
+terraform/
+  main.tf              # provider config, GCS backend, google_project_service
+  variables.tf         # project_id, region, environment, github_repo
+  artifact_registry.tf # Docker repository
+  cloud_sql.tf         # instance, database, user, password in Secret Manager
+  cloud_run.tf         # service definition, env vars, secret refs, IAM
+  gcs.tf               # audio storage bucket
+  secrets.tf           # Secret Manager secrets (shells — values set manually)
+  iam.tf               # service accounts, role bindings, WIF (if not in bootstrap)
+  outputs.tf           # service URL, SQL connection name, registry URL
+```
+
+### Resources
+
+**Artifact Registry:**
+- Docker repository `drill` in the configured region
+
+**Cloud SQL:**
+- PostgreSQL 16, `db-f1-micro`, 10 GB SSD
+- Automated backups enabled, HA off
+- No private IP — Cloud Run connects via built-in Cloud SQL Auth Proxy
+- Database `drill`, user `drill`, random password generated by Terraform and stored in Secret Manager
+
+**Cloud Run Service:**
+- Image: placeholder initially, updated by CI on each deploy
+- CPU: 1 vCPU, Memory: 512 MB
+- Min instances: 0, Max instances: 2
+- Concurrency: 100
+- Request timeout: 3600s (1 hour, for WebSocket interview sessions)
+- Container port: 8080
+- Cloud SQL connection annotation (enables Auth Proxy sidecar)
+- Startup probe: HTTP GET `/healthz` on port 8080
+- Termination grace period: 30s (graceful shutdown persists state and sends `reconnect_please` before exit)
+
+**Cloud Run environment variables (non-secret):**
+
+| Variable | Value |
+|---|---|
+| `SERVER_PORT` | `8080` |
+| `SERVER_SHUTDOWN_TIMEOUT_SEC` | `30` |
+| `BASE_URL` | `https://<service-url>` (from Cloud Run output) |
+| `OTEL_ENABLED` | `true` |
+| `OTEL_EXPORTER` | `google` |
+| `OTEL_SAMPLE_RATE` | `1.0` |
+| `OTEL_SERVICE_NAME` | `drill` |
+| `EMAIL_FROM` | `noreply@drill.dev` |
+
+`GOOGLE_CLOUD_PROJECT` is auto-injected by Cloud Run — no need to set it.
+
+**Cloud Run secret references (from Secret Manager):**
+
+| Variable | Secret Name |
+|---|---|
+| `DATABASE_URL` | `database-url` |
+| `AUTH_TOKEN_SECRET` | `auth-token-secret` |
+| `ANTHROPIC_API_KEY` | `anthropic-api-key` |
+| `OPENAI_API_KEY` | `openai-api-key` |
+| `MAILGUN_API_KEY` | `mailgun-api-key` |
+| `MAILGUN_DOMAIN` | `mailgun-domain` |
+| `OAUTH_GOOGLE_CLIENT_ID` | `oauth-google-client-id` |
+| `OAUTH_GOOGLE_CLIENT_SECRET` | `oauth-google-client-secret` |
+| `OAUTH_GITHUB_CLIENT_ID` | `oauth-github-client-id` |
+| `OAUTH_GITHUB_CLIENT_SECRET` | `oauth-github-client-secret` |
+
+Secret *values* are set manually via `gcloud secrets versions add` or the console — never in Terraform.
+
+**Note on DATABASE_URL format:** Cloud Run connects to Cloud SQL via the built-in Auth Proxy over a Unix socket. The DATABASE_URL value must use the socket path:
+```
+postgres://drill:PASSWORD@/drill?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME
+```
+
+**GCS Bucket:**
+- Name: `${PROJECT_ID}-audio`
+- Standard storage class
+- Uniform bucket-level access
+
+**Secret Manager:**
+- One `google_secret_manager_secret` resource per secret listed above
+- Terraform creates the secret shells; values are populated manually
+
+**IAM & Service Accounts:**
+- `drill-app@${PROJECT_ID}.iam.gserviceaccount.com` — Cloud Run runtime SA
+  - `roles/cloudsql.client` (Cloud SQL Auth Proxy)
+  - `roles/storage.objectAdmin` on the audio bucket
+  - `roles/secretmanager.secretAccessor`
+  - `roles/cloudtrace.agent` (OTel Cloud Trace exporter)
+  - `roles/logging.logWriter` (structured logs to Cloud Logging)
+- Cloud Run service identity set to `drill-app@`
+
+**Cloud Run IAM:**
+- `allUsers` → `roles/run.invoker` (public HTTP endpoint; auth is application-layer)
+
+### Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `project_id` | yes | — | GCP project ID |
+| `region` | no | `us-central1` | GCP region |
+| `environment` | no | `prod` | Used in resource naming |
+| `github_repo` | yes | — | `owner/repo` for WIF binding |
+
+---
+
+## 5. Dockerfile
+
+Multi-stage build producing a minimal container.
+
+```dockerfile
+# Stage 1: Build
+FROM golang:1.25 AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o drill ./cmd/drill
+
+# Stage 2: Runtime
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /app/drill /drill
+EXPOSE 8080
+ENTRYPOINT ["/drill"]
+```
+
+**Design notes:**
+- `CGO_ENABLED=0` — pgx is pure Go, no C dependencies
+- `distroless/static` — no shell, no libc, smallest attack surface. Possible because of no CGO.
+- `go mod download` in a separate layer for Docker cache efficiency
+- Migrations are embedded via `embed.FS` in `cmd/drill/` — no SQL files need copying
+- No frontend build stage yet — React SPA (Phase 9) will add a Node stage that builds into a directory embedded by the Go binary
+
+### .dockerignore
+
+```
+terraform/
+docs/
+.git/
+.github/
+coverage.out
+.env*
+*.md
+scripts/
+```
+
+---
+
+## 6. GitHub Actions Workflows
+
+### `ci.yml` — PR checks
+
+**Trigger:** Pull request to main
+
+```
+Steps:
+1. actions/checkout
+2. actions/setup-go (1.25)
+3. go vet ./...
+4. staticcheck ./...
+5. sqlc diff (fail if generated code is stale)
+6. go test ./... -race -count=1
+```
+
+Testcontainers spins up Postgres in the GitHub Actions runner (Docker available by default). No need for a `services:` block.
+
+### `deploy.yml` — Deploy on main push
+
+**Trigger:** Push to main branch
+
+```
+Steps:
+1. actions/checkout
+2. google-github-actions/auth (WIF, deployer SA)
+3. actions/setup-go (1.25)
+4. go test ./... -race -count=1 (gate before deploy)
+5. google-github-actions/setup-gcloud
+6. gcloud auth configure-docker ${REGION}-docker.pkg.dev
+7. docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/drill/drill:${GITHUB_SHA::7} .
+8. docker push <tagged image>
+9. gcloud run deploy drill --image <tagged image> --region ${REGION}
+10. Smoke test: curl GET ${SERVICE_URL}/healthz, expect 200
+```
+
+**Key design points:**
+- Image tagged with short git SHA — every deploy traces to a commit
+- Tests run again (not relying on the PR check) — main could have a broken merge
+- No canary — full traffic cutover
+- Smoke test: if `/healthz` returns non-200, the workflow fails. Manual rollback for now.
+- Workflow environment variables (`PROJECT_ID`, `REGION`, `SERVICE_URL`) stored as GitHub Actions variables (not secrets — they're not sensitive)
+- WIF provider details stored as GitHub Actions secrets
+
+---
+
+## 7. Health Check & Graceful Shutdown
+
+### Health Check
+
+The existing `/healthz` endpoint (Phase 1) returns `200 OK` with `{"status":"ok"}` when the app is serving and the database pool is connected.
+
+Cloud Run's startup probe hits `/healthz` on port 8080. If the app can't start (migration failure, pool creation failure), it exits non-zero before serving — Cloud Run sees the crash and doesn't route traffic.
+
+No separate readiness/liveness probes — Cloud Run doesn't support the Kubernetes-style probe model beyond startup.
+
+### Graceful Shutdown
+
+Already implemented in `cmd/drill/main.go`:
+
+1. SIGTERM received (Cloud Run sends this during deploy)
+2. HTTP server stops accepting new connections
+3. In-flight requests drain (up to `SERVER_SHUTDOWN_TIMEOUT_SEC`)
+4. `Backend.Close()` — River drains workers, pool closes
+5. OTel providers flush and shut down
+6. Process exits
+
+The 30-second grace period is sufficient — on deploy, interview conductors (Conductor phase, built after this) will persist state to Postgres and send `reconnect_please` to WebSocket clients within seconds. The session continues on the new revision. The grace period doesn't need to match session duration.
+
+---
+
+## 8. Interaction with Observability (Phase 4)
+
+Phase 4 is complete and merged to main. No parallel work coordination needed.
+
+**What Phase 4 already provides:**
+- `config.Otel` struct with `OTEL_ENABLED`, `OTEL_EXPORTER`, `OTEL_SAMPLE_RATE`, `OTEL_SERVICE_NAME`, `GOOGLE_CLOUD_PROJECT`
+- `drilotel.Init()` configures stdout or Google Cloud Trace exporters based on config
+- `drilotel.NewTraceHandler()` wraps slog with trace/span correlation
+- `otelhttp` middleware on all routes
+- `otelpgx` tracer on all database queries
+- River job tracing middleware
+
+**What this phase wires up:**
+- Terraform sets `OTEL_ENABLED=true`, `OTEL_EXPORTER=google` on the Cloud Run service
+- IAM grants `roles/cloudtrace.agent` and `roles/logging.logWriter` to the runtime SA
+- `GOOGLE_CLOUD_PROJECT` is auto-injected by Cloud Run — no Terraform config needed
+
+When the app starts on Cloud Run, traces flow to Cloud Trace and logs flow to Cloud Logging automatically.
+
+---
+
+## 9. File Inventory
+
+New files created by this phase:
+
+```
+Dockerfile
+.dockerignore
+scripts/bootstrap.sh
+terraform/
+  main.tf
+  variables.tf
+  artifact_registry.tf
+  cloud_sql.tf
+  cloud_run.tf
+  gcs.tf
+  secrets.tf
+  iam.tf
+  outputs.tf
+.github/
+  workflows/
+    ci.yml
+    deploy.yml
+```
+
+No existing files are modified.
+
+---
+
+## 10. Out of Scope
+
+- **Canary deployments** — add when there's real traffic
+- **Automated rollback** — manual via `gcloud run services update-traffic` for now
+- **Custom domain / SSL** — configure after initial deploy is working
+- **CDN / Cloud Armor** — not needed at launch scale
+- **Monitoring dashboards** — Cloud Run and Cloud Trace have built-in views; custom dashboards when needed
+- **Frontend build stage in Dockerfile** — Phase 9 (React SPA)
+- **Multi-environment (staging/prod)** — single prod environment for now; add staging by duplicating Terraform with different variables
