@@ -49,6 +49,75 @@ func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (Question, erro
 	return i, err
 }
 
+const getQuestionsForUser = `-- name: GetQuestionsForUser :many
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at FROM questions
+WHERE user_id IS NULL OR user_id = $1
+ORDER BY created_at
+`
+
+func (q *Queries) GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]Question, error) {
+	rows, err := q.db.Query(ctx, getQuestionsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Question
+	for rows.Next() {
+		var i Question
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.Prompt,
+			&i.Difficulty,
+			&i.Tags,
+			&i.Hints,
+			&i.Source,
+			&i.CoachRationale,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertQuestion = `-- name: InsertQuestion :one
+INSERT INTO questions (user_id, title, prompt, difficulty, tags, source, coach_rationale)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id
+`
+
+type InsertQuestionParams struct {
+	UserID         pgtype.UUID `json:"user_id"`
+	Title          string      `json:"title"`
+	Prompt         string      `json:"prompt"`
+	Difficulty     string      `json:"difficulty"`
+	Tags           []string    `json:"tags"`
+	Source         string      `json:"source"`
+	CoachRationale pgtype.Text `json:"coach_rationale"`
+}
+
+func (q *Queries) InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, insertQuestion,
+		arg.UserID,
+		arg.Title,
+		arg.Prompt,
+		arg.Difficulty,
+		arg.Tags,
+		arg.Source,
+		arg.CoachRationale,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listQuestionsForUser = `-- name: ListQuestionsForUser :many
 SELECT id, user_id, title, prompt, difficulty, tags, hints, source, created_at
 FROM questions

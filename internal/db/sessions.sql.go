@@ -79,6 +79,72 @@ func (q *Queries) FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error
 	return items, nil
 }
 
+const getReviewedSessionIDsForUser = `-- name: GetReviewedSessionIDsForUser :many
+SELECT id FROM interview_sessions
+WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+ORDER BY created_at
+`
+
+func (q *Queries) GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, getReviewedSessionIDsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getReviewedSessionsForUser = `-- name: GetReviewedSessionsForUser :many
+SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at FROM interview_sessions
+WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+ORDER BY created_at
+`
+
+func (q *Queries) GetReviewedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]InterviewSession, error) {
+	rows, err := q.db.Query(ctx, getReviewedSessionsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InterviewSession
+	for rows.Next() {
+		var i InterviewSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.QuestionID,
+			&i.Status,
+			&i.ConfigDurationMinutes,
+			&i.ConfigTtsEnabled,
+			&i.ConfigCoachBriefing,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.TurnCount,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSession = `-- name: GetSession :one
 SELECT s.id, s.user_id, s.question_id, s.status,
        s.config_duration_minutes, s.config_tts_enabled,
