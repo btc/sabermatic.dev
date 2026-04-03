@@ -126,7 +126,7 @@ terraform/
 | Variable | Value |
 |---|---|
 | `SERVER_PORT` | `8080` |
-| `SERVER_SHUTDOWN_TIMEOUT_SEC` | `30` |
+| `SERVER_SHUTDOWN_TIMEOUT_SEC` | `30` (shutdown cascade math depends on this — see Section 7) |
 | `BASE_URL` | `https://<service-url>` (from Cloud Run output) |
 | `OTEL_ENABLED` | `true` |
 | `OTEL_EXPORTER` | `google` |
@@ -135,6 +135,8 @@ terraform/
 | `EMAIL_FROM` | `noreply@drill.dev` |
 
 `GOOGLE_CLOUD_PROJECT` is auto-injected by Cloud Run — no need to set it.
+
+**Env vars intentionally using code defaults:** `DATABASE_MAX_POOL_SIZE` (5), `RIVER_SHUTDOWN_TIMEOUT_SEC` (15 — shutdown cascade math depends on this, see Section 7), `RIVER_*_WORKERS`, `AUTH_SESSION_TTL`, `AUTH_BCRYPT_COST`. These should be tuned once traffic patterns are observed. In particular, `DATABASE_MAX_POOL_SIZE=5` × max 2 instances = 10 connections, well within `db-f1-micro` limits (~25), but must be recalculated when scaling up.
 
 **Cloud Run secret references (from Secret Manager):**
 
@@ -242,7 +244,7 @@ scripts/
 ```
 Steps:
 1. actions/checkout
-2. actions/setup-go (1.25)
+2. actions/setup-go (1.25.x)
 3. Install tools: go install honnef.co/go/tools/cmd/staticcheck@latest && go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 4. go vet ./...
 5. staticcheck ./...
@@ -260,7 +262,7 @@ Testcontainers spins up Postgres in the GitHub Actions runner (Docker available 
 Steps:
 1. actions/checkout
 2. google-github-actions/auth (WIF, deployer SA)
-3. actions/setup-go (1.25)
+3. actions/setup-go (1.25.x)
 4. go test ./... -race -count=1 (gate before deploy)
 5. google-github-actions/setup-gcloud
 6. gcloud auth configure-docker ${REGION}-docker.pkg.dev
@@ -284,7 +286,7 @@ Steps:
 
 ### Health Check
 
-The existing `/api/health` endpoint (Phase 1) returns `200 OK` with `{"status":"ok"}` when the app is serving and the database pool is connected.
+The existing `/api/health` endpoint (Phase 1) returns `200 OK` with `{"status":"ok","db":true}` when the app is serving and the database pool is connected (or `503` with `{"status":"degraded","db":false}` if the pool is unhealthy).
 
 Cloud Run's startup probe hits `/api/health` on port 8080. If the app can't start (migration failure, pool creation failure), it exits non-zero before serving — Cloud Run sees the crash and doesn't route traffic.
 
