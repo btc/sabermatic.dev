@@ -44,3 +44,5 @@ frontend/dist/
 .worktrees/
 # Go binary
 /drill
+cov.out
+coverage.out
