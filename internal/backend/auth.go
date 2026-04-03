@@ -17,6 +17,7 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -108,12 +109,14 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 		return nil, fmt.Errorf("sign verification token: %w", err)
 	}
 	verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
+	emailOpts := jobs.SendEmailInsertOpts(&b.cfg.Email)
+	drilotel.SetTraceMetadata(ctx, emailOpts)
 	_, err = b.jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{
 		To:      user.Email,
 		Subject: "Verify your Drill account",
 		Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
 		HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL),
-	}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+	}, emailOpts)
 	if err != nil {
 		return nil, fmt.Errorf("enqueue verification email: %w", err)
 	}
@@ -236,12 +239,14 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 	}
 	resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
 
+	resetEmailOpts := jobs.SendEmailInsertOpts(&b.cfg.Email)
+	drilotel.SetTraceMetadata(ctx, resetEmailOpts)
 	_, err = b.jobs.Insert(ctx, jobs.SendEmailArgs{
 		To:      user.Email,
 		Subject: "Reset your Drill password",
 		Text:    "Click here to reset your password: " + resetURL,
 		HTML:    "<p>Click <a href=\"" + resetURL + "\">here</a> to reset your password.</p>",
-	}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+	}, resetEmailOpts)
 	if err != nil {
 		return fmt.Errorf("forgot password: enqueue email: %w", err)
 	}
