@@ -1081,6 +1081,79 @@ func TestWS_NonexistentSession(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Test: Advisory lock contention — second connection to same session rejected
+// ---------------------------------------------------------------------------
+
+func TestWS_AdvisoryLockContention(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tokens := []string{"Hello."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	// First connection: dial, send session_init, receive session_loaded.
+	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws1.CloseNow()
+
+	loaded := readMsg(t, ws1)
+	require.Equal(t, "session_loaded", loaded["type"])
+
+	// Second connection: dial raw (same user, same session).
+	// The HTTP upgrade succeeds, but the conductor will fail to acquire the
+	// advisory lock and close the WS with StatusPolicyViolation.
+	wsURL := strings.Replace(srv.URL, "http://", "ws://", 1) +
+		"/api/sessions/" + session.ID.String() + "/ws"
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer dialCancel()
+
+	ws2, _, err := websocket.Dial(dialCtx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Cookie": {cookie.String()}},
+	})
+	require.NoError(t, err, "dial should succeed; rejection happens at conductor level")
+	defer ws2.CloseNow()
+
+	// Send session_init on ws2. Write may or may not fail depending on timing,
+	// so ignore the write error — the important thing is the subsequent Read.
+	initData, _ := json.Marshal(wsMsg{"type": "session_init"})
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = ws2.Write(writeCtx, websocket.MessageText, initData)
+	writeCancel()
+
+	// Read from ws2: the conductor closes it with StatusPolicyViolation, so
+	// Read returns a CloseError with that code.
+	readCtx, readCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer readCancel()
+	_, _, readErr := ws2.Read(readCtx)
+	require.Error(t, readErr, "second connection should be closed by the server")
+	assert.Equal(t, websocket.StatusPolicyViolation, websocket.CloseStatus(readErr),
+		"expected StatusPolicyViolation for lock contention, got: %v", readErr)
+
+	// First connection must still be alive. Drain the full opening sequence
+	// (state_change → interviewer_speaking, tokens, interviewer_done,
+	// state_change → waiting_for_input), then ping.
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	sendMsg(t, ws1, wsMsg{"type": "ping"})
+	pong := readMsg(t, ws1)
+	assert.Equal(t, "pong", pong["type"])
+}
+
+// ---------------------------------------------------------------------------
 // Test: Ping/pong works
 // ---------------------------------------------------------------------------
 
