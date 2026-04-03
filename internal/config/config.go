@@ -21,6 +21,7 @@ type Config struct {
 	Auth     Auth
 	OAuth    OAuth
 	Otel     Otel
+	Storage  Storage
 }
 
 type Server struct {
@@ -116,6 +117,12 @@ type Otel struct {
 	GCPProjectID string  `env:"GOOGLE_CLOUD_PROJECT"`
 }
 
+type Storage struct {
+	Backend  string `env:"STORAGE_BACKEND,default=local"`
+	Bucket   string `env:"STORAGE_BUCKET"`
+	LocalDir string `env:"STORAGE_LOCAL_DIR,default=data/audio"`
+}
+
 // SecureCookies returns true if BaseURL uses HTTPS, indicating cookies
 // should have the Secure flag set.
 func (a *Auth) SecureCookies() bool {
@@ -145,6 +152,12 @@ func validate(cfg *Config) error {
 	}
 	if len(cfg.Auth.TokenSecret) < 32 {
 		return fmt.Errorf("AUTH_TOKEN_SECRET must be at least 32 characters")
+	}
+	if cfg.Storage.Backend != "local" && cfg.Storage.Backend != "gcs" {
+		return fmt.Errorf("STORAGE_BACKEND must be \"local\" or \"gcs\", got %q", cfg.Storage.Backend)
+	}
+	if cfg.Storage.Backend == "gcs" && cfg.Storage.Bucket == "" {
+		return fmt.Errorf("STORAGE_BUCKET is required when STORAGE_BACKEND=gcs")
 	}
 	return nil
 }
