@@ -49,6 +49,55 @@ func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (Question, erro
 	return i, err
 }
 
+const listQuestionsForUser = `-- name: ListQuestionsForUser :many
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, created_at
+FROM questions
+WHERE (source = 'seed' AND user_id IS NULL) OR user_id = $1
+ORDER BY created_at
+`
+
+type ListQuestionsForUserRow struct {
+	ID         uuid.UUID   `json:"id"`
+	UserID     pgtype.UUID `json:"user_id"`
+	Title      string      `json:"title"`
+	Prompt     string      `json:"prompt"`
+	Difficulty string      `json:"difficulty"`
+	Tags       []string    `json:"tags"`
+	Hints      pgtype.Text `json:"hints"`
+	Source     string      `json:"source"`
+	CreatedAt  time.Time   `json:"created_at"`
+}
+
+func (q *Queries) ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listQuestionsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuestionsForUserRow
+	for rows.Next() {
+		var i ListQuestionsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Title,
+			&i.Prompt,
+			&i.Difficulty,
+			&i.Tags,
+			&i.Hints,
+			&i.Source,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSeedQuestions = `-- name: ListSeedQuestions :many
 SELECT id, title, prompt, difficulty, tags, hints, source, created_at
 FROM questions
