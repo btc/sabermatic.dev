@@ -22,8 +22,8 @@ resource "google_secret_manager_secret" "secrets" {
   }
 }
 
-# Store the generated DB password so the DATABASE_URL secret can reference it.
-# The full DATABASE_URL must still be set manually (includes socket path).
+# Auto-populate DATABASE_URL with the Cloud SQL Auth Proxy socket path.
+# Other secrets must be set manually via gcloud or the console.
 resource "google_secret_manager_secret_version" "db_password" {
   secret      = google_secret_manager_secret.secrets["database-url"].id
   secret_data = "postgres://drill:${random_password.db_password.result}@/drill?host=/cloudsql/${google_sql_database_instance.drill.connection_name}"
