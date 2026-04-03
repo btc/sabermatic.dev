@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import { useSession, useEvaluation, useRetryEvaluation } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -121,9 +121,14 @@ function InsightCard({ text, variant, sessionId }: InsightCardProps) {
 
 export default function Overview() {
   const { id: sessionId } = useParams<{ id: string }>();
-  const { data: session } = useSession(sessionId!);
-  const { data: evaluation } = useEvaluation(sessionId!);
-  const retryEvaluation = useRetryEvaluation(sessionId!);
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <OverviewInner sessionId={sessionId} />;
+}
+
+function OverviewInner({ sessionId }: { sessionId: string }) {
+  const { data: session } = useSession(sessionId);
+  const { data: evaluation } = useEvaluation(sessionId);
+  const retryEvaluation = useRetryEvaluation(sessionId);
 
   if (!session || !evaluation) {
     return (
@@ -176,7 +181,7 @@ export default function Overview() {
           </h2>
           <div className="space-y-2">
             {strengths.map((text, i) => (
-              <InsightCard key={i} text={text} variant="strength" sessionId={sessionId!} />
+              <InsightCard key={i} text={text} variant="strength" sessionId={sessionId} />
             ))}
           </div>
         </section>
@@ -190,7 +195,7 @@ export default function Overview() {
           </h2>
           <div className="space-y-2">
             {gaps.map((text, i) => (
-              <InsightCard key={i} text={text} variant="gap" sessionId={sessionId!} />
+              <InsightCard key={i} text={text} variant="gap" sessionId={sessionId} />
             ))}
           </div>
         </section>

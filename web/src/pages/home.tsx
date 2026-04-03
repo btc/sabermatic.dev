@@ -103,10 +103,10 @@ function CoachCard({ coach, isActive }: {
     );
   }
 
-  const narrativeExcerpt = coach.narrative
-    .split(/(?<=[.!?])\s+/)
-    .slice(0, 3)
-    .join(" ");
+  const narrativeExcerpt =
+    coach.narrative.length > 300
+      ? coach.narrative.slice(0, 300) + "…"
+      : coach.narrative;
 
   return (
     <Card>
@@ -410,6 +410,8 @@ export default function Home() {
   const reviewed = reviewedSessions(sessions);
   const active = activeSessions(sessions);
   const reviewedCount = reviewed.length;
+  // TODO: concurrent limit should come from the backend (plan capabilities endpoint).
+  // Hardcoded until the backend exposes per-plan limits via the /api/me or /api/usage response.
   const concurrentLimit = user?.plan === "pro" ? 2 : 1;
   const atConcurrentLimit = active.length >= concurrentLimit;
   const tagList = useMemo(() => allTags(questions), [questions]);

@@ -82,8 +82,10 @@ export function useInterview(sessionId: string) {
         streamingTextRef.current = "";
         setStreamingText("");
         setMessages((prev) => {
+          // Do NOT update lastSeqRef here — the reconnect_state handler sets it
+          // from authoritative server data. Updating it here would cause
+          // session_init.last_seq to diverge from server-acknowledged seqs.
           const seq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
-          lastSeqRef.current = seq;
           return [...prev, { id: msg.message_id, seq, role: "interviewer", content: finalText }];
         });
         break;
@@ -116,9 +118,13 @@ export function useInterview(sessionId: string) {
   }, [sessionId, handleMessage]);
 
   const sendText = useCallback((content: string, traceContext?: TraceContext) => {
-    const seq = (lastSeqRef.current ?? 0) + 1;
-    lastSeqRef.current = seq;
-    setMessages((prev) => [...prev, { id: `local-${seq}`, seq, role: "candidate", content }]);
+    // Use a local display seq derived from current messages — do NOT modify
+    // lastSeqRef, which is reserved for server-acknowledged seqs used in
+    // session_init.last_seq on reconnect.
+    setMessages((prev) => {
+      const displaySeq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
+      return [...prev, { id: `local-${displaySeq}`, seq: displaySeq, role: "candidate", content }];
+    });
     setState("processing");
     cmRef.current?.send({ type: "end_turn", content, input_method: "text", trace_context: traceContext });
   }, []);
