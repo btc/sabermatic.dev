@@ -4,6 +4,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEducator, useRequestEducator, useMe } from "@/api/queries";
 import { Button } from "@/components/ui/button";
+import { GENERATING_MESSAGES } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Heading extraction + slugify
@@ -125,13 +126,6 @@ function TOC({ headings }: TOCProps) {
 // ---------------------------------------------------------------------------
 // Cycling message component for generating state
 // ---------------------------------------------------------------------------
-
-const GENERATING_MESSAGES = [
-  "Building model answer...",
-  "Analyzing your gaps...",
-  "Preparing deep dive...",
-  "Reviewing your approach...",
-];
 
 function GeneratingView() {
   const [index, setIndex] = useState(0);

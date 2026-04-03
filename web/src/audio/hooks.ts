@@ -17,8 +17,8 @@ export function useAudioRecorder() {
     setIsRecording(true);
   }, []);
 
-  const stop = useCallback(() => {
-    recorderRef.current?.stop();
+  const stop = useCallback(async () => {
+    await recorderRef.current?.stop();
     setIsRecording(false);
     setSegmentCount(recorderRef.current?.segmentCount ?? 0);
   }, []);
