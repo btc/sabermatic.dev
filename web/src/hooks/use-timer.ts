@@ -11,12 +11,9 @@ export interface TimerState {
 export function useTimer(startedAt: string | null, durationMinutes: number) {
   const [elapsed, setElapsed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const warningThresholdRef = useRef(0);
 
   useEffect(() => {
     if (!startedAt) return;
-
-    warningThresholdRef.current = Math.max(2, Math.min(5, Math.round(durationMinutes / 9)));
 
     const start = new Date(startedAt).getTime();
     const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000));
@@ -27,7 +24,8 @@ export function useTimer(startedAt: string | null, durationMinutes: number) {
 
   const totalSeconds = durationMinutes * 60;
   const remaining = totalSeconds - elapsed;
-  const warningAt = warningThresholdRef.current * 60;
+  const warningThreshold = Math.max(2, Math.min(5, Math.round(durationMinutes / 9)));
+  const warningAt = warningThreshold * 60;
 
   let phase: TimerPhase = "normal";
   if (remaining <= 0) phase = "overtime";

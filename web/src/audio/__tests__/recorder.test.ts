@@ -29,7 +29,7 @@ describe("AudioRecorder", () => {
   it("discard clears segments", () => {
     const recorder = new AudioRecorder();
     // Access internal segments for test setup
-    (recorder as any).segments = [new Blob(["a"]), new Blob(["b"])];
+    (recorder as unknown as { segments: Blob[] }).segments = [new Blob(["a"]), new Blob(["b"])];
     expect(recorder.segmentCount).toBe(2);
     recorder.discard();
     expect(recorder.segmentCount).toBe(0);
@@ -37,7 +37,7 @@ describe("AudioRecorder", () => {
 
   it("submit returns base64 and clears segments", async () => {
     const recorder = new AudioRecorder();
-    (recorder as any).segments = [new Blob(["hello"])];
+    (recorder as unknown as { segments: Blob[] }).segments = [new Blob(["hello"])];
     const result = await recorder.submit();
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
