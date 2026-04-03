@@ -14,7 +14,7 @@ Phases 1–3b built the application core: database, job queue, auth, OAuth. None
 This phase delivers:
 
 1. **OTel SDK initialization** — tracer and meter providers with dual-mode exporters (stdout for dev, Google Cloud for production)
-2. **HTTP middleware** — automatic span creation for every request via `otelhttp`, plus `user_id` attribute injection
+2. **HTTP middleware** — automatic span creation for every request via `otelhttp`, plus `user_id` span enrichment in `RequireAuth`
 3. **SQL tracing** — every pgx query appears as a child span via `otelpgx`
 4. **Structured log correlation** — custom `slog.Handler` wrapper that injects `trace_id`/`span_id` into every log line
 5. **River job tracing** — span-per-job execution via `WorkerMiddleware`, with span links connecting jobs to the traces that enqueued them
@@ -39,6 +39,8 @@ Systems that don't exist yet (Conductor, LLM client, frontend) are not instrumen
 
 `otelhttp` is already an indirect dependency (v0.61.0) via testcontainers. The OTel core packages (`otel`, `otel/trace`, `otel/metric`) are also indirect deps. This phase promotes them to direct. The Google Cloud exporter packages are separate modules under `opentelemetry-operations-go` — one for trace (v1.31.0), one for metric (v0.55.0).
 
+**Version alignment:** The current `go.mod` has `otel/sdk/metric v1.39.0` as an indirect dep while `otel v1.41.0` is also indirect. When promoting to direct deps, all OTel SDK packages (`otel/sdk`, `otel/sdk/metric`) must be upgraded to the same minor version to avoid skew. Run `go get go.opentelemetry.io/otel/sdk@latest go.opentelemetry.io/otel/sdk/metric@latest` to align them.
+
 ---
 
 ## 3. Configuration
@@ -47,10 +49,11 @@ New `Otel` struct added to `config.Config`:
 
 ```go
 type Otel struct {
-    Enabled    bool    `env:"OTEL_ENABLED,default=false"`
-    Exporter   string  `env:"OTEL_EXPORTER,default=stdout"`   // "stdout" | "google"
-    SampleRate float64 `env:"OTEL_SAMPLE_RATE,default=1.0"`   // 1.0 = trace everything
-    ServiceName string `env:"OTEL_SERVICE_NAME,default=drill"`
+    Enabled      bool    `env:"OTEL_ENABLED,default=false"`
+    Exporter     string  `env:"OTEL_EXPORTER,default=stdout"`     // "stdout" | "google"
+    SampleRate   float64 `env:"OTEL_SAMPLE_RATE,default=1.0"`     // 1.0 = trace everything
+    ServiceName  string  `env:"OTEL_SERVICE_NAME,default=drill"`
+    GCPProjectID string  `env:"GOOGLE_CLOUD_PROJECT"`             // auto-set on Cloud Run
 }
 ```
 
@@ -60,6 +63,7 @@ type Otel struct {
 | `Exporter` | `stdout` | `"stdout"` for dev (JSON to stderr), `"google"` for Cloud Run. |
 | `SampleRate` | `1.0` | At launch scale (< 500 sessions), 100% sampling is fine. Tunable later. |
 | `ServiceName` | `drill` | OTel resource attribute `service.name`. |
+| `GCPProjectID` | `""` | Cloud Run sets `GOOGLE_CLOUD_PROJECT` automatically. When non-empty, `TraceHandler` outputs Cloud Logging-compatible trace fields (see Section 6). |
 
 Validation: when `Enabled=true` and `Exporter=google`, no additional configuration is needed — the Google Cloud exporter auto-detects project ID and credentials from the Cloud Run environment. When running locally with `Exporter=google`, standard `GOOGLE_APPLICATION_CREDENTIALS` or `gcloud auth application-default login` must be set (standard GCP developer workflow, not our config concern).
 
@@ -68,6 +72,7 @@ Added to `.env.example`:
 ```
 OTEL_ENABLED=false
 OTEL_EXPORTER=stdout
+# GOOGLE_CLOUD_PROJECT is auto-set on Cloud Run; no need to set locally
 ```
 
 ---
@@ -95,7 +100,7 @@ type Providers struct {
 2. Build the OTel `resource.Resource` with `service.name=cfg.ServiceName` and `service.version` (from build info or `"dev"`).
 
 3. Select exporter based on `cfg.Exporter`:
-   - `"stdout"`: `stdouttrace.New()` and `stdoutmetric.New()` — write to stderr (not stdout, to avoid mixing with application JSON logs).
+   - `"stdout"`: `stdouttrace.New(stdouttrace.WithWriter(os.Stderr))` and `stdoutmetric.New(stdoutmetric.WithWriter(os.Stderr))` — explicitly write to stderr (the default is stdout, which would mix with application JSON logs).
    - `"google"`: `cloudtrace.New()` from `github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace` and `cloudmetric.New()` from `.../exporter/metric`. Both auto-detect project ID and credentials from the environment.
    - Anything else: return an error.
 
@@ -115,6 +120,8 @@ type Providers struct {
 
 7. Return `Providers` with `Shutdown` that calls `tp.Shutdown(ctx)` and `mp.Shutdown(ctx)`, flushing any buffered data.
 
+**Partial failure cleanup:** If any step after exporter creation fails (e.g., `MeterProvider` creation fails after `TracerProvider` was created), `Init` must shut down already-created resources before returning the error. Use a cleanup slice or defer pattern: each successfully created resource registers a cleanup func; on error, run all cleanups in reverse order. This prevents orphaned providers and leaked goroutines (the batcher and periodic reader both start background goroutines).
+
 ### 4.3 main.go Integration
 
 ```go
@@ -123,7 +130,11 @@ providers, err := drilotel.Init(&cfg.Otel)
 if err != nil {
     return fmt.Errorf("init otel: %w", err)
 }
-defer providers.Shutdown(context.Background())
+defer func() {
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    providers.Shutdown(ctx)
+}()
 
 // Backend.New(cfg) — pool now has otelpgx tracer active
 b, err := backend.New(cfg)
@@ -184,24 +195,27 @@ When OTel is disabled, `otelpgx.NewTracer()` reads from the global no-op `Tracer
 
 ```go
 type TraceHandler struct {
-    inner slog.Handler
+    inner        slog.Handler
+    gcpProjectID string // when non-empty, use Cloud Logging trace format
 }
 
-func NewTraceHandler(inner slog.Handler) *TraceHandler {
-    return &TraceHandler{inner: inner}
+func NewTraceHandler(inner slog.Handler, gcpProjectID string) *TraceHandler {
+    return &TraceHandler{inner: inner, gcpProjectID: gcpProjectID}
 }
 ```
 
 Implements all four `slog.Handler` methods:
 
 - **`Enabled`**: delegates to inner.
-- **`Handle`**: extracts `trace.SpanFromContext(ctx).SpanContext()`. If `IsValid()`, adds `trace_id` and `span_id` as `slog.String` attributes to the record, then delegates to inner. If not valid (no active span), delegates unchanged.
-- **`WithAttrs`**: returns new `TraceHandler` wrapping `inner.WithAttrs(...)`.
-- **`WithGroup`**: returns new `TraceHandler` wrapping `inner.WithGroup(...)`.
+- **`Handle`**: extracts `trace.SpanFromContext(ctx).SpanContext()`. If `IsValid()`, adds trace correlation fields (format depends on `gcpProjectID` — see below), then delegates to inner. If not valid (no active span), delegates unchanged.
+- **`WithAttrs`**: returns new `TraceHandler` wrapping `inner.WithAttrs(...)`, preserving `gcpProjectID`.
+- **`WithGroup`**: returns new `TraceHandler` wrapping `inner.WithGroup(...)`, preserving `gcpProjectID`.
 
-### 6.2 Log Output
+### 6.2 Log Output — Dual Format
 
-When a span is active (any HTTP request, any River job):
+Cloud Logging does **not** auto-correlate from a plain `trace_id` field. It requires specific field names and a project-qualified trace resource name. The `TraceHandler` switches format based on whether `gcpProjectID` is set.
+
+**Local dev** (`gcpProjectID` is empty) — plain fields for human readability:
 
 ```json
 {
@@ -209,13 +223,25 @@ When a span is active (any HTTP request, any River job):
   "level": "INFO",
   "msg": "oauth login",
   "provider": "google",
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "span_id": "00f067aa0ba902b7"
 }
 ```
 
-Cloud Logging automatically correlates log entries with Cloud Trace when `trace_id` is present. This enables clicking from a trace span to its log entries and vice versa.
+**Cloud Run** (`gcpProjectID` is set, e.g. `"my-project"`) — Cloud Logging format for automatic trace correlation:
+
+```json
+{
+  "time": "2026-04-02T14:30:00.000Z",
+  "level": "INFO",
+  "msg": "oauth login",
+  "provider": "google",
+  "logging.googleapis.com/trace": "projects/my-project/traces/4bf92f3577b34da6a3ce929d0e0e4736",
+  "logging.googleapis.com/spanId": "00f067aa0ba902b7"
+}
+```
+
+This enables clicking from a Cloud Trace span to its correlated log entries and vice versa. The `GOOGLE_CLOUD_PROJECT` env var is auto-set on Cloud Run — no manual config needed.
 
 ### 6.3 Application-Level Fields
 
@@ -233,7 +259,7 @@ Existing `slog.Info` calls that don't pass a context still work — they just wo
 jsonHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
     Level: slog.LevelInfo,
 })
-logger := slog.New(drilotel.NewTraceHandler(jsonHandler))
+logger := slog.New(drilotel.NewTraceHandler(jsonHandler, cfg.Otel.GCPProjectID))
 slog.SetDefault(logger)
 ```
 
@@ -247,8 +273,6 @@ When OTel is disabled, `SpanFromContext` returns a no-op span whose `SpanContext
 
 ## 7. HTTP Middleware
 
-`internal/drilotel/middleware.go` — two composable middleware functions.
-
 ### 7.1 otelhttp Wrapper
 
 `otelhttp.NewMiddleware("drill")` — the standard OTel HTTP middleware. Creates a server span per request with:
@@ -257,21 +281,28 @@ When OTel is disabled, `SpanFromContext` returns a no-op span whose `SpanContext
 - Request duration
 - W3C `traceparent` header extraction (inbound distributed trace propagation)
 
-### 7.2 User Attribute Injection
+### 7.2 User Attribute Injection — Inside RequireAuth
+
+A standalone `InjectUser` middleware in the outer chain would run **before** route dispatch, which means **before** `RequireAuth` has authenticated the user. The user would never be in the context at that point.
+
+Instead, `user_id` enrichment is added directly to `auth.RequireAuth`. After successful authentication, before calling `next.ServeHTTP`, it sets the `user_id` attribute on the current span:
 
 ```go
-func InjectUser(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if userID, ok := auth.UserIDFromContext(r.Context()); ok {
-            span := trace.SpanFromContext(r.Context())
-            span.SetAttributes(attribute.String("user_id", userID.String()))
-        }
-        next.ServeHTTP(w, r)
-    })
-}
+// In auth.RequireAuth, after building the AuthUser:
+import "go.opentelemetry.io/otel/trace"
+import "go.opentelemetry.io/otel/attribute"
+
+span := trace.SpanFromContext(r.Context())
+span.SetAttributes(attribute.String("user_id", user.ID.String()))
+
+next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
 ```
 
-Reads from the auth middleware's context value (already set for authenticated routes). Unauthenticated requests (health check, login, signup) have no `user_id` — the span proceeds without the attribute.
+This works because:
+- The `otelhttp` middleware (outer chain) has already created a span and injected it into the request context before the mux dispatches to routes.
+- `RequireAuth` runs after mux dispatch, so the span is active.
+- `trace.SpanFromContext` and `span.SetAttributes` are from the OTel API package (`go.opentelemetry.io/otel/trace`), which is a lightweight, SDK-independent package. When OTel is disabled, the global provider is no-op, so `SpanFromContext` returns a no-op span and `SetAttributes` is free. No SDK dependency in the auth package.
+- Unauthenticated routes (health, login, signup) never call `RequireAuth`, so their spans have no `user_id` — correct behavior.
 
 ### 7.3 Middleware Chain in main.go
 
@@ -279,7 +310,7 @@ Reads from the auth middleware's context value (already set for authenticated ro
 mux := http.NewServeMux()
 handler.RegisterRoutes(mux, b)
 
-otelHandler := otelhttp.NewMiddleware("drill")(InjectUser(mux))
+otelHandler := otelhttp.NewMiddleware("drill")(mux)
 csrfHandler := csrfMiddleware(otelHandler)
 
 srv := &http.Server{
@@ -288,15 +319,14 @@ srv := &http.Server{
 }
 ```
 
-Execution order (outside-in): CSRF → OTel span creation → user injection → route handler.
+Execution order (outside-in): CSRF → OTel span creation → mux → (RequireAuth on protected routes, which enriches span with user_id) → handler.
 
-- CSRF is outermost: protects everything, rejects bad tokens before a span is created (CSRF failures don't generate traces — they're noise).
-- OTel is next: the span exists before `InjectUser` runs, so the user attribute is set on the correct span.
-- `InjectUser` enriches the span, then delegates to the mux.
+- CSRF is outermost: protects everything. CSRF rejections of state-changing requests (POST/PUT/DELETE with invalid tokens) are rejected before a span is created. This means those failures won't appear in traces — an acceptable tradeoff since they're either attacks or misconfigured clients, and the CSRF middleware already logs them. Safe methods (GET) always pass through CSRF and do generate traces.
+- OTel is next: creates the span that all downstream code (including `RequireAuth`) reads from context.
 
 ### 7.4 No-Op Behavior
 
-When OTel is disabled, `otelhttp.NewMiddleware` wraps the handler but creates no-op spans (reads from global no-op provider). `InjectUser` calls `trace.SpanFromContext` which returns a no-op span — `SetAttributes` is a no-op. Negligible overhead.
+When OTel is disabled, `otelhttp.NewMiddleware` wraps the handler but creates no-op spans (reads from global no-op provider). The `trace.SpanFromContext` call in `RequireAuth` returns a no-op span — `SetAttributes` is a no-op. Negligible overhead.
 
 ---
 
@@ -306,18 +336,19 @@ When OTel is disabled, `otelhttp.NewMiddleware` wraps the handler but creates no
 
 ### 8.1 Enqueue Side — Capturing Trace Context
 
+A helper that sets trace metadata on an existing `*river.InsertOpts`, preserving all other fields (queue, max attempts, etc.):
+
 ```go
-func JobInsertOpts(ctx context.Context) river.InsertOpts {
+func SetTraceMetadata(ctx context.Context, opts *river.InsertOpts) {
     sc := trace.SpanFromContext(ctx).SpanContext()
     if !sc.IsValid() {
-        return river.InsertOpts{}
+        return
     }
-    meta := fmt.Sprintf(`{"trace_id":"%s","span_id":"%s"}`, sc.TraceID(), sc.SpanID())
-    return river.InsertOpts{Metadata: []byte(meta)}
+    opts.Metadata = []byte(fmt.Sprintf(`{"trace_id":"%s","span_id":"%s"}`, sc.TraceID(), sc.SpanID()))
 }
 ```
 
-Call sites that enqueue jobs merge this with their insert opts. This is opt-in — existing enqueue calls without `JobInsertOpts` still work; their jobs just won't have a span link.
+Call sites add one line after building their insert opts. This is opt-in — existing enqueue calls without `SetTraceMetadata` still work; their jobs just won't have a span link. When there's no active span (tests, disabled OTel), it's a no-op.
 
 ### 8.2 Execute Side — WorkerMiddleware
 
@@ -380,18 +411,33 @@ riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 
 ### 8.6 Existing Enqueue Call Sites
 
-The existing `SendEmail` job enqueue in the auth handlers will be updated to use `JobInsertOpts`:
+The existing `SendEmail` job enqueue call sites in `backend/auth.go` will be updated to add trace metadata. There are two patterns:
+
+**`Insert` (e.g., `ForgotPassword`):**
 
 ```go
 // Before:
-b.Jobs.Insert(ctx, jobs.SendEmailArgs{...}, nil)
+b.Jobs.Insert(ctx, jobs.SendEmailArgs{...}, jobs.SendEmailInsertOpts(&b.cfg.Email))
 
 // After:
-insertOpts := drilotel.JobInsertOpts(ctx)
-b.Jobs.Insert(ctx, jobs.SendEmailArgs{...}, &insertOpts)
+opts := jobs.SendEmailInsertOpts(&b.cfg.Email)
+drilotel.SetTraceMetadata(ctx, opts)
+b.Jobs.Insert(ctx, jobs.SendEmailArgs{...}, opts)
 ```
 
-This is a small change per call site. Any future enqueue calls follow the same pattern.
+**`InsertTx` (e.g., `Signup`):**
+
+```go
+// Before:
+b.Jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{...}, jobs.SendEmailInsertOpts(&b.cfg.Email))
+
+// After:
+opts := jobs.SendEmailInsertOpts(&b.cfg.Email)
+drilotel.SetTraceMetadata(ctx, opts)
+b.Jobs.InsertTx(ctx, tx, jobs.SendEmailArgs{...}, opts)
+```
+
+One extra line per call site. Queue, max attempts, and all other insert opts are preserved. Future enqueue calls follow the same pattern.
 
 ---
 
@@ -402,16 +448,17 @@ internal/
 ├── drilotel/
 │   ├── drilotel.go          # Init() / Shutdown(), Providers struct, exporter selection
 │   ├── drilotel_test.go     # Init roundtrip, disabled mode, stdout mode
-│   ├── sloghandler.go       # TraceHandler — slog.Handler wrapper
-│   ├── sloghandler_test.go  # Trace context injection, no-op when invalid
-│   ├── middleware.go         # InjectUser HTTP middleware
-│   ├── middleware_test.go    # user_id attribute on span
-│   ├── riverware.go         # JobTracer middleware, JobInsertOpts, linkFromMetadata
+│   ├── sloghandler.go       # TraceHandler — slog.Handler wrapper with GCP format support
+│   ├── sloghandler_test.go  # Trace context injection, GCP format, no-op when invalid
+│   ├── riverware.go         # JobTracer middleware, SetTraceMetadata, linkFromMetadata
 │   └── riverware_test.go    # Span creation, span links, error recording
+├── auth/
+│   └── middleware.go        # Modified: add user_id span enrichment in RequireAuth
 ├── config/
 │   └── config.go            # Modified: add Otel struct
 ├── backend/
-│   └── backend.go           # Modified: add WorkerMiddleware to River config
+│   ├── backend.go           # Modified: add Middleware to River config
+│   └── auth.go              # Modified: add SetTraceMetadata to enqueue call sites
 cmd/drill/
 └── main.go                  # Modified: OTel init/shutdown, slog handler, middleware chain
 ```
@@ -428,24 +475,19 @@ All tests use an in-memory `TracerProvider` with `sdktrace.NewTracerProvider(sdk
 
 | Case | Setup | Expected |
 |---|---|---|
-| Log with active span | Create span, pass ctx to slog.Handler.Handle | Output JSON contains `trace_id` and `span_id` |
-| Log without span context | Pass background ctx | Output JSON has no `trace_id` or `span_id` fields |
+| Log with active span (local) | Create span, gcpProjectID="" | Output JSON contains `trace_id` and `span_id` (plain format) |
+| Log with active span (GCP) | Create span, gcpProjectID="my-project" | Output JSON contains `logging.googleapis.com/trace` as `projects/my-project/traces/{id}` and `logging.googleapis.com/spanId` |
+| Log without span context | Pass background ctx | Output JSON has no trace fields |
 | WithAttrs preserves wrapping | Call WithAttrs, then Handle with span | Both custom attrs and trace fields present |
-| WithGroup preserves wrapping | Call WithGroup, then Handle with span | Trace fields present at top level, not inside group |
-
-**middleware_test.go:**
-
-| Case | Setup | Expected |
-|---|---|---|
-| Authenticated request | Set user ID in context, call InjectUser | Span has `user_id` attribute |
-| Unauthenticated request | No user ID in context | Span has no `user_id` attribute, no error |
+| WithGroup preserves wrapping | Call WithGroup("g"), add attr "x" via WithAttrs, then Handle with span | `trace_id`/`span_id` at top level (added by `Handle` via `record.AddAttrs`), custom attr "x" inside group "g" (added by inner handler's `WithAttrs`+`WithGroup`). Verify trace fields are NOT nested inside the group. |
 
 **riverware_test.go:**
 
 | Case | Setup | Expected |
 |---|---|---|
-| JobInsertOpts with active span | Create span, call JobInsertOpts | Returned opts have metadata with trace_id/span_id JSON |
-| JobInsertOpts without span | Background ctx | Returned opts have empty/nil metadata |
+| SetTraceMetadata with active span | Create span, pass existing InsertOpts | Opts.Metadata contains trace_id/span_id JSON, other fields unchanged |
+| SetTraceMetadata without span | Background ctx, pass existing InsertOpts | Opts unchanged (Metadata stays nil/empty) |
+| SetTraceMetadata preserves existing fields | InsertOpts with Queue and MaxAttempts set | Queue and MaxAttempts still set after call, Metadata added |
 | JobTracer.Work creates span | In-memory exporter, call Work | Exported span named `river.job/{kind}` with correct attributes |
 | JobTracer.Work with metadata link | Job metadata has trace_id/span_id | Exported span has link to that span context |
 | JobTracer.Work records error | doInner returns error | Span status is Error, error event recorded |
@@ -465,8 +507,9 @@ All tests use an in-memory `TracerProvider` with `sdktrace.NewTracerProvider(sdk
 ### 10.3 Existing Test Impact
 
 - **testcontainers integration tests**: `otelpgx` is added to the pool unconditionally, but OTel is not initialized in tests (global provider is no-op). Zero spans produced, zero overhead. No test changes needed.
-- **Handler tests**: Tests that call `handler.RegisterRoutes` directly don't go through the otelhttp/InjectUser middleware chain. No changes needed.
-- **River worker tests**: The `WorkerMiddleware` is added to the River config in `backend.New()`. Tests that construct `Backend` manually (without `New`) don't have the middleware. Tests that use `New` get it, but it's no-op without OTel init.
+- **Handler tests**: Tests that call `handler.RegisterRoutes` directly don't go through the otelhttp middleware chain. No changes needed.
+- **Auth middleware tests**: The `RequireAuth` change adds `trace.SpanFromContext` + `SetAttributes` calls. With no OTel init, these are no-ops. Existing auth tests continue to pass without modification.
+- **River worker tests**: The `Middleware` is added to the River config in `backend.New()`. Tests that construct `Backend` manually (without `New`) don't have the middleware. Tests that use `New` get it, but it's no-op without OTel init.
 
 ### 10.4 What Is NOT Tested
 
