@@ -87,6 +87,15 @@ resource "google_cloud_run_v2_service" "drill" {
         value = "noreply@drill.dev"
       }
 
+      env {
+        name  = "STORAGE_BACKEND"
+        value = "gcs"
+      }
+      env {
+        name  = "STORAGE_BUCKET"
+        value = "${var.project_id}-audio"
+      }
+
       # ---- Secret env vars ----
       env {
         name = "DATABASE_URL"
