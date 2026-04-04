@@ -19,3 +19,6 @@ ORDER BY seq;
 SELECT COALESCE(MAX(seq), 0)::int AS max_seq
 FROM messages
 WHERE session_id = $1;
+
+-- name: SetAudioURL :exec
+UPDATE messages SET audio_url = $2 WHERE id = $1;

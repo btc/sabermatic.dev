@@ -57,6 +57,7 @@ type Querier interface {
 	MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
+	SetAudioURL(ctx context.Context, arg SetAudioURLParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
