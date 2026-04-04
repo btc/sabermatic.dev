@@ -73,6 +73,11 @@ func AllPackSizes() []int {
 	return []int{120, 300, 600}
 }
 
+// FreeGrantExpiry returns the expiry timestamp for a free grant created now.
+func FreeGrantExpiry() time.Time {
+	return EndOfMonth(time.Now().UTC())
+}
+
 func EndOfMonth(t time.Time) time.Time {
 	y, m, _ := t.Date()
 	return time.Date(y, m+1, 1, 0, 0, 0, 0, time.UTC)
