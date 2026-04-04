@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -27,11 +26,9 @@ type CoachResponse struct {
 // GetLatestCoachAnalysis returns the most recent coach analysis for a user.
 // Returns nil with no error if no analysis exists.
 func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (*CoachResponse, error) {
-	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("get billing snapshot: %w", err)
-	}
-	if !billing.Resolve(snapshotFrom(bs)).CanAccessCoach() {
+	if ent, err := b.Check(ctx, userID); err != nil {
+		return nil, err
+	} else if !ent.CanAccessCoach() {
 		return nil, ErrNoPaidBalance
 	}
 
@@ -68,11 +65,11 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 // RequestCoachAnalysis enqueues a coach analysis job.
 // force skips the "no new sessions" check — used by admin or retry flows.
 func (b *Backend) RequestCoachAnalysis(ctx context.Context, userID uuid.UUID, force bool) error {
-	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	ent, err := b.Check(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("get billing snapshot: %w", err)
+		return err
 	}
-	if !billing.Resolve(snapshotFrom(bs)).CanAccessCoach() {
+	if !ent.CanAccessCoach() {
 		return ErrNoPaidBalance
 	}
 
