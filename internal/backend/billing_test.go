@@ -196,15 +196,13 @@ func TestReserveMinutes_MultiGrant_FIFO(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Purchase grant (never expires) — use CreateGrantFromStripe with a fake event ID.
-	_, err = q.CreateGrantFromStripe(ctx, db.CreateGrantFromStripeParams{
-		UserID: userID, Source: "purchase",
-		StripeEventID:  pgtype.Text{String: "evt_test_fifo_" + uuid.New().String(), Valid: true},
-		InitialMinutes: 100,
-		ExpiresAt:      pgtype.Timestamptz{Valid: false},
+	// Purchase grant (never expires).
+	err = q.CreatePurchaseGrant(ctx, db.CreatePurchaseGrantParams{
+		UserID:        userID,
+		StripeEventID: pgtype.Text{String: "evt_test_fifo_" + uuid.New().String(), Valid: true},
+		Minutes:       100,
 	})
 	require.NoError(t, err)
-	// Insert ledger entry for the purchase grant.
 	bs, err := q.GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
 	assert.Equal(t, int32(120), bs.TotalBalance) // 20 + 100

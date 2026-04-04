@@ -175,31 +175,6 @@ func (q *Queries) GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID)
 	return i, err
 }
 
-const getUserByStripeCustomerID = `-- name: GetUserByStripeCustomerID :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
-WHERE stripe_customer_id = $1 AND deleted_at IS NULL
-`
-
-func (q *Queries) GetUserByStripeCustomerID(ctx context.Context, stripeCustomerID pgtype.Text) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByStripeCustomerID, stripeCustomerID)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.EmailVerified,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.StripeCustomerID,
-		&i.Plan,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.FreeFullEducatorsUsed,
-	)
-	return i, err
-}
-
 const incrementFreeEducatorUsed = `-- name: IncrementFreeEducatorUsed :one
 UPDATE users
 SET free_full_educators_used = free_full_educators_used + 1
@@ -239,6 +214,24 @@ func (q *Queries) SoftDeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const updatePlanByStripeCustomer = `-- name: UpdatePlanByStripeCustomer :execrows
+UPDATE users SET plan = $1, updated_at = NOW()
+WHERE stripe_customer_id = $2 AND deleted_at IS NULL
+`
+
+type UpdatePlanByStripeCustomerParams struct {
+	Plan             string      `json:"plan"`
+	StripeCustomerID pgtype.Text `json:"stripe_customer_id"`
+}
+
+func (q *Queries) UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlanByStripeCustomerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePlanByStripeCustomer, arg.Plan, arg.StripeCustomerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users SET password_hash = $2, updated_at = NOW()
 WHERE id = $1
@@ -251,20 +244,6 @@ type UpdateUserPasswordParams struct {
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
-	return err
-}
-
-const updateUserPlan = `-- name: UpdateUserPlan :exec
-UPDATE users SET plan = $2, updated_at = NOW() WHERE id = $1
-`
-
-type UpdateUserPlanParams struct {
-	ID   uuid.UUID `json:"id"`
-	Plan string    `json:"plan"`
-}
-
-func (q *Queries) UpdateUserPlan(ctx context.Context, arg UpdateUserPlanParams) error {
-	_, err := q.db.Exec(ctx, updateUserPlan, arg.ID, arg.Plan)
 	return err
 }
 

@@ -15,10 +15,16 @@ type Querier interface {
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountSeedQuestions(ctx context.Context) (int64, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
-	CreateGrantFromStripe(ctx context.Context, arg CreateGrantFromStripeParams) (Grant, error)
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) (OauthAccount, error)
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
+	// Atomically creates a purchase grant + ledger entry. Idempotent via
+	// stripe_event_id: duplicate events produce zero CTE rows → no-op.
+	CreatePurchaseGrant(ctx context.Context, arg CreatePurchaseGrantParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (InterviewSession, error)
+	// Atomically looks up user by stripe_customer_id, creates subscription grant +
+	// ledger entry, and updates user plan. Returns user_found=0 for unknown customer,
+	// grants_created=0 for duplicate event.
+	CreateSubscriptionGrant(ctx context.Context, arg CreateSubscriptionGrantParams) (CreateSubscriptionGrantRow, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
@@ -38,7 +44,6 @@ type Querier interface {
 	GetEducatorAnalysisBySession(ctx context.Context, sessionID uuid.UUID) (EducatorAnalysis, error)
 	GetEvaluationBySession(ctx context.Context, sessionID uuid.UUID) (Evaluation, error)
 	GetEvaluationsBySessionIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Evaluation, error)
-	GetFreeGrantForMonth(ctx context.Context, arg GetFreeGrantForMonthParams) (uuid.UUID, error)
 	GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (CoachAnalysis, error)
 	GetMaxSeqForSession(ctx context.Context, sessionID uuid.UUID) (int32, error)
 	GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]Message, error)
@@ -56,7 +61,6 @@ type Querier interface {
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
-	GetUserByStripeCustomerID(ctx context.Context, stripeCustomerID pgtype.Text) (User, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
 	InsertAnnotation(ctx context.Context, arg InsertAnnotationParams) error
@@ -65,7 +69,6 @@ type Querier interface {
 	InsertEvaluation(ctx context.Context, arg InsertEvaluationParams) (uuid.UUID, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (uuid.UUID, error)
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
-	InsertLedgerEntry(ctx context.Context, arg InsertLedgerEntryParams) (LedgerEntry, error)
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
 	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
@@ -86,13 +89,13 @@ type Querier interface {
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
 	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
+	UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlanByStripeCustomerParams) (int64, error)
 	UpdateSessionStatus(ctx context.Context, arg UpdateSessionStatusParams) error
 	// NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
 	// Used for status transitions after session completion (evaluating → reviewed,
 	// → evaluation_failed) where end time and turn count should not change.
 	UpdateSessionStatusOnly(ctx context.Context, arg UpdateSessionStatusOnlyParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
-	UpdateUserPlan(ctx context.Context, arg UpdateUserPlanParams) error
 	UpdateUserStripeCustomerID(ctx context.Context, arg UpdateUserStripeCustomerIDParams) error
 	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
 }

@@ -1,3 +1,47 @@
+-- name: CreatePurchaseGrant :exec
+-- Atomically creates a purchase grant + ledger entry. Idempotent via
+-- stripe_event_id: duplicate events produce zero CTE rows → no-op.
+WITH new_grant AS (
+  INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
+  VALUES (@user_id, 'purchase', @stripe_event_id, @minutes, @minutes, NULL)
+  ON CONFLICT (stripe_event_id) DO NOTHING
+  RETURNING id, user_id, initial_minutes
+)
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+SELECT user_id, id, initial_minutes, 'purchase'
+FROM new_grant;
+
+-- name: CreateSubscriptionGrant :one
+-- Atomically looks up user by stripe_customer_id, creates subscription grant +
+-- ledger entry, and updates user plan. Returns user_found=0 for unknown customer,
+-- grants_created=0 for duplicate event.
+WITH target_user AS (
+  SELECT u.id FROM users u
+  WHERE u.stripe_customer_id = @cust_id AND u.deleted_at IS NULL
+),
+new_grant AS (
+  INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
+  SELECT tu.id, 'subscription', @stripe_event_id, @minutes, @minutes, NULL
+  FROM target_user tu
+  ON CONFLICT (stripe_event_id) DO NOTHING
+  RETURNING id, user_id, initial_minutes
+),
+new_ledger AS (
+  INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+  SELECT ng.user_id, ng.id, ng.initial_minutes, 'subscription_renewal'
+  FROM new_grant ng
+  RETURNING 1
+),
+update_plan AS (
+  UPDATE users SET plan = @plan, updated_at = NOW()
+  FROM new_grant ng2
+  WHERE users.id = ng2.user_id
+  RETURNING 1
+)
+SELECT
+  (SELECT count(*)::int FROM target_user) AS user_found,
+  (SELECT count(*)::int FROM new_grant) AS grants_created;
+
 -- name: ReserveMinutes :many
 -- Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
 -- Returns one row per grant debited. Returns zero rows if balance is insufficient
@@ -54,17 +98,6 @@ INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
 SELECT @user_id, ad.grant_id, -ad.debit, 'session_reserve', @session_id
 FROM apply_debits ad
 RETURNING grant_id, amount;
-
--- name: InsertLedgerEntry :one
-INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING *;
-
--- name: CreateGrantFromStripe :one
-INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
-VALUES ($1, $2, $3, $4, $4, $5)
-ON CONFLICT (stripe_event_id) DO NOTHING
-RETURNING *;
 
 -- name: EnsureFreeGrant :exec
 -- Creates the monthly free grant + ledger entry atomically. If the grant
