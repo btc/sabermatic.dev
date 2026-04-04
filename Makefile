@@ -1,4 +1,23 @@
-.PHONY: test test-short cover cover-html cover-func clean-cover
+.PHONY: dev dev-api dev-web seed test test-short cover cover-html cover-func clean-cover
+
+# Start Go backend + Vite frontend dev server. Ctrl-C kills both.
+dev:
+	@echo "Starting Drill → http://localhost:3000"
+	@trap 'kill 0' EXIT; \
+	$(MAKE) dev-api & \
+	$(MAKE) dev-web & \
+	sleep 2 && open http://localhost:3000 & \
+	wait
+
+dev-api:
+	set -a && . ./.env && set +a && go run ./cmd/drill
+
+dev-web:
+	cd web && npm run dev
+
+# Create dev user + seed questions. Run with server already up.
+seed:
+	./scripts/dev-seed.sh
 
 # Run all tests (integration + unit). Requires Docker.
 test:
