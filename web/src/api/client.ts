@@ -9,7 +9,7 @@ export class ApiError extends Error {
 }
 
 function getCsrfToken(): string {
-  return (window as any).__csrfToken ?? "";
+  return window.__csrfToken ?? "";
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
