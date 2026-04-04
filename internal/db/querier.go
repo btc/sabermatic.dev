@@ -12,6 +12,7 @@ import (
 )
 
 type Querier interface {
+	CancelSession(ctx context.Context, arg CancelSessionParams) error
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountSeedQuestions(ctx context.Context) (int64, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)

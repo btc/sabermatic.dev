@@ -211,6 +211,11 @@ func (c *Conductor) Run(serverCtx context.Context) {
 					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
 				}
 				return
+			case "cancel_session":
+				if err := c.cancelSession(serverCtx); err != nil {
+					slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
+				}
+				return
 			case "ping":
 				c.send(serverCtx, msgPong)
 			default:
@@ -470,6 +475,25 @@ func (c *Conductor) endSession(ctx context.Context) error {
 	}
 
 	c.send(ctx, msgSessionEnded("candidate"))
+	return nil
+}
+
+// cancelSession ends the session early without evaluation. Archived + refunded.
+func (c *Conductor) cancelSession(ctx context.Context) error {
+	if err := c.sm.Transition(StateEnding); err != nil {
+		c.send(ctx, msgError("invalid_state_transition", err.Error()))
+		return nil
+	}
+
+	if err := c.backend.CancelSession(ctx, c.sessionID, c.sm.TurnCount()); err != nil {
+		return fmt.Errorf("cancel session: %w", err)
+	}
+
+	if err := c.sm.Transition(StateEnded); err != nil {
+		return fmt.Errorf("transition to ended: %w", err)
+	}
+
+	c.send(ctx, msgSessionEnded("cancelled"))
 	return nil
 }
 

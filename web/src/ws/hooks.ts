@@ -138,6 +138,10 @@ export function useInterview(sessionId: string) {
     cmRef.current?.send({ type: "end_session" });
   }, []);
 
+  const cancelSession = useCallback(() => {
+    cmRef.current?.send({ type: "cancel_session" });
+  }, []);
+
   const cancelTts = useCallback(() => {
     cmRef.current?.send({ type: "cancel_tts" });
   }, []);
@@ -166,6 +170,7 @@ export function useInterview(sessionId: string) {
     sendText,
     sendAudio,
     endSession,
+    cancelSession,
     cancelTts,
     setRawMessageHandler,
   };
