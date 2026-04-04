@@ -13,40 +13,84 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createGrantFromStripe = `-- name: CreateGrantFromStripe :one
-INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
-VALUES ($1, $2, $3, $4, $4, $5)
-ON CONFLICT (stripe_event_id) DO NOTHING
-RETURNING id, user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at, created_at
+const createPurchaseGrant = `-- name: CreatePurchaseGrant :exec
+WITH new_grant AS (
+  INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
+  VALUES ($1, 'purchase', $2, $3, $3, NULL)
+  ON CONFLICT (stripe_event_id) DO NOTHING
+  RETURNING id, user_id, initial_minutes
+)
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+SELECT user_id, id, initial_minutes, 'purchase'
+FROM new_grant
 `
 
-type CreateGrantFromStripeParams struct {
-	UserID         uuid.UUID          `json:"user_id"`
-	Source         string             `json:"source"`
-	StripeEventID  pgtype.Text        `json:"stripe_event_id"`
-	InitialMinutes int32              `json:"initial_minutes"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+type CreatePurchaseGrantParams struct {
+	UserID        uuid.UUID   `json:"user_id"`
+	StripeEventID pgtype.Text `json:"stripe_event_id"`
+	Minutes       int32       `json:"minutes"`
 }
 
-func (q *Queries) CreateGrantFromStripe(ctx context.Context, arg CreateGrantFromStripeParams) (Grant, error) {
-	row := q.db.QueryRow(ctx, createGrantFromStripe,
-		arg.UserID,
-		arg.Source,
+// Atomically creates a purchase grant + ledger entry. Idempotent via
+// stripe_event_id: duplicate events produce zero CTE rows → no-op.
+func (q *Queries) CreatePurchaseGrant(ctx context.Context, arg CreatePurchaseGrantParams) error {
+	_, err := q.db.Exec(ctx, createPurchaseGrant, arg.UserID, arg.StripeEventID, arg.Minutes)
+	return err
+}
+
+const createSubscriptionGrant = `-- name: CreateSubscriptionGrant :one
+WITH target_user AS (
+  SELECT u.id FROM users u
+  WHERE u.stripe_customer_id = $1 AND u.deleted_at IS NULL
+),
+new_grant AS (
+  INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
+  SELECT tu.id, 'subscription', $2, $3, $3, NULL
+  FROM target_user tu
+  ON CONFLICT (stripe_event_id) DO NOTHING
+  RETURNING id, user_id, initial_minutes
+),
+new_ledger AS (
+  INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+  SELECT ng.user_id, ng.id, ng.initial_minutes, 'subscription_renewal'
+  FROM new_grant ng
+  RETURNING 1
+),
+update_plan AS (
+  UPDATE users SET plan = $4, updated_at = NOW()
+  FROM new_grant ng2
+  WHERE users.id = ng2.user_id
+  RETURNING 1
+)
+SELECT
+  (SELECT count(*)::int FROM target_user) AS user_found,
+  (SELECT count(*)::int FROM new_grant) AS grants_created
+`
+
+type CreateSubscriptionGrantParams struct {
+	CustID        pgtype.Text `json:"cust_id"`
+	StripeEventID pgtype.Text `json:"stripe_event_id"`
+	Minutes       int32       `json:"minutes"`
+	Plan          string      `json:"plan"`
+}
+
+type CreateSubscriptionGrantRow struct {
+	UserFound     int32 `json:"user_found"`
+	GrantsCreated int32 `json:"grants_created"`
+}
+
+// Atomically looks up user by stripe_customer_id, creates subscription grant +
+// ledger entry, and updates user plan. Returns user_found=0 for unknown customer,
+// grants_created=0 for duplicate event.
+func (q *Queries) CreateSubscriptionGrant(ctx context.Context, arg CreateSubscriptionGrantParams) (CreateSubscriptionGrantRow, error) {
+	row := q.db.QueryRow(ctx, createSubscriptionGrant,
+		arg.CustID,
 		arg.StripeEventID,
-		arg.InitialMinutes,
-		arg.ExpiresAt,
+		arg.Minutes,
+		arg.Plan,
 	)
-	var i Grant
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.Source,
-		&i.StripeEventID,
-		&i.InitialMinutes,
-		&i.RemainingMinutes,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
+	var i CreateSubscriptionGrantRow
+	err := row.Scan(&i.UserFound, &i.GrantsCreated)
 	return i, err
 }
 
@@ -195,26 +239,6 @@ func (q *Queries) GetBillingSnapshot(ctx context.Context, id uuid.UUID) (GetBill
 	return i, err
 }
 
-const getFreeGrantForMonth = `-- name: GetFreeGrantForMonth :one
-SELECT id FROM grants
-WHERE user_id = $1
-  AND source = 'free_grant'
-  AND expires_at = $2
-LIMIT 1
-`
-
-type GetFreeGrantForMonthParams struct {
-	UserID    uuid.UUID          `json:"user_id"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) GetFreeGrantForMonth(ctx context.Context, arg GetFreeGrantForMonthParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, getFreeGrantForMonth, arg.UserID, arg.ExpiresAt)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const getRecentLedgerEntries = `-- name: GetRecentLedgerEntries :many
 SELECT amount, reason, session_id, created_at
 FROM ledger_entries
@@ -280,41 +304,6 @@ func (q *Queries) GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (Ge
 	row := q.db.QueryRow(ctx, getUserUsageSummary, userID)
 	var i GetUserUsageSummaryRow
 	err := row.Scan(&i.TotalBalance, &i.FreeBalance, &i.PaidBalance)
-	return i, err
-}
-
-const insertLedgerEntry = `-- name: InsertLedgerEntry :one
-INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, grant_id, amount, reason, session_id, created_at
-`
-
-type InsertLedgerEntryParams struct {
-	UserID    uuid.UUID   `json:"user_id"`
-	GrantID   uuid.UUID   `json:"grant_id"`
-	Amount    int32       `json:"amount"`
-	Reason    string      `json:"reason"`
-	SessionID pgtype.UUID `json:"session_id"`
-}
-
-func (q *Queries) InsertLedgerEntry(ctx context.Context, arg InsertLedgerEntryParams) (LedgerEntry, error) {
-	row := q.db.QueryRow(ctx, insertLedgerEntry,
-		arg.UserID,
-		arg.GrantID,
-		arg.Amount,
-		arg.Reason,
-		arg.SessionID,
-	)
-	var i LedgerEntry
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.GrantID,
-		&i.Amount,
-		&i.Reason,
-		&i.SessionID,
-		&i.CreatedAt,
-	)
 	return i, err
 }
 

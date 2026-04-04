@@ -2,14 +2,12 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	stripe "github.com/stripe/stripe-go/v82"
 	portalsession "github.com/stripe/stripe-go/v82/billingportal/session"
@@ -302,41 +300,12 @@ func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Even
 		return nil
 	}
 
-	tx, err := b.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	q := db.New(tx)
-	grant, err := q.CreateGrantFromStripe(ctx, db.CreateGrantFromStripeParams{
-		UserID:         userID,
-		Source:         "purchase",
-		StripeEventID:  pgtype.Text{String: event.ID, Valid: true},
-		InitialMinutes: int32(minutes),
-		ExpiresAt:      pgtype.Timestamptz{Valid: false}, // never expires
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Idempotent: grant already created for this event.
-			return nil
-		}
+	if err := db.New(b.pool).CreatePurchaseGrant(ctx, db.CreatePurchaseGrantParams{
+		UserID:        userID,
+		StripeEventID: pgtype.Text{String: event.ID, Valid: true},
+		Minutes:       int32(minutes),
+	}); err != nil {
 		return fmt.Errorf("create purchase grant: %w", err)
-	}
-
-	_, err = q.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
-		UserID:    userID,
-		GrantID:   grant.ID,
-		Amount:    int32(minutes),
-		Reason:    "purchase",
-		SessionID: pgtype.UUID{}, // NULL
-	})
-	if err != nil {
-		return fmt.Errorf("insert purchase ledger entry: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit purchase tx: %w", err)
 	}
 
 	slog.Info("purchase grant created", "user_id", userID, "minutes", minutes, "event_id", event.ID)
@@ -353,68 +322,29 @@ func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) err
 		return nil
 	}
 
-	q := db.New(b.pool)
-	user, err := q.GetUserByStripeCustomerID(ctx, pgtype.Text{String: custID, Valid: true})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("invoice.paid unknown customer", "event_id", event.ID, "customer_id", custID)
-			return nil // unknown customer, don't retry
-		}
-		return fmt.Errorf("get user by stripe customer: %w", err) // transient error, retry
-	}
-
-	// Determine plan from subscription metadata or default to pro.
-	planName := "pro"
-	plan, ok := billing.PlanByName(planName)
+	plan, ok := billing.PlanByName("pro")
 	if !ok {
-		return fmt.Errorf("unknown plan %q", planName)
+		return fmt.Errorf("unknown plan %q", "pro")
 	}
 
-	tx, err := b.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	tq := db.New(tx)
-	grant, err := tq.CreateGrantFromStripe(ctx, db.CreateGrantFromStripeParams{
-		UserID:         user.ID,
-		Source:         "subscription",
-		StripeEventID:  pgtype.Text{String: event.ID, Valid: true},
-		InitialMinutes: int32(plan.MinutesPerMonth),
-		ExpiresAt:      pgtype.Timestamptz{Valid: false}, // never expires
+	result, err := db.New(b.pool).CreateSubscriptionGrant(ctx, db.CreateSubscriptionGrantParams{
+		CustID:        pgtype.Text{String: custID, Valid: true},
+		StripeEventID: pgtype.Text{String: event.ID, Valid: true},
+		Minutes:       int32(plan.MinutesPerMonth),
+		Plan:          "pro",
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Idempotent: grant already created for this event.
-			return nil
-		}
 		return fmt.Errorf("create subscription grant: %w", err)
 	}
-
-	_, err = tq.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
-		UserID:    user.ID,
-		GrantID:   grant.ID,
-		Amount:    int32(plan.MinutesPerMonth),
-		Reason:    "subscription_renewal",
-		SessionID: pgtype.UUID{}, // NULL
-	})
-	if err != nil {
-		return fmt.Errorf("insert subscription ledger entry: %w", err)
+	if result.UserFound == 0 {
+		slog.Warn("invoice.paid unknown customer", "event_id", event.ID, "customer_id", custID)
+		return nil
+	}
+	if result.GrantsCreated == 0 {
+		return nil // idempotent: already processed
 	}
 
-	if err := tq.UpdateUserPlan(ctx, db.UpdateUserPlanParams{
-		ID:   user.ID,
-		Plan: planName,
-	}); err != nil {
-		return fmt.Errorf("update user plan: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit subscription tx: %w", err)
-	}
-
-	slog.Info("subscription grant created", "user_id", user.ID, "plan", planName, "event_id", event.ID)
+	slog.Info("subscription grant created", "customer_id", custID, "plan", "pro", "event_id", event.ID)
 	return nil
 }
 
@@ -427,24 +357,19 @@ func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Ev
 		return nil
 	}
 
-	q := db.New(b.pool)
-	user, err := q.GetUserByStripeCustomerID(ctx, pgtype.Text{String: custID, Valid: true})
+	n, err := db.New(b.pool).UpdatePlanByStripeCustomer(ctx, db.UpdatePlanByStripeCustomerParams{
+		Plan:             "free",
+		StripeCustomerID: pgtype.Text{String: custID, Valid: true},
+	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("subscription.deleted unknown customer", "event_id", event.ID, "customer_id", custID)
-			return nil
-		}
-		return fmt.Errorf("get user by stripe customer: %w", err)
+		return fmt.Errorf("revert plan to free: %w", err)
+	}
+	if n == 0 {
+		slog.Warn("subscription.deleted unknown customer", "event_id", event.ID, "customer_id", custID)
+		return nil
 	}
 
-	if err := q.UpdateUserPlan(ctx, db.UpdateUserPlanParams{
-		ID:   user.ID,
-		Plan: "free",
-	}); err != nil {
-		return fmt.Errorf("update user plan to free: %w", err)
-	}
-
-	slog.Info("subscription deleted, plan set to free", "user_id", user.ID, "event_id", event.ID)
+	slog.Info("subscription deleted, plan set to free", "customer_id", custID, "event_id", event.ID)
 	return nil
 }
 
@@ -457,29 +382,24 @@ func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Ev
 		return nil
 	}
 
-	q := db.New(b.pool)
-	user, err := q.GetUserByStripeCustomerID(ctx, pgtype.Text{String: custID, Valid: true})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("subscription.updated unknown customer", "event_id", event.ID, "customer_id", custID)
-			return nil
-		}
-		return fmt.Errorf("get user by stripe customer: %w", err)
-	}
-
 	status := event.GetObjectValue("status")
 	planName := "pro"
 	if status == "canceled" || status == "unpaid" || status == "past_due" {
 		planName = "free"
 	}
 
-	if err := q.UpdateUserPlan(ctx, db.UpdateUserPlanParams{
-		ID:   user.ID,
-		Plan: planName,
-	}); err != nil {
+	n, err := db.New(b.pool).UpdatePlanByStripeCustomer(ctx, db.UpdatePlanByStripeCustomerParams{
+		Plan:             planName,
+		StripeCustomerID: pgtype.Text{String: custID, Valid: true},
+	})
+	if err != nil {
 		return fmt.Errorf("update user plan: %w", err)
 	}
+	if n == 0 {
+		slog.Warn("subscription.updated unknown customer", "event_id", event.ID, "customer_id", custID)
+		return nil
+	}
 
-	slog.Info("subscription updated", "user_id", user.ID, "plan", planName, "status", status, "event_id", event.ID)
+	slog.Info("subscription updated", "customer_id", custID, "plan", planName, "status", status, "event_id", event.ID)
 	return nil
 }
