@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"embed"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/csrf"
@@ -77,13 +77,33 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	return nil
 }
 
+// ogTags maps SPA route paths to the OG meta tags to inject before </head>.
+var ogTags = map[string]string{
+	"/": `<meta property="og:title" content="Sabermetric">` +
+		`<meta property="og:description" content="data-driven system design prep">` +
+		`<meta property="og:type" content="website">` +
+		`<meta property="og:image" content="/og-landing.png">`,
+	"/sample": `<meta property="og:title" content="Sabermetric — sample evaluation">` +
+		`<meta property="og:description" content="See a real system design interview evaluated across 5 dimensions">` +
+		`<meta property="og:type" content="website">` +
+		`<meta property="og:image" content="/og-sample.png">`,
+}
+
 // SPAHandler serves the embedded SPA. Static assets served directly.
 // All other paths return index.html for client-side routing.
-func SPAHandler(fsys embed.FS) http.Handler {
+// For paths with OG tags defined, the tags are injected before </head>.
+func SPAHandler(fsys fs.FS) http.Handler {
 	sub, err := fs.Sub(fsys, "web/dist")
 	if err != nil {
 		panic(fmt.Sprintf("embed sub: %v", err))
 	}
+
+	indexBytes, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		panic(fmt.Sprintf("read index.html: %v", err))
+	}
+	indexHTML := string(indexBytes)
+
 	fileServer := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +118,16 @@ func SPAHandler(fsys embed.FS) http.Handler {
 				return
 			}
 		}
+
+		// Inject OG tags if this path has them defined
+		if tags, ok := ogTags[path]; ok {
+			body := strings.Replace(indexHTML, "</head>", tags+"</head>", 1)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			_, _ = w.Write([]byte(body))
+			return
+		}
+
 		// Fall back to index.html for client-side routing
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
