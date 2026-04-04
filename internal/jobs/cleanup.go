@@ -42,20 +42,11 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 
 	// Refund unused minutes and enqueue evaluation for each.
 	for _, id := range ids {
-		// Refund unused reserved minutes. The SQL query computes actual
-		// duration from wall-clock time (ended_at was just set by the
-		// batch UPDATE above) and distributes the refund atomically.
-		sess, err := q.GetSessionByID(ctx, id)
-		if err != nil {
-			slog.Warn("cleanup: get session for refund", "session_id", id, "error", err)
-		} else if sess.ReservedMinutes.Valid && sess.ReservedMinutes.Int32 > 0 {
-			if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
-				UserID:    sess.UserID,
-				Reason:    "session_refund",
-				SessionID: pgtype.UUID{Bytes: id, Valid: true},
-			}); err != nil {
-				slog.Warn("cleanup: refund failed", "session_id", id, "error", err)
-			}
+		if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
+			Reason:    "session_refund",
+			SessionID: pgtype.UUID{Bytes: id, Valid: true},
+		}); err != nil {
+			slog.Warn("cleanup: refund failed", "session_id", id, "error", err)
 		}
 
 		if _, err := w.Jobs.InsertTx(ctx, tx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts()); err != nil {

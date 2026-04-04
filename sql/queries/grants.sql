@@ -130,13 +130,19 @@ ORDER BY created_at DESC
 LIMIT $2;
 
 -- name: RefundSessionMinutes :many
+-- Refunds unused minutes for a completed session based on wall-clock duration.
+-- Derives user_id from the session — caller only needs session_id and reason.
 WITH RECURSIVE
-  refund_calc AS (
-    SELECT GREATEST(0,
-      reserved_minutes - GREATEST(1, CEIL(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60))::int
-    ) AS total
+  sess AS (
+    SELECT user_id, reserved_minutes, started_at, ended_at
     FROM interview_sessions
     WHERE id = @session_id AND reserved_minutes IS NOT NULL
+  ),
+  refund_calc AS (
+    SELECT GREATEST(0,
+      s.reserved_minutes - GREATEST(1, CEIL(EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 60))::int
+    ) AS total, s.user_id
+    FROM sess s
   ),
   reserves AS (
     SELECT grant_id, -amount AS debit,
@@ -172,16 +178,18 @@ WITH RECURSIVE
     RETURNING g.id AS grant_id, d.credit
   )
 INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
-SELECT @user_id, ac.grant_id, ac.credit, @reason, @session_id
+SELECT (SELECT user_id FROM refund_calc), ac.grant_id, ac.credit, @reason, @session_id
 FROM apply_credits ac
 RETURNING grant_id, amount;
 
 -- name: FullRefundSessionMinutes :many
--- Refunds exactly @minutes back to the grants that were originally debited
--- for this session. Used by FailSession (platform error → full refund).
+-- Refunds all reserved minutes for a session. Used by FailSession (platform error).
+-- Derives user_id and reserved_minutes from the session — caller only needs session_id.
 WITH RECURSIVE
-  refund_amount AS (
-    SELECT @minutes::int AS total
+  sess AS (
+    SELECT user_id, reserved_minutes
+    FROM interview_sessions
+    WHERE id = @session_id AND reserved_minutes IS NOT NULL
   ),
   reserves AS (
     SELECT grant_id, -amount AS debit,
@@ -191,10 +199,10 @@ WITH RECURSIVE
   ),
   distributed AS (
     SELECT r.grant_id, r.debit,
-           LEAST(r.debit, ra.total) AS credit,
-           ra.total - LEAST(r.debit, ra.total) AS remaining,
+           LEAST(r.debit, s.reserved_minutes) AS credit,
+           s.reserved_minutes - LEAST(r.debit, s.reserved_minutes) AS remaining,
            r.rn
-    FROM reserves r, refund_amount ra
+    FROM reserves r, sess s
     WHERE r.rn = 1
 
     UNION ALL
@@ -216,7 +224,7 @@ WITH RECURSIVE
     RETURNING g.id AS grant_id, d.credit
   )
 INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
-SELECT @user_id, ac.grant_id, ac.credit, @reason, @session_id
+SELECT (SELECT user_id FROM sess), ac.grant_id, ac.credit, @reason, @session_id
 FROM apply_credits ac
 RETURNING grant_id, amount;
 
