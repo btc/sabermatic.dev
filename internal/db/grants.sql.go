@@ -351,6 +351,85 @@ func (q *Queries) ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]Lis
 	return items, nil
 }
 
+const refundSessionMinutes = `-- name: RefundSessionMinutes :many
+WITH RECURSIVE
+  refund_calc AS (
+    SELECT GREATEST(0,
+      reserved_minutes - GREATEST(1, CEIL(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60))::int
+    ) AS total
+    FROM interview_sessions
+    WHERE id = $3 AND reserved_minutes IS NOT NULL
+  ),
+  reserves AS (
+    SELECT grant_id, -amount AS debit,
+           ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
+    FROM ledger_entries
+    WHERE session_id = $3 AND reason = 'session_reserve'
+  ),
+  distributed AS (
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, rc.total) AS credit,
+           rc.total - LEAST(r.debit, rc.total) AS remaining,
+           r.rn
+    FROM reserves r, refund_calc rc
+    WHERE r.rn = 1
+
+    UNION ALL
+
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, d.remaining) AS credit,
+           d.remaining - LEAST(r.debit, d.remaining) AS remaining,
+           r.rn
+    FROM reserves r
+    JOIN distributed d ON r.rn = d.rn + 1
+    WHERE d.remaining > 0
+  ),
+  apply_credits AS (
+    UPDATE grants g
+    SET remaining_minutes = remaining_minutes + d.credit
+    FROM distributed d
+    WHERE g.id = d.grant_id
+      AND d.credit > 0
+      AND g.remaining_minutes + d.credit <= g.initial_minutes
+    RETURNING g.id AS grant_id, d.credit
+  )
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
+SELECT $1, ac.grant_id, ac.credit, $2, $3
+FROM apply_credits ac
+RETURNING grant_id, amount
+`
+
+type RefundSessionMinutesParams struct {
+	UserID    uuid.UUID   `json:"user_id"`
+	Reason    string      `json:"reason"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+type RefundSessionMinutesRow struct {
+	GrantID uuid.UUID `json:"grant_id"`
+	Amount  int32     `json:"amount"`
+}
+
+func (q *Queries) RefundSessionMinutes(ctx context.Context, arg RefundSessionMinutesParams) ([]RefundSessionMinutesRow, error) {
+	rows, err := q.db.Query(ctx, refundSessionMinutes, arg.UserID, arg.Reason, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RefundSessionMinutesRow
+	for rows.Next() {
+		var i RefundSessionMinutesRow
+		if err := rows.Scan(&i.GrantID, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const selectGrantsForReservation = `-- name: SelectGrantsForReservation :many
 SELECT id, remaining_minutes
 FROM grants
