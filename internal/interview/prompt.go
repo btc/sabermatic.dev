@@ -172,6 +172,13 @@ func (b *PromptBuilder) WithTranscript(msgs []db.Message) *PromptBuilder {
 }
 
 // Build returns the assembled system prompt string and message history.
+// If the transcript is empty (opening turn), a seed user message is injected
+// because the Anthropic API requires messages to begin with a user role.
 func (b *PromptBuilder) Build() (string, []anthropic.MessageParam) {
+	if len(b.msgs) == 0 {
+		b.msgs = append(b.msgs, anthropic.NewUserMessage(
+			anthropic.NewTextBlock("(Present the question in 1-2 sentences only. No elaboration, no hints, no suggested approach.)"),
+		))
+	}
 	return b.system.String(), b.msgs
 }
