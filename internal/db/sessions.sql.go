@@ -15,7 +15,7 @@ import (
 
 const cancelSession = `-- name: CancelSession :exec
 UPDATE interview_sessions
-SET status = 'completed', ended_at = NOW(), turn_count = $2, archived_at = NOW(), updated_at = NOW()
+SET status = 'cancelled', ended_at = NOW(), turn_count = $2, archived_at = NOW(), updated_at = NOW()
 WHERE id = $1
 `
 

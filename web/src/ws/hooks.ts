@@ -17,7 +17,8 @@ export type InterviewState =
   | "transcribing"
   | "processing"
   | "streaming"
-  | "ended";
+  | "ended"
+  | "cancelled";
 
 // TODO: Add integration tests for useInterview — requires WebSocket mock infrastructure
 export function useInterview(sessionId: string) {
@@ -105,7 +106,7 @@ export function useInterview(sessionId: string) {
         break;
 
       case "session_ended":
-        setState("ended");
+        setState(msg.reason === "cancelled" ? "cancelled" : "ended");
         // Close any outstanding turn span on session end.
         if (turnSpanRef.current) {
           closeTurnSpan(turnSpanRef.current, false);
