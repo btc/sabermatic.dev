@@ -82,8 +82,8 @@ type Querier interface {
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	// Refunds unused minutes for a completed session based on wall-clock duration.
-	// Derives user_id from the session — caller only needs session_id and reason.
-	RefundSessionMinutes(ctx context.Context, arg RefundSessionMinutesParams) ([]RefundSessionMinutesRow, error)
+	// Derives user_id from the session — caller only needs session_id.
+	RefundSessionMinutes(ctx context.Context, sessionID pgtype.UUID) ([]RefundSessionMinutesRow, error)
 	// Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
 	// Returns one row per grant debited. Returns zero rows if balance is insufficient
 	// (all-or-nothing: no mutations occur when balance < requested).

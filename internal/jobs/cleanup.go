@@ -42,10 +42,7 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 
 	// Refund unused minutes and enqueue evaluation for each.
 	for _, id := range ids {
-		if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
-			Reason:    "session_refund",
-			SessionID: pgtype.UUID{Bytes: id, Valid: true},
-		}); err != nil {
+		if _, err := q.RefundSessionMinutes(ctx, pgtype.UUID{Bytes: id, Valid: true}); err != nil {
 			slog.Warn("cleanup: refund failed", "session_id", id, "error", err)
 		}
 
