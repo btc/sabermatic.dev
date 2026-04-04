@@ -15,6 +15,10 @@ function AnimatedBar({ value, delay, animate }: { value: number; delay: number; 
 
   useEffect(() => {
     if (!animate) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setWidth((value / 5) * 100);
+      return;
+    }
     const timer = setTimeout(() => setWidth((value / 5) * 100), delay);
     return () => clearTimeout(timer);
   }, [animate, value, delay]);
@@ -22,7 +26,7 @@ function AnimatedBar({ value, delay, animate }: { value: number; delay: number; 
   return (
     <div className="h-2 w-full rounded-full bg-muted">
       <div
-        className="h-2 rounded-full bg-primary transition-all duration-700 ease-out"
+        className="h-2 rounded-full bg-primary transition-all duration-700 ease-out motion-reduce:transition-none"
         style={{ width: `${width}%` }}
       />
     </div>
@@ -35,11 +39,12 @@ export function Scoring() {
   const { data: sessionData } = useSampleSession();
 
   if (!evaluation?.scores) return null;
+  const scores = evaluation.scores;
 
   return (
-    <section ref={ref} className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
+    <section ref={ref} aria-labelledby="scoring-heading" className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
       <div className="max-w-2xl space-y-4 text-center">
-        <h2 className="text-3xl font-light text-foreground sm:text-4xl">
+        <h2 id="scoring-heading" className="text-3xl font-light text-foreground sm:text-4xl">
           Scored across five dimensions
         </h2>
         {sessionData?.session.question_title && (
@@ -54,11 +59,11 @@ export function Scoring() {
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">{dim.label}</span>
               <span className="font-medium text-foreground">
-                {isVisible ? evaluation.scores![dim.key] : 0}/5
+                {isVisible ? scores[dim.key] : 0}/5
               </span>
             </div>
             <AnimatedBar
-              value={evaluation.scores![dim.key]}
+              value={scores[dim.key]}
               delay={i * 150}
               animate={isVisible}
             />
@@ -69,11 +74,11 @@ export function Scoring() {
           <div className="flex items-center justify-between">
             <span className="text-lg text-foreground font-medium">Overall</span>
             <span className="text-2xl font-semibold text-primary">
-              {isVisible ? evaluation.scores!.overall : 0}/5
+              {isVisible ? scores.overall : 0}/5
             </span>
           </div>
           <AnimatedBar
-            value={evaluation.scores!.overall}
+            value={scores.overall}
             delay={DIMENSIONS.length * 150}
             animate={isVisible}
           />
