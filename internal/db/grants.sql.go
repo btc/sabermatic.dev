@@ -202,6 +202,42 @@ func (q *Queries) FullRefundSessionMinutes(ctx context.Context, arg FullRefundSe
 	return items, nil
 }
 
+const getBillingSnapshot = `-- name: GetBillingSnapshot :one
+SELECT u.plan, u.free_full_educators_used,
+  COALESCE(SUM(g.remaining_minutes) FILTER (
+    WHERE g.remaining_minutes > 0 AND (g.expires_at IS NULL OR g.expires_at > NOW())
+  ), 0)::int AS total_balance,
+  COALESCE(SUM(g.remaining_minutes) FILTER (
+    WHERE g.remaining_minutes > 0 AND g.source != 'free_grant'
+    AND (g.expires_at IS NULL OR g.expires_at > NOW())
+  ), 0)::int AS paid_balance
+FROM users u
+LEFT JOIN grants g ON g.user_id = u.id
+WHERE u.id = $1
+GROUP BY u.id, u.plan, u.free_full_educators_used
+`
+
+type GetBillingSnapshotRow struct {
+	Plan                  string `json:"plan"`
+	FreeFullEducatorsUsed int32  `json:"free_full_educators_used"`
+	TotalBalance          int32  `json:"total_balance"`
+	PaidBalance           int32  `json:"paid_balance"`
+}
+
+// Single query to fetch all billing state needed for entitlement checks.
+// Fetch inside the caller's transaction to avoid TOCTOU.
+func (q *Queries) GetBillingSnapshot(ctx context.Context, id uuid.UUID) (GetBillingSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, getBillingSnapshot, id)
+	var i GetBillingSnapshotRow
+	err := row.Scan(
+		&i.Plan,
+		&i.FreeFullEducatorsUsed,
+		&i.TotalBalance,
+		&i.PaidBalance,
+	)
+	return i, err
+}
+
 const getFreeGrantForMonth = `-- name: GetFreeGrantForMonth :one
 SELECT id FROM grants
 WHERE user_id = $1
