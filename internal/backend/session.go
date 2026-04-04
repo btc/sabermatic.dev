@@ -262,20 +262,13 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		return fmt.Errorf("update session status: %w", err)
 	}
 
-	// Refund unused reserved minutes. The SQL computes actual duration from
-	// wall-clock time, distributes the refund across grants in FIFO-reverse
-	// order, and writes ledger entries — all in one atomic query.
-	session, err := q.GetSessionByID(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("get session for refund: %w", err)
-	}
+	// Refund unused reserved minutes. The SQL derives user_id and duration
+	// from the session, distributes the refund, and writes ledger entries.
 	if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
-		UserID:    session.UserID,
 		Reason:    "session_refund",
 		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
 	}); err != nil {
 		slog.Warn("session refund failed", "session_id", sessionID, "error", err)
-		// Non-fatal: session still completes.
 	}
 
 	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, jobs.EvaluateSessionInsertOpts())
@@ -315,16 +308,12 @@ func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
 		return fmt.Errorf("update session status: %w", err)
 	}
 
-	// Full refund of reserved minutes via SQL recursive CTE.
-	if session.ReservedMinutes.Valid && session.ReservedMinutes.Int32 > 0 {
-		if _, err := q.FullRefundSessionMinutes(ctx, db.FullRefundSessionMinutesParams{
-			SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
-			Minutes:   session.ReservedMinutes.Int32,
-			UserID:    session.UserID,
-			Reason:    "error_refund",
-		}); err != nil {
-			slog.Warn("fail-session refund failed", "session_id", sessionID, "error", err)
-		}
+	// Full refund — SQL derives user_id and reserved_minutes from the session.
+	if _, err := q.FullRefundSessionMinutes(ctx, db.FullRefundSessionMinutesParams{
+		Reason:    "error_refund",
+		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
+	}); err != nil {
+		slog.Warn("fail-session refund failed", "session_id", sessionID, "error", err)
 	}
 
 	return tx.Commit(ctx)
