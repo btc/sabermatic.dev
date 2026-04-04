@@ -18,18 +18,21 @@ import (
 	"github.com/btc/drill/internal/db"
 )
 
-// snapshotFrom converts the sqlc-generated row to the billing package's snapshot type.
-func snapshotFrom(row db.GetBillingSnapshotRow) billing.BillingSnapshot {
-	return billing.BillingSnapshot{
-		Plan:                  row.Plan,
-		FreeFullEducatorsUsed: int(row.FreeFullEducatorsUsed),
-		TotalBalance:          int(row.TotalBalance),
-		PaidBalance:           int(row.PaidBalance),
-	}
+// ---------------------------------------------------------------------------
+// Params
+// ---------------------------------------------------------------------------
+
+// CheckoutParams holds the parameters for CreateCheckoutSession.
+type CheckoutParams struct {
+	UserID      uuid.UUID
+	Email       string
+	Type        string // "subscription" or "pack"
+	Plan        string // for subscription
+	PackMinutes int    // for pack
 }
 
 // ---------------------------------------------------------------------------
-// EnsureFreeGrant
+// Public methods
 // ---------------------------------------------------------------------------
 
 // EnsureFreeGrant creates the current-month free grant for the user if it does
@@ -46,43 +49,6 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planNam
 		InitialMinutes: int32(plan.MinutesPerMonth),
 		ExpiresAt:      pgtype.Timestamptz{Time: billing.EndOfMonth(time.Now().UTC()), Valid: true},
 	})
-}
-
-// ---------------------------------------------------------------------------
-// ReserveMinutes
-// ---------------------------------------------------------------------------
-
-// reserveMinutesTx reserves minutes via a single SQL recursive CTE that
-// locks grants, checks balance, debits in FIFO order, and writes ledger
-// entries atomically. Returns ErrInsufficientBalance if balance < requested
-// (zero rows returned = no mutations occurred).
-func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
-	rows, err := db.New(dbtx).ReserveMinutes(ctx, db.ReserveMinutesParams{
-		UserID:    userID,
-		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
-		Minutes:   minutes,
-	})
-	if err != nil {
-		return fmt.Errorf("reserve minutes: %w", err)
-	}
-	if len(rows) == 0 {
-		return ErrInsufficientBalance
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// GetUsageSummary
-// ---------------------------------------------------------------------------
-
-// UsageSummary holds the balance breakdown, active grants, and recent ledger
-// entries for a user.
-type UsageSummary struct {
-	TotalBalance int32                       `json:"total_balance"`
-	FreeBalance  int32                       `json:"free_balance"`
-	PaidBalance  int32                       `json:"paid_balance"`
-	Grants       []db.ListActiveGrantsRow    `json:"grants"`
-	RecentActivity []db.GetRecentLedgerEntriesRow `json:"recent_activity"`
 }
 
 // GetUsageSummary returns the user's balance breakdown, active grants, and
@@ -109,41 +75,33 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*Usage
 	}
 
 	return &UsageSummary{
-		TotalBalance: summary.TotalBalance,
-		FreeBalance:  summary.FreeBalance,
-		PaidBalance:  summary.PaidBalance,
-		Grants:       grants,
+		TotalBalance:   summary.TotalBalance,
+		FreeBalance:    summary.FreeBalance,
+		PaidBalance:    summary.PaidBalance,
+		Grants:         grants,
 		RecentActivity: entries,
 	}, nil
 }
 
-// ---------------------------------------------------------------------------
-// CreateCheckoutSession
-// ---------------------------------------------------------------------------
-
 // CreateCheckoutSession creates a Stripe Checkout session for a subscription or
-// one-time minute-pack purchase. It returns the checkout URL. If the user has
-// no Stripe customer yet, one is created and persisted.
-func (b *Backend) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, email, checkoutType, planName string, packMinutes int) (string, error) {
+// one-time minute-pack purchase. Returns the checkout URL.
+func (b *Backend) CreateCheckoutSession(ctx context.Context, p CheckoutParams) (string, error) {
 	if b.cfg.Stripe.SecretKey == "" {
 		return "", fmt.Errorf("stripe not configured")
 	}
 
 	q := db.New(b.pool)
-	user, err := q.GetUserByID(ctx, userID)
+	user, err := q.GetUserByID(ctx, p.UserID)
 	if err != nil {
 		return "", fmt.Errorf("get user: %w", err)
 	}
 
-	// Ensure the user has a Stripe customer ID.
 	custID := user.StripeCustomerID.String
 	if !user.StripeCustomerID.Valid || custID == "" {
 		cust, err := customer.New(&stripe.CustomerParams{
-			Email: stripe.String(email),
+			Email: stripe.String(p.Email),
 			Params: stripe.Params{
-				Metadata: map[string]string{
-					"user_id": userID.String(),
-				},
+				Metadata: map[string]string{"user_id": p.UserID.String()},
 			},
 		})
 		if err != nil {
@@ -151,43 +109,42 @@ func (b *Backend) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, e
 		}
 		custID = cust.ID
 		if err := q.UpdateUserStripeCustomerID(ctx, db.UpdateUserStripeCustomerIDParams{
-			ID:               userID,
+			ID:               p.UserID,
 			StripeCustomerID: pgtype.Text{String: custID, Valid: true},
 		}); err != nil {
 			return "", fmt.Errorf("save stripe customer id: %w", err)
 		}
 	}
 
-	// Determine mode and price ID.
 	var mode string
 	var priceID string
 	metadata := map[string]string{
-		"user_id": userID.String(),
-		"type":    checkoutType,
+		"user_id": p.UserID.String(),
+		"type":    p.Type,
 	}
 
-	switch checkoutType {
+	switch p.Type {
 	case "subscription":
 		mode = string(stripe.CheckoutSessionModeSubscription)
-		if _, ok := billing.PlanByName(planName); !ok {
-			return "", fmt.Errorf("unknown plan %q", planName)
+		if _, ok := billing.PlanByName(p.Plan); !ok {
+			return "", fmt.Errorf("unknown plan %q", p.Plan)
 		}
-		priceID = b.cfg.Stripe.PriceIDForPlan(planName)
+		priceID = b.cfg.Stripe.PriceIDForPlan(p.Plan)
 		if priceID == "" {
-			return "", fmt.Errorf("plan %q has no Stripe price configured", planName)
+			return "", fmt.Errorf("plan %q has no Stripe price configured", p.Plan)
 		}
 	case "pack":
 		mode = string(stripe.CheckoutSessionModePayment)
-		if !billing.ValidPackSize(packMinutes) {
-			return "", fmt.Errorf("unknown pack size %d", packMinutes)
+		if !billing.ValidPackSize(p.PackMinutes) {
+			return "", fmt.Errorf("unknown pack size %d", p.PackMinutes)
 		}
-		priceID = b.cfg.Stripe.PriceIDForPack(packMinutes)
+		priceID = b.cfg.Stripe.PriceIDForPack(p.PackMinutes)
 		if priceID == "" {
-			return "", fmt.Errorf("pack %d has no Stripe price configured", packMinutes)
+			return "", fmt.Errorf("pack %d has no Stripe price configured", p.PackMinutes)
 		}
-		metadata["pack_minutes"] = strconv.Itoa(packMinutes)
+		metadata["pack_minutes"] = strconv.Itoa(p.PackMinutes)
 	default:
-		return "", fmt.Errorf("invalid checkout type %q", checkoutType)
+		return "", fmt.Errorf("invalid checkout type %q", p.Type)
 	}
 
 	baseURL := b.cfg.Auth.BaseURL
@@ -195,10 +152,7 @@ func (b *Backend) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, e
 		Customer: stripe.String(custID),
 		Mode:     stripe.String(mode),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
-			{
-				Price:    stripe.String(priceID),
-				Quantity: stripe.Int64(1),
-			},
+			{Price: stripe.String(priceID), Quantity: stripe.Int64(1)},
 		},
 		SuccessURL: stripe.String(baseURL + "/settings/billing?success=1"),
 		CancelURL:  stripe.String(baseURL + "/settings/billing?canceled=1"),
@@ -211,24 +165,16 @@ func (b *Backend) CreateCheckoutSession(ctx context.Context, userID uuid.UUID, e
 	return sess.URL, nil
 }
 
-// ---------------------------------------------------------------------------
-// CreatePortalSession
-// ---------------------------------------------------------------------------
-
 // CreatePortalSession creates a Stripe billing portal session for the user.
-// Returns the portal URL. Returns ErrNoStripeAccount if the user has no
-// Stripe customer on file.
 func (b *Backend) CreatePortalSession(ctx context.Context, userID uuid.UUID) (string, error) {
 	if b.cfg.Stripe.SecretKey == "" {
 		return "", fmt.Errorf("stripe not configured")
 	}
 
-	q := db.New(b.pool)
-	user, err := q.GetUserByID(ctx, userID)
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("get user: %w", err)
 	}
-
 	if !user.StripeCustomerID.Valid || user.StripeCustomerID.String == "" {
 		return "", ErrNoStripeAccount
 	}
@@ -245,13 +191,7 @@ func (b *Backend) CreatePortalSession(ctx context.Context, userID uuid.UUID) (st
 	return sess.URL, nil
 }
 
-// ---------------------------------------------------------------------------
-// HandleStripeWebhook
-// ---------------------------------------------------------------------------
-
-// HandleStripeWebhook dispatches a Stripe webhook event. It handles checkout
-// completions (purchase grants), invoice payments (subscription grants),
-// subscription deletions, and subscription updates.
+// HandleStripeWebhook dispatches a Stripe webhook event.
 func (b *Backend) HandleStripeWebhook(ctx context.Context, event stripe.Event) error {
 	switch event.Type {
 	case "checkout.session.completed":
@@ -268,13 +208,54 @@ func (b *Backend) HandleStripeWebhook(ctx context.Context, event stripe.Event) e
 	}
 }
 
-// handleCheckoutCompleted processes checkout.session.completed events. For
-// one-time payments (mode=payment), it creates a purchase grant and ledger
-// entry. Subscription checkouts are handled by invoice.paid instead.
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+// UsageSummary holds the balance breakdown, active grants, and recent ledger
+// entries for a user.
+type UsageSummary struct {
+	TotalBalance   int32                         `json:"total_balance"`
+	FreeBalance    int32                         `json:"free_balance"`
+	PaidBalance    int32                         `json:"paid_balance"`
+	Grants         []db.ListActiveGrantsRow      `json:"grants"`
+	RecentActivity []db.GetRecentLedgerEntriesRow `json:"recent_activity"`
+}
+
+// ---------------------------------------------------------------------------
+// Private methods
+// ---------------------------------------------------------------------------
+
+// snapshotFrom converts the sqlc-generated row to the billing package's snapshot type.
+func snapshotFrom(row db.GetBillingSnapshotRow) billing.BillingSnapshot {
+	return billing.BillingSnapshot{
+		Plan:                  row.Plan,
+		FreeFullEducatorsUsed: int(row.FreeFullEducatorsUsed),
+		TotalBalance:          int(row.TotalBalance),
+		PaidBalance:           int(row.PaidBalance),
+	}
+}
+
+// reserveMinutesTx reserves minutes via a single SQL recursive CTE.
+// Returns ErrInsufficientBalance if balance < requested.
+func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
+	rows, err := db.New(dbtx).ReserveMinutes(ctx, db.ReserveMinutesParams{
+		UserID:    userID,
+		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
+		Minutes:   minutes,
+	})
+	if err != nil {
+		return fmt.Errorf("reserve minutes: %w", err)
+	}
+	if len(rows) == 0 {
+		return ErrInsufficientBalance
+	}
+	return nil
+}
+
 func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Event) error {
 	mode := event.GetObjectValue("mode")
 	if mode != "payment" {
-		// Subscription checkouts are handled via invoice.paid.
 		return nil
 	}
 
@@ -312,9 +293,6 @@ func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Even
 	return nil
 }
 
-// handleInvoicePaid processes invoice.paid events. It looks up the user by
-// stripe_customer_id and creates a subscription grant + ledger entry, then
-// updates the user's plan.
 func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) error {
 	custID := event.GetObjectValue("customer")
 	if custID == "" {
@@ -348,8 +326,6 @@ func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) err
 	return nil
 }
 
-// handleSubscriptionDeleted processes customer.subscription.deleted events.
-// It reverts the user's plan to "free".
 func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Event) error {
 	custID := event.GetObjectValue("customer")
 	if custID == "" {
@@ -373,8 +349,6 @@ func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Ev
 	return nil
 }
 
-// handleSubscriptionUpdated processes customer.subscription.updated events.
-// It syncs the user's plan based on subscription status.
 func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Event) error {
 	custID := event.GetObjectValue("customer")
 	if custID == "" {
