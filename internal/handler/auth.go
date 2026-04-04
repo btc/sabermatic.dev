@@ -17,6 +17,13 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	json.NewEncoder(w).Encode(body)
 }
 
+func writePaidBalanceRequired(w http.ResponseWriter) {
+	writeJSON(w, http.StatusForbidden, map[string]string{
+		"error":   "paid_balance_required",
+		"message": "This feature requires a paid plan or minute balance.",
+	})
+}
+
 // Signup returns a handler that creates a new user account.
 func Signup(b *backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
