@@ -36,17 +36,18 @@ type CheckoutParams struct {
 // ---------------------------------------------------------------------------
 
 // Check returns the user's billing entitlements (single DB query).
-func (b *Backend) Check(ctx context.Context, userID uuid.UUID) (billing.Entitlements, error) {
+func (b *Backend) Check(ctx context.Context, userID uuid.UUID) (*billing.Entitlements, error) {
 	return b.CheckTx(ctx, b.pool, userID)
 }
 
 // CheckTx is like Check but runs on the provided DBTX (pool or transaction).
-func (b *Backend) CheckTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (billing.Entitlements, error) {
+func (b *Backend) CheckTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (*billing.Entitlements, error) {
 	bs, err := db.New(dbtx).GetBillingSnapshot(ctx, userID)
 	if err != nil {
-		return billing.Entitlements{}, fmt.Errorf("get billing snapshot: %w", err)
+		return nil, fmt.Errorf("get billing snapshot: %w", err)
 	}
-	return billing.Resolve(snapshotFrom(bs)), nil
+	ent := billing.Resolve(snapshotFrom(bs))
+	return &ent, nil
 }
 
 // EnsureFreeGrant creates the current-month free grant for the user if it does
