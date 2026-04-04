@@ -1,6 +1,7 @@
 import { Hero } from "./hero";
 import { Scoring } from "./scoring";
 import { StrengthsGaps } from "./strengths-gaps";
+import { Annotations } from "./annotations";
 
 export default function Landing() {
   return (
@@ -8,6 +9,7 @@ export default function Landing() {
       <Hero />
       <Scoring />
       <StrengthsGaps />
+      <Annotations />
     </div>
   );
 }
