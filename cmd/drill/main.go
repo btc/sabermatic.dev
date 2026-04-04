@@ -15,9 +15,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	"github.com/gorilla/csrf"
 	stripe "github.com/stripe/stripe-go/v82"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	drill "github.com/btc/drill"
 	"github.com/btc/drill/internal/auth"
@@ -75,8 +73,8 @@ func runWithContext(ctx context.Context) error {
 		}
 	}()
 
-	// Initialize Stripe — set API key once (package-level global, must not be set per-request).
-	if cfg.Stripe.SecretKey != "" {
+	// Initialize Stripe SDK (package-level global required by stripe-go).
+	if cfg.Stripe.Configured() {
 		stripe.Key = cfg.Stripe.SecretKey
 		slog.Info("stripe configured")
 	} else {
@@ -92,35 +90,10 @@ func runWithContext(ctx context.Context) error {
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
-	mux.Handle("/", handler.SPAHandler(drill.WebFS))
-
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
-	csrfProtect := csrf.Protect(
-		csrfKey,
-		csrf.Secure(cfg.Auth.SecureCookies()),
-		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
-		csrf.Path("/"),
-		csrf.SameSite(csrf.SameSiteLaxMode),
-	)
-
-	otelHandler := otelhttp.NewMiddleware("drill")(mux)
-
-	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
-	csrfProtected := csrfProtect(otelHandler)
-	topHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
-			otelHandler.ServeHTTP(w, r)
-			return
-		}
-		csrfProtected.ServeHTTP(w, r)
-	})
-
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: topHandler,
+		Handler: handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies()),
 	}
 
 	errCh := make(chan error, 1)

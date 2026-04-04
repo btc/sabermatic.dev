@@ -81,13 +81,6 @@ INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
 SELECT user_id, id, initial_minutes, 'free_monthly'
 FROM new_grant;
 
--- name: GetFreeGrantForMonth :one
-SELECT id FROM grants
-WHERE user_id = $1
-  AND source = 'free_grant'
-  AND expires_at = $2
-LIMIT 1;
-
 -- name: ListActiveGrants :many
 SELECT id, source, initial_minutes, remaining_minutes, expires_at, created_at
 FROM grants
