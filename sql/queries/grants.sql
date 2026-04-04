@@ -1,18 +1,59 @@
--- name: SelectGrantsForReservation :many
-SELECT id, remaining_minutes
-FROM grants
-WHERE user_id = $1
-  AND remaining_minutes > 0
-  AND (expires_at IS NULL OR expires_at > NOW())
-ORDER BY expires_at ASC NULLS LAST
-FOR UPDATE;
+-- name: ReserveMinutes :many
+-- Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
+-- Returns one row per grant debited. Returns zero rows if balance is insufficient
+-- (all-or-nothing: no mutations occur when balance < requested).
+WITH RECURSIVE
+  locked AS (
+    SELECT id, remaining_minutes, expires_at
+    FROM grants
+    WHERE user_id = @user_id
+      AND remaining_minutes > 0
+      AND (expires_at IS NULL OR expires_at > NOW())
+    FOR UPDATE
+  ),
+  eligible AS (
+    SELECT id, remaining_minutes,
+           ROW_NUMBER() OVER (ORDER BY expires_at ASC NULLS LAST) AS rn
+    FROM locked
+  ),
+  balance_check AS (
+    SELECT COALESCE(SUM(remaining_minutes), 0) AS total
+    FROM eligible
+  ),
+  request AS (
+    SELECT @minutes::int AS requested
+    FROM balance_check
+    WHERE total >= @minutes
+  ),
+  distributed AS (
+    SELECT e.id AS grant_id, e.remaining_minutes,
+           LEAST(e.remaining_minutes, r.requested) AS debit,
+           r.requested - LEAST(e.remaining_minutes, r.requested) AS remaining,
+           e.rn
+    FROM eligible e, request r
+    WHERE e.rn = 1
 
--- name: DebitGrant :one
-UPDATE grants
-SET remaining_minutes = remaining_minutes - $2
-WHERE id = $1
-  AND remaining_minutes >= $2
-RETURNING remaining_minutes;
+    UNION ALL
+
+    SELECT e.id, e.remaining_minutes,
+           LEAST(e.remaining_minutes, d.remaining) AS debit,
+           d.remaining - LEAST(e.remaining_minutes, d.remaining) AS remaining,
+           e.rn
+    FROM eligible e
+    JOIN distributed d ON e.rn = d.rn + 1
+    WHERE d.remaining > 0
+  ),
+  apply_debits AS (
+    UPDATE grants g
+    SET remaining_minutes = g.remaining_minutes - d.debit
+    FROM distributed d
+    WHERE g.id = d.grant_id AND d.debit > 0
+    RETURNING g.id AS grant_id, d.debit
+  )
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
+SELECT @user_id, ad.grant_id, -ad.debit, 'session_reserve', @session_id
+FROM apply_debits ad
+RETURNING grant_id, amount;
 
 -- name: InsertLedgerEntry :one
 INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)

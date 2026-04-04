@@ -20,7 +20,6 @@ type Querier interface {
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (InterviewSession, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, error)
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	// Creates the monthly free grant + ledger entry atomically. If the grant
@@ -79,7 +78,10 @@ type Querier interface {
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	RefundSessionMinutes(ctx context.Context, arg RefundSessionMinutesParams) ([]RefundSessionMinutesRow, error)
-	SelectGrantsForReservation(ctx context.Context, userID uuid.UUID) ([]SelectGrantsForReservationRow, error)
+	// Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
+	// Returns one row per grant debited. Returns zero rows if balance is insufficient
+	// (all-or-nothing: no mutations occur when balance < requested).
+	ReserveMinutes(ctx context.Context, arg ReserveMinutesParams) ([]ReserveMinutesRow, error)
 	SetAudioURL(ctx context.Context, arg SetAudioURLParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
