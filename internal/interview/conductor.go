@@ -321,7 +321,7 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 	// Extract client trace context so the server span becomes a child of the
 	// browser's turn.submit span, producing one end-to-end flame graph per turn.
-	ctx = drilotel.ExtractTraceparent(ctx, msg.traceparent())
+	ctx = drilotel.ExtractTraceparent(ctx, msg.Traceparent())
 	ctx, span := tracer.Start(ctx, "Conductor.endTurn")
 	defer func() { drilotel.End(span, err) }()
 

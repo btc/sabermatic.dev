@@ -82,8 +82,8 @@ func ParseWSMessage(data []byte) (WSMessage, error) {
 	return msg, nil
 }
 
-// traceparent returns the W3C traceparent string, or "" if not present.
-func (m WSMessage) traceparent() string {
+// Traceparent returns the W3C traceparent string, or "" if not present.
+func (m WSMessage) Traceparent() string {
 	if m.TraceContext == nil {
 		return ""
 	}
