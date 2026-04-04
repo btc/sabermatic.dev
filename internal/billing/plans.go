@@ -43,6 +43,11 @@ var plans = map[string]Plan{
 	},
 }
 
+// FreePlanMinutesPerMonth returns the free tier's monthly minute allocation.
+func FreePlanMinutesPerMonth() int {
+	return plans["free"].MinutesPerMonth
+}
+
 func PlanByName(name string) (Plan, bool) {
 	p, ok := plans[name]
 	return p, ok
