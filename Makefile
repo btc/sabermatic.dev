@@ -1,4 +1,4 @@
-.PHONY: dev dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover
+.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover
 
 # Start embedded dev server. Vite rebuilds on save, air bounces Go binary.
 # One origin (port 8080), no proxy, no CSRF issues. Ctrl-C kills all.
@@ -10,6 +10,11 @@ dev:
 	$(MAKE) dev-air & \
 	sleep 3 && open http://localhost:8080 & \
 	wait
+
+# Same as dev, but tee all output to tmp/dev.log for easy inspection.
+dev-log:
+	@mkdir -p tmp
+	@$(MAKE) dev 2>&1 | tee tmp/dev.log
 
 # Initial frontend build before air starts
 dev-build:
