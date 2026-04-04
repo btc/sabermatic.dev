@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,10 +22,8 @@ import (
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/sql/migrations"
 )
-
-//go:embed migrations/*.sql
-var migrations embed.FS
 
 func main() {
 	if err := run(); err != nil {
@@ -148,7 +145,7 @@ func buildLogWriter(path string) (io.Writer, func()) {
 }
 
 func runMigrations(databaseURL string) error {
-	d, err := iofs.New(migrations, "migrations")
+	d, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("create migration source: %w", err)
 	}
