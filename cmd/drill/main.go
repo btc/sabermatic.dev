@@ -97,7 +97,7 @@ func runWithContext(ctx context.Context) error {
 	mux.Handle("/", handler.SPAHandler(drill.WebFS))
 
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
-	csrfMiddleware := csrf.Protect(
+	csrfProtect := csrf.Protect(
 		csrfKey,
 		csrf.Secure(cfg.Auth.SecureCookies()),
 		csrf.HttpOnly(false),
@@ -107,9 +107,20 @@ func runWithContext(ctx context.Context) error {
 	)
 
 	otelHandler := otelhttp.NewMiddleware("drill")(mux)
+
+	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
+	csrfProtected := csrfProtect(otelHandler)
+	topHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
+			otelHandler.ServeHTTP(w, r)
+			return
+		}
+		csrfProtected.ServeHTTP(w, r)
+	})
+
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler: csrfMiddleware(otelHandler),
+		Handler: topHandler,
 	}
 
 	errCh := make(chan error, 1)
