@@ -34,17 +34,17 @@ const REVIEWED_STATUSES: SessionStatus[] = ["reviewed", "evaluation_failed"];
 function applyFilter(sessions: Session[], tab: FilterTab): Session[] {
   switch (tab) {
     case "all":
-      return sessions.filter((s) => !s.archived);
+      return sessions.filter((s) => !s.archived_at_at);
     case "in_progress":
       return sessions.filter(
-        (s) => !s.archived && IN_PROGRESS_STATUSES.includes(s.status),
+        (s) => !s.archived_at_at && IN_PROGRESS_STATUSES.includes(s.status),
       );
     case "reviewed":
       return sessions.filter(
-        (s) => !s.archived && REVIEWED_STATUSES.includes(s.status),
+        (s) => !s.archived_at_at && REVIEWED_STATUSES.includes(s.status),
       );
     case "archived":
-      return sessions.filter((s) => s.archived);
+      return sessions.filter((s) => s.archived_at);
     default:
       return sessions;
   }
@@ -198,7 +198,7 @@ interface SessionRowProps {
 }
 
 function SessionRow({ session, checked, onToggle }: SessionRowProps) {
-  const isArchived = session.archived;
+  const isArchived = !!session.archived_at;
 
   return (
     <div
@@ -327,7 +327,7 @@ function ActionBar({ selectedIds, sessions, onClear }: ActionBarProps) {
 
   // Determine if selected sessions are mostly archived or not
   const selectedSessions = sessions.filter((s) => selectedIds.has(s.id));
-  const allArchived = selectedSessions.every((s) => s.archived);
+  const allArchived = selectedSessions.every((s) => s.archived_at);
   const shouldArchive = !allArchived;
 
   function handleAction() {
@@ -407,7 +407,7 @@ export default function History() {
 
   // Reviewed sessions for trend chart (all, not tab-filtered)
   const reviewedSessions = useMemo(
-    () => allSessions.filter((s) => s.status === "reviewed" && !s.archived),
+    () => allSessions.filter((s) => s.status === "reviewed" && !s.archived_at_at),
     [allSessions],
   );
 
