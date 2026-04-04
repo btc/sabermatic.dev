@@ -18,12 +18,12 @@ export function Credits() {
   return (
     <section ref={ref} aria-labelledby="credits-heading" className="py-24 px-4">
       <div className="mx-auto max-w-sm">
-        <h3
+        <h2
           id="credits-heading"
           className="mb-6 text-xs font-medium uppercase tracking-wider text-muted-foreground text-center"
         >
           Built with
-        </h3>
+        </h2>
         <div className="space-y-2">
           {CREDITS.map((c, i) => (
             <div

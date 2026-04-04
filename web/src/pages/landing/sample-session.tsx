@@ -19,21 +19,23 @@ export function SampleSessionLink() {
           isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
         }`}
       >
-        {sessionData?.session && (
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <p className="text-foreground font-medium">{sessionData.session.question_title}</p>
-            <p>{sessionData.messages?.length ?? 0} turns · {sessionData.session.config_duration_minutes} min</p>
-            {evaluation?.scores && (
-              <p className="text-primary font-medium">Overall score: {evaluation.scores.overall}/5</p>
-            )}
-          </div>
-        )}
-        <Link
-          to="/sample"
-          className="mt-4 inline-block rounded-md bg-muted px-6 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80"
-        >
-          View full session →
-        </Link>
+        {sessionData?.session ? (
+          <>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p className="text-foreground font-medium">{sessionData.session.question_title}</p>
+              <p>{sessionData.messages?.length ?? 0} turns · {sessionData.session.config_duration_minutes} min</p>
+              {evaluation?.scores && (
+                <p className="text-primary font-medium">Overall score: {evaluation.scores.overall}/5</p>
+              )}
+            </div>
+            <Link
+              to="/sample"
+              className="mt-4 inline-block rounded-md bg-muted px-6 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80"
+            >
+              View full session →
+            </Link>
+          </>
+        ) : null}
       </div>
     </section>
   );
