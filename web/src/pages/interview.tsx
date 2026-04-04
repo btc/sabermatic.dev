@@ -182,6 +182,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     sendText,
     sendAudio,
     endSession,
+    cancelSession,
     cancelTts,
     setRawMessageHandler,
   } = useInterview(sessionId);
@@ -475,10 +476,10 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
               variant="ghost"
               onClick={() => {
                 setCancelDialogOpen(false);
-                navigate("/");
+                cancelSession();
               }}
             >
-              Leave
+              Cancel Session
             </Button>
           </DialogFooter>
         </DialogContent>

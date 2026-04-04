@@ -65,6 +65,11 @@ SELECT id FROM interview_sessions
 WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
 ORDER BY created_at;
 
+-- name: CancelSession :exec
+UPDATE interview_sessions
+SET status = 'completed', ended_at = NOW(), turn_count = $2, archived = TRUE, updated_at = NOW()
+WHERE id = $1;
+
 -- name: CountActiveSessionsByUser :one
 SELECT COUNT(*)::int AS count
 FROM interview_sessions

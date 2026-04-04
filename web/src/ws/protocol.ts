@@ -6,6 +6,7 @@ export type ClientMessage =
   | { type: "end_turn"; audio: string; input_method: "voice"; trace_context?: TraceContext }
   | { type: "cancel_tts" }
   | { type: "end_session" }
+  | { type: "cancel_session" }
   | { type: "ping" };
 
 export interface TraceContext {
@@ -27,7 +28,7 @@ export type ServerMessage =
   | { type: "transcription_result"; text: string }
   | { type: "timer_warning"; minutes_remaining: number }
   | { type: "timer_overtime" }
-  | { type: "session_ended"; reason: "candidate" | "interviewer" | "timeout" }
+  | { type: "session_ended"; reason: "candidate" | "interviewer" | "timeout" | "cancelled" }
   | { type: "reconnect_please" }
   | { type: "error"; code: string; message: string }
   | { type: "pong" };

@@ -283,6 +283,35 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 	return nil
 }
 
+// CancelSession ends a session early at the user's request. Sets status to
+// completed + archived (excluded from coach analysis and session lists).
+// Refunds unused minutes based on wall-clock duration. Does NOT enqueue evaluation.
+func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCount int) error {
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin cancel-session tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := db.New(tx)
+
+	if err := q.CancelSession(ctx, db.CancelSessionParams{
+		ID:        sessionID,
+		TurnCount: int32(turnCount),
+	}); err != nil {
+		return fmt.Errorf("cancel session: %w", err)
+	}
+
+	if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
+		Reason:    "session_refund",
+		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
+	}); err != nil {
+		slog.Warn("cancel session refund failed", "session_id", sessionID, "error", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
 // FailSession transitions a session to "failed" and refunds all reserved minutes.
 func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
 	tx, err := b.pool.Begin(ctx)
