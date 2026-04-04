@@ -38,6 +38,17 @@ func TestParseWSMessage_EndTurnVoice(t *testing.T) {
 	assert.Equal(t, "end_turn", msg.Type)
 	assert.Equal(t, "voice", msg.InputMethod)
 	assert.Equal(t, []byte("hello"), msg.Audio)
+	assert.Equal(t, "audio/webm", msg.AudioMIME, "should default to audio/webm when not specified")
+	assert.Equal(t, "webm", msg.AudioExt())
+}
+
+func TestParseWSMessage_EndTurnVoiceWithMIME(t *testing.T) {
+	msg, err := interview.ParseWSMessage([]byte(`{"type":"end_turn","audio":"aGVsbG8=","input_method":"voice","audio_mime":"audio/ogg"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "voice", msg.InputMethod)
+	assert.Equal(t, []byte("hello"), msg.Audio)
+	assert.Equal(t, "audio/ogg", msg.AudioMIME)
+	assert.Equal(t, "ogg", msg.AudioExt())
 }
 
 func TestParseWSMessage_CancelTTS(t *testing.T) {

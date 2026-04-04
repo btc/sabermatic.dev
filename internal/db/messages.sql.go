@@ -141,3 +141,17 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (M
 	)
 	return i, err
 }
+
+const setAudioURL = `-- name: SetAudioURL :exec
+UPDATE messages SET audio_url = $2 WHERE id = $1
+`
+
+type SetAudioURLParams struct {
+	ID       uuid.UUID   `json:"id"`
+	AudioUrl pgtype.Text `json:"audio_url"`
+}
+
+func (q *Queries) SetAudioURL(ctx context.Context, arg SetAudioURLParams) error {
+	_, err := q.db.Exec(ctx, setAudioURL, arg.ID, arg.AudioUrl)
+	return err
+}

@@ -243,3 +243,16 @@ func (b *Backend) Synthesize(ctx context.Context, text string) (io.ReadCloser, e
 func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (*ai.TokenStream, error) {
 	return b.llm.StreamAndLog(ctx, p)
 }
+
+// StoreAudio uploads audio bytes to object storage and returns the URL.
+func (b *Backend) StoreAudio(ctx context.Context, key string, data []byte, contentType string) (string, error) {
+	return b.store.Put(ctx, key, data, contentType)
+}
+
+// SetAudioURL updates the audio_url column for a message.
+func (b *Backend) SetAudioURL(ctx context.Context, id uuid.UUID, url string) error {
+	return db.New(b.pool).SetAudioURL(ctx, db.SetAudioURLParams{
+		ID:       id,
+		AudioUrl: pgtype.Text{String: url, Valid: true},
+	})
+}

@@ -15,12 +15,16 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/interview/observer"
 )
+
+var tracer = otel.Tracer("drill/interview")
 
 // ConductorParams contains everything needed to construct a Conductor.
 // The handler creates these after auth, validation, and WebSocket upgrade.
@@ -297,6 +301,7 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) error {
 // endTurn processes a candidate's turn (text or voice).
 func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 	var candidateContent string
+	messageID := uuid.New()
 
 	if msg.InputMethod == "voice" {
 		// Validate audio.
@@ -312,8 +317,33 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 		}
 		c.send(ctx, msgStateChange(StateTranscribing))
 
+		// Fire upload goroutine — does not block transcription.
+		go func() {
+			uploadCtx, span := tracer.Start(context.WithoutCancel(ctx), "storage.upload_audio")
+			defer span.End()
+
+			key := fmt.Sprintf("%s/%s.%s", c.sessionID, messageID, msg.AudioExt())
+			url, err := c.backend.StoreAudio(uploadCtx, key, msg.Audio, msg.AudioMIME)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, "audio upload failed")
+				slog.Error("conductor: audio upload failed",
+					"error", err,
+					"session_id", c.sessionID,
+					"message_id", messageID)
+				return
+			}
+			if err := c.backend.SetAudioURL(uploadCtx, messageID, url); err != nil {
+				span.RecordError(err)
+				slog.Error("conductor: failed to set audio_url",
+					"error", err,
+					"session_id", c.sessionID,
+					"message_id", messageID)
+			}
+		}()
+
 		// STT.
-		text, err := c.backend.Transcribe(ctx, msg.Audio, "webm")
+		text, err := c.backend.Transcribe(ctx, msg.Audio, msg.AudioExt())
 		if err != nil {
 			slog.Error("conductor: transcription failed", "error", err, "session_id", c.sessionID)
 			return fmt.Errorf("transcription: %w", err)
@@ -341,7 +371,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 	c.send(ctx, msgStateChange(StateProcessingInput))
 
 	// Persist candidate message.
-	candidateMsg, err := c.persistMessage(ctx, "candidate", candidateContent, msg.InputMethod)
+	candidateMsg, err := c.persistMessage(ctx, messageID, "candidate", candidateContent, msg.InputMethod)
 	if err != nil {
 		slog.Error("conductor: persist candidate message", "error", err, "session_id", c.sessionID)
 		return fmt.Errorf("persist candidate message: %w", err)
@@ -474,11 +504,11 @@ func (c *Conductor) endSession(ctx context.Context) error {
 }
 
 // persistMessage inserts a message into the DB and returns it.
-func (c *Conductor) persistMessage(ctx context.Context, role, content, inputMethod string) (db.Message, error) {
+func (c *Conductor) persistMessage(ctx context.Context, id uuid.UUID, role, content, inputMethod string) (db.Message, error) {
 	c.sequence++
 
 	msg, err := c.backend.PersistMessage(ctx, backend.PersistMessageParams{
-		MessageID:   uuid.New(),
+		MessageID:   id,
 		SessionID:   c.sessionID,
 		Seq:         c.sequence,
 		Role:        role,
