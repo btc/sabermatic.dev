@@ -44,8 +44,12 @@ web/dist/
 # Claude Code / Superpowers
 .superpowers/
 .worktrees/
+.claude/worktrees/
+.playwright-mcp/
+
 # Go binary
 /drill
 cov.out
 coverage.out
+coverage-cross.out
 tmp/
