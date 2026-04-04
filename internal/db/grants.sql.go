@@ -120,6 +120,88 @@ func (q *Queries) DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, 
 	return remaining_minutes, err
 }
 
+const fullRefundSessionMinutes = `-- name: FullRefundSessionMinutes :many
+WITH RECURSIVE
+  refund_amount AS (
+    SELECT $4::int AS total
+  ),
+  reserves AS (
+    SELECT grant_id, -amount AS debit,
+           ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
+    FROM ledger_entries
+    WHERE session_id = $3 AND reason = 'session_reserve'
+  ),
+  distributed AS (
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, ra.total) AS credit,
+           ra.total - LEAST(r.debit, ra.total) AS remaining,
+           r.rn
+    FROM reserves r, refund_amount ra
+    WHERE r.rn = 1
+
+    UNION ALL
+
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, d.remaining) AS credit,
+           d.remaining - LEAST(r.debit, d.remaining) AS remaining,
+           r.rn
+    FROM reserves r
+    JOIN distributed d ON r.rn = d.rn + 1
+    WHERE d.remaining > 0
+  ),
+  apply_credits AS (
+    UPDATE grants g
+    SET remaining_minutes = remaining_minutes + d.credit
+    FROM distributed d
+    WHERE g.id = d.grant_id AND d.credit > 0
+      AND g.remaining_minutes + d.credit <= g.initial_minutes
+    RETURNING g.id AS grant_id, d.credit
+  )
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
+SELECT $1, ac.grant_id, ac.credit, $2, $3
+FROM apply_credits ac
+RETURNING grant_id, amount
+`
+
+type FullRefundSessionMinutesParams struct {
+	UserID    uuid.UUID   `json:"user_id"`
+	Reason    string      `json:"reason"`
+	SessionID pgtype.UUID `json:"session_id"`
+	Minutes   int32       `json:"minutes"`
+}
+
+type FullRefundSessionMinutesRow struct {
+	GrantID uuid.UUID `json:"grant_id"`
+	Amount  int32     `json:"amount"`
+}
+
+// Refunds exactly @minutes back to the grants that were originally debited
+// for this session. Used by FailSession (platform error → full refund).
+func (q *Queries) FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error) {
+	rows, err := q.db.Query(ctx, fullRefundSessionMinutes,
+		arg.UserID,
+		arg.Reason,
+		arg.SessionID,
+		arg.Minutes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FullRefundSessionMinutesRow
+	for rows.Next() {
+		var i FullRefundSessionMinutesRow
+		if err := rows.Scan(&i.GrantID, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFreeGrantForMonth = `-- name: GetFreeGrantForMonth :one
 SELECT id FROM grants
 WHERE user_id = $1

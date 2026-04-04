@@ -129,6 +129,50 @@ SELECT @user_id, ac.grant_id, ac.credit, @reason, @session_id
 FROM apply_credits ac
 RETURNING grant_id, amount;
 
+-- name: FullRefundSessionMinutes :many
+-- Refunds exactly @minutes back to the grants that were originally debited
+-- for this session. Used by FailSession (platform error → full refund).
+WITH RECURSIVE
+  refund_amount AS (
+    SELECT @minutes::int AS total
+  ),
+  reserves AS (
+    SELECT grant_id, -amount AS debit,
+           ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
+    FROM ledger_entries
+    WHERE session_id = @session_id AND reason = 'session_reserve'
+  ),
+  distributed AS (
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, ra.total) AS credit,
+           ra.total - LEAST(r.debit, ra.total) AS remaining,
+           r.rn
+    FROM reserves r, refund_amount ra
+    WHERE r.rn = 1
+
+    UNION ALL
+
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, d.remaining) AS credit,
+           d.remaining - LEAST(r.debit, d.remaining) AS remaining,
+           r.rn
+    FROM reserves r
+    JOIN distributed d ON r.rn = d.rn + 1
+    WHERE d.remaining > 0
+  ),
+  apply_credits AS (
+    UPDATE grants g
+    SET remaining_minutes = remaining_minutes + d.credit
+    FROM distributed d
+    WHERE g.id = d.grant_id AND d.credit > 0
+      AND g.remaining_minutes + d.credit <= g.initial_minutes
+    RETURNING g.id AS grant_id, d.credit
+  )
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
+SELECT @user_id, ac.grant_id, ac.credit, @reason, @session_id
+FROM apply_credits ac
+RETURNING grant_id, amount;
+
 -- name: GetUserUsageSummary :one
 SELECT
   COALESCE(SUM(remaining_minutes) FILTER (WHERE expires_at IS NULL OR expires_at > NOW()), 0)::int AS total_balance,

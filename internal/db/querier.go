@@ -26,6 +26,9 @@ type Querier interface {
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
+	// Refunds exactly @minutes back to the grants that were originally debited
+	// for this session. Used by FailSession (platform error → full refund).
+	FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
 	GetEducatorAnalysisBySession(ctx context.Context, sessionID uuid.UUID) (EducatorAnalysis, error)
