@@ -85,9 +85,9 @@ func TestCreateSession_WithSufficientBalance(t *testing.T) {
 	assert.Equal(t, int32(30), session.ConfigDurationMinutes)
 
 	// Balance should be 60 - 30 = 30.
-	balance, err := db.New(b.pool).GetUserBalance(ctx, userID)
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
-	assert.Equal(t, int32(30), balance)
+	assert.Equal(t, int32(30), bs.TotalBalance)
 }
 
 func TestCreateSession_EnforcesDurationLimit(t *testing.T) {
@@ -165,9 +165,9 @@ func TestCompleteSession_RefundsUnusedMinutes(t *testing.T) {
 	require.NoError(t, err)
 
 	// Balance after reservation: 60 - 30 = 30.
-	balance, err := db.New(b.pool).GetUserBalance(ctx, userID)
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
-	assert.Equal(t, int32(30), balance)
+	assert.Equal(t, int32(30), bs.TotalBalance)
 
 	// Complete immediately (wall-clock ~0 seconds -> actualMinutes = 1).
 	// Refund should be 30 - 1 = 29.
@@ -175,7 +175,7 @@ func TestCompleteSession_RefundsUnusedMinutes(t *testing.T) {
 	require.NoError(t, err)
 
 	// Final balance: 30 + 29 = 59 (or 60 - 1 = 59).
-	balance, err = db.New(b.pool).GetUserBalance(ctx, userID)
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
-	assert.Equal(t, int32(59), balance)
+	assert.Equal(t, int32(59), bs.TotalBalance)
 }

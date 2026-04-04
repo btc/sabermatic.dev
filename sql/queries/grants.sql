@@ -1,10 +1,3 @@
--- name: GetUserBalance :one
-SELECT COALESCE(SUM(remaining_minutes), 0)::int AS balance
-FROM grants
-WHERE user_id = $1
-  AND remaining_minutes > 0
-  AND (expires_at IS NULL OR expires_at > NOW());
-
 -- name: SelectGrantsForReservation :many
 SELECT id, remaining_minutes
 FROM grants

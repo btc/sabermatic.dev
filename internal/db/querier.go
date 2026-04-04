@@ -50,7 +50,6 @@ type Querier interface {
 	GetReviewedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]InterviewSession, error)
 	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error)
-	GetUserBalance(ctx context.Context, userID uuid.UUID) (int32, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
