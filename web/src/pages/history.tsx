@@ -34,14 +34,14 @@ const REVIEWED_STATUSES: SessionStatus[] = ["reviewed", "evaluation_failed"];
 function applyFilter(sessions: Session[], tab: FilterTab): Session[] {
   switch (tab) {
     case "all":
-      return sessions.filter((s) => !s.archived_at_at);
+      return sessions.filter((s) => !s.archived_at);
     case "in_progress":
       return sessions.filter(
-        (s) => !s.archived_at_at && IN_PROGRESS_STATUSES.includes(s.status),
+        (s) => !s.archived_at && IN_PROGRESS_STATUSES.includes(s.status),
       );
     case "reviewed":
       return sessions.filter(
-        (s) => !s.archived_at_at && REVIEWED_STATUSES.includes(s.status),
+        (s) => !s.archived_at && REVIEWED_STATUSES.includes(s.status),
       );
     case "archived":
       return sessions.filter((s) => s.archived_at);
@@ -407,7 +407,7 @@ export default function History() {
 
   // Reviewed sessions for trend chart (all, not tab-filtered)
   const reviewedSessions = useMemo(
-    () => allSessions.filter((s) => s.status === "reviewed" && !s.archived_at_at),
+    () => allSessions.filter((s) => s.status === "reviewed" && !s.archived_at),
     [allSessions],
   );
 
