@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+<<<<<<< HEAD
 import { useParams, Navigate } from "react-router-dom";
 import { useQuery } from "@connectrpc/connect-query";
 import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
@@ -6,6 +7,11 @@ import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connec
 import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
 import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
 import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
+=======
+import { useTranscript, useEvaluation } from "@/api/queries";
+import { useSampleSession, useSampleEvaluation } from "@/api/sample-queries";
+import { useSessionDetail } from "./layout";
+>>>>>>> 5e73811 (feat: session detail dataSource context for public/sample mode)
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -232,16 +238,27 @@ function NoAnnotationsView() {
 // ---------------------------------------------------------------------------
 
 export default function TranscriptPage() {
-  const { id: sessionId } = useParams<{ id: string }>();
-  if (!sessionId) return <Navigate to="/" replace />;
-  return <TranscriptInner sessionId={sessionId} />;
+  return <TranscriptInner />;
 }
 
+<<<<<<< HEAD
 function TranscriptInner({ sessionId }: { sessionId: string }) {
   const { data: transcriptResp } = useQuery(getTranscript, { sessionId });
   const messages = transcriptResp?.messages;
   const { data: evalResp } = useQuery(getEvaluation, { sessionId });
   const evaluation = evalResp?.evaluation;
+=======
+function TranscriptInner() {
+  const { dataSource, sessionId } = useSessionDetail();
+
+  const authTranscript = useTranscript(sessionId, dataSource === "api");
+  const authEval = useEvaluation(sessionId, dataSource === "api");
+  const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+  const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
+
+  const messages = dataSource === "api" ? authTranscript.data : sampleSession.data?.messages;
+  const evaluation = dataSource === "api" ? authEval.data : sampleEval.data;
+>>>>>>> 5e73811 (feat: session detail dataSource context for public/sample mode)
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
