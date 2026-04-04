@@ -131,7 +131,7 @@ LIMIT $2;
 
 -- name: RefundSessionMinutes :many
 -- Refunds unused minutes for a completed session based on wall-clock duration.
--- Derives user_id from the session — caller only needs session_id and reason.
+-- Derives user_id from the session — caller only needs session_id.
 WITH RECURSIVE
   sess AS (
     SELECT user_id, reserved_minutes, started_at, ended_at
@@ -178,7 +178,7 @@ WITH RECURSIVE
     RETURNING g.id AS grant_id, d.credit
   )
 INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
-SELECT (SELECT user_id FROM refund_calc), ac.grant_id, ac.credit, @reason, @session_id
+SELECT (SELECT user_id FROM refund_calc), ac.grant_id, ac.credit, 'session_refund', @session_id
 FROM apply_credits ac
 RETURNING grant_id, amount;
 
