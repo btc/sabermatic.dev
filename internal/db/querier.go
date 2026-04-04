@@ -21,7 +21,6 @@ type Querier interface {
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (InterviewSession, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	CreditGrant(ctx context.Context, arg CreditGrantParams) (int32, error)
 	DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, error)
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
@@ -51,14 +50,12 @@ type Querier interface {
 	GetReviewedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]InterviewSession, error)
 	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error)
-	GetSessionReservationEntries(ctx context.Context, sessionID pgtype.UUID) ([]GetSessionReservationEntriesRow, error)
 	GetUserBalance(ctx context.Context, userID uuid.UUID) (int32, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByStripeCustomerID(ctx context.Context, stripeCustomerID pgtype.Text) (User, error)
-	GetUserPaidBalance(ctx context.Context, userID uuid.UUID) (int32, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
 	InsertAnnotation(ctx context.Context, arg InsertAnnotationParams) error

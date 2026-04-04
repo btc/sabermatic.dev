@@ -80,26 +80,6 @@ func (q *Queries) CreateGrantFromStripe(ctx context.Context, arg CreateGrantFrom
 	return i, err
 }
 
-const creditGrant = `-- name: CreditGrant :one
-UPDATE grants
-SET remaining_minutes = remaining_minutes + $2
-WHERE id = $1
-  AND remaining_minutes + $2 <= initial_minutes
-RETURNING remaining_minutes
-`
-
-type CreditGrantParams struct {
-	ID               uuid.UUID `json:"id"`
-	RemainingMinutes int32     `json:"remaining_minutes"`
-}
-
-func (q *Queries) CreditGrant(ctx context.Context, arg CreditGrantParams) (int32, error) {
-	row := q.db.QueryRow(ctx, creditGrant, arg.ID, arg.RemainingMinutes)
-	var remaining_minutes int32
-	err := row.Scan(&remaining_minutes)
-	return remaining_minutes, err
-}
-
 const debitGrant = `-- name: DebitGrant :one
 UPDATE grants
 SET remaining_minutes = remaining_minutes - $2
@@ -303,38 +283,6 @@ func (q *Queries) GetRecentLedgerEntries(ctx context.Context, arg GetRecentLedge
 	return items, nil
 }
 
-const getSessionReservationEntries = `-- name: GetSessionReservationEntries :many
-SELECT grant_id, amount
-FROM ledger_entries
-WHERE session_id = $1 AND reason = 'session_reserve'
-ORDER BY created_at DESC
-`
-
-type GetSessionReservationEntriesRow struct {
-	GrantID uuid.UUID `json:"grant_id"`
-	Amount  int32     `json:"amount"`
-}
-
-func (q *Queries) GetSessionReservationEntries(ctx context.Context, sessionID pgtype.UUID) ([]GetSessionReservationEntriesRow, error) {
-	rows, err := q.db.Query(ctx, getSessionReservationEntries, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetSessionReservationEntriesRow
-	for rows.Next() {
-		var i GetSessionReservationEntriesRow
-		if err := rows.Scan(&i.GrantID, &i.Amount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getUserBalance = `-- name: GetUserBalance :one
 SELECT COALESCE(SUM(remaining_minutes), 0)::int AS balance
 FROM grants
@@ -345,22 +293,6 @@ WHERE user_id = $1
 
 func (q *Queries) GetUserBalance(ctx context.Context, userID uuid.UUID) (int32, error) {
 	row := q.db.QueryRow(ctx, getUserBalance, userID)
-	var balance int32
-	err := row.Scan(&balance)
-	return balance, err
-}
-
-const getUserPaidBalance = `-- name: GetUserPaidBalance :one
-SELECT COALESCE(SUM(remaining_minutes), 0)::int AS balance
-FROM grants
-WHERE user_id = $1
-  AND remaining_minutes > 0
-  AND source != 'free_grant'
-  AND (expires_at IS NULL OR expires_at > NOW())
-`
-
-func (q *Queries) GetUserPaidBalance(ctx context.Context, userID uuid.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, getUserPaidBalance, userID)
 	var balance int32
 	err := row.Scan(&balance)
 	return balance, err
