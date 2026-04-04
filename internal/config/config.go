@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sethvargo/go-envconfig"
+	stripe "github.com/stripe/stripe-go/v82"
 )
 
 type Config struct {
@@ -129,6 +130,14 @@ type Stripe struct {
 // Configured reports whether Stripe credentials are present.
 func (s *Stripe) Configured() bool { return s.SecretKey != "" }
 
+// Init sets the Stripe SDK's package-level API key. Call once at startup.
+// No-op if SecretKey is empty.
+func (s *Stripe) Init() {
+	if s.SecretKey != "" {
+		stripe.Key = s.SecretKey
+	}
+}
+
 // PriceIDForPlan returns the Stripe price ID for the named plan, or "" if
 // not configured. Only "pro" has a price; "free" returns "".
 func (s *Stripe) PriceIDForPlan(plan string) string {
@@ -169,6 +178,7 @@ func Load() (*Config, error) {
 	if err := validate(&cfg); err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	cfg.Stripe.Init()
 	return &cfg, nil
 }
 
