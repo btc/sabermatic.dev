@@ -28,7 +28,13 @@ func PostCheckout(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		url, err := b.CreateCheckoutSession(r.Context(), user.ID, user.Email, req.Type, req.Plan, req.Minutes)
+		url, err := b.CreateCheckoutSession(r.Context(), backend.CheckoutParams{
+			UserID:      user.ID,
+			Email:       user.Email,
+			Type:        req.Type,
+			Plan:        req.Plan,
+			PackMinutes: req.Minutes,
+		})
 		if err != nil {
 			slog.Error("create checkout session", "error", err, "user_id", user.ID)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create checkout session"})
