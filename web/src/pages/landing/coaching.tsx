@@ -31,7 +31,7 @@ function Sparkline({ data, animate }: { data: { date: string; overall_score: num
       <path
         d={pathData}
         fill="none"
-        stroke="hsl(var(--primary))"
+        stroke="var(--primary)"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -42,7 +42,7 @@ function Sparkline({ data, animate }: { data: { date: string; overall_score: num
           cx={p.x}
           cy={p.y}
           r="3"
-          fill="hsl(var(--primary))"
+          fill="var(--primary)"
           className="transition-opacity duration-300 motion-reduce:transition-none"
           style={{ transitionDelay: `${i * 100}ms`, opacity: animate ? 1 : 0 }}
         />

@@ -69,7 +69,7 @@ export function Annotations() {
               </div>
               {msgAnnotations.map((ann, annIdx) => (
                 <div
-                  key={`${ann.message_seq}-${ann.type}`}
+                  key={`${ann.message_seq}-${ann.type}-${annIdx}`}
                   className={cn(
                     "ml-8 border-l-2 pl-3 py-1 text-xs transition-all duration-500 motion-reduce:transition-none",
                     ANNOTATION_COLORS[ann.type],

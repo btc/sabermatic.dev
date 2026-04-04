@@ -143,7 +143,7 @@ function SessionLayoutInner({ id }: { id: string }) {
     <div className="space-y-0">
       {/* Tab bar */}
       <div className="border-b border-border -mx-4 px-4">
-        <nav className="flex items-end max-w-5xl mx-auto -mb-px">
+        <nav aria-label="Session tabs" className="flex items-end max-w-5xl mx-auto -mb-px">
           <TabLink to={`/sessions/${id}/overview`} disabled={!overviewEnabled}>
             Overview
           </TabLink>

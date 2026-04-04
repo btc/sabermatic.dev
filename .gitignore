@@ -65,3 +65,5 @@ terraform/.terraform/
 terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/tfplan
+
+extract-sample
