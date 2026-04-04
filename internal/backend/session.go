@@ -32,9 +32,9 @@ type CreateSessionParams struct {
 // CreateSession creates a new interview session after validating duration,
 // enforcing plan limits (max duration, concurrent sessions, minute balance),
 // and reserving minutes from the user's grants.
-func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.CreateSessionRow, error) {
+func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.InterviewSession, error) {
 	if p.DurationMinutes < 1 || p.DurationMinutes > 180 {
-		return db.CreateSessionRow{}, ErrInvalidDuration
+		return db.InterviewSession{}, ErrInvalidDuration
 	}
 
 	// Look up plan; fall back to "free" if unset or unknown.
@@ -49,18 +49,18 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 
 	// Enforce plan duration limit.
 	if p.DurationMinutes > plan.MaxDurationMinutes {
-		return db.CreateSessionRow{}, ErrDurationExceedsPlan
+		return db.InterviewSession{}, ErrDurationExceedsPlan
 	}
 
 	// Ensure the current-month free grant exists (idempotent, outside tx).
 	if err := b.EnsureFreeGrant(ctx, p.UserID, planName); err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("ensure free grant: %w", err)
+		return db.InterviewSession{}, fmt.Errorf("ensure free grant: %w", err)
 	}
 
 	// Begin transaction for all remaining checks and mutations.
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("begin create-session tx: %w", err)
+		return db.InterviewSession{}, fmt.Errorf("begin create-session tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -69,47 +69,40 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 	// Check concurrent session limit.
 	activeCount, err := q.CountActiveSessionsByUser(ctx, p.UserID)
 	if err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("count active sessions: %w", err)
+		return db.InterviewSession{}, fmt.Errorf("count active sessions: %w", err)
 	}
 	if int(activeCount) >= plan.ConcurrentSessions {
-		return db.CreateSessionRow{}, ErrConcurrentSessionLimit
+		return db.InterviewSession{}, ErrConcurrentSessionLimit
 	}
 
 	// Verify the question exists (within tx for consistency).
 	if _, err := q.GetQuestion(ctx, p.QuestionID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.CreateSessionRow{}, ErrQuestionNotFound
+			return db.InterviewSession{}, ErrQuestionNotFound
 		}
-		return db.CreateSessionRow{}, fmt.Errorf("get question: %w", err)
+		return db.InterviewSession{}, fmt.Errorf("get question: %w", err)
 	}
 
-	// Create session first (need ID for ledger entries).
+	// Create session with reserved_minutes set at insert time.
 	duration := int32(p.DurationMinutes)
 	session, err := q.CreateSession(ctx, db.CreateSessionParams{
 		UserID:                p.UserID,
 		QuestionID:            p.QuestionID,
 		ConfigDurationMinutes: duration,
 		ConfigTtsEnabled:      p.TTSEnabled,
+		ReservedMinutes:       pgtype.Int4{Int32: duration, Valid: true},
 	})
 	if err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("create session: %w", err)
+		return db.InterviewSession{}, fmt.Errorf("create session: %w", err)
 	}
 
 	// Reserve minutes via shared FIFO walk (locks grants, checks balance, debits).
 	if err := b.reserveMinutesTx(ctx, tx, p.UserID, session.ID, duration); err != nil {
-		return db.CreateSessionRow{}, err
-	}
-
-	// Set reserved_minutes on the session.
-	if err := q.UpdateSessionReservedMinutes(ctx, db.UpdateSessionReservedMinutesParams{
-		ID:              session.ID,
-		ReservedMinutes: pgtype.Int4{Int32: duration, Valid: true},
-	}); err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("set reserved minutes: %w", err)
+		return db.InterviewSession{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return db.CreateSessionRow{}, fmt.Errorf("commit create-session tx: %w", err)
+		return db.InterviewSession{}, fmt.Errorf("commit create-session tx: %w", err)
 	}
 
 	return session, nil

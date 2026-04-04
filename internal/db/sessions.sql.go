@@ -27,43 +27,28 @@ func (q *Queries) CountActiveSessionsByUser(ctx context.Context, userID uuid.UUI
 }
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO interview_sessions (user_id, question_id, config_duration_minutes, config_tts_enabled)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled,
-          config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at
+INSERT INTO interview_sessions (user_id, question_id, config_duration_minutes, config_tts_enabled, reserved_minutes)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at, reserved_minutes
 `
 
 type CreateSessionParams struct {
-	UserID                uuid.UUID `json:"user_id"`
-	QuestionID            uuid.UUID `json:"question_id"`
-	ConfigDurationMinutes int32     `json:"config_duration_minutes"`
-	ConfigTtsEnabled      bool      `json:"config_tts_enabled"`
+	UserID                uuid.UUID   `json:"user_id"`
+	QuestionID            uuid.UUID   `json:"question_id"`
+	ConfigDurationMinutes int32       `json:"config_duration_minutes"`
+	ConfigTtsEnabled      bool        `json:"config_tts_enabled"`
+	ReservedMinutes       pgtype.Int4 `json:"reserved_minutes"`
 }
 
-type CreateSessionRow struct {
-	ID                    uuid.UUID          `json:"id"`
-	UserID                uuid.UUID          `json:"user_id"`
-	QuestionID            uuid.UUID          `json:"question_id"`
-	Status                string             `json:"status"`
-	ConfigDurationMinutes int32              `json:"config_duration_minutes"`
-	ConfigTtsEnabled      bool               `json:"config_tts_enabled"`
-	ConfigCoachBriefing   bool               `json:"config_coach_briefing"`
-	StartedAt             time.Time          `json:"started_at"`
-	EndedAt               pgtype.Timestamptz `json:"ended_at"`
-	TurnCount             int32              `json:"turn_count"`
-	Archived              bool               `json:"archived"`
-	CreatedAt             time.Time          `json:"created_at"`
-	UpdatedAt             time.Time          `json:"updated_at"`
-}
-
-func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error) {
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (InterviewSession, error) {
 	row := q.db.QueryRow(ctx, createSession,
 		arg.UserID,
 		arg.QuestionID,
 		arg.ConfigDurationMinutes,
 		arg.ConfigTtsEnabled,
+		arg.ReservedMinutes,
 	)
-	var i CreateSessionRow
+	var i InterviewSession
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -78,6 +63,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (C
 		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ReservedMinutes,
 	)
 	return i, err
 }
@@ -354,20 +340,6 @@ WHERE id = $1
 
 func (q *Queries) MarkSessionCompleted(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markSessionCompleted, id)
-	return err
-}
-
-const updateSessionReservedMinutes = `-- name: UpdateSessionReservedMinutes :exec
-UPDATE interview_sessions SET reserved_minutes = $2 WHERE id = $1
-`
-
-type UpdateSessionReservedMinutesParams struct {
-	ID              uuid.UUID   `json:"id"`
-	ReservedMinutes pgtype.Int4 `json:"reserved_minutes"`
-}
-
-func (q *Queries) UpdateSessionReservedMinutes(ctx context.Context, arg UpdateSessionReservedMinutesParams) error {
-	_, err := q.db.Exec(ctx, updateSessionReservedMinutes, arg.ID, arg.ReservedMinutes)
 	return err
 }
 

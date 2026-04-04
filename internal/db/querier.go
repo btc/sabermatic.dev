@@ -19,7 +19,7 @@ type Querier interface {
 	CreateGrantFromStripe(ctx context.Context, arg CreateGrantFromStripeParams) (Grant, error)
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) (OauthAccount, error)
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
-	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (InterviewSession, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreditGrant(ctx context.Context, arg CreditGrantParams) (int32, error)
 	DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, error)
@@ -78,7 +78,6 @@ type Querier interface {
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
 	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
-	UpdateSessionReservedMinutes(ctx context.Context, arg UpdateSessionReservedMinutesParams) error
 	UpdateSessionStatus(ctx context.Context, arg UpdateSessionStatusParams) error
 	// NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.
 	// Used for status transitions after session completion (evaluating → reviewed,

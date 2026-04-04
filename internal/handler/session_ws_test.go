@@ -120,7 +120,7 @@ func createTestQuestion(t *testing.T, pool *pgxpool.Pool) db.Question {
 }
 
 // createTestSession inserts an active interview session and returns it.
-func createTestSession(t *testing.T, pool *pgxpool.Pool, userID, questionID uuid.UUID) db.CreateSessionRow {
+func createTestSession(t *testing.T, pool *pgxpool.Pool, userID, questionID uuid.UUID) db.InterviewSession {
 	t.Helper()
 	ctx := context.Background()
 	s, err := db.New(pool).CreateSession(ctx, db.CreateSessionParams{
