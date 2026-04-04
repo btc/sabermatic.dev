@@ -73,14 +73,8 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 
 // truncateRunes returns s truncated to at most n runes.
 func truncateRunes(s string, n int) string {
-	count := 0
-	for i := range s {
-		if count == n {
-			return s[:i]
-		}
-		count++
-	}
-	return s
+	r := []rune(s)
+	return string(r[:min(n, len(r))])
 }
 
 // RequestEducatorAnalysis enqueues educator content generation for a session.
