@@ -35,6 +35,8 @@ export function useReplayEngine(options: ReplayOptions | null) {
   optionsRef.current = options;
 
   const messageOffsets = useRef<number[]>([]);
+  // seq → index map for O(1) lookups in tick/seek (avoids O(A*M) per frame)
+  const seqToIndex = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
     if (!options) return;
@@ -47,32 +49,39 @@ export function useReplayEngine(options: ReplayOptions | null) {
       (m) => (new Date(m.created_at).getTime() - start) / 1000,
     );
 
+    const map = new Map<number, number>();
+    options.messages.forEach((m, i) => map.set(m.seq, i));
+    seqToIndex.current = map;
+
     setState((s) => ({ ...s, duration: (end - start) / 1000 }));
   }, [options]);
 
+  function computeActiveAnnotations(visible: number): number[] {
+    const opts = optionsRef.current;
+    if (!opts) return [];
+    const map = seqToIndex.current;
+    return opts.annotationSeqs.filter((seq) => {
+      const idx = map.get(seq);
+      return idx !== undefined && idx < visible;
+    });
+  }
+
   const tick = useCallback(() => {
-    if (!playingRef.current) return; // Stop the loop when not playing
+    if (!playingRef.current) return;
 
     const now = performance.now();
     const dt = (now - lastTickRef.current) / 1000;
     lastTickRef.current = now;
 
     setState((prev) => {
-      if (!prev.isPlaying) return prev;
-
       const newTime = prev.currentTime + dt * prev.speed;
       if (newTime >= prev.duration) {
-        playingRef.current = false; // Stop the rAF loop
+        playingRef.current = false;
         return { ...prev, isPlaying: false, currentTime: prev.duration };
       }
 
       const visible = messageOffsets.current.filter((t) => t <= newTime).length;
-
-      const opts = optionsRef.current;
-      const activeAnns = opts?.annotationSeqs.filter((seq) => {
-        const idx = opts.messages.findIndex((m) => m.seq === seq);
-        return idx >= 0 && idx < visible;
-      }) ?? [];
+      const activeAnns = computeActiveAnnotations(visible);
 
       return {
         ...prev,
@@ -82,7 +91,6 @@ export function useReplayEngine(options: ReplayOptions | null) {
       };
     });
 
-    // Only continue the loop if still playing
     if (playingRef.current) {
       animRef.current = requestAnimationFrame(tick);
     }
@@ -107,11 +115,7 @@ export function useReplayEngine(options: ReplayOptions | null) {
     setState((prev) => {
       const clamped = Math.max(0, Math.min(time, prev.duration));
       const visible = messageOffsets.current.filter((t) => t <= clamped).length;
-      const opts = optionsRef.current;
-      const activeAnns = opts?.annotationSeqs.filter((seq) => {
-        const idx = opts.messages.findIndex((m) => m.seq === seq);
-        return idx >= 0 && idx < visible;
-      }) ?? [];
+      const activeAnns = computeActiveAnnotations(visible);
 
       return {
         ...prev,
