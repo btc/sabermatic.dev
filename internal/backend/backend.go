@@ -41,6 +41,24 @@ type Backend struct {
 // New creates a pool, runs River migrations, and starts the River client.
 // App migrations must be run before calling this (schema must exist).
 func New(cfg *config.Config) (*Backend, error) {
+	// Object storage (no pool dependency -- initialize first).
+	var store storage.ObjectStore
+	var err error
+	switch cfg.Storage.Backend {
+	case "gcs":
+		store, err = storage.NewGCS(context.Background(), cfg.Storage.Bucket)
+		if err != nil {
+			return nil, fmt.Errorf("gcs storage: %w", err)
+		}
+		slog.Info("storage: gcs", "bucket", cfg.Storage.Bucket)
+	case "local":
+		store, err = storage.NewLocal(cfg.Storage.LocalDir)
+		if err != nil {
+			return nil, fmt.Errorf("local storage: %w", err)
+		}
+		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
+	}
+
 	// Pool uses background context -- must outlive any request or signal context.
 	pool, err := cfg.Database.NewPool(context.Background(), otelpgx.NewTracer())
 	if err != nil {
@@ -67,25 +85,6 @@ func New(cfg *config.Config) (*Backend, error) {
 	llmClient := ai.NewClient(cfg.LLM.APIKey, pool)
 	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.WhisperModel)
 	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
-
-	// Object storage
-	var store storage.ObjectStore
-	switch cfg.Storage.Backend {
-	case "gcs":
-		store, err = storage.NewGCS(context.Background(), cfg.Storage.Bucket)
-		if err != nil {
-			pool.Close()
-			return nil, fmt.Errorf("gcs storage: %w", err)
-		}
-		slog.Info("storage: gcs", "bucket", cfg.Storage.Bucket)
-	case "local":
-		store, err = storage.NewLocal(cfg.Storage.LocalDir)
-		if err != nil {
-			pool.Close()
-			return nil, fmt.Errorf("local storage: %w", err)
-		}
-		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
-	}
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
