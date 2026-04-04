@@ -30,7 +30,7 @@ export function DeepDivePreview() {
           </h3>
           <div className="prose prose-sm prose-stone dark:prose-invert max-w-none">
             <p className="text-sm text-foreground leading-relaxed">
-              {modelPreview}...
+              {modelPreview}{educator.model_answer.length > 500 ? "..." : ""}
             </p>
           </div>
         </div>
@@ -47,7 +47,7 @@ export function DeepDivePreview() {
             </h3>
             <div className="prose prose-sm prose-stone dark:prose-invert max-w-none">
               <p className="text-sm text-foreground leading-relaxed">
-                {gapPreview}...
+                {gapPreview}{(educator.gap_deep_dives?.length ?? 0) > 400 ? "..." : ""}
               </p>
             </div>
           </div>
