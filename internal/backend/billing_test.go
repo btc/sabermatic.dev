@@ -344,10 +344,10 @@ func TestEnsureFreeGrant_Idempotent(t *testing.T) {
 	q := db.New(b.pool)
 
 	// Call twice — second should be a no-op.
-	err := b.EnsureFreeGrant(ctx, userID, "free")
+	err := b.EnsureFreeGrant(ctx, userID)
 	require.NoError(t, err)
 
-	err = b.EnsureFreeGrant(ctx, userID, "free")
+	err = b.EnsureFreeGrant(ctx, userID)
 	require.NoError(t, err)
 
 	// Only one grant should exist.

@@ -36,7 +36,7 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 	}
 
 	// Ensure the current-month free grant exists (idempotent, outside tx).
-	if err := b.EnsureFreeGrant(ctx, p.UserID, p.Plan); err != nil {
+	if err := b.EnsureFreeGrant(ctx, p.UserID); err != nil {
 		return db.InterviewSession{}, fmt.Errorf("ensure free grant: %w", err)
 	}
 
