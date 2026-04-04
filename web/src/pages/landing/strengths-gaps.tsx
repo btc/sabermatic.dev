@@ -11,7 +11,7 @@ function FadeInCard({
   children: ReactNode;
   delay: number;
   animate: boolean;
-  accent: string;
+  accent: "strength" | "gap" | "primary";
 }) {
   return (
     <div
@@ -48,6 +48,7 @@ export function StrengthsGaps() {
       <div className="w-full max-w-2xl space-y-8">
         {/* Strengths */}
         <div className="space-y-3">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Strengths</h3>
           {strengths.map((s, i) => (
             <FadeInCard key={i} delay={i * 200} animate={isVisible} accent="strength">
               <p className="text-sm text-foreground">{s}</p>
@@ -56,6 +57,7 @@ export function StrengthsGaps() {
         </div>
         {/* Gaps */}
         <div className="space-y-3">
+          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Areas to improve</h3>
           {gaps.map((g, i) => (
             <FadeInCard key={i} delay={(strengths.length + i) * 200} animate={isVisible} accent="gap">
               <p className="text-sm text-foreground">{g}</p>
