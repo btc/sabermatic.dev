@@ -7,7 +7,6 @@ import (
 
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -48,7 +47,7 @@ type JobTracer struct {
 }
 
 func (*JobTracer) Work(ctx context.Context, job *rivertype.JobRow, doInner func(ctx context.Context) error) error {
-	tracer := otel.Tracer("drill/river")
+	tracer := Tracer("river")
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindConsumer),
 		trace.WithAttributes(

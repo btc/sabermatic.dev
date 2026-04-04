@@ -12,9 +12,8 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/drilotel"
 )
-
-const serviceName = "drill"
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook CSRF exemption. Returns a ready-to-use http.Handler.
@@ -32,7 +31,7 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 		csrf.SameSite(csrf.SameSiteLaxMode),
 	)
 
-	otelHandler := otelhttp.NewMiddleware(serviceName)(mux)
+	otelHandler := otelhttp.NewMiddleware(drilotel.AppName)(mux)
 	csrfProtected := csrfProtect(otelHandler)
 
 	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.

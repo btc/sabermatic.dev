@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -25,7 +26,10 @@ type CoachResponse struct {
 
 // GetLatestCoachAnalysis returns the most recent coach analysis for a user.
 // Returns nil with no error if no analysis exists.
-func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (*CoachResponse, error) {
+func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (_ *CoachResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetLatestCoachAnalysis")
+	defer func() { drilotel.End(span, err) }()
+
 	if ent, err := b.Check(ctx, userID); err != nil {
 		return nil, err
 	} else if !ent.CanAccessCoach() {
@@ -64,7 +68,10 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 
 // RequestCoachAnalysis enqueues a coach analysis job.
 // force skips the "no new sessions" check — used by admin or retry flows.
-func (b *Backend) RequestCoachAnalysis(ctx context.Context, userID uuid.UUID, force bool) error {
+func (b *Backend) RequestCoachAnalysis(ctx context.Context, userID uuid.UUID, force bool) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.RequestCoachAnalysis")
+	defer func() { drilotel.End(span, err) }()
+
 	ent, err := b.Check(ctx, userID)
 	if err != nil {
 		return err

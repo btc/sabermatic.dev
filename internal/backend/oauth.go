@@ -14,6 +14,7 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // OAuthLoginParams holds the parameters for OAuthLogin.
@@ -41,7 +42,10 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 	return b.oauthLoginWithRetry(ctx, p, false)
 }
 
-func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, isRetry bool) (*OAuthLoginResult, error) {
+func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, isRetry bool) (_ *OAuthLoginResult, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.oauthLoginWithRetry")
+	defer func() { drilotel.End(span, err) }()
+
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
 	tx, err := b.pool.Begin(ctx)
@@ -182,7 +186,10 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 
 // createSessionInTx generates a session token, creates an auth session within
 // the given transaction, and returns the OAuthLoginResult.
-func (b *Backend) createSessionInTx(ctx context.Context, tx pgx.Tx, queries *db.Queries, user db.User, p OAuthLoginParams) (*OAuthLoginResult, error) {
+func (b *Backend) createSessionInTx(ctx context.Context, tx pgx.Tx, queries *db.Queries, user db.User, p OAuthLoginParams) (_ *OAuthLoginResult, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.createSessionInTx")
+	defer func() { drilotel.End(span, err) }()
+
 	rawToken, tokenHash, err := auth.GenerateSessionToken()
 	if err != nil {
 		return nil, fmt.Errorf("oauth login: generate session token: %w", err)

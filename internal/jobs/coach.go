@@ -16,6 +16,7 @@ import (
 	"github.com/btc/drill/internal/coach"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // RunCoachAnalysisArgs are the arguments for the coach analysis job.
@@ -48,7 +49,10 @@ func (w *RunCoachAnalysisWorker) Timeout(job *river.Job[RunCoachAnalysisArgs]) t
 	return 15 * time.Minute
 }
 
-func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoachAnalysisArgs]) error {
+func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoachAnalysisArgs]) (err error) {
+	ctx, span := tracer.Start(ctx, "RunCoachAnalysisWorker.Work")
+	defer func() { drilotel.End(span, err) }()
+
 	userID := job.Args.UserID
 	q := db.New(w.Pool)
 

@@ -15,16 +15,16 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/interview/observer"
 )
 
-var tracer = otel.Tracer("drill/interview")
+var tracer = drilotel.Tracer("interview")
 
 // ConductorParams contains everything needed to construct a Conductor.
 // The handler creates these after auth, validation, and WebSocket upgrade.
@@ -258,7 +258,10 @@ func (c *Conductor) Run(serverCtx context.Context) {
 }
 
 // loadSession loads the session, question, and existing messages from DB.
-func (c *Conductor) loadSession(ctx context.Context) error {
+func (c *Conductor) loadSession(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.loadSession")
+	defer func() { drilotel.End(span, err) }()
+
 	row, err := c.backend.GetSession(ctx, c.sessionID)
 	if err != nil {
 		return err
@@ -301,7 +304,10 @@ func (c *Conductor) loadSession(ctx context.Context) error {
 
 // sendInitialMessage sends the appropriate first message to the client:
 // reconnect_state for reconnections, session_loaded + opening LLM stream for new connections.
-func (c *Conductor) sendInitialMessage(ctx context.Context) error {
+func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.sendInitialMessage")
+	defer func() { drilotel.End(span, err) }()
+
 	if c.isReconnect() {
 		afterSeq := *c.initMsg.LastSeq // isReconnect already verified non-nil
 		c.send(ctx, msgReconnectState(afterSeq, c.messages))
@@ -312,7 +318,10 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) error {
 }
 
 // endTurn processes a candidate's turn (text or voice).
-func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
+func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.endTurn")
+	defer func() { drilotel.End(span, err) }()
+
 	var candidateContent string
 	messageID := uuid.New()
 
@@ -332,24 +341,24 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 
 		// Fire upload goroutine — does not block transcription.
 		go func() {
-			uploadCtx, span := tracer.Start(context.WithoutCancel(ctx), "storage.upload_audio")
-			defer span.End()
+			uploadCtx, uploadSpan := tracer.Start(context.WithoutCancel(ctx), "Conductor.uploadAudio")
+			defer uploadSpan.End()
 
 			key := fmt.Sprintf("%s/%s.%s", c.sessionID, messageID, msg.AudioExt())
-			url, err := c.backend.StoreAudio(uploadCtx, key, msg.Audio, msg.AudioMIME)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, "audio upload failed")
+			url, uploadErr := c.backend.StoreAudio(uploadCtx, key, msg.Audio, msg.AudioMIME)
+			if uploadErr != nil {
+				uploadSpan.RecordError(uploadErr)
+				uploadSpan.SetStatus(codes.Error, "audio upload failed")
 				slog.Error("conductor: audio upload failed",
-					"error", err,
+					"error", uploadErr,
 					"session_id", c.sessionID,
 					"message_id", messageID)
 				return
 			}
-			if err := c.backend.SetAudioURL(uploadCtx, messageID, url); err != nil {
-				span.RecordError(err)
+			if setErr := c.backend.SetAudioURL(uploadCtx, messageID, url); setErr != nil {
+				uploadSpan.RecordError(setErr)
 				slog.Error("conductor: failed to set audio_url",
-					"error", err,
+					"error", setErr,
 					"session_id", c.sessionID,
 					"message_id", messageID)
 			}
@@ -396,7 +405,10 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 }
 
 // streamInterviewerResponse builds a prompt, streams the LLM, and persists the result.
-func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
+func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.streamInterviewerResponse")
+	defer func() { drilotel.End(span, err) }()
+
 	// Transition to InterviewerSpeaking.
 	if err := c.sm.Transition(StateInterviewerSpeaking); err != nil {
 		c.send(ctx, msgError("invalid_state_transition", err.Error()))
@@ -498,7 +510,10 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) error {
 }
 
 // endSession transitions to Ending, persists status + enqueues evaluation atomically, then Ended.
-func (c *Conductor) endSession(ctx context.Context) error {
+func (c *Conductor) endSession(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.endSession")
+	defer func() { drilotel.End(span, err) }()
+
 	if err := c.sm.Transition(StateEnding); err != nil {
 		c.send(ctx, msgError("invalid_state_transition", err.Error()))
 		return nil
@@ -517,7 +532,10 @@ func (c *Conductor) endSession(ctx context.Context) error {
 }
 
 // cancelSession ends the session early without evaluation. Archived + refunded.
-func (c *Conductor) cancelSession(ctx context.Context) error {
+func (c *Conductor) cancelSession(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.cancelSession")
+	defer func() { drilotel.End(span, err) }()
+
 	if err := c.sm.Transition(StateEnding); err != nil {
 		c.send(ctx, msgError("invalid_state_transition", err.Error()))
 		return nil
@@ -536,7 +554,10 @@ func (c *Conductor) cancelSession(ctx context.Context) error {
 }
 
 // persistMessage inserts a message into the DB and returns it.
-func (c *Conductor) persistMessage(ctx context.Context, id uuid.UUID, role, content, inputMethod string) (db.Message, error) {
+func (c *Conductor) persistMessage(ctx context.Context, id uuid.UUID, role, content, inputMethod string) (_ db.Message, err error) {
+	ctx, span := tracer.Start(ctx, "Conductor.persistMessage")
+	defer func() { drilotel.End(span, err) }()
+
 	c.sequence++
 
 	msg, err := c.backend.PersistMessage(ctx, backend.PersistMessageParams{
