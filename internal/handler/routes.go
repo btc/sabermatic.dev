@@ -14,6 +14,7 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/rpc"
+	"github.com/btc/drill/internal/sample"
 )
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
@@ -51,6 +52,9 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
 	}
+
+	// Sample data — public, no auth required
+	sample.RegisterRoutes(mux)
 
 	mux.HandleFunc("GET /api/health", Health(b))
 
