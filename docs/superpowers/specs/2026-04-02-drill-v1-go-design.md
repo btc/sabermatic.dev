@@ -784,6 +784,7 @@ Frontend built incrementally with shadcn/ui alongside each backend sub-project.
 | 8. Educator + Coach | Both AI roles, question generation | Learn page, Home coach card |
 | 9. Billing | Stripe, entitlements, usage tracking | Plan selector, upgrade prompts |
 | 10. Polish + UI | History, Home stats, score trends, bulk archive | Remaining UX |
+| 10b. Row-Level Security | Postgres RLS policies on all user-scoped tables, service role for background jobs | None |
 | 11. Admin | Admin dashboard, alerts, River UI | Admin pages |
 
 Each phase gets its own implementation plan. Phases 1–3a are complete on main.
