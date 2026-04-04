@@ -15,9 +15,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/backend"
@@ -323,9 +321,8 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 	// Extract client trace context so the server span becomes a child of the
 	// browser's turn.submit span, producing one end-to-end flame graph per turn.
-	if msg.TraceContext != nil && msg.TraceContext.Traceparent != "" {
-		prop := otel.GetTextMapPropagator()
-		ctx = prop.Extract(ctx, propagation.MapCarrier{"traceparent": msg.TraceContext.Traceparent})
+	if msg.TraceContext != nil {
+		ctx = drilotel.ExtractTraceparent(ctx, msg.TraceContext.Traceparent)
 	}
 	ctx, span := tracer.Start(ctx, "Conductor.endTurn")
 	defer func() { drilotel.End(span, err) }()

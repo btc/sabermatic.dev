@@ -49,6 +49,15 @@ func End(span trace.Span, err error) {
 	span.End()
 }
 
+// ExtractTraceparent returns a context carrying the remote span described by
+// the W3C traceparent string. If traceparent is empty, ctx is returned as-is.
+func ExtractTraceparent(ctx context.Context, traceparent string) context.Context {
+	if traceparent == "" {
+		return ctx
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier{"traceparent": traceparent})
+}
+
 // Providers holds the OTel providers created by Init.
 // When OTel is disabled, both provider fields are nil and Shutdown is a no-op.
 type Providers struct {
