@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/btc/drill/internal/config"
-	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/riverqueue/river"
 )
@@ -46,14 +45,11 @@ func (w *SendEmailWorker) Timeout(job *river.Job[SendEmailArgs]) time.Duration {
 	return w.cfg.SendTimeout
 }
 
-func (w *SendEmailWorker) Work(ctx context.Context, job *river.Job[SendEmailArgs]) (err error) {
-	ctx, span := tracer.Start(ctx, "SendEmailWorker.Work")
-	defer func() { drilotel.End(span, err) }()
-
+func (w *SendEmailWorker) Work(ctx context.Context, job *river.Job[SendEmailArgs]) error {
 	if job.Args.To == "" {
 		return fmt.Errorf("send_email: missing recipient")
 	}
-	err = w.Sender.Send(ctx, email.Message{
+	err := w.Sender.Send(ctx, email.Message{
 		To:      job.Args.To,
 		Subject: job.Args.Subject,
 		Text:    job.Args.Text,

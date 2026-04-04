@@ -17,7 +17,6 @@ import (
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/educator"
 )
 
@@ -51,10 +50,7 @@ func (w *GenerateEducatorContentWorker) Timeout(job *river.Job[GenerateEducatorC
 	return 15 * time.Minute
 }
 
-func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job[GenerateEducatorContentArgs]) (err error) {
-	ctx, span := tracer.Start(ctx, "GenerateEducatorContentWorker.Work")
-	defer func() { drilotel.End(span, err) }()
-
+func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job[GenerateEducatorContentArgs]) error {
 	sessionID := job.Args.SessionID
 	q := db.New(w.Pool)
 

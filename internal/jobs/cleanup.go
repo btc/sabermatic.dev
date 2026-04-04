@@ -11,7 +11,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/drilotel"
 )
 
 // CleanupAbandonedSessionsArgs are the arguments for the CleanupAbandonedSessions job.
@@ -26,10 +25,7 @@ type CleanupAbandonedSessionsWorker struct {
 	Jobs *river.Client[pgx.Tx] // set after river.NewClient returns
 }
 
-func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Job[CleanupAbandonedSessionsArgs]) (err error) {
-	ctx, span := tracer.Start(ctx, "CleanupAbandonedSessionsWorker.Work")
-	defer func() { drilotel.End(span, err) }()
-
+func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Job[CleanupAbandonedSessionsArgs]) error {
 	tx, err := w.Pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin cleanup tx: %w", err)
