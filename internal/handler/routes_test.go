@@ -15,15 +15,24 @@ func TestSPAHandlerOGTags(t *testing.T) {
 		"web/dist/index.html": &fstest.MapFile{Data: []byte(indexHTML)},
 	}
 
-	h := handler.SPAHandler(fsys)
+	h := handler.SPAHandler(fsys, "https://sabermetric.dev")
 
 	tests := []struct {
-		path    string
-		wantTag string
+		path     string
+		wantTags []string // all must be present; empty means no OG tags
 	}{
-		{"/", `og:title" content="Sabermetric"`},
-		{"/sample", `og:title" content="Sabermetric — sample evaluation"`},
-		{"/login", ""},
+		{"/", []string{
+			`og:title" content="Sabermetric"`,
+			`og:description" content="data-driven system design prep"`,
+			`og:url" content="https://sabermetric.dev/"`,
+			`og:image" content="https://sabermetric.dev/og-landing.png"`,
+		}},
+		{"/sample", []string{
+			`og:title" content="Sabermetric — sample evaluation"`,
+			`og:url" content="https://sabermetric.dev/sample"`,
+			`og:image" content="https://sabermetric.dev/og-sample.png"`,
+		}},
+		{"/login", nil},
 	}
 
 	for _, tt := range tests {
@@ -33,11 +42,22 @@ func TestSPAHandlerOGTags(t *testing.T) {
 			h.ServeHTTP(w, req)
 
 			body := w.Body.String()
-			if tt.wantTag != "" && !strings.Contains(body, tt.wantTag) {
-				t.Errorf("expected OG tag %q in body", tt.wantTag)
-			}
-			if tt.wantTag == "" && strings.Contains(body, "og:title") {
-				t.Errorf("unexpected OG tag in body")
+
+			if len(tt.wantTags) > 0 {
+				// Verify OG tags appear before </head>
+				headClose := strings.Index(body, "</head>")
+				for _, tag := range tt.wantTags {
+					pos := strings.Index(body, tag)
+					if pos < 0 {
+						t.Errorf("expected OG tag %q in body", tag)
+					} else if pos > headClose {
+						t.Errorf("OG tag %q appears after </head>", tag)
+					}
+				}
+			} else {
+				if strings.Contains(body, "og:title") {
+					t.Errorf("unexpected OG tag in body")
+				}
 			}
 		})
 	}

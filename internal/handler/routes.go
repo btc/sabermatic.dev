@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"embed"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -19,12 +20,12 @@ import (
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
-func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) (http.Handler, error) {
+func NewHandler(b *backend.Backend, spaFS embed.FS, baseURL string, csrfKey []byte, secureCookies bool) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if err := RegisterRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
-	mux.Handle("/", SPAHandler(spaFS))
+	mux.Handle("/", SPAHandler(spaFS, baseURL))
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
@@ -77,22 +78,32 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	return nil
 }
 
-// ogTags maps SPA route paths to the OG meta tags to inject before </head>.
-var ogTags = map[string]string{
-	"/": `<meta property="og:title" content="Sabermetric">` +
-		`<meta property="og:description" content="data-driven system design prep">` +
-		`<meta property="og:type" content="website">` +
-		`<meta property="og:image" content="/og-landing.png">`,
-	"/sample": `<meta property="og:title" content="Sabermetric — sample evaluation">` +
-		`<meta property="og:description" content="See a real system design interview evaluated across 5 dimensions">` +
-		`<meta property="og:type" content="website">` +
-		`<meta property="og:image" content="/og-sample.png">`,
+// ogRoute defines OG meta tag content for a public route.
+type ogRoute struct {
+	title       string
+	description string
+	image       string // path relative to base URL
+}
+
+var ogRoutes = map[string]ogRoute{
+	"/": {
+		title:       "Sabermetric",
+		description: "data-driven system design prep",
+		image:       "/og-landing.png",
+	},
+	"/sample": {
+		title:       "Sabermetric — sample evaluation",
+		description: "See a real system design interview evaluated across 5 dimensions",
+		image:       "/og-sample.png",
+	},
 }
 
 // SPAHandler serves the embedded SPA. Static assets served directly.
 // All other paths return index.html for client-side routing.
 // For paths with OG tags defined, the tags are injected before </head>.
-func SPAHandler(fsys fs.FS) http.Handler {
+// baseURL is the public URL (e.g., "https://sabermetric.dev") used for
+// absolute og:url and og:image values. Pass "" for tests.
+func SPAHandler(fsys fs.FS, baseURL string) http.Handler {
 	sub, err := fs.Sub(fsys, "web/dist")
 	if err != nil {
 		panic(fmt.Sprintf("embed sub: %v", err))
@@ -104,13 +115,26 @@ func SPAHandler(fsys fs.FS) http.Handler {
 	}
 	indexHTML := string(indexBytes)
 
+	// Pre-compute OG-injected HTML at init time
+	ogPages := make(map[string][]byte, len(ogRoutes))
+	for path, og := range ogRoutes {
+		tags := fmt.Sprintf(
+			`<meta property="og:title" content="%s">`+
+				`<meta property="og:description" content="%s">`+
+				`<meta property="og:type" content="website">`+
+				`<meta property="og:url" content="%s%s">`+
+				`<meta property="og:image" content="%s%s">`,
+			og.title, og.description, baseURL, path, baseURL, og.image,
+		)
+		ogPages[path] = []byte(strings.Replace(indexHTML, "</head>", tags+"</head>", 1))
+	}
+
 	fileServer := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path != "/" {
 			if _, err := fs.Stat(sub, strings.TrimPrefix(path, "/")); err == nil {
-				// Hashed asset files are immutable and can be cached forever
 				if strings.Contains(path, "/assets/") {
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 				}
@@ -119,12 +143,11 @@ func SPAHandler(fsys fs.FS) http.Handler {
 			}
 		}
 
-		// Inject OG tags if this path has them defined
-		if tags, ok := ogTags[path]; ok {
-			body := strings.Replace(indexHTML, "</head>", tags+"</head>", 1)
+		// Serve pre-computed OG-injected HTML if this path has OG tags
+		if body, ok := ogPages[path]; ok {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-			_, _ = w.Write([]byte(body))
+			_, _ = w.Write(body)
 			return
 		}
 
