@@ -5,14 +5,6 @@ WHERE user_id = $1
   AND remaining_minutes > 0
   AND (expires_at IS NULL OR expires_at > NOW());
 
--- name: GetUserPaidBalance :one
-SELECT COALESCE(SUM(remaining_minutes), 0)::int AS balance
-FROM grants
-WHERE user_id = $1
-  AND remaining_minutes > 0
-  AND source != 'free_grant'
-  AND (expires_at IS NULL OR expires_at > NOW());
-
 -- name: SelectGrantsForReservation :many
 SELECT id, remaining_minutes
 FROM grants
@@ -27,13 +19,6 @@ UPDATE grants
 SET remaining_minutes = remaining_minutes - $2
 WHERE id = $1
   AND remaining_minutes >= $2
-RETURNING remaining_minutes;
-
--- name: CreditGrant :one
-UPDATE grants
-SET remaining_minutes = remaining_minutes + $2
-WHERE id = $1
-  AND remaining_minutes + $2 <= initial_minutes
 RETURNING remaining_minutes;
 
 -- name: InsertLedgerEntry :one
@@ -75,12 +60,6 @@ FROM ledger_entries
 WHERE user_id = $1
 ORDER BY created_at DESC
 LIMIT $2;
-
--- name: GetSessionReservationEntries :many
-SELECT grant_id, amount
-FROM ledger_entries
-WHERE session_id = $1 AND reason = 'session_reserve'
-ORDER BY created_at DESC;
 
 -- name: RefundSessionMinutes :many
 WITH RECURSIVE
