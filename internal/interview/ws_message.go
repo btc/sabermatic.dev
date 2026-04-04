@@ -38,6 +38,7 @@ type WSMessage struct {
 	Content     string `json:"content,omitempty"`
 	Audio       []byte `json:"-"`
 	AudioBase64 string `json:"audio,omitempty"`
+	AudioFormat string `json:"audio_format,omitempty"`
 	InputMethod string `json:"input_method,omitempty"`
 }
 
@@ -56,6 +57,9 @@ func ParseWSMessage(data []byte) (WSMessage, error) {
 			return WSMessage{}, fmt.Errorf("decode audio base64: %w", err)
 		}
 		msg.Audio = audio
+		if msg.AudioFormat == "" {
+			msg.AudioFormat = "webm"
+		}
 	}
 	return msg, nil
 }

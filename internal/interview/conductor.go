@@ -301,7 +301,7 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) error {
 // endTurn processes a candidate's turn (text or voice).
 func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 	var candidateContent string
-	var messageID uuid.UUID
+	messageID := uuid.New()
 
 	if msg.InputMethod == "voice" {
 		// Validate audio.
@@ -317,15 +317,13 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 		}
 		c.send(ctx, msgStateChange(StateTranscribing))
 
-		messageID = uuid.New()
-
 		// Fire upload goroutine — does not block transcription.
 		go func() {
 			uploadCtx, span := tracer.Start(context.WithoutCancel(ctx), "storage.upload_audio")
 			defer span.End()
 
-			key := fmt.Sprintf("%s/%s.webm", c.sessionID, messageID)
-			url, err := c.backend.StoreAudio(uploadCtx, key, msg.Audio, "audio/webm")
+			key := fmt.Sprintf("%s/%s.%s", c.sessionID, messageID, msg.AudioFormat)
+			url, err := c.backend.StoreAudio(uploadCtx, key, msg.Audio, "audio/"+msg.AudioFormat)
 			if err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, "audio upload failed")
@@ -345,7 +343,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 		}()
 
 		// STT.
-		text, err := c.backend.Transcribe(ctx, msg.Audio, "webm")
+		text, err := c.backend.Transcribe(ctx, msg.Audio, msg.AudioFormat)
 		if err != nil {
 			slog.Error("conductor: transcription failed", "error", err, "session_id", c.sessionID)
 			return fmt.Errorf("transcription: %w", err)
@@ -373,16 +371,10 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 	c.send(ctx, msgStateChange(StateProcessingInput))
 
 	// Persist candidate message.
-	var candidateMsg db.Message
-	var persistErr error
-	if messageID != uuid.Nil {
-		candidateMsg, persistErr = c.persistMessageWithID(ctx, messageID, "candidate", candidateContent, msg.InputMethod)
-	} else {
-		candidateMsg, persistErr = c.persistMessage(ctx, "candidate", candidateContent, msg.InputMethod)
-	}
-	if persistErr != nil {
-		slog.Error("conductor: persist candidate message", "error", persistErr, "session_id", c.sessionID)
-		return fmt.Errorf("persist candidate message: %w", persistErr)
+	candidateMsg, err := c.persistMessage(ctx, messageID, "candidate", candidateContent, msg.InputMethod)
+	if err != nil {
+		slog.Error("conductor: persist candidate message", "error", err, "session_id", c.sessionID)
+		return fmt.Errorf("persist candidate message: %w", err)
 	}
 	c.messages = append(c.messages, candidateMsg)
 
@@ -511,13 +503,8 @@ func (c *Conductor) endSession(ctx context.Context) error {
 	return nil
 }
 
-// persistMessage inserts a message into the DB with a new random ID and returns it.
-func (c *Conductor) persistMessage(ctx context.Context, role, content, inputMethod string) (db.Message, error) {
-	return c.persistMessageWithID(ctx, uuid.New(), role, content, inputMethod)
-}
-
-// persistMessageWithID inserts a message into the DB with the given ID and returns it.
-func (c *Conductor) persistMessageWithID(ctx context.Context, id uuid.UUID, role, content, inputMethod string) (db.Message, error) {
+// persistMessage inserts a message into the DB and returns it.
+func (c *Conductor) persistMessage(ctx context.Context, id uuid.UUID, role, content, inputMethod string) (db.Message, error) {
 	c.sequence++
 
 	msg, err := c.backend.PersistMessage(ctx, backend.PersistMessageParams{
