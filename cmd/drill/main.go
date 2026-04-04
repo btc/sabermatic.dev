@@ -15,8 +15,6 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	stripe "github.com/stripe/stripe-go/v82"
-
 	drill "github.com/btc/drill"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
@@ -72,14 +70,6 @@ func runWithContext(ctx context.Context) error {
 			slog.Warn("otel shutdown error", "error", err)
 		}
 	}()
-
-	// Initialize Stripe SDK (package-level global required by stripe-go).
-	if cfg.Stripe.Configured() {
-		stripe.Key = cfg.Stripe.SecretKey
-		slog.Info("stripe configured")
-	} else {
-		slog.Warn("stripe not configured — billing endpoints will return errors")
-	}
 
 	b, err := backend.New(cfg)
 	if err != nil {
