@@ -12,7 +12,7 @@ import (
 )
 
 func TestPromptBuilder_Basic(t *testing.T) {
-	system, msgs := interview.NewInterviewerPrompt().
+	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
 		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "Design a URL shortening service."}).
 		WithTimeContext(5*time.Minute, 25*time.Minute).
@@ -22,7 +22,6 @@ func TestPromptBuilder_Basic(t *testing.T) {
 	assert.Contains(t, system, "Design a URL shortening service")
 	assert.Contains(t, system, "5 minutes")
 	assert.Contains(t, system, "25 minutes")
-	assert.Empty(t, msgs)
 }
 
 func TestPromptBuilder_WithTranscript(t *testing.T) {
@@ -119,6 +118,35 @@ func TestPromptBuilder_TranscriptRoleMapping(t *testing.T) {
 	assert.Equal(t, "assistant", string(msgs[0].Role))
 	assert.Equal(t, "user", string(msgs[1].Role))
 	assert.Equal(t, "assistant", string(msgs[2].Role))
+}
+
+func TestPromptBuilder_EmptyTranscriptSeedsUserMessage(t *testing.T) {
+	// On the opening turn there is no transcript. The Anthropic API requires
+	// messages to begin with a user role, so Build must inject a seed message.
+	_, msgs := interview.NewInterviewerPrompt().
+		WithSystemInstructions().
+		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "Design a URL shortening service."}).
+		WithTimeContext(0, 45*time.Minute).
+		Build()
+
+	require.NotEmpty(t, msgs, "opening turn must have at least one message")
+	assert.Equal(t, "user", string(msgs[0].Role), "first message must be user role")
+}
+
+func TestPromptBuilder_NonEmptyTranscriptNoSeed(t *testing.T) {
+	// When transcript already has messages, no seed should be injected.
+	messages := []db.Message{
+		{Seq: 1, Role: "interviewer", Content: "Design a URL shortener."},
+		{Seq: 2, Role: "candidate", Content: "I'd start with the API design."},
+	}
+	_, msgs := interview.NewInterviewerPrompt().
+		WithSystemInstructions().
+		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "..."}).
+		WithTranscript(messages).
+		WithTimeContext(10*time.Minute, 20*time.Minute).
+		Build()
+
+	require.Len(t, msgs, 2, "should only contain transcript messages, no extra seed")
 }
 
 func TestPromptBuilder_SystemInstructionsContent(t *testing.T) {
