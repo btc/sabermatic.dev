@@ -174,7 +174,7 @@ function ProfileSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground" htmlFor="display-name">
+          <label className="block text-xs font-medium text-muted-foreground" htmlFor="display-name">
             Display name
           </label>
           <Input
