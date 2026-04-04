@@ -321,7 +321,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 
 		// Fire upload goroutine — does not block transcription.
 		go func() {
-			uploadCtx, span := tracer.Start(context.Background(), "storage.upload_audio")
+			uploadCtx, span := tracer.Start(context.WithoutCancel(ctx), "storage.upload_audio")
 			defer span.End()
 
 			key := fmt.Sprintf("%s/%s.webm", c.sessionID, messageID)
