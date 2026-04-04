@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -119,4 +120,32 @@ func TestIsDuplicateKeyError(t *testing.T) {
 		wrapped := errors.Join(errors.New("outer"), inner)
 		require.True(t, isDuplicateKeyError(wrapped))
 	})
+}
+
+// ---------------------------------------------------------------------------
+// truncateRunes
+// ---------------------------------------------------------------------------
+
+func TestTruncateRunes(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"shorter than limit", "hello", 10, "hello"},
+		{"exact length", "hello", 5, "hello"},
+		{"truncated", "hello world", 5, "hello"},
+		{"empty string", "", 5, ""},
+		{"zero limit", "hello", 0, ""},
+		{"multibyte runes", "héllo wörld", 5, "héllo"},
+		{"emoji", "👋🌍🚀💫✨", 3, "👋🌍🚀"},
+		{"cjk", "你好世界测试", 4, "你好世界"},
+		{"one rune", "x", 1, "x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, truncateRunes(tc.s, tc.n))
+		})
+	}
 }
