@@ -202,6 +202,10 @@ func main() {
 		}
 		messages = append(messages, msg)
 	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterating messages: %v\n", err)
+		os.Exit(1)
+	}
 
 	writeJSON("internal/sample/fixtures/session.json", SessionFixture{
 		Session:  sess,
@@ -268,6 +272,10 @@ func main() {
 			os.Exit(1)
 		}
 		annotations = append(annotations, a)
+	}
+	if err := aRows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterating annotations: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Ensure nil slices marshal as [] not null
@@ -369,6 +377,10 @@ func main() {
 			Date:         date.Format("2006-01-02"),
 			OverallScore: score,
 		})
+	}
+	if err := trendRows.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "iterating trend: %v\n", err)
+		os.Exit(1)
 	}
 
 	if trend == nil {
