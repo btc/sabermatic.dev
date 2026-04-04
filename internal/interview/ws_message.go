@@ -82,6 +82,14 @@ func ParseWSMessage(data []byte) (WSMessage, error) {
 	return msg, nil
 }
 
+// traceparent returns the W3C traceparent string, or "" if not present.
+func (m WSMessage) traceparent() string {
+	if m.TraceContext == nil {
+		return ""
+	}
+	return m.TraceContext.Traceparent
+}
+
 // AudioExt returns the file extension derived from AudioMIME (e.g. "audio/webm" -> "webm").
 func (m WSMessage) AudioExt() string {
 	if ext, ok := audioExt[m.AudioMIME]; ok {
