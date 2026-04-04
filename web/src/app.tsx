@@ -20,6 +20,7 @@ const DeepDive = lazy(() => import("@/pages/session/deep-dive"));
 const History = lazy(() => import("@/pages/history"));
 const Settings = lazy(() => import("@/pages/settings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
+const SampleSession = lazy(() => import("@/pages/sample"));
 
 function Loading() {
   return <div className="flex h-screen items-center justify-center text-muted-foreground">Loading...</div>;
@@ -56,7 +57,11 @@ export function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
-        {/* The /sample route with nested tabs is set up in Task 15 */}
+        <Route path="/sample" element={<SampleSession />}>
+          <Route index element={<Overview />} />
+          <Route path="transcript" element={<TranscriptPage />} />
+          <Route path="deep-dive" element={<DeepDive />} />
+        </Route>
 
         {/* Root — conditional: landing (unauth) or app layout (auth) */}
         <Route path="/" element={<ConditionalHome />} />
