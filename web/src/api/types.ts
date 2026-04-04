@@ -45,7 +45,7 @@ export interface Session {
   started_at: string;
   ended_at: string | null;
   turn_count: number;
-  archived: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
   question_title?: string;

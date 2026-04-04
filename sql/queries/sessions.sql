@@ -7,7 +7,7 @@ RETURNING *;
 SELECT s.id, s.user_id, s.question_id, s.status,
        s.config_duration_minutes, s.config_tts_enabled,
        s.config_coach_briefing, s.started_at, s.ended_at,
-       s.turn_count, s.archived, s.created_at, s.updated_at,
+       s.turn_count, s.archived_at, s.created_at, s.updated_at,
        q.title AS question_title, q.prompt AS question_prompt,
        q.difficulty AS question_difficulty, q.hints AS question_hints
 FROM interview_sessions s
@@ -16,7 +16,7 @@ WHERE s.id = $1;
 
 -- name: ListSessionsByUser :many
 SELECT s.id, s.user_id, s.question_id, s.status, s.config_duration_minutes,
-       s.config_tts_enabled, s.started_at, s.ended_at, s.turn_count, s.archived,
+       s.config_tts_enabled, s.started_at, s.ended_at, s.turn_count, s.archived_at,
        s.created_at, q.title AS question_title
 FROM interview_sessions s
 JOIN questions q ON q.id = s.question_id
@@ -57,17 +57,17 @@ WHERE id = $1;
 
 -- name: GetReviewedSessionsForUser :many
 SELECT * FROM interview_sessions
-WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+WHERE user_id = $1 AND status = 'reviewed' AND archived_at IS NULL
 ORDER BY created_at;
 
 -- name: GetReviewedSessionIDsForUser :many
 SELECT id FROM interview_sessions
-WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+WHERE user_id = $1 AND status = 'reviewed' AND archived_at IS NULL
 ORDER BY created_at;
 
 -- name: CancelSession :exec
 UPDATE interview_sessions
-SET status = 'completed', ended_at = NOW(), turn_count = $2, archived = TRUE, updated_at = NOW()
+SET status = 'completed', ended_at = NOW(), turn_count = $2, archived_at = NOW(), updated_at = NOW()
 WHERE id = $1;
 
 -- name: CountActiveSessionsByUser :one
