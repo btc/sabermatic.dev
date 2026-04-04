@@ -1,68 +1,50 @@
-import { useState, useRef, useCallback } from "react";
-<<<<<<< HEAD
-import { useParams, Navigate } from "react-router-dom";
-import { useQuery } from "@connectrpc/connect-query";
-import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
-import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
-import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
-import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
-import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
-=======
-import { useTranscript, useEvaluation } from "@/api/queries";
+import { useState, useRef, useCallback, useMemo } from "react";
+import { useSession, useTranscript, useEvaluation } from "@/api/queries";
 import { useSampleSession, useSampleEvaluation } from "@/api/sample-queries";
 import { useSessionDetail } from "./layout";
->>>>>>> 5e73811 (feat: session detail dataSource context for public/sample mode)
+import { useReplayEngine } from "@/components/replay/engine";
+import { ReplayControls } from "@/components/replay/controls";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { AnnotationType, AnnotationResponse, Message } from "@/api/types";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
 // ---------------------------------------------------------------------------
 
-const ANNOTATION_LABELS: Record<number, string> = {
-  [AnnotationType.UNSPECIFIED]: "notes",
-  [AnnotationType.STRENGTH]: "strengths",
-  [AnnotationType.GAP]: "gaps",
-  [AnnotationType.MISSED_OPPORTUNITY]: "missed opportunities",
-  [AnnotationType.NOTE]: "notes",
+const ANNOTATION_LABELS: Record<AnnotationType, string> = {
+  strength: "strengths",
+  gap: "gaps",
+  missed_opportunity: "missed opportunities",
+  note: "notes",
 };
 
-const ANNOTATION_BORDER: Record<number, string> = {
-  [AnnotationType.UNSPECIFIED]: "border-note",
-  [AnnotationType.STRENGTH]: "border-strength",
-  [AnnotationType.GAP]: "border-gap",
-  [AnnotationType.MISSED_OPPORTUNITY]: "border-missed",
-  [AnnotationType.NOTE]: "border-note",
+const ANNOTATION_BORDER: Record<AnnotationType, string> = {
+  strength: "border-strength",
+  gap: "border-gap",
+  missed_opportunity: "border-missed",
+  note: "border-note",
 };
 
-const ANNOTATION_TEXT: Record<number, string> = {
-  [AnnotationType.UNSPECIFIED]: "text-note",
-  [AnnotationType.STRENGTH]: "text-strength",
-  [AnnotationType.GAP]: "text-gap",
-  [AnnotationType.MISSED_OPPORTUNITY]: "text-missed",
-  [AnnotationType.NOTE]: "text-note",
+const ANNOTATION_TEXT: Record<AnnotationType, string> = {
+  strength: "text-strength",
+  gap: "text-gap",
+  missed_opportunity: "text-missed",
+  note: "text-note",
 };
 
-const ANNOTATION_BG: Record<number, string> = {
-  [AnnotationType.UNSPECIFIED]: "bg-note",
-  [AnnotationType.STRENGTH]: "bg-strength",
-  [AnnotationType.GAP]: "bg-gap",
-  [AnnotationType.MISSED_OPPORTUNITY]: "bg-missed",
-  [AnnotationType.NOTE]: "bg-note",
-};
-
-const ANNOTATION_TYPE_DISPLAY: Record<number, string> = {
-  [AnnotationType.STRENGTH]: "strength",
-  [AnnotationType.GAP]: "gap",
-  [AnnotationType.MISSED_OPPORTUNITY]: "missed opportunity",
-  [AnnotationType.NOTE]: "note",
+const ANNOTATION_BG: Record<AnnotationType, string> = {
+  strength: "bg-strength",
+  gap: "bg-gap",
+  missed_opportunity: "bg-missed",
+  note: "bg-note",
 };
 
 const ANNOTATION_TYPES: AnnotationType[] = [
-  AnnotationType.STRENGTH,
-  AnnotationType.GAP,
-  AnnotationType.MISSED_OPPORTUNITY,
-  AnnotationType.NOTE,
+  "strength",
+  "gap",
+  "missed_opportunity",
+  "note",
 ];
 
 type FilterType = "all" | AnnotationType;
@@ -72,7 +54,7 @@ type FilterType = "all" | AnnotationType;
 // ---------------------------------------------------------------------------
 
 interface SummaryBarProps {
-  annotations: Annotation[];
+  annotations: AnnotationResponse[];
   activeFilter: FilterType;
   onFilterChange: (filter: FilterType) => void;
   onJumpToFirst: (type: AnnotationType) => void;
@@ -84,12 +66,12 @@ function SummaryBar({
   onFilterChange,
   onJumpToFirst,
 }: SummaryBarProps) {
-  const counts = ANNOTATION_TYPES.reduce<Record<number, number>>(
+  const counts = ANNOTATION_TYPES.reduce<Record<AnnotationType, number>>(
     (acc, type) => {
       acc[type] = annotations.filter((a) => a.type === type).length;
       return acc;
     },
-    { [AnnotationType.STRENGTH]: 0, [AnnotationType.GAP]: 0, [AnnotationType.MISSED_OPPORTUNITY]: 0, [AnnotationType.NOTE]: 0 },
+    { strength: 0, gap: 0, missed_opportunity: 0, note: 0 },
   );
 
   const total = annotations.length;
@@ -105,8 +87,8 @@ function SummaryBar({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm py-3 px-1">
-      <span className="text-muted-foreground mr-1">{total} annotation{total !== 1 ? "s" : ""}:</span>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground py-3 px-1">
+      <span className="font-medium text-foreground">{total} annotation{total !== 1 ? "s" : ""}:</span>
       {ANNOTATION_TYPES.map((type) => {
         const count = counts[type];
         if (count === 0) return null;
@@ -116,13 +98,11 @@ function SummaryBar({
             key={type}
             onClick={() => handleTypeClick(type)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer",
-              isActive
-                ? cn("border-current", ANNOTATION_TEXT[type], "bg-current/10")
-                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30",
+              "transition-colors hover:text-foreground",
+              isActive && cn("font-medium", ANNOTATION_TEXT[type]),
+              !isActive && activeFilter !== "all" && "opacity-40",
             )}
           >
-            <span className={cn("size-1.5 rounded-full", ANNOTATION_BG[type])} />
             {count} {ANNOTATION_LABELS[type]}
           </button>
         );
@@ -136,32 +116,23 @@ function SummaryBar({
 // ---------------------------------------------------------------------------
 
 interface AnnotationCardProps {
-  annotation: Annotation;
+  annotation: AnnotationResponse;
   dimmed: boolean;
 }
 
-function AnnotationCard({ annotation, dimmed, showRailDot }: AnnotationCardProps & { showRailDot: boolean }) {
+function AnnotationCard({ annotation, dimmed }: AnnotationCardProps) {
   return (
     <div
       className={cn(
-        "relative ml-4 mt-1.5 border border-border border-l-4 bg-card rounded-lg px-3 py-2 text-xs leading-relaxed transition-opacity duration-150",
+        "ml-4 mt-1.5 border border-border border-l-4 bg-card rounded-lg px-3 py-2 text-xs leading-relaxed transition-opacity duration-150",
         ANNOTATION_BORDER[annotation.type],
         dimmed && "opacity-30",
       )}
     >
       <span className={cn("font-medium uppercase tracking-wide text-[10px] mr-2", ANNOTATION_TEXT[annotation.type])}>
-        {ANNOTATION_TYPE_DISPLAY[annotation.type] ?? "unknown"}
+        {annotation.type.replace("_", " ")}
       </span>
       {annotation.content}
-      {showRailDot && (
-        <span
-          className={cn(
-            "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 left-[calc(100%+18px)] z-10 size-2 rounded-full",
-            ANNOTATION_BG[annotation.type],
-          )}
-          aria-hidden="true"
-        />
-      )}
     </div>
   );
 }
@@ -171,20 +142,17 @@ function AnnotationCard({ annotation, dimmed, showRailDot }: AnnotationCardProps
 // ---------------------------------------------------------------------------
 
 interface MessageRowProps {
-  message: ProtoMessage;
-  annotations: Annotation[];
+  message: Message;
+  annotations: AnnotationResponse[];
   activeFilter: FilterType;
-  showRailDots: boolean;
   msgRef: (el: HTMLDivElement | null) => void;
 }
 
-function MessageRow({ message, annotations, activeFilter, showRailDots, msgRef }: MessageRowProps) {
+function MessageRow({ message, annotations, activeFilter, msgRef }: MessageRowProps) {
   const isInterviewer = message.role === "interviewer";
-  const hasMatchingAnnotation = activeFilter === "all" || annotations.some((a) => a.type === activeFilter);
-  const dimMessage = activeFilter !== "all" && !hasMatchingAnnotation;
 
   return (
-    <div ref={msgRef} className={cn("space-y-0 transition-opacity duration-150", dimMessage && "opacity-20")}>
+    <div ref={msgRef} className="space-y-0">
       {/* Bubble */}
       <div className={cn("flex", isInterviewer ? "justify-start" : "justify-end")}>
         <div
@@ -202,7 +170,7 @@ function MessageRow({ message, annotations, activeFilter, showRailDots, msgRef }
       {/* Annotation callout cards */}
       {annotations.map((ann, i) => {
         const dimmed = activeFilter !== "all" && activeFilter !== ann.type;
-        return <AnnotationCard key={i} annotation={ann} dimmed={dimmed} showRailDot={showRailDots} />;
+        return <AnnotationCard key={i} annotation={ann} dimmed={dimmed} />;
       })}
     </div>
   );
@@ -212,11 +180,59 @@ function MessageRow({ message, annotations, activeFilter, showRailDots, msgRef }
 // Annotation rail
 // ---------------------------------------------------------------------------
 
-function AnnotationRail() {
+interface RailDotProps {
+  annotation: AnnotationResponse;
+  totalMessages: number;
+  msgIndex: number;
+  onClick: () => void;
+}
+
+function RailDot({ annotation, totalMessages, msgIndex, onClick }: RailDotProps) {
+  // Proportional position: map msgIndex to 0%–100%
+  const pct = totalMessages > 1 ? (msgIndex / (totalMessages - 1)) * 100 : 50;
+
+  return (
+    <button
+      onClick={onClick}
+      title={`${annotation.type.replace("_", " ")}: ${annotation.content.slice(0, 60)}...`}
+      className={cn(
+        "absolute size-2 rounded-full -translate-x-1/2 -translate-y-1/2 transition-transform hover:scale-150 cursor-pointer",
+        ANNOTATION_BG[annotation.type],
+      )}
+      style={{ top: `${pct}%`, left: "50%" }}
+    />
+  );
+}
+
+interface AnnotationRailProps {
+  annotations: AnnotationResponse[];
+  messages: Message[];
+  onDotClick: (seq: number) => void;
+}
+
+function AnnotationRail({ annotations, messages, onDotClick }: AnnotationRailProps) {
+  if (annotations.length === 0) return null;
+
+  // Build seq -> index lookup
+  const seqToIndex = new Map(messages.map((m, i) => [m.seq, i]));
+
   return (
     <div className="relative w-5 shrink-0 ml-2" aria-hidden="true">
       {/* Track line */}
       <div className="absolute inset-y-0 left-1/2 w-px bg-border -translate-x-1/2" />
+
+      {annotations.map((ann, i) => {
+        const msgIndex = seqToIndex.get(ann.message_seq) ?? 0;
+        return (
+          <RailDot
+            key={i}
+            annotation={ann}
+            totalMessages={messages.length}
+            msgIndex={msgIndex}
+            onClick={() => onDotClick(ann.message_seq)}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -241,26 +257,38 @@ export default function TranscriptPage() {
   return <TranscriptInner />;
 }
 
-<<<<<<< HEAD
-function TranscriptInner({ sessionId }: { sessionId: string }) {
-  const { data: transcriptResp } = useQuery(getTranscript, { sessionId });
-  const messages = transcriptResp?.messages;
-  const { data: evalResp } = useQuery(getEvaluation, { sessionId });
-  const evaluation = evalResp?.evaluation;
-=======
 function TranscriptInner() {
   const { dataSource, sessionId } = useSessionDetail();
 
+  const authSession = useSession(sessionId, { enabled: dataSource === "api" });
   const authTranscript = useTranscript(sessionId, dataSource === "api");
   const authEval = useEvaluation(sessionId, dataSource === "api");
   const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
   const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
 
+  const session =
+    dataSource === "api" ? authSession.data : sampleSession.data?.session;
   const messages = dataSource === "api" ? authTranscript.data : sampleSession.data?.messages;
   const evaluation = dataSource === "api" ? authEval.data : sampleEval.data;
->>>>>>> 5e73811 (feat: session detail dataSource context for public/sample mode)
+  const evaluationLoading = dataSource === "api" ? authEval.isLoading : sampleEval.isLoading;
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+
+  // Replay state
+  const [replayMode, setReplayMode] = useState(false);
+
+  const replay = useReplayEngine(
+    replayMode && messages && session
+      ? {
+          messages,
+          sessionStartedAt: session.started_at,
+          sessionEndedAt: session.ended_at,
+          annotationSeqs: (evaluation?.annotations ?? []).map(
+            (a) => a.message_seq,
+          ),
+        }
+      : null,
+  );
 
   // Map of seq -> DOM element ref for scroll targets
   const msgRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -295,53 +323,111 @@ function TranscriptInner() {
     );
   }
 
-  const sorted = [...messages].sort((a, b) => a.seq - b.seq);
+  const sorted = useMemo(
+    () => [...messages].sort((a, b) => a.seq - b.seq),
+    [messages],
+  );
   const annotations = evaluation?.annotations ?? [];
 
-  // Group annotations by messageSeq for efficient lookup
-  const annotationsBySeq = annotations.reduce<Map<number, Annotation[]>>(
-    (acc, ann) => {
-      const existing = acc.get(ann.messageSeq) ?? [];
-      acc.set(ann.messageSeq, [...existing, ann]);
-      return acc;
-    },
-    new Map(),
+  // Group annotations by message_seq for efficient lookup
+  const annotationsBySeq = useMemo(
+    () =>
+      annotations.reduce<Map<number, AnnotationResponse[]>>(
+        (acc, ann) => {
+          const existing = acc.get(ann.message_seq) ?? [];
+          acc.set(ann.message_seq, [...existing, ann]);
+          return acc;
+        },
+        new Map(),
+      ),
+    [annotations],
   );
 
   const handleJumpToFirst = (type: AnnotationType) => {
     const first = annotations.find((a) => a.type === type);
     if (first) {
-      scrollToSeq(first.messageSeq);
+      scrollToSeq(first.message_seq);
     }
   };
+
+  // Filter messages/annotations during replay
+  const displayMessages = replayMode
+    ? sorted.slice(0, replay.state.visibleMessages)
+    : sorted;
+
+  const displayAnnotations = replayMode
+    ? (() => {
+        const activeSet = new Set(replay.state.activeAnnotationSeqs);
+        return annotations.filter((a) => activeSet.has(a.message_seq));
+      })()
+    : annotations;
+
+  // Build display-time annotation lookup (changes during replay)
+  const displayAnnotationsBySeq = replayMode
+    ? displayAnnotations.reduce<Map<number, AnnotationResponse[]>>(
+        (acc, ann) => {
+          const existing = acc.get(ann.message_seq) ?? [];
+          acc.set(ann.message_seq, [...existing, ann]);
+          return acc;
+        },
+        new Map(),
+      )
+    : annotationsBySeq;
 
   return (
     <div className="flex gap-0 max-w-3xl mx-auto">
       {/* Main content column */}
       <div className="flex-1 min-w-0">
+        {/* Replay controls */}
+        <div className="flex items-center gap-2 py-2 px-1">
+          <button
+            className={cn(
+              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              replayMode
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setReplayMode((v) => !v)}
+            aria-pressed={replayMode}
+          >
+            {replayMode ? "Exit Replay" : "Replay"}
+          </button>
+        </div>
+
+        {replayMode && (
+          <div className="px-1 pb-3">
+            <ReplayControls
+              state={replay.state}
+              onPlay={replay.play}
+              onPause={replay.pause}
+              onSeek={replay.seek}
+              onSetSpeed={replay.setSpeed}
+            />
+          </div>
+        )}
+
         {/* Summary bar */}
-        {annotations.length > 0 ? (
+        {!replayMode && annotations.length > 0 ? (
           <SummaryBar
             annotations={annotations}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
             onJumpToFirst={handleJumpToFirst}
           />
-        ) : (
+        ) : !replayMode && !evaluationLoading ? (
           <NoAnnotationsView />
-        )}
+        ) : null}
 
         {/* Message list */}
         <div className="space-y-5 pt-2 pb-10">
-          {sorted.map((msg) => {
-            const msgAnnotations = annotationsBySeq.get(msg.seq) ?? [];
+          {displayMessages.map((msg) => {
+            const msgAnnotations = displayAnnotationsBySeq.get(msg.seq) ?? [];
             return (
               <MessageRow
                 key={msg.id}
                 message={msg}
                 annotations={msgAnnotations}
                 activeFilter={activeFilter}
-                showRailDots={annotations.length > 0}
                 msgRef={setRef(msg.seq)}
               />
             );
@@ -350,7 +436,13 @@ function TranscriptInner() {
       </div>
 
       {/* Annotation rail */}
-      {annotations.length > 0 && <AnnotationRail />}
+      {!replayMode && annotations.length > 0 && (
+        <AnnotationRail
+          annotations={annotations}
+          messages={sorted}
+          onDotClick={scrollToSeq}
+        />
+      )}
     </div>
   );
 }
