@@ -85,6 +85,7 @@ func Login(b *backend.Backend) http.HandlerFunc {
 			if errors.Is(err, backend.ErrInvalidCredentials) {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 			} else {
+				slog.Error("login failed", "error", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
 			return
