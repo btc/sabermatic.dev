@@ -45,13 +45,19 @@ func (c *Conn) Close(code websocket.StatusCode, reason string) error {
 
 // WSMessage represents a client-to-server WebSocket message.
 type WSMessage struct {
-	Type        string `json:"type"`
-	LastSeq     *int   `json:"last_seq,omitempty"`
-	Content     string `json:"content,omitempty"`
-	Audio       []byte `json:"-"`
-	AudioBase64 string `json:"audio,omitempty"`
-	AudioMIME   string `json:"audio_mime,omitempty"`
-	InputMethod string `json:"input_method,omitempty"`
+	Type         string          `json:"type"`
+	LastSeq      *int            `json:"last_seq,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	Audio        []byte          `json:"-"`
+	AudioBase64  string          `json:"audio,omitempty"`
+	AudioMIME    string          `json:"audio_mime,omitempty"`
+	InputMethod  string          `json:"input_method,omitempty"`
+	TraceContext *wsTraceContext `json:"trace_context,omitempty"`
+}
+
+// wsTraceContext carries W3C traceparent from the client.
+type wsTraceContext struct {
+	Traceparent string `json:"traceparent"`
 }
 
 // ParseWSMessage parses a raw JSON WebSocket message.

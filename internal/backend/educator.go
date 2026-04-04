@@ -137,14 +137,18 @@ func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID
 			}); err != nil {
 				return fmt.Errorf("reset educator status: %w", err)
 			}
-			if _, err := b.jobs.InsertTx(ctx, tx, jobs.GenerateEducatorContentArgs{SessionID: sessionID}, jobs.GenerateEducatorContentInsertOpts()); err != nil {
+			eduOpts := jobs.GenerateEducatorContentInsertOpts()
+			drilotel.SetTraceMetadata(ctx, eduOpts)
+			if _, err := b.jobs.InsertTx(ctx, tx, jobs.GenerateEducatorContentArgs{SessionID: sessionID}, eduOpts); err != nil {
 				return fmt.Errorf("enqueue educator job: %w", err)
 			}
 			return tx.Commit(ctx)
 		}
 	}
 
-	_, err = b.jobs.Insert(ctx, jobs.GenerateEducatorContentArgs{SessionID: sessionID}, jobs.GenerateEducatorContentInsertOpts())
+	eduOpts := jobs.GenerateEducatorContentInsertOpts()
+	drilotel.SetTraceMetadata(ctx, eduOpts)
+	_, err = b.jobs.Insert(ctx, jobs.GenerateEducatorContentArgs{SessionID: sessionID}, eduOpts)
 	if err != nil {
 		return fmt.Errorf("enqueue educator job: %w", err)
 	}

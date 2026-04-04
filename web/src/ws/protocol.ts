@@ -10,8 +10,7 @@ export type ClientMessage =
   | { type: "ping" };
 
 export interface TraceContext {
-  trace_id: string;
-  span_id: string;
+  traceparent: string;
 }
 
 // --- Server → Client ---

@@ -99,7 +99,9 @@ func (b *Backend) RequestCoachAnalysis(ctx context.Context, userID uuid.UUID, fo
 		}
 	}
 
-	_, err = b.jobs.Insert(ctx, jobs.RunCoachAnalysisArgs{UserID: userID}, jobs.RunCoachAnalysisInsertOpts())
+	coachOpts := jobs.RunCoachAnalysisInsertOpts()
+	drilotel.SetTraceMetadata(ctx, coachOpts)
+	_, err = b.jobs.Insert(ctx, jobs.RunCoachAnalysisArgs{UserID: userID}, coachOpts)
 	if err != nil {
 		return fmt.Errorf("enqueue coach job: %w", err)
 	}
