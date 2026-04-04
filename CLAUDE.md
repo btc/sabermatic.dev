@@ -5,3 +5,5 @@ A browser-after-each-commit rule: after any UI-affecting file is committed, load
 An agent sequencing rule: for tightly-coupled files, agents run sequentially instead of in parallel, with later agents receiving the committed output of earlier ones.
 
 Backend list endpoints must never return nil slices. Go's `json.Marshal(nil)` produces `null`, not `[]`, which breaks frontend code expecting arrays. Always coerce nil to an empty slice in the backend method (not the handler) before returning.
+
+Practice red green TDD when investigating issues. Before jumping to implementation and fixes, create a test that detects the bug. Then prompt user to allow you to fix the bug and thus green the test.
