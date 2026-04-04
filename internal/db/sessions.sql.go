@@ -15,7 +15,7 @@ import (
 
 const cancelSession = `-- name: CancelSession :exec
 UPDATE interview_sessions
-SET status = 'completed', ended_at = NOW(), turn_count = $2, archived = TRUE, updated_at = NOW()
+SET status = 'completed', ended_at = NOW(), turn_count = $2, archived_at = NOW(), updated_at = NOW()
 WHERE id = $1
 `
 
@@ -45,7 +45,7 @@ func (q *Queries) CountActiveSessionsByUser(ctx context.Context, userID uuid.UUI
 const createSession = `-- name: CreateSession :one
 INSERT INTO interview_sessions (user_id, question_id, config_duration_minutes, config_tts_enabled, reserved_minutes)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at, reserved_minutes
+RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at
 `
 
 type CreateSessionParams struct {
@@ -76,10 +76,10 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (I
 		&i.StartedAt,
 		&i.EndedAt,
 		&i.TurnCount,
-		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReservedMinutes,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -112,7 +112,7 @@ func (q *Queries) FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error
 
 const getReviewedSessionIDsForUser = `-- name: GetReviewedSessionIDsForUser :many
 SELECT id FROM interview_sessions
-WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+WHERE user_id = $1 AND status = 'reviewed' AND archived_at IS NULL
 ORDER BY created_at
 `
 
@@ -137,8 +137,8 @@ func (q *Queries) GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.
 }
 
 const getReviewedSessionsForUser = `-- name: GetReviewedSessionsForUser :many
-SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at, reserved_minutes FROM interview_sessions
-WHERE user_id = $1 AND status = 'reviewed' AND archived = FALSE
+SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at FROM interview_sessions
+WHERE user_id = $1 AND status = 'reviewed' AND archived_at IS NULL
 ORDER BY created_at
 `
 
@@ -162,10 +162,10 @@ func (q *Queries) GetReviewedSessionsForUser(ctx context.Context, userID uuid.UU
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.TurnCount,
-			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReservedMinutes,
+			&i.ArchivedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -181,7 +181,7 @@ const getSession = `-- name: GetSession :one
 SELECT s.id, s.user_id, s.question_id, s.status,
        s.config_duration_minutes, s.config_tts_enabled,
        s.config_coach_briefing, s.started_at, s.ended_at,
-       s.turn_count, s.archived, s.created_at, s.updated_at,
+       s.turn_count, s.archived_at, s.created_at, s.updated_at,
        q.title AS question_title, q.prompt AS question_prompt,
        q.difficulty AS question_difficulty, q.hints AS question_hints
 FROM interview_sessions s
@@ -200,7 +200,7 @@ type GetSessionRow struct {
 	StartedAt             time.Time          `json:"started_at"`
 	EndedAt               pgtype.Timestamptz `json:"ended_at"`
 	TurnCount             int32              `json:"turn_count"`
-	Archived              bool               `json:"archived"`
+	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt             time.Time          `json:"created_at"`
 	UpdatedAt             time.Time          `json:"updated_at"`
 	QuestionTitle         string             `json:"question_title"`
@@ -223,7 +223,7 @@ func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, 
 		&i.StartedAt,
 		&i.EndedAt,
 		&i.TurnCount,
-		&i.Archived,
+		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.QuestionTitle,
@@ -235,7 +235,7 @@ func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, 
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at, reserved_minutes FROM interview_sessions WHERE id = $1
+SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at FROM interview_sessions WHERE id = $1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error) {
@@ -252,17 +252,17 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSe
 		&i.StartedAt,
 		&i.EndedAt,
 		&i.TurnCount,
-		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReservedMinutes,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const listSessionsByUser = `-- name: ListSessionsByUser :many
 SELECT s.id, s.user_id, s.question_id, s.status, s.config_duration_minutes,
-       s.config_tts_enabled, s.started_at, s.ended_at, s.turn_count, s.archived,
+       s.config_tts_enabled, s.started_at, s.ended_at, s.turn_count, s.archived_at,
        s.created_at, q.title AS question_title
 FROM interview_sessions s
 JOIN questions q ON q.id = s.question_id
@@ -280,7 +280,7 @@ type ListSessionsByUserRow struct {
 	StartedAt             time.Time          `json:"started_at"`
 	EndedAt               pgtype.Timestamptz `json:"ended_at"`
 	TurnCount             int32              `json:"turn_count"`
-	Archived              bool               `json:"archived"`
+	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt             time.Time          `json:"created_at"`
 	QuestionTitle         string             `json:"question_title"`
 }
@@ -304,7 +304,7 @@ func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]L
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.TurnCount,
-			&i.Archived,
+			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.QuestionTitle,
 		); err != nil {
