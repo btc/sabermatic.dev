@@ -82,6 +82,53 @@ FROM ledger_entries
 WHERE session_id = $1 AND reason = 'session_reserve'
 ORDER BY created_at DESC;
 
+-- name: RefundSessionMinutes :many
+WITH RECURSIVE
+  refund_calc AS (
+    SELECT GREATEST(0,
+      reserved_minutes - GREATEST(1, CEIL(EXTRACT(EPOCH FROM (ended_at - started_at)) / 60))::int
+    ) AS total
+    FROM interview_sessions
+    WHERE id = @session_id AND reserved_minutes IS NOT NULL
+  ),
+  reserves AS (
+    SELECT grant_id, -amount AS debit,
+           ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
+    FROM ledger_entries
+    WHERE session_id = @session_id AND reason = 'session_reserve'
+  ),
+  distributed AS (
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, rc.total) AS credit,
+           rc.total - LEAST(r.debit, rc.total) AS remaining,
+           r.rn
+    FROM reserves r, refund_calc rc
+    WHERE r.rn = 1
+
+    UNION ALL
+
+    SELECT r.grant_id, r.debit,
+           LEAST(r.debit, d.remaining) AS credit,
+           d.remaining - LEAST(r.debit, d.remaining) AS remaining,
+           r.rn
+    FROM reserves r
+    JOIN distributed d ON r.rn = d.rn + 1
+    WHERE d.remaining > 0
+  ),
+  apply_credits AS (
+    UPDATE grants g
+    SET remaining_minutes = remaining_minutes + d.credit
+    FROM distributed d
+    WHERE g.id = d.grant_id
+      AND d.credit > 0
+      AND g.remaining_minutes + d.credit <= g.initial_minutes
+    RETURNING g.id AS grant_id, d.credit
+  )
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
+SELECT @user_id, ac.grant_id, ac.credit, @reason, @session_id
+FROM apply_credits ac
+RETURNING grant_id, amount;
+
 -- name: GetUserUsageSummary :one
 SELECT
   COALESCE(SUM(remaining_minutes) FILTER (WHERE expires_at IS NULL OR expires_at > NOW()), 0)::int AS total_balance,

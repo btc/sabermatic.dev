@@ -73,6 +73,7 @@ type Querier interface {
 	MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
+	RefundSessionMinutes(ctx context.Context, arg RefundSessionMinutesParams) ([]RefundSessionMinutesRow, error)
 	SelectGrantsForReservation(ctx context.Context, userID uuid.UUID) ([]SelectGrantsForReservationRow, error)
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
