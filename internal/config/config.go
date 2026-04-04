@@ -126,6 +126,9 @@ type Stripe struct {
 	Pack600PriceID string `env:"STRIPE_PACK_600_PRICE_ID"`
 }
 
+// Configured reports whether Stripe credentials are present.
+func (s *Stripe) Configured() bool { return s.SecretKey != "" }
+
 // PriceIDForPlan returns the Stripe price ID for the named plan, or "" if
 // not configured. Only "pro" has a price; "free" returns "".
 func (s *Stripe) PriceIDForPlan(plan string) string {

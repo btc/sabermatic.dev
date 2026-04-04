@@ -7,11 +7,46 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gorilla/csrf"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 )
 
+const serviceName = "drill"
+
+// NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
+// and webhook CSRF exemption. Returns a ready-to-use http.Handler.
+func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) http.Handler {
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, b)
+	mux.Handle("/", SPAHandler(spaFS))
+
+	csrfProtect := csrf.Protect(
+		csrfKey,
+		csrf.Secure(secureCookies),
+		csrf.HttpOnly(false),
+		csrf.CookieName("drill_csrf"),
+		csrf.Path("/"),
+		csrf.SameSite(csrf.SameSiteLaxMode),
+	)
+
+	otelHandler := otelhttp.NewMiddleware(serviceName)(mux)
+	csrfProtected := csrfProtect(otelHandler)
+
+	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
+			otelHandler.ServeHTTP(w, r)
+			return
+		}
+		csrfProtected.ServeHTTP(w, r)
+	})
+}
+
 // RegisterRoutes sets up all HTTP routes on the given mux.
+// Used by NewHandler for production and directly by tests.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 	mux.HandleFunc("GET /api/health", Health(b))
 	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
