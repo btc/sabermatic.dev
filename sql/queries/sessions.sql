@@ -1,8 +1,7 @@
 -- name: CreateSession :one
-INSERT INTO interview_sessions (user_id, question_id, config_duration_minutes, config_tts_enabled)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled,
-          config_coach_briefing, started_at, ended_at, turn_count, archived, created_at, updated_at;
+INSERT INTO interview_sessions (user_id, question_id, config_duration_minutes, config_tts_enabled, reserved_minutes)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
 
 -- name: GetSession :one
 SELECT s.id, s.user_id, s.question_id, s.status,
@@ -70,9 +69,6 @@ ORDER BY created_at;
 SELECT COUNT(*)::int AS count
 FROM interview_sessions
 WHERE user_id = $1 AND status = 'active';
-
--- name: UpdateSessionReservedMinutes :exec
-UPDATE interview_sessions SET reserved_minutes = $2 WHERE id = $1;
 
 -- name: GetSessionByID :one
 SELECT * FROM interview_sessions WHERE id = $1;
