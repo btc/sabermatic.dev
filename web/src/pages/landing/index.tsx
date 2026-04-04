@@ -3,6 +3,7 @@ import { Scoring } from "./scoring";
 import { StrengthsGaps } from "./strengths-gaps";
 import { Annotations } from "./annotations";
 import { DeepDivePreview } from "./deep-dive";
+import { Coaching } from "./coaching";
 
 export default function Landing() {
   return (
@@ -12,6 +13,7 @@ export default function Landing() {
       <StrengthsGaps />
       <Annotations />
       <DeepDivePreview />
+      <Coaching />
     </div>
   );
 }
