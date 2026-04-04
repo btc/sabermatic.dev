@@ -270,6 +270,17 @@ func main() {
 		annotations = append(annotations, a)
 	}
 
+	// Ensure nil slices marshal as [] not null
+	if strengthList == nil {
+		strengthList = []string{}
+	}
+	if gapList == nil {
+		gapList = []string{}
+	}
+	if annotations == nil {
+		annotations = []Annotation{}
+	}
+
 	writeJSON("internal/sample/fixtures/evaluation.json", EvaluationFixture{
 		Status: "reviewed",
 		Scores: EvaluationScores{
@@ -358,6 +369,10 @@ func main() {
 			Date:         date.Format("2006-01-02"),
 			OverallScore: score,
 		})
+	}
+
+	if trend == nil {
+		trend = []ScoreTrendPoint{}
 	}
 
 	var gapAnalysis map[string]any
