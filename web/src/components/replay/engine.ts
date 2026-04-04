@@ -10,7 +10,7 @@ export interface ReplayState {
   activeAnnotationSeqs: number[];
 }
 
-interface ReplayOptions {
+export interface ReplayOptions {
   messages: Message[];
   sessionStartedAt: string;
   sessionEndedAt: string | null;
@@ -29,6 +29,7 @@ export function useReplayEngine(options: ReplayOptions | null) {
 
   const animRef = useRef<number>(0);
   const lastTickRef = useRef<number>(0);
+  const playingRef = useRef(false);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -50,6 +51,8 @@ export function useReplayEngine(options: ReplayOptions | null) {
   }, [options]);
 
   const tick = useCallback(() => {
+    if (!playingRef.current) return; // Stop the loop when not playing
+
     const now = performance.now();
     const dt = (now - lastTickRef.current) / 1000;
     lastTickRef.current = now;
@@ -59,6 +62,7 @@ export function useReplayEngine(options: ReplayOptions | null) {
 
       const newTime = prev.currentTime + dt * prev.speed;
       if (newTime >= prev.duration) {
+        playingRef.current = false; // Stop the rAF loop
         return { ...prev, isPlaying: false, currentTime: prev.duration };
       }
 
@@ -78,16 +82,23 @@ export function useReplayEngine(options: ReplayOptions | null) {
       };
     });
 
-    animRef.current = requestAnimationFrame(tick);
+    // Only continue the loop if still playing
+    if (playingRef.current) {
+      animRef.current = requestAnimationFrame(tick);
+    }
   }, []);
 
   const play = useCallback(() => {
+    // Cancel any existing loop to prevent stacking
+    cancelAnimationFrame(animRef.current);
+    playingRef.current = true;
     lastTickRef.current = performance.now();
     setState((s) => ({ ...s, isPlaying: true }));
     animRef.current = requestAnimationFrame(tick);
   }, [tick]);
 
   const pause = useCallback(() => {
+    playingRef.current = false;
     cancelAnimationFrame(animRef.current);
     setState((s) => ({ ...s, isPlaying: false }));
   }, []);
@@ -116,7 +127,10 @@ export function useReplayEngine(options: ReplayOptions | null) {
   }, []);
 
   useEffect(() => {
-    return () => cancelAnimationFrame(animRef.current);
+    return () => {
+      playingRef.current = false;
+      cancelAnimationFrame(animRef.current);
+    };
   }, []);
 
   return { state, play, pause, seek, setSpeed };
