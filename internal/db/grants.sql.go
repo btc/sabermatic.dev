@@ -283,21 +283,6 @@ func (q *Queries) GetRecentLedgerEntries(ctx context.Context, arg GetRecentLedge
 	return items, nil
 }
 
-const getUserBalance = `-- name: GetUserBalance :one
-SELECT COALESCE(SUM(remaining_minutes), 0)::int AS balance
-FROM grants
-WHERE user_id = $1
-  AND remaining_minutes > 0
-  AND (expires_at IS NULL OR expires_at > NOW())
-`
-
-func (q *Queries) GetUserBalance(ctx context.Context, userID uuid.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, getUserBalance, userID)
-	var balance int32
-	err := row.Scan(&balance)
-	return balance, err
-}
-
 const getUserUsageSummary = `-- name: GetUserUsageSummary :one
 SELECT
   COALESCE(SUM(remaining_minutes) FILTER (WHERE expires_at IS NULL OR expires_at > NOW()), 0)::int AS total_balance,
