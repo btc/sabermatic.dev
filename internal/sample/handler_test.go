@@ -8,61 +8,35 @@ import (
 	"github.com/btc/drill/internal/sample"
 )
 
-func TestSampleSessionEndpoint(t *testing.T) {
+func TestSampleEndpoints(t *testing.T) {
 	mux := http.NewServeMux()
 	sample.RegisterRoutes(mux)
 
-	req := httptest.NewRequest("GET", "/api/sample/session", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	endpoints := []string{
+		"/api/sample/session",
+		"/api/sample/evaluation",
+		"/api/sample/educator",
+		"/api/sample/coach",
 	}
-	ct := w.Header().Get("Content-Type")
-	if ct != "application/json" {
-		t.Fatalf("expected application/json, got %s", ct)
-	}
-	if w.Body.Len() == 0 {
-		t.Fatal("empty response body")
-	}
-}
 
-func TestSampleEvaluationEndpoint(t *testing.T) {
-	mux := http.NewServeMux()
-	sample.RegisterRoutes(mux)
+	for _, ep := range endpoints {
+		t.Run(ep, func(t *testing.T) {
+			req := httptest.NewRequest("GET", ep, nil)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
 
-	req := httptest.NewRequest("GET", "/api/sample/evaluation", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestSampleEducatorEndpoint(t *testing.T) {
-	mux := http.NewServeMux()
-	sample.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/sample/educator", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestSampleCoachEndpoint(t *testing.T) {
-	mux := http.NewServeMux()
-	sample.RegisterRoutes(mux)
-
-	req := httptest.NewRequest("GET", "/api/sample/coach", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+				t.Fatalf("expected application/json, got %s", ct)
+			}
+			if cc := w.Header().Get("Cache-Control"); cc != "public, max-age=3600" {
+				t.Fatalf("expected Cache-Control public, max-age=3600, got %s", cc)
+			}
+			if w.Body.Len() == 0 {
+				t.Fatal("empty response body")
+			}
+		})
 	}
 }

@@ -15,7 +15,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 
 func serveFixture(path string) http.HandlerFunc {
 	// Read at init time — embedded files don't change
-	data, err := FixtureFS.ReadFile(path)
+	data, err := fixtureFS.ReadFile(path)
 	if err != nil {
 		panic("missing fixture: " + path)
 	}
