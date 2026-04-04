@@ -175,6 +175,74 @@ func TestCompleteSession_RefundsUnusedMinutes(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// CancelSession: status, refund, and no eval job
+// ---------------------------------------------------------------------------
+
+func TestCancelSession_SetsStatusCancelled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 30,
+		Plan:            "free",
+	})
+	require.NoError(t, err)
+
+	err = b.CancelSession(ctx, session.ID, 2)
+	require.NoError(t, err)
+
+	// Status must be "cancelled", not "completed".
+	got, err := db.New(b.pool).GetSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "cancelled", got.Status, "CancelSession must set status to 'cancelled'")
+	assert.True(t, got.ArchivedAt.Valid, "CancelSession must set archived_at")
+	assert.True(t, got.EndedAt.Valid, "CancelSession must set ended_at")
+}
+
+func TestCancelSession_RefundsFullReservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 30,
+		Plan:            "free",
+	})
+	require.NoError(t, err)
+
+	// Balance after reservation: 60 - 30 = 30.
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), bs.TotalBalance)
+
+	// Cancel immediately — should refund nearly all reserved minutes.
+	err = b.CancelSession(ctx, session.ID, 0)
+	require.NoError(t, err)
+
+	// Refund should restore balance (30 reserved - 1 min floor = 29 refunded → 59 total).
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(59), bs.TotalBalance)
+}
+
+// ---------------------------------------------------------------------------
 // SQL query tests: ReserveMinutes, RefundSessionMinutes, FullRefundSessionMinutes
 // ---------------------------------------------------------------------------
 

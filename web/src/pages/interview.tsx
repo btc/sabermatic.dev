@@ -170,8 +170,6 @@ export default function Interview() {
 }
 
 function InterviewInner({ sessionId }: { sessionId: string }) {
-  const navigate = useNavigate();
-
   // Hooks
   const {
     messages,
@@ -187,6 +185,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     setRawMessageHandler,
   } = useInterview(sessionId);
 
+  const navigate = useNavigate();
   const { data: session } = useSession(sessionId);
   const audioRecorder = useAudioRecorder();
   const audioPlayer = useAudioPlayer();
@@ -195,6 +194,13 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     session?.started_at ?? null,
     sessionInfo?.duration ?? 0,
   );
+
+  // Navigate home when session is cancelled
+  useEffect(() => {
+    if (state === "cancelled") {
+      navigate("/");
+    }
+  }, [state, navigate]);
 
   // Local state
   const [textInput, setTextInput] = useState("");
@@ -309,7 +315,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Derived state ------
   const isStreaming = state === "streaming";
   const isProcessing = state === "transcribing" || state === "processing";
-  const isEnded = state === "ended";
+  const isEnded = state === "ended" || state === "cancelled";
   const inputDisabled = isStreaming || isEnded;
   const canSend = (textInput.trim().length > 0 || audioRecorder.segmentCount > 0) && !inputDisabled;
 
