@@ -19,20 +19,14 @@ import (
 
 // seedFreeGrant creates a free grant with the given minutes, expiring at the
 // end of the current month.
-func seedFreeGrant(t *testing.T, b *Backend, userID uuid.UUID, minutes int32) db.Grant {
+func seedFreeGrant(t *testing.T, b *Backend, userID uuid.UUID, minutes int32) {
 	t.Helper()
-	q := db.New(b.pool)
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC),
-		Valid: true,
-	}
-	grant, err := q.CreateFreeGrant(context.Background(), db.CreateFreeGrantParams{
+	err := db.New(b.pool).EnsureFreeGrant(context.Background(), db.EnsureFreeGrantParams{
 		UserID:         userID,
 		InitialMinutes: minutes,
-		ExpiresAt:      expiresAt,
+		ExpiresAt:      pgtype.Timestamptz{Time: time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC), Valid: true},
 	})
 	require.NoError(t, err)
-	return grant
 }
 
 // ---------------------------------------------------------------------------

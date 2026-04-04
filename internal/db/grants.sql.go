@@ -13,36 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createFreeGrant = `-- name: CreateFreeGrant :one
-INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
-VALUES ($1, 'free_grant', $2, $2, $3)
-ON CONFLICT (user_id, date_trunc('month', timezone('UTC', created_at))) WHERE source = 'free_grant'
-DO NOTHING
-RETURNING id, user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at, created_at
-`
-
-type CreateFreeGrantParams struct {
-	UserID         uuid.UUID          `json:"user_id"`
-	InitialMinutes int32              `json:"initial_minutes"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) CreateFreeGrant(ctx context.Context, arg CreateFreeGrantParams) (Grant, error) {
-	row := q.db.QueryRow(ctx, createFreeGrant, arg.UserID, arg.InitialMinutes, arg.ExpiresAt)
-	var i Grant
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.Source,
-		&i.StripeEventID,
-		&i.InitialMinutes,
-		&i.RemainingMinutes,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const createGrantFromStripe = `-- name: CreateGrantFromStripe :one
 INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)
 VALUES ($1, $2, $3, $4, $4, $5)
@@ -98,6 +68,33 @@ func (q *Queries) DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, 
 	var remaining_minutes int32
 	err := row.Scan(&remaining_minutes)
 	return remaining_minutes, err
+}
+
+const ensureFreeGrant = `-- name: EnsureFreeGrant :exec
+WITH new_grant AS (
+  INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
+  VALUES ($1, 'free_grant', $2, $2, $3)
+  ON CONFLICT (user_id, date_trunc('month', timezone('UTC', created_at))) WHERE source = 'free_grant'
+  DO NOTHING
+  RETURNING id, user_id, initial_minutes
+)
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+SELECT user_id, id, initial_minutes, 'free_monthly'
+FROM new_grant
+`
+
+type EnsureFreeGrantParams struct {
+	UserID         uuid.UUID          `json:"user_id"`
+	InitialMinutes int32              `json:"initial_minutes"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Creates the monthly free grant + ledger entry atomically. If the grant
+// already exists (ON CONFLICT), both the INSERT and the ledger SELECT
+// produce zero rows — a no-op.
+func (q *Queries) EnsureFreeGrant(ctx context.Context, arg EnsureFreeGrantParams) error {
+	_, err := q.db.Exec(ctx, ensureFreeGrant, arg.UserID, arg.InitialMinutes, arg.ExpiresAt)
+	return err
 }
 
 const fullRefundSessionMinutes = `-- name: FullRefundSessionMinutes :many

@@ -94,7 +94,7 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 		return db.InterviewSession{}, fmt.Errorf("create session: %w", err)
 	}
 
-	// Reserve minutes via shared FIFO walk (locks grants, checks balance, debits).
+	// Reserve minutes from the user's grants.
 	if err := b.reserveMinutesTx(ctx, tx, p.UserID, session.ID, duration); err != nil {
 		return db.InterviewSession{}, err
 	}

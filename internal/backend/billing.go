@@ -35,51 +35,19 @@ func snapshotFrom(row db.GetBillingSnapshotRow) billing.BillingSnapshot {
 // ---------------------------------------------------------------------------
 
 // EnsureFreeGrant creates the current-month free grant for the user if it does
-// not already exist. The grant amount and expiry are determined by the user's
-// plan. It is safe to call multiple times per month; duplicate creation is a
-// no-op thanks to the ON CONFLICT clause in CreateFreeGrant.
+// not already exist. The SQL atomically creates both the grant and its ledger
+// entry in a single writable CTE. If the grant already exists (ON CONFLICT),
+// both inserts no-op.
 func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planName string) error {
 	plan, ok := billing.PlanByName(planName)
 	if !ok {
 		return fmt.Errorf("unknown plan %q", planName)
 	}
-
-	now := time.Now().UTC()
-	expiresAt := billing.EndOfMonth(now)
-
-	tx, err := b.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin free grant tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	q := db.New(tx)
-	grant, err := q.CreateFreeGrant(ctx, db.CreateFreeGrantParams{
+	return db.New(b.pool).EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
 		UserID:         userID,
 		InitialMinutes: int32(plan.MinutesPerMonth),
-		ExpiresAt:      pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		ExpiresAt:      pgtype.Timestamptz{Time: billing.EndOfMonth(time.Now().UTC()), Valid: true},
 	})
-	if err != nil {
-		// ON CONFLICT DO NOTHING returns pgx.ErrNoRows when the grant
-		// already exists for this month -- treat as success.
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("create free grant: %w", err)
-	}
-
-	// Record the grant creation in the ledger for auditability.
-	if _, err := q.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
-		UserID:    userID,
-		GrantID:   grant.ID,
-		Amount:    int32(plan.MinutesPerMonth),
-		Reason:    "free_monthly",
-		SessionID: pgtype.UUID{},
-	}); err != nil {
-		return fmt.Errorf("insert free grant ledger entry: %w", err)
-	}
-
-	return tx.Commit(ctx)
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,6 @@ type Querier interface {
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountSeedQuestions(ctx context.Context) (int64, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
-	CreateFreeGrant(ctx context.Context, arg CreateFreeGrantParams) (Grant, error)
 	CreateGrantFromStripe(ctx context.Context, arg CreateGrantFromStripeParams) (Grant, error)
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) (OauthAccount, error)
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
@@ -24,6 +23,10 @@ type Querier interface {
 	DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, error)
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
+	// Creates the monthly free grant + ledger entry atomically. If the grant
+	// already exists (ON CONFLICT), both the INSERT and the ledger SELECT
+	// produce zero rows — a no-op.
+	EnsureFreeGrant(ctx context.Context, arg EnsureFreeGrantParams) error
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
 	// Refunds exactly @minutes back to the grants that were originally debited
 	// for this session. Used by FailSession (platform error → full refund).
