@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	stripe "github.com/stripe/stripe-go/v82"
 
 	"github.com/btc/drill/internal/db"
 )
@@ -399,6 +400,361 @@ func TestFullRefundSessionMinutes_FailSession(t *testing.T) {
 	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
 	assert.Equal(t, int32(60), bs.TotalBalance)
+}
+
+// ---------------------------------------------------------------------------
+// Stripe webhook handler integration tests
+// ---------------------------------------------------------------------------
+
+// makeEvent constructs a stripe.Event with the given type, ID, and object data.
+// GetObjectValue reads from Data.Object (a map[string]interface{}), so we set
+// that directly without going through JSON round-tripping.
+func makeEvent(eventType, eventID string, object map[string]interface{}) stripe.Event {
+	return stripe.Event{
+		ID:   eventID,
+		Type: stripe.EventType(eventType),
+		Data: &stripe.EventData{
+			Object: object,
+		},
+	}
+}
+
+// seedUserWithStripeCustomer creates a user, assigns a stripe_customer_id, and
+// returns the userID and the customer ID string.
+func seedUserWithStripeCustomer(t *testing.T, b *Backend) (uuid.UUID, string) {
+	t.Helper()
+	userID := seedUser(t, b)
+	custID := "cus_test_" + uuid.NewString()[:8]
+	err := db.New(b.pool).UpdateUserStripeCustomerID(context.Background(), db.UpdateUserStripeCustomerIDParams{
+		ID:               userID,
+		StripeCustomerID: pgtype.Text{String: custID, Valid: true},
+	})
+	require.NoError(t, err)
+	return userID, custID
+}
+
+func TestHandleCheckoutCompleted_CreatesPurchaseGrant(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	eventID := "evt_checkout_" + uuid.NewString()[:8]
+
+	event := makeEvent("checkout.session.completed", eventID, map[string]interface{}{
+		"mode": "payment",
+		"metadata": map[string]interface{}{
+			"user_id":     userID.String(),
+			"pack_minutes": "120",
+		},
+	})
+
+	err := b.handleCheckoutCompleted(ctx, event)
+	require.NoError(t, err)
+
+	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, "purchase", grants[0].Source)
+	assert.Equal(t, int32(120), grants[0].RemainingMinutes)
+}
+
+func TestHandleCheckoutCompleted_IgnoresSubscriptionMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	eventID := "evt_checkout_sub_" + uuid.NewString()[:8]
+
+	event := makeEvent("checkout.session.completed", eventID, map[string]interface{}{
+		"mode": "subscription",
+		"metadata": map[string]interface{}{
+			"user_id": userID.String(),
+		},
+	})
+
+	err := b.handleCheckoutCompleted(ctx, event)
+	require.NoError(t, err)
+
+	// No grants should be created for subscription-mode checkouts.
+	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
+	require.NoError(t, err)
+	assert.Empty(t, grants)
+}
+
+func TestHandleCheckoutCompleted_IdempotentOnDuplicateEventID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	eventID := "evt_checkout_idem_" + uuid.NewString()[:8]
+
+	event := makeEvent("checkout.session.completed", eventID, map[string]interface{}{
+		"mode": "payment",
+		"metadata": map[string]interface{}{
+			"user_id":     userID.String(),
+			"pack_minutes": "60",
+		},
+	})
+
+	// Call twice with the same event ID — should be idempotent.
+	require.NoError(t, b.handleCheckoutCompleted(ctx, event))
+	require.NoError(t, b.handleCheckoutCompleted(ctx, event))
+
+	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
+	require.NoError(t, err)
+	assert.Len(t, grants, 1, "duplicate stripe event should not create a second grant")
+}
+
+func TestHandleInvoicePaid_CreatesSubscriptionGrantAndSetsPlan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+	eventID := "evt_invoice_" + uuid.NewString()[:8]
+
+	event := makeEvent("invoice.paid", eventID, map[string]interface{}{
+		"customer": custID,
+	})
+
+	err := b.handleInvoicePaid(ctx, event)
+	require.NoError(t, err)
+
+	// Subscription grant should exist.
+	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, "subscription", grants[0].Source)
+
+	// Plan should have been upgraded to "pro".
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "pro", user.Plan)
+}
+
+func TestHandleInvoicePaid_UnknownCustomerIsNoOp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	eventID := "evt_invoice_unknown_" + uuid.NewString()[:8]
+
+	event := makeEvent("invoice.paid", eventID, map[string]interface{}{
+		"customer": "cus_doesnotexist",
+	})
+
+	// Should return nil (not an error) for an unknown customer.
+	err := b.handleInvoicePaid(ctx, event)
+	require.NoError(t, err)
+}
+
+func TestHandleInvoicePaid_IdempotentOnDuplicateEventID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+	eventID := "evt_invoice_idem_" + uuid.NewString()[:8]
+
+	event := makeEvent("invoice.paid", eventID, map[string]interface{}{
+		"customer": custID,
+	})
+
+	require.NoError(t, b.handleInvoicePaid(ctx, event))
+	require.NoError(t, b.handleInvoicePaid(ctx, event))
+
+	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
+	require.NoError(t, err)
+	assert.Len(t, grants, 1, "duplicate invoice.paid should not create a second grant")
+}
+
+func TestHandleSubscriptionDeleted_SetsPlanToFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	// Promote the user to "pro" first by setting the plan directly.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE users SET plan = 'pro' WHERE id = $1`, userID)
+	require.NoError(t, err)
+
+	// Confirm setup.
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "pro", user.Plan)
+
+	eventID := "evt_sub_deleted_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.deleted", eventID, map[string]interface{}{
+		"customer": custID,
+	})
+
+	err = b.handleSubscriptionDeleted(ctx, event)
+	require.NoError(t, err)
+
+	// Plan should now be "free".
+	user, err = db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "free", user.Plan)
+}
+
+func TestHandleSubscriptionDeleted_UnknownCustomerIsNoOp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	eventID := "evt_sub_deleted_unknown_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.deleted", eventID, map[string]interface{}{
+		"customer": "cus_doesnotexist",
+	})
+
+	err := b.handleSubscriptionDeleted(ctx, event)
+	require.NoError(t, err)
+}
+
+func TestHandleSubscriptionUpdated_ActiveStatusKeepsPro(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	// Start on free plan.
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "free", user.Plan)
+
+	eventID := "evt_sub_updated_active_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.updated", eventID, map[string]interface{}{
+		"customer": custID,
+		"status":   "active",
+	})
+
+	err = b.handleSubscriptionUpdated(ctx, event)
+	require.NoError(t, err)
+
+	// "active" status → plan should be "pro".
+	user, err = db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "pro", user.Plan)
+}
+
+func TestHandleSubscriptionUpdated_CanceledStatusDowngradesToFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	// First upgrade to pro.
+	_, err := b.pool.Exec(ctx, `UPDATE users SET plan = 'pro' WHERE id = $1`, userID)
+	require.NoError(t, err)
+
+	eventID := "evt_sub_updated_canceled_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.updated", eventID, map[string]interface{}{
+		"customer": custID,
+		"status":   "canceled",
+	})
+
+	err = b.handleSubscriptionUpdated(ctx, event)
+	require.NoError(t, err)
+
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "free", user.Plan)
+}
+
+func TestHandleSubscriptionUpdated_UnpaidStatusDowngradesToFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	_, err := b.pool.Exec(ctx, `UPDATE users SET plan = 'pro' WHERE id = $1`, userID)
+	require.NoError(t, err)
+
+	eventID := "evt_sub_updated_unpaid_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.updated", eventID, map[string]interface{}{
+		"customer": custID,
+		"status":   "unpaid",
+	})
+
+	err = b.handleSubscriptionUpdated(ctx, event)
+	require.NoError(t, err)
+
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "free", user.Plan)
+}
+
+func TestHandleSubscriptionUpdated_PastDueStatusDowngradesToFree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	_, err := b.pool.Exec(ctx, `UPDATE users SET plan = 'pro' WHERE id = $1`, userID)
+	require.NoError(t, err)
+
+	eventID := "evt_sub_updated_pastdue_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.updated", eventID, map[string]interface{}{
+		"customer": custID,
+		"status":   "past_due",
+	})
+
+	err = b.handleSubscriptionUpdated(ctx, event)
+	require.NoError(t, err)
+
+	user, err := db.New(b.pool).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "free", user.Plan)
+}
+
+func TestHandleSubscriptionUpdated_UnknownCustomerIsNoOp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	eventID := "evt_sub_updated_unknown_" + uuid.NewString()[:8]
+	event := makeEvent("customer.subscription.updated", eventID, map[string]interface{}{
+		"customer": "cus_doesnotexist",
+		"status":   "active",
+	})
+
+	err := b.handleSubscriptionUpdated(ctx, event)
+	require.NoError(t, err)
 }
 
 func TestEnsureFreeGrant_Idempotent(t *testing.T) {

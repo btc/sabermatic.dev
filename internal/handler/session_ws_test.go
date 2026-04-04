@@ -1747,3 +1747,51 @@ func TestWS_PingPong(t *testing.T) {
 	pong := readMsg(t, ws)
 	assert.Equal(t, "pong", pong["type"])
 }
+
+// ---------------------------------------------------------------------------
+// Test: cancel_session — server responds with session_ended, DB marked cancelled
+// ---------------------------------------------------------------------------
+
+func TestWS_CancelSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	tokens := []string{"Let's ", "discuss ", "this."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux, b)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Wait for the opening sequence to finish before cancelling.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send cancel_session.
+	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
+
+	// Read messages until session_ended, asserting reason == "cancelled".
+	ended, _ := drainUntilType(t, ws, "session_ended")
+	assert.Equal(t, "cancelled", ended["reason"], "session_ended reason should be 'cancelled'")
+
+	// Verify DB state.
+	ctx := context.Background()
+	updated, err := db.New(pool).GetSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "cancelled", updated.Status, "session status should be 'cancelled'")
+	assert.True(t, updated.ArchivedAt.Valid, "archived_at should be set after cancellation")
+	assert.True(t, updated.EndedAt.Valid, "ended_at should be set after cancellation")
+}
