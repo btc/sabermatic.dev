@@ -16,10 +16,9 @@ function FadeInCard({
   return (
     <div
       className={`border-l-2 pl-4 py-2 transition-all duration-500 motion-reduce:transition-none ${
-        animate ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-      }`}
+        accent === "strength" ? "border-strength" : accent === "gap" ? "border-gap" : "border-primary"
+      } ${animate ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
       style={{
-        borderColor: `hsl(var(--${accent}))`,
         transitionDelay: `${delay}ms`,
       }}
     >
