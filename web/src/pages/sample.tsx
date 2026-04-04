@@ -22,7 +22,7 @@ export default function SampleSession() {
 
         <main className="mx-auto max-w-5xl px-4 py-6">
           <div className="border-b border-border -mx-4 px-4">
-            <nav className="flex items-end max-w-5xl mx-auto -mb-px">
+            <nav aria-label="Session tabs" className="flex items-end max-w-5xl mx-auto -mb-px">
               <TabLink to="/sample">Overview</TabLink>
               <TabLink to="/sample/transcript">Transcript</TabLink>
               <TabLink to="/sample/deep-dive">Deep Dive</TabLink>
