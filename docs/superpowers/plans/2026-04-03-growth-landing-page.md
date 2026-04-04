@@ -326,8 +326,14 @@ func main() {
 	}
 
 	var strengthList, gapList []string
-	json.Unmarshal(strengths, &strengthList)
-	json.Unmarshal(gaps, &gapList)
+	if err := json.Unmarshal(strengths, &strengthList); err != nil {
+		fmt.Fprintf(os.Stderr, "unmarshal strengths: %v\n", err)
+		os.Exit(1)
+	}
+	if err := json.Unmarshal(gaps, &gapList); err != nil {
+		fmt.Fprintf(os.Stderr, "unmarshal gaps: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Annotations
 	aRows, err := conn.Query(ctx, `
@@ -416,6 +422,8 @@ func main() {
 	}
 
 	// Build score trend from all user sessions
+	// NOTE: v0 is single-user so no WHERE user_id clause is needed.
+	// For multi-user, add: WHERE s.user_id = (SELECT user_id FROM sessions WHERE id = $1)
 	trendRows, err := conn.Query(ctx, `
 		SELECT s.started_at, e.score_overall
 		FROM sessions s
@@ -448,7 +456,10 @@ func main() {
 	// The narrative is the recommendation text. weakest_dimension, improving_dimensions,
 	// topic_gaps are extracted from gap_analysis JSON.
 	var gapAnalysis map[string]any
-	json.Unmarshal(gapAnalysisJSON, &gapAnalysis)
+	if err := json.Unmarshal(gapAnalysisJSON, &gapAnalysis); err != nil {
+		fmt.Fprintf(os.Stderr, "unmarshal gap_analysis: %v\n", err)
+		os.Exit(1)
+	}
 
 	sessionIDs := make([]string, len(sessionsJSON))
 	for i, id := range sessionsJSON {
@@ -484,6 +495,14 @@ func main() {
 	if sqid, ok := gapAnalysis["suggested_question_id"]; ok && sqid != nil {
 		s := fmt.Sprintf("%v", sqid)
 		coach.SuggestedQuestionID = &s
+	}
+
+	// Ensure nil slices marshal as [] not null in JSON
+	if coach.ImprovingDimensions == nil {
+		coach.ImprovingDimensions = []string{}
+	}
+	if coach.TopicGaps == nil {
+		coach.TopicGaps = []string{}
 	}
 
 	writeJSON("internal/sample/fixtures/coach.json", coach)
@@ -556,6 +575,8 @@ git commit -m "feat: extract v0 session 27 data into sample fixtures"
 ---
 
 ## Task 2: Go Backend — Sample Data Endpoints
+
+**Blocked by:** Task 1 must run first to produce the fixture JSON files. The server will panic at startup if `internal/sample/fixtures/*.json` files are missing, since `serveFixture` reads them at init time.
 
 **Files:**
 - Create: `internal/sample/embed.go`
@@ -804,11 +825,16 @@ func SPAHandler(fsys fs.FS) http.Handler {
 	ogTags := map[string]string{
 		"/": `<meta property="og:title" content="Sabermetric">` +
 			`<meta property="og:description" content="data-driven system design prep">` +
-			`<meta property="og:type" content="website">`,
+			`<meta property="og:type" content="website">` +
+			`<meta property="og:image" content="/og-landing.png">`,
 		"/sample": `<meta property="og:title" content="Sabermetric — sample evaluation">` +
 			`<meta property="og:description" content="See a real system design interview evaluated across 5 dimensions">` +
-			`<meta property="og:type" content="website">`,
+			`<meta property="og:type" content="website">` +
+			`<meta property="og:image" content="/og-sample.png">`,
 	}
+	// NOTE: og:image static assets (`og-landing.png`, `og-sample.png`) need to be created
+	// and placed in `web/public/` (or served from GCS). These can be screenshots of the
+	// scoring section and session overview respectively.
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -941,35 +967,43 @@ export interface CoachFixture extends CoachAnalysis {
   score_trend: ScoreTrendPoint[];
 }
 
-export function useSampleSession() {
+interface SampleQueryOptions {
+  enabled?: boolean;
+}
+
+export function useSampleSession(options?: SampleQueryOptions) {
   return useQuery({
     queryKey: ["sample", "session"],
     queryFn: () => apiClient.get<SessionFixture>("/api/sample/session"),
     staleTime: Infinity,
+    enabled: options?.enabled,
   });
 }
 
-export function useSampleEvaluation() {
+export function useSampleEvaluation(options?: SampleQueryOptions) {
   return useQuery({
     queryKey: ["sample", "evaluation"],
     queryFn: () => apiClient.get<EvaluationResponse>("/api/sample/evaluation"),
     staleTime: Infinity,
+    enabled: options?.enabled,
   });
 }
 
-export function useSampleEducator() {
+export function useSampleEducator(options?: SampleQueryOptions) {
   return useQuery({
     queryKey: ["sample", "educator"],
     queryFn: () => apiClient.get<EducatorAnalysis>("/api/sample/educator"),
     staleTime: Infinity,
+    enabled: options?.enabled,
   });
 }
 
-export function useSampleCoach() {
+export function useSampleCoach(options?: SampleQueryOptions) {
   return useQuery({
     queryKey: ["sample", "coach"],
     queryFn: () => apiClient.get<CoachFixture>("/api/sample/coach"),
     staleTime: Infinity,
+    enabled: options?.enabled,
   });
 }
 ```
@@ -998,10 +1032,14 @@ Add to `web/src/hooks/use-auth.ts`:
 /**
  * Checks auth state without redirecting. For routes that render
  * different content based on auth (e.g., landing page vs dashboard).
+ * Distinguishes 401 (not authenticated) from 5xx (server error) so
+ * server errors don't incorrectly show the landing page.
  */
 export function useOptionalAuth() {
-  const { data: user, isLoading, isError } = useMe();
-  return { user, isLoading, isAuthenticated: !!user && !isError };
+  const { data: user, isLoading, error } = useMe();
+  // Only treat 401 as "not authenticated". Server errors should not show landing page.
+  const isAuthError = error && (error as any)?.status === 401;
+  return { user, isLoading, isAuthenticated: !!user, isAuthError };
 }
 ```
 
@@ -1058,7 +1096,7 @@ export function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
-        <Route path="/sample" element={<SampleSession />} />
+        {/* The /sample route with nested tabs is set up in Task 15 */}
 
         {/* Root — conditional: landing (unauth) or app layout (auth) */}
         <Route path="/" element={<ConditionalHome />} />
@@ -1091,14 +1129,25 @@ Note: `ConditionalHome` handles the `/` route. When authenticated, it renders `H
 
 ```typescript
 function ConditionalHome() {
-  const { isAuthenticated, isLoading } = useOptionalAuth();
+  const { isAuthenticated, isLoading, isAuthError } = useOptionalAuth();
   if (isLoading) return <Loading />;
-  if (!isAuthenticated) return <Landing />;
-  // Authenticated: render within AppLayout
+  if (isAuthenticated) {
+    // Authenticated: render within AppLayout
+    return (
+      <AppLayout>
+        <Home />
+      </AppLayout>
+    );
+  }
+  if (isAuthError) {
+    // 401 — show landing page for unauthenticated visitors
+    return <Landing />;
+  }
+  // Non-401 error (5xx, network failure) — show error state, not landing page
   return (
-    <AppLayout>
-      <Home />
-    </AppLayout>
+    <div className="flex min-h-screen items-center justify-center">
+      <p className="text-sm text-muted-foreground">Something went wrong. Please try again later.</p>
+    </div>
   );
 }
 ```
@@ -1107,24 +1156,21 @@ And update `AppLayout` to accept children as an alternative to `<Outlet />`:
 
 - [ ] **Step 3: Update AppLayout to support children**
 
-In `web/src/layouts/app-layout.tsx`, update the return to use `children` when provided, otherwise `<Outlet />`:
+In `web/src/layouts/app-layout.tsx`, make two targeted changes. **Only change the function signature and the `<Outlet />` line. Do not replace the entire component.**
 
-```typescript
-export function AppLayout({ children }: { children?: React.ReactNode }) {
-  // ... existing hook calls ...
-
-  return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border">
-        {/* ... existing header ... */}
-      </header>
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        {children ?? <Outlet />}
-      </main>
-    </div>
-  );
-}
+1. Change the function signature to accept optional children:
+```diff
+-export function AppLayout() {
++export function AppLayout({ children }: { children?: React.ReactNode }) {
 ```
+
+2. Change the `<Outlet />` in the main content area to use children when provided:
+```diff
+-        <Outlet />
++        {children ?? <Outlet />}
+```
+
+Leave the entire header, nav, and all other JSX completely untouched.
 
 - [ ] **Step 4: Verify the app builds**
 
@@ -1197,6 +1243,8 @@ export function Hero() {
       >
         {TAGLINES[index]}
       </p>
+      {/* NOTE: Consider using buttonVariants({ variant: "default" }) from shadcn/ui
+          instead of hand-rolled classes, for consistent styling with other buttons. */}
       <Link
         to="/signup"
         className="mt-4 rounded-md bg-primary px-8 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
@@ -1378,6 +1426,7 @@ git commit -m "feat: landing page scoring section with animated bars"
 
 ```tsx
 // web/src/pages/landing/strengths-gaps.tsx
+import type { ReactNode } from "react";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 import { useSampleEvaluation } from "@/api/sample-queries";
 
@@ -1387,7 +1436,7 @@ function FadeInCard({
   animate,
   accent,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   delay: number;
   animate: boolean;
   accent: string;
@@ -1733,7 +1782,7 @@ export function Coaching() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
   const { data: coach } = useSampleCoach();
 
-  if (!coach) return null;
+  if (!coach || !coach.narrative) return null;
 
   return (
     <section ref={ref} className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
@@ -1812,7 +1861,7 @@ git commit -m "feat: landing page coaching section with sparkline"
 
 ```tsx
 // web/src/pages/landing/voice-pipeline.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 
 type Stage = "waveform" | "transcript" | "annotations";
@@ -1820,6 +1869,12 @@ type Stage = "waveform" | "transcript" | "annotations";
 export function VoicePipeline() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
   const [stage, setStage] = useState<Stage>("waveform");
+
+  // Stable random bar heights — computed once, not on every render
+  const barHeights = useMemo(
+    () => Array.from({ length: 24 }, (_, i) => 12 + Math.sin(i * 0.5) * 12 + Math.random() * 8),
+    [],
+  );
 
   useEffect(() => {
     if (!isVisible) return;
@@ -1842,12 +1897,12 @@ export function VoicePipeline() {
             isVisible ? "opacity-100" : "opacity-0"
           }`}
         >
-          {Array.from({ length: 24 }).map((_, i) => (
+          {barHeights.map((h, i) => (
             <div
               key={i}
               className={`w-1 rounded-full bg-primary ${stage === "waveform" ? "animate-pulse" : ""}`}
               style={{
-                height: `${12 + Math.sin(i * 0.5) * 12 + Math.random() * 8}px`,
+                height: `${h}px`,
               }}
             />
           ))}
@@ -2054,6 +2109,55 @@ git commit -m "feat: complete landing page with all 10 sections"
 
 This task makes the session detail components work with both authenticated API data and public sample data.
 
+- [ ] **Step 0: Widen hook signatures to accept `enabled`**
+
+In `web/src/api/queries.ts`, update `useSession` and `useTranscript` to accept an `enabled` option so callers can conditionally skip queries:
+
+```typescript
+// useSession — add `enabled` to the options Pick type
+export function useSession(
+  id: string,
+  options?: Pick<UseQueryOptions, "refetchInterval" | "enabled">,
+) {
+  return useQuery({
+    queryKey: ["session", id],
+    queryFn: () => apiClient.get<Session>(`/api/sessions/${id}`),
+    enabled: options?.enabled,
+    refetchInterval: options?.refetchInterval,
+  });
+}
+
+// useTranscript — add optional `enabled` param
+export function useTranscript(sessionId: string, enabled?: boolean) {
+  return useQuery({
+    queryKey: ["transcript", sessionId],
+    queryFn: () => apiClient.get<Message[]>(`/api/sessions/${sessionId}/messages`),
+    enabled,
+  });
+}
+```
+
+`useEducator` and `useEvaluation` already accept `enabled` parameters, so no changes are needed for them.
+
+Also update `web/src/api/sample-queries.ts` (from Task 5) so each sample hook accepts an optional `options` object with `enabled`, to allow callers to disable them when not in sample mode:
+
+```typescript
+interface SampleQueryOptions {
+  enabled?: boolean;
+}
+
+export function useSampleSession(options?: SampleQueryOptions) {
+  return useQuery({
+    queryKey: ["sample", "session"],
+    queryFn: () => apiClient.get<SessionFixture>("/api/sample/session"),
+    staleTime: Infinity,
+    enabled: options?.enabled,
+  });
+}
+
+// Apply the same pattern to useSampleEvaluation, useSampleEducator, useSampleCoach
+```
+
 - [ ] **Step 1: Update session layout to accept dataSource**
 
 In `web/src/pages/session/layout.tsx`, add a context for the data source:
@@ -2094,10 +2198,10 @@ export default function SessionLayout() {
 }
 ```
 
-Export the provider for use by the sample page:
+Export the provider and `TabLink` for use by the sample page (Task 15):
 
 ```tsx
-export { SessionDetailCtx };
+export { SessionDetailCtx, TabLink };
 ```
 
 - [ ] **Step 2: Update overview.tsx to use context**
@@ -2112,8 +2216,8 @@ import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
 const { dataSource, sessionId } = useSessionDetail();
 const authSession = useSession(sessionId, { enabled: dataSource === "api" });
 const authEval = useEvaluation(sessionId, dataSource === "api");
-const sampleSession = useSampleSession();
-const sampleEval = useSampleEvaluation();
+const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
 
 const session = dataSource === "api" ? authSession.data : sampleSession.data?.session;
 const evaluation = dataSource === "api" ? authEval.data : sampleEval.data;
@@ -2125,10 +2229,10 @@ Same pattern: check `dataSource`, use sample hooks for transcript messages and a
 
 ```tsx
 const { dataSource, sessionId } = useSessionDetail();
-const authTranscript = useTranscript(sessionId);
+const authTranscript = useTranscript(sessionId, dataSource === "api");
 const authEval = useEvaluation(sessionId, dataSource === "api");
-const sampleSession = useSampleSession();
-const sampleEval = useSampleEvaluation();
+const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
 
 const messages = dataSource === "api" ? authTranscript.data : sampleSession.data?.messages;
 const annotations = dataSource === "api" ? authEval.data?.annotations : sampleEval.data?.annotations;
@@ -2139,7 +2243,7 @@ const annotations = dataSource === "api" ? authEval.data?.annotations : sampleEv
 ```tsx
 const { dataSource, sessionId } = useSessionDetail();
 const authEducator = useEducator(sessionId, dataSource === "api");
-const sampleEducator = useSampleEducator();
+const sampleEducator = useSampleEducator({ enabled: dataSource === "sample" });
 
 const educator = dataSource === "api" ? authEducator.data : sampleEducator.data;
 ```
@@ -2175,31 +2279,14 @@ import SessionLayoutInner from "@/pages/session/layout";
 // Re-export the inner layout — but we need the tab nav + outlet structure.
 // The simplest approach: render the session layout with sample context.
 
-import { Outlet, NavLink, Routes, Route } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import Overview from "@/pages/session/overview";
 import TranscriptPage from "@/pages/session/transcript";
 import DeepDive from "@/pages/session/deep-dive";
-import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
-
-function TabLink({ to, children }: { to: string; children: React.ReactNode }) {
-  return (
-    <NavLink
-      to={to}
-      end
-      className={({ isActive }) =>
-        cn(
-          "px-4 py-2.5 text-sm transition-colors",
-          isActive
-            ? "border-b-2 border-primary text-foreground font-medium"
-            : "text-muted-foreground hover:text-foreground",
-        )
-      }
-    >
-      {children}
-    </NavLink>
-  );
-}
+// Reuse TabLink from session layout instead of redefining it.
+// NOTE: Task 14 Step 1 must also export TabLink from web/src/pages/session/layout.tsx
+import { TabLink } from "@/pages/session/layout";
 
 export default function SampleSession() {
   return (
@@ -2209,7 +2296,7 @@ export default function SampleSession() {
         <header className="border-b border-border">
           <div className="mx-auto flex h-12 max-w-5xl items-center justify-between px-4">
             <Link to="/" className="text-sm font-semibold tracking-wider text-muted-foreground">
-              DRILL
+              sabermetric
             </Link>
             <Link
               to="/signup"
@@ -2271,6 +2358,8 @@ git commit -m "feat: sample session page at /sample with session 27 data"
 
 ## Task 16: Session Replay — Engine
 
+> **Note:** This is the text-only replay fallback described in the spec. Audio playback is deferred — the conductor spec defers audio storage to v1. Audio playback will be integrated when the v1 audio storage pipeline is implemented.
+
 **Files:**
 - Create: `web/src/components/replay/engine.ts`
 
@@ -2310,6 +2399,11 @@ export function useReplayEngine(options: ReplayOptions | null) {
   const animRef = useRef<number>(0);
   const lastTickRef = useRef<number>(0);
 
+  // Store options in a ref so the tick callback always reads the latest value
+  // without needing to be recreated (which would break the animation loop).
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   // Compute message timestamps as offsets from session start
   const messageOffsets = useRef<number[]>([]);
 
@@ -2343,9 +2437,10 @@ export function useReplayEngine(options: ReplayOptions | null) {
       // Count visible messages
       const visible = messageOffsets.current.filter((t) => t <= newTime).length;
 
-      // Active annotation seqs
-      const activeAnns = options?.annotationSeqs.filter((seq) => {
-        const idx = options.messages.findIndex((m) => m.seq === seq);
+      // Active annotation seqs — read from ref to avoid stale closure
+      const opts = optionsRef.current;
+      const activeAnns = opts?.annotationSeqs.filter((seq) => {
+        const idx = opts.messages.findIndex((m) => m.seq === seq);
         return idx >= 0 && idx < visible;
       }) ?? [];
 
@@ -2358,7 +2453,7 @@ export function useReplayEngine(options: ReplayOptions | null) {
     });
 
     animRef.current = requestAnimationFrame(tick);
-  }, [options]);
+  }, []); // no dependency on options — reads from optionsRef
 
   const play = useCallback(() => {
     lastTickRef.current = performance.now();
@@ -2375,8 +2470,9 @@ export function useReplayEngine(options: ReplayOptions | null) {
     setState((prev) => {
       const clamped = Math.max(0, Math.min(time, prev.duration));
       const visible = messageOffsets.current.filter((t) => t <= clamped).length;
-      const activeAnns = options?.annotationSeqs.filter((seq) => {
-        const idx = options.messages.findIndex((m) => m.seq === seq);
+      const opts = optionsRef.current;
+      const activeAnns = opts?.annotationSeqs.filter((seq) => {
+        const idx = opts.messages.findIndex((m) => m.seq === seq);
         return idx >= 0 && idx < visible;
       }) ?? [];
 
@@ -2387,7 +2483,7 @@ export function useReplayEngine(options: ReplayOptions | null) {
         activeAnnotationSeqs: activeAnns,
       };
     });
-  }, [options]);
+  }, []); // no dependency on options — reads from optionsRef
 
   const setSpeed = useCallback((speed: number) => {
     setState((s) => ({ ...s, speed }));
@@ -2412,6 +2508,8 @@ git commit -m "feat: session replay engine with timing, seek, speed control"
 ---
 
 ## Task 17: Session Replay — UI Controls
+
+> **Note:** This is the text-only replay UI. Audio playback will be integrated when the v1 audio storage pipeline is implemented (conductor spec defers audio storage).
 
 **Files:**
 - Create: `web/src/components/replay/controls.tsx`
