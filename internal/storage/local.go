@@ -110,3 +110,6 @@ func (s *LocalStore) DeletePrefix(_ context.Context, prefix string) error {
 	}
 	return nil
 }
+
+// Close is a no-op for local filesystem storage.
+func (s *LocalStore) Close() error { return nil }

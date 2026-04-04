@@ -60,3 +60,6 @@ func (m *MockStore) Count() int {
 	defer m.mu.Unlock()
 	return len(m.Objects)
 }
+
+// Close is a no-op for the mock store.
+func (m *MockStore) Close() error { return nil }

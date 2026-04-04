@@ -210,10 +210,8 @@ func (b *Backend) Close() error {
 	}
 	slog.Info("river stopped")
 
-	if c, ok := b.store.(interface{ Close() error }); ok {
-		if err := c.Close(); err != nil {
-			slog.Warn("storage close error", "error", err)
-		}
+	if err := b.store.Close(); err != nil {
+		slog.Warn("storage close error", "error", err)
 	}
 
 	b.pool.Close()

@@ -14,4 +14,7 @@ type ObjectStore interface {
 	// Pure string prefix match — not path-segment-aware.
 	// Callers should include trailing "/" for path-segment-aligned deletes.
 	DeletePrefix(ctx context.Context, prefix string) error
+
+	// Close releases any resources held by the store.
+	Close() error
 }
