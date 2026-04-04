@@ -4,6 +4,10 @@ import { StrengthsGaps } from "./strengths-gaps";
 import { Annotations } from "./annotations";
 import { DeepDivePreview } from "./deep-dive";
 import { Coaching } from "./coaching";
+import { VoicePipeline } from "./voice-pipeline";
+import { SampleSessionLink } from "./sample-session";
+import { Credits } from "./credits";
+import { CTARepeat } from "./cta-repeat";
 
 export default function Landing() {
   return (
@@ -14,6 +18,10 @@ export default function Landing() {
       <Annotations />
       <DeepDivePreview />
       <Coaching />
+      <VoicePipeline />
+      <SampleSessionLink />
+      <Credits />
+      <CTARepeat />
     </div>
   );
 }
