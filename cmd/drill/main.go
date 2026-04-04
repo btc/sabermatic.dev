@@ -4,10 +4,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -48,8 +50,12 @@ func runWithContext(ctx context.Context) error {
 	}
 
 	// Structured logger with trace correlation (must be after config load for GCPProjectID).
-	jsonHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+	logLevel := parseLogLevel(cfg.Log.Level)
+	logWriter, logCloser := buildLogWriter(cfg.Log.File)
+	defer logCloser()
+
+	jsonHandler := slog.NewJSONHandler(logWriter, &slog.HandlerOptions{
+		Level: logLevel,
 	})
 	logger := slog.New(drilotel.NewTraceHandler(jsonHandler, cfg.Otel.GCPProjectID))
 	slog.SetDefault(logger)
@@ -108,6 +114,37 @@ func runWithContext(ctx context.Context) error {
 		slog.Info("http server stopped")
 		return nil
 	}
+}
+
+func parseLogLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// buildLogWriter returns an io.Writer for slog and a closer func.
+// When path is non-empty, logs are written to both stderr and the file.
+func buildLogWriter(path string) (io.Writer, func()) {
+	if path == "" {
+		return os.Stderr, func() {}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: cannot create log dir: %v\n", err)
+		return os.Stderr, func() {}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warn: cannot open log file: %v\n", err)
+		return os.Stderr, func() {}
+	}
+	return io.MultiWriter(os.Stderr, f), func() { f.Close() }
 }
 
 func runMigrations(databaseURL string) error {

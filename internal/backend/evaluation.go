@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -41,7 +42,10 @@ type AnnotationResponse struct {
 }
 
 // GetEvaluation returns the evaluation for a session owned by the given user.
-func (b *Backend) GetEvaluation(ctx context.Context, sessionID, userID uuid.UUID) (*EvaluationResponse, error) {
+func (b *Backend) GetEvaluation(ctx context.Context, sessionID, userID uuid.UUID) (_ *EvaluationResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetEvaluation")
+	defer func() { drilotel.End(span, err) }()
+
 	session, err := b.GetSessionForUser(ctx, sessionID, userID)
 	if err != nil {
 		return nil, err
@@ -106,7 +110,10 @@ func (b *Backend) GetEvaluation(ctx context.Context, sessionID, userID uuid.UUID
 }
 
 // RetryEvaluation re-enqueues evaluation for a failed session.
-func (b *Backend) RetryEvaluation(ctx context.Context, sessionID, userID uuid.UUID) error {
+func (b *Backend) RetryEvaluation(ctx context.Context, sessionID, userID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.RetryEvaluation")
+	defer func() { drilotel.End(span, err) }()
+
 	session, err := b.GetSessionForUser(ctx, sessionID, userID)
 	if err != nil {
 		return err

@@ -7,6 +7,8 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // Synthesizer converts text to audio.
@@ -32,7 +34,10 @@ func NewOpenAISynthesizer(apiKey, model, voice string) *OpenAISynthesizer {
 
 // Synthesize sends text to the OpenAI TTS API and returns the streaming audio response body.
 // The caller is responsible for closing the returned ReadCloser.
-func (s *OpenAISynthesizer) Synthesize(ctx context.Context, text string) (io.ReadCloser, error) {
+func (s *OpenAISynthesizer) Synthesize(ctx context.Context, text string) (_ io.ReadCloser, err error) {
+	ctx, span := tracer.Start(ctx, "OpenAISynthesizer.Synthesize")
+	defer func() { drilotel.End(span, err) }()
+
 	resp, err := s.client.Audio.Speech.New(ctx, openai.AudioSpeechNewParams{
 		Input: text,
 		Model: s.model,

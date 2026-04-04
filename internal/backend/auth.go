@@ -64,7 +64,10 @@ type LoginResult struct {
 // verification email. User creation and email enqueue are atomic: both
 // succeed or both roll back. Returns ErrPasswordLength or ErrDuplicateEmail
 // on validation/constraint failures.
-func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, error) {
+func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.Signup")
+	defer func() { drilotel.End(span, err) }()
+
 	// Normalize.
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 	p.DisplayName = strings.TrimSpace(p.DisplayName)
@@ -138,7 +141,10 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (*SignupResult, er
 
 // Login authenticates a user by email/password, creates a session, and returns
 // the raw session token. Returns ErrInvalidCredentials on any auth failure.
-func (b *Backend) Login(ctx context.Context, p LoginParams) (*LoginResult, error) {
+func (b *Backend) Login(ctx context.Context, p LoginParams) (_ *LoginResult, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.Login")
+	defer func() { drilotel.End(span, err) }()
+
 	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
 	// Look up user.
@@ -193,7 +199,10 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (*LoginResult, error
 
 // Logout invalidates the session identified by the given raw token.
 // Errors are best-effort (always returns nil).
-func (b *Backend) Logout(ctx context.Context, sessionToken string) error {
+func (b *Backend) Logout(ctx context.Context, sessionToken string) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.Logout")
+	defer func() { drilotel.End(span, err) }()
+
 	tokenHash := auth.HashSessionToken(sessionToken)
 	queries := db.New(b.pool)
 
@@ -208,7 +217,10 @@ func (b *Backend) Logout(ctx context.Context, sessionToken string) error {
 
 // VerifyEmail marks a user's email as verified using the signed token.
 // Returns ErrInvalidToken if the token is invalid or expired.
-func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
+func (b *Backend) VerifyEmail(ctx context.Context, token string) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.VerifyEmail")
+	defer func() { drilotel.End(span, err) }()
+
 	signer := auth.NewTokenSigner(auth.DeriveKey(b.cfg.Auth.TokenSecret, "hmac-tokens"))
 	userID, err := signer.Verify(token, "verify-email")
 	if err != nil {
@@ -225,7 +237,10 @@ func (b *Backend) VerifyEmail(ctx context.Context, token string) error {
 // ForgotPassword enqueues a password-reset email if the user exists.
 // Returns ErrUserNotFound when the email is not registered (caller decides HTTP policy).
 // Returns a wrapped error for any DB or system failure.
-func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
+func (b *Backend) ForgotPassword(ctx context.Context, email string) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ForgotPassword")
+	defer func() { drilotel.End(span, err) }()
+
 	email = strings.TrimSpace(strings.ToLower(email))
 
 	queries := db.New(b.pool)
@@ -261,7 +276,10 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) error {
 // ResetPassword verifies the reset token, updates the password, and deletes
 // all sessions for the user. Returns ErrPasswordLength or ErrInvalidToken on
 // validation failures.
-func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) error {
+func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ResetPassword")
+	defer func() { drilotel.End(span, err) }()
+
 	if err := ValidatePasswordLength(p.NewPassword); err != nil {
 		return err
 	}

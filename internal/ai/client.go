@@ -19,7 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 )
+
+var tracer = drilotel.Tracer("ai")
 
 // pricing maps model names to per-token costs (USD).
 var pricing = map[string]struct{ Input, Output float64 }{
@@ -80,7 +83,10 @@ type CallParams struct {
 
 // StreamAndLog creates a streaming Anthropic request and returns a TokenStream.
 // When the stream is closed, the call is persisted to llm_calls + llm_call_content.
-func (c *Client) StreamAndLog(ctx context.Context, p StreamParams) (*TokenStream, error) {
+func (c *Client) StreamAndLog(ctx context.Context, p StreamParams) (_ *TokenStream, err error) {
+	ctx, span := tracer.Start(ctx, "Client.StreamAndLog")
+	defer func() { drilotel.End(span, err) }()
+
 	maxTokens := p.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -125,7 +131,10 @@ type CallToolParams struct {
 
 // CallToolAndLog makes a blocking Anthropic request with forced tool_choice and
 // returns the raw tool input JSON. Persists the call within the caller's transaction.
-func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams) (json.RawMessage, error) {
+func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams) (_ json.RawMessage, err error) {
+	ctx, span := tracer.Start(ctx, "Client.CallToolAndLog")
+	defer func() { drilotel.End(span, err) }()
+
 	maxTokens := p.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096
@@ -208,7 +217,10 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 
 // CallAndLog makes a blocking Anthropic request and persists the call within
 // the caller's transaction. Returns the concatenated text response.
-func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (string, error) {
+func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (_ string, err error) {
+	ctx, span := tracer.Start(ctx, "Client.CallAndLog")
+	defer func() { drilotel.End(span, err) }()
+
 	maxTokens := p.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 4096

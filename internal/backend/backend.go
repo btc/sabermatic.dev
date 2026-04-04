@@ -23,6 +23,8 @@ import (
 	"github.com/btc/drill/internal/storage"
 )
 
+var tracer = drilotel.Tracer("backend")
+
 // Backend holds shared dependencies and business logic. Handlers call its
 // methods; it owns the database pool and River client lifecycle.
 //
@@ -168,14 +170,19 @@ func (b *Backend) Config() *config.Config { return b.cfg }
 func (b *Backend) Pool() *pgxpool.Pool { return b.pool }
 
 // Ping checks connectivity to all backend dependencies.
-func (b *Backend) Ping(ctx context.Context) error {
+func (b *Backend) Ping(ctx context.Context) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.Ping")
+	defer func() { drilotel.End(span, err) }()
 	return b.pool.Ping(ctx)
 }
 
 // AuthenticateSession validates a session token hash and returns the
 // authenticated user. It also touches the session's last_active timestamp
 // in the background.
-func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (*auth.AuthUser, error) {
+func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ *auth.AuthUser, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.AuthenticateSession")
+	defer func() { drilotel.End(span, err) }()
+
 	queries := db.New(b.pool)
 	row, err := queries.GetAuthSessionByToken(ctx, tokenHash)
 	if err != nil {

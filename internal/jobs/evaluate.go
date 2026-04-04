@@ -18,8 +18,11 @@ import (
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/evaluation"
 )
+
+var tracer = drilotel.Tracer("jobs")
 
 // EvaluateSessionArgs are the arguments for the EvaluateSession job.
 type EvaluateSessionArgs struct {
@@ -52,12 +55,15 @@ func (w *EvaluateSessionWorker) Timeout(job *river.Job[EvaluateSessionArgs]) tim
 	return 10 * time.Minute
 }
 
-func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[EvaluateSessionArgs]) error {
+func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[EvaluateSessionArgs]) (err error) {
+	ctx, span := tracer.Start(ctx, "EvaluateSessionWorker.Work")
+	defer func() { drilotel.End(span, err) }()
+
 	sessionID := job.Args.SessionID
 	q := db.New(w.Pool)
 
 	// 1. Idempotency: if evaluation already exists for this session, return nil.
-	_, err := q.GetEvaluationBySession(ctx, sessionID)
+	_, err = q.GetEvaluationBySession(ctx, sessionID)
 	if err == nil {
 		slog.Info("evaluation already exists, skipping", "session_id", sessionID)
 		return nil

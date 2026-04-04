@@ -7,8 +7,11 @@ import (
 	"sync"
 
 	"github.com/btc/drill/internal/config"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/mailgun/mailgun-go/v5"
 )
+
+var tracer = drilotel.Tracer("email")
 
 // Message represents an email to send.
 type Message struct {
@@ -44,7 +47,10 @@ func newMailgunSender(cfg *config.Email) *MailgunSender {
 	return &MailgunSender{mg: mg, cfg: cfg}
 }
 
-func (s *MailgunSender) Send(ctx context.Context, msg Message) error {
+func (s *MailgunSender) Send(ctx context.Context, msg Message) (err error) {
+	ctx, span := tracer.Start(ctx, "MailgunSender.Send")
+	defer func() { drilotel.End(span, err) }()
+
 	m := mailgun.NewMessage(s.cfg.MailgunDomain, s.cfg.FromAddress, msg.Subject, msg.Text, msg.To)
 	if msg.HTML != "" {
 		m.SetHTML(msg.HTML)

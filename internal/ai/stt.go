@@ -7,6 +7,8 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // Transcriber converts audio bytes to text.
@@ -30,7 +32,10 @@ func NewOpenAITranscriber(apiKey, model string) *OpenAITranscriber {
 
 // Transcribe sends audio bytes to the Whisper API and returns the transcript text.
 // The format parameter is the audio container format (e.g. "webm", "mp3", "wav").
-func (t *OpenAITranscriber) Transcribe(ctx context.Context, audio []byte, format string) (string, error) {
+func (t *OpenAITranscriber) Transcribe(ctx context.Context, audio []byte, format string) (_ string, err error) {
+	ctx, span := tracer.Start(ctx, "OpenAITranscriber.Transcribe")
+	defer func() { drilotel.End(span, err) }()
+
 	filename := fmt.Sprintf("audio.%s", format)
 	reader := newNamedReader(filename, bytes.NewReader(audio))
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
@@ -15,12 +16,38 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	"go.opentelemetry.io/otel/trace"
 
 	cloudmetric "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric"
 	cloudtrace "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 
 	"github.com/btc/drill/internal/config"
 )
+
+// AppName is the application name used as the OTel tracer namespace prefix.
+const AppName = "drill"
+
+// Tracer returns an OTel tracer namespaced under AppName.
+// Usage: var tracer = drilotel.Tracer("backend")
+func Tracer(component string) trace.Tracer {
+	return otel.Tracer(AppName + "/" + component)
+}
+
+// End records err on span (if non-nil) and ends it. Designed for use with
+// named return values:
+//
+//	func Foo(ctx context.Context) (err error) {
+//	    ctx, span := tracer.Start(ctx, "Foo")
+//	    defer func() { drilotel.End(span, err) }()
+//	    ...
+//	}
+func End(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
+}
 
 // Providers holds the OTel providers created by Init.
 // When OTel is disabled, both provider fields are nil and Shutdown is a no-op.

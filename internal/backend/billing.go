@@ -15,6 +15,7 @@ import (
 
 	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,10 @@ func (b *Backend) Check(ctx context.Context, userID uuid.UUID) (*billing.Entitle
 }
 
 // CheckTx is like Check but runs on the provided DBTX (pool or transaction).
-func (b *Backend) CheckTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (*billing.Entitlements, error) {
+func (b *Backend) CheckTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (_ *billing.Entitlements, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.CheckTx")
+	defer func() { drilotel.End(span, err) }()
+
 	bs, err := db.New(dbtx).GetBillingSnapshot(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get billing snapshot: %w", err)
@@ -44,7 +48,9 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID) error {
 }
 
 // EnsureFreeGrantTx creates the current-month free grant on the given DBTX.
-func (b *Backend) EnsureFreeGrantTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) error {
+func (b *Backend) EnsureFreeGrantTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.EnsureFreeGrantTx")
+	defer func() { drilotel.End(span, err) }()
 	return db.New(dbtx).EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
 		UserID:         userID,
 		InitialMinutes: int32(billing.FreePlanMinutesPerMonth()),
@@ -55,7 +61,10 @@ func (b *Backend) EnsureFreeGrantTx(ctx context.Context, dbtx db.DBTX, userID uu
 // GetUsageSummary returns the user's balance breakdown, active grants, and
 // recent ledger entries. Ensures the current-month free grant exists and
 // reads everything in a single transaction for snapshot consistency.
-func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*UsageSummary, error) {
+func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (_ *UsageSummary, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetUsageSummary")
+	defer func() { drilotel.End(span, err) }()
+
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin usage tx: %w", err)
@@ -110,7 +119,10 @@ type CheckoutParams struct {
 
 // CreateCheckoutSession creates a Stripe Checkout session for a subscription or
 // one-time minute-pack purchase. Returns the checkout URL.
-func (b *Backend) CreateCheckoutSession(ctx context.Context, p CheckoutParams) (string, error) {
+func (b *Backend) CreateCheckoutSession(ctx context.Context, p CheckoutParams) (_ string, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.CreateCheckoutSession")
+	defer func() { drilotel.End(span, err) }()
+
 	if b.cfg.Stripe.SecretKey == "" {
 		return "", fmt.Errorf("stripe not configured")
 	}
@@ -191,7 +203,10 @@ func (b *Backend) CreateCheckoutSession(ctx context.Context, p CheckoutParams) (
 }
 
 // CreatePortalSession creates a Stripe billing portal session for the user.
-func (b *Backend) CreatePortalSession(ctx context.Context, userID uuid.UUID) (string, error) {
+func (b *Backend) CreatePortalSession(ctx context.Context, userID uuid.UUID) (_ string, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.CreatePortalSession")
+	defer func() { drilotel.End(span, err) }()
+
 	if b.cfg.Stripe.SecretKey == "" {
 		return "", fmt.Errorf("stripe not configured")
 	}
@@ -217,7 +232,10 @@ func (b *Backend) CreatePortalSession(ctx context.Context, userID uuid.UUID) (st
 }
 
 // HandleStripeWebhook dispatches a Stripe webhook event.
-func (b *Backend) HandleStripeWebhook(ctx context.Context, event stripe.Event) error {
+func (b *Backend) HandleStripeWebhook(ctx context.Context, event stripe.Event) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.HandleStripeWebhook")
+	defer func() { drilotel.End(span, err) }()
+
 	switch event.Type {
 	case "checkout.session.completed":
 		return b.handleCheckoutCompleted(ctx, event)
@@ -263,7 +281,10 @@ func snapshotFrom(row db.GetBillingSnapshotRow) billing.BillingSnapshot {
 
 // reserveMinutesTx reserves minutes via a single SQL recursive CTE.
 // Returns ErrInsufficientBalance if balance < requested.
-func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
+func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.reserveMinutesTx")
+	defer func() { drilotel.End(span, err) }()
+
 	rows, err := db.New(dbtx).ReserveMinutes(ctx, db.ReserveMinutesParams{
 		UserID:    userID,
 		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
@@ -278,7 +299,10 @@ func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uui
 	return nil
 }
 
-func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Event) error {
+func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Event) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.handleCheckoutCompleted")
+	defer func() { drilotel.End(span, err) }()
+
 	mode := event.GetObjectValue("mode")
 	if mode != "payment" {
 		return nil
@@ -318,7 +342,10 @@ func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Even
 	return nil
 }
 
-func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) error {
+func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.handleInvoicePaid")
+	defer func() { drilotel.End(span, err) }()
+
 	custID := event.GetObjectValue("customer")
 	if custID == "" {
 		slog.Warn("invoice.paid missing customer", "event_id", event.ID)
@@ -351,7 +378,10 @@ func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) err
 	return nil
 }
 
-func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Event) error {
+func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Event) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.handleSubscriptionDeleted")
+	defer func() { drilotel.End(span, err) }()
+
 	custID := event.GetObjectValue("customer")
 	if custID == "" {
 		slog.Warn("subscription.deleted missing customer", "event_id", event.ID)
@@ -374,7 +404,10 @@ func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Ev
 	return nil
 }
 
-func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Event) error {
+func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Event) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.handleSubscriptionUpdated")
+	defer func() { drilotel.End(span, err) }()
+
 	custID := event.GetObjectValue("customer")
 	if custID == "" {
 		slog.Warn("subscription.updated missing customer", "event_id", event.ID)

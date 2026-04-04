@@ -10,6 +10,7 @@ import (
 
 	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -23,7 +24,10 @@ type EducatorResponse struct {
 }
 
 // GetEducatorAnalysis returns the educator analysis for a session.
-func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uuid.UUID) (*EducatorResponse, error) {
+func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uuid.UUID) (_ *EducatorResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetEducatorAnalysis")
+	defer func() { drilotel.End(span, err) }()
+
 	session, err := b.GetSessionForUser(ctx, sessionID, userID)
 	if err != nil {
 		return nil, err
@@ -78,7 +82,10 @@ func truncateRunes(s string, n int) string {
 }
 
 // RequestEducatorAnalysis enqueues educator content generation for a session.
-func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID uuid.UUID) error {
+func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.RequestEducatorAnalysis")
+	defer func() { drilotel.End(span, err) }()
+
 	session, err := b.GetSessionForUser(ctx, sessionID, userID)
 	if err != nil {
 		return err

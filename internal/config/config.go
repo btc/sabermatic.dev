@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Server   Server
 	Database Database
+	Log      Log
 	LLM      LLM
 	Speech   Speech
 	Email    Email
@@ -24,6 +25,11 @@ type Config struct {
 	Otel     Otel
 	Storage  Storage
 	Stripe   Stripe
+}
+
+type Log struct {
+	Level string `env:"LOG_LEVEL,default=debug"`
+	File  string `env:"LOG_FILE,default=data/logs/drill.log"`
 }
 
 type Server struct {

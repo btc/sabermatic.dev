@@ -15,6 +15,7 @@ import (
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -30,7 +31,10 @@ type CreateSessionParams struct {
 // CreateSession creates a new interview session after validating duration,
 // enforcing plan limits (max duration, concurrent sessions, minute balance),
 // and reserving minutes from the user's grants.
-func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.InterviewSession, error) {
+func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (_ db.InterviewSession, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.CreateSession")
+	defer func() { drilotel.End(span, err) }()
+
 	if p.DurationMinutes < 1 || p.DurationMinutes > 180 {
 		return db.InterviewSession{}, ErrInvalidDuration
 	}
@@ -105,7 +109,10 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 
 // GetSession returns the interview session with the given ID, including the
 // joined question fields. Returns ErrSessionNotFound if no such session exists.
-func (b *Backend) GetSession(ctx context.Context, id uuid.UUID) (db.GetSessionRow, error) {
+func (b *Backend) GetSession(ctx context.Context, id uuid.UUID) (_ db.GetSessionRow, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetSession")
+	defer func() { drilotel.End(span, err) }()
+
 	queries := db.New(b.pool)
 	session, err := queries.GetSession(ctx, id)
 	if err != nil {
@@ -120,7 +127,10 @@ func (b *Backend) GetSession(ctx context.Context, id uuid.UUID) (db.GetSessionRo
 // GetSessionForUser returns the session only if it belongs to the given user.
 // Returns ErrSessionNotFound if the session does not exist, ErrSessionNotOwned
 // if it belongs to a different user.
-func (b *Backend) GetSessionForUser(ctx context.Context, id, userID uuid.UUID) (db.GetSessionRow, error) {
+func (b *Backend) GetSessionForUser(ctx context.Context, id, userID uuid.UUID) (_ db.GetSessionRow, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetSessionForUser")
+	defer func() { drilotel.End(span, err) }()
+
 	session, err := b.GetSession(ctx, id)
 	if err != nil {
 		return db.GetSessionRow{}, err
@@ -133,7 +143,10 @@ func (b *Backend) GetSessionForUser(ctx context.Context, id, userID uuid.UUID) (
 
 // ListSessions returns all sessions for the given user, ordered by creation
 // time descending.
-func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) ([]db.ListSessionsByUserRow, error) {
+func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.ListSessionsByUserRow, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ListSessions")
+	defer func() { drilotel.End(span, err) }()
+
 	queries := db.New(b.pool)
 	rows, err := queries.ListSessionsByUser(ctx, userID)
 	if err != nil {
@@ -149,7 +162,10 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) ([]db.List
 // AcquireSessionLock acquires a Postgres advisory lock for the given session.
 // Returns the dedicated connection (caller must release it) and whether the
 // lock was acquired. If acquired is false, no lock is held and conn is nil.
-func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (*pgxpool.Conn, bool, error) {
+func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (_ *pgxpool.Conn, _ bool, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.AcquireSessionLock")
+	defer func() { drilotel.End(span, err) }()
+
 	lockConn, err := b.pool.Acquire(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquire lock conn: %w", err)
@@ -171,7 +187,10 @@ func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (
 }
 
 // GetMessagesBySession returns all messages for the given session.
-func (b *Backend) GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]db.Message, error) {
+func (b *Backend) GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) (_ []db.Message, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetMessagesBySession")
+	defer func() { drilotel.End(span, err) }()
+
 	msgs, err := db.New(b.pool).GetMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("get messages: %w", err)
@@ -190,7 +209,10 @@ type PersistMessageParams struct {
 }
 
 // persistMessage is the internal helper that inserts a message using any DBTX (pool or tx).
-func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMessageParams) (db.Message, error) {
+func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMessageParams) (_ db.Message, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.persistMessage")
+	defer func() { drilotel.End(span, err) }()
+
 	var im pgtype.Text
 	if p.InputMethod != "" {
 		im = pgtype.Text{String: p.InputMethod, Valid: true}
@@ -218,7 +240,10 @@ func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (d
 // PersistInterviewerTurn atomically persists the interviewer message AND the
 // LLM call record. The TokenStream's CloseWithTx is called within the
 // transaction.
-func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p PersistMessageParams) (db.Message, error) {
+func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p PersistMessageParams) (_ db.Message, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.PersistInterviewerTurn")
+	defer func() { drilotel.End(span, err) }()
+
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return db.Message{}, fmt.Errorf("begin tx for interviewer msg: %w", err)
@@ -244,7 +269,10 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 
 // CompleteSession atomically updates session status to completed, sets turn
 // count, and enqueues EvaluateSession.
-func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turnCount int) error {
+func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turnCount int) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.CompleteSession")
+	defer func() { drilotel.End(span, err) }()
+
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin end-session tx: %w", err)
@@ -283,7 +311,10 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 // CancelSession ends a session early at the user's request. Sets status to
 // completed + archived (excluded from coach analysis and session lists).
 // Refunds unused minutes based on wall-clock duration. Does NOT enqueue evaluation.
-func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCount int) error {
+func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCount int) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.CancelSession")
+	defer func() { drilotel.End(span, err) }()
+
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin cancel-session tx: %w", err)
@@ -307,7 +338,10 @@ func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCo
 }
 
 // FailSession transitions a session to "failed" and refunds all reserved minutes.
-func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
+func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.FailSession")
+	defer func() { drilotel.End(span, err) }()
+
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin fail-session tx: %w", err)
@@ -343,7 +377,9 @@ func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
 }
 
 // Transcribe delegates to the STT provider.
-func (b *Backend) Transcribe(ctx context.Context, audio []byte, format string) (string, error) {
+func (b *Backend) Transcribe(ctx context.Context, audio []byte, format string) (_ string, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.Transcribe")
+	defer func() { drilotel.End(span, err) }()
 	return b.stt.Transcribe(ctx, audio, format)
 }
 
@@ -354,22 +390,30 @@ func (b *Backend) Synthesizer() (ai.Synthesizer, error) {
 }
 
 // Synthesize delegates to the TTS provider.
-func (b *Backend) Synthesize(ctx context.Context, text string) (io.ReadCloser, error) {
+func (b *Backend) Synthesize(ctx context.Context, text string) (_ io.ReadCloser, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.Synthesize")
+	defer func() { drilotel.End(span, err) }()
 	return b.tts.Synthesize(ctx, text)
 }
 
 // StreamLLM creates a streaming LLM call via the Anthropic SDK.
-func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (*ai.TokenStream, error) {
+func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (_ *ai.TokenStream, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.StreamLLM")
+	defer func() { drilotel.End(span, err) }()
 	return b.llm.StreamAndLog(ctx, p)
 }
 
 // StoreAudio uploads audio bytes to object storage and returns the URL.
-func (b *Backend) StoreAudio(ctx context.Context, key string, data []byte, contentType string) (string, error) {
+func (b *Backend) StoreAudio(ctx context.Context, key string, data []byte, contentType string) (_ string, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.StoreAudio")
+	defer func() { drilotel.End(span, err) }()
 	return b.store.Put(ctx, key, data, contentType)
 }
 
 // SetAudioURL updates the audio_url column for a message.
-func (b *Backend) SetAudioURL(ctx context.Context, id uuid.UUID, url string) error {
+func (b *Backend) SetAudioURL(ctx context.Context, id uuid.UUID, url string) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.SetAudioURL")
+	defer func() { drilotel.End(span, err) }()
 	return db.New(b.pool).SetAudioURL(ctx, db.SetAudioURLParams{
 		ID:       id,
 		AudioUrl: pgtype.Text{String: url, Valid: true},
