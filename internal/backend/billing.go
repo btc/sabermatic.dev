@@ -35,6 +35,15 @@ type CheckoutParams struct {
 // Public methods
 // ---------------------------------------------------------------------------
 
+// Check returns the user's billing entitlements (single DB query).
+func (b *Backend) Check(ctx context.Context, userID uuid.UUID) (billing.Entitlements, error) {
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	if err != nil {
+		return billing.Entitlements{}, fmt.Errorf("get billing snapshot: %w", err)
+	}
+	return billing.Resolve(snapshotFrom(bs)), nil
+}
+
 // EnsureFreeGrant creates the current-month free grant for the user if it does
 // not already exist. The SQL atomically creates both the grant and its ledger
 // entry in a single writable CTE. If the grant already exists (ON CONFLICT),

@@ -32,11 +32,10 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 		return nil, ErrEvaluationNotReady
 	}
 
-	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	ent, err := b.Check(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get billing snapshot: %w", err)
+		return nil, err
 	}
-	ent := billing.Resolve(snapshotFrom(bs))
 	accessLevel := ent.EducatorAccessLevel()
 
 	q := db.New(b.pool)
@@ -94,12 +93,10 @@ func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID
 		return ErrEvaluationNotReady
 	}
 
-	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	ent, err := b.Check(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("get billing snapshot: %w", err)
+		return err
 	}
-	ent := billing.Resolve(snapshotFrom(bs))
-
 	if ent.EducatorAccessLevel() == billing.Preview {
 		return ErrNoPaidBalance
 	}
