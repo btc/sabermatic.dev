@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/btc/drill/internal/ai"
-	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -50,12 +49,10 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 
 	q := db.New(tx)
 
-	// Single snapshot of all billing state, inside the transaction.
-	bs, err := q.GetBillingSnapshot(ctx, p.UserID)
+	ent, err := b.CheckTx(ctx, tx, p.UserID)
 	if err != nil {
-		return db.InterviewSession{}, fmt.Errorf("get billing snapshot: %w", err)
+		return db.InterviewSession{}, err
 	}
-	ent := billing.Resolve(snapshotFrom(bs))
 
 	if !ent.DurationAllowed(p.DurationMinutes) {
 		return db.InterviewSession{}, ErrDurationExceedsPlan
