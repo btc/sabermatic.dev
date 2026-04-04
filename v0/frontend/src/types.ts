@@ -129,7 +129,7 @@ export interface TraceEntry {
 // Client -> Server
 export type WSClientMessage =
   | { type: "start"; question_id: number; timer_sec?: number; tts_enabled?: boolean; briefed?: boolean }
-  | { type: "end_turn"; audio_data: string; audio_format: string }
+  | { type: "end_turn"; audio_data: string }
   | { type: "text_input"; text: string }
   | { type: "edit_transcript"; text: string }
   | { type: "end_session" };

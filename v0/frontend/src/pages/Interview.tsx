@@ -274,7 +274,7 @@ export default function Interview({ sessionId, session }: InterviewProps) {
 
             if (audioData) {
               const sendSpan = startSpan("ws.send", { msg_type: "end_turn" });
-              send({ type: "end_turn", audio_data: audioData, audio_format: "webm" });
+              send({ type: "end_turn", audio_data: audioData });
               sendSpan.end();
             }
           } catch (err) {

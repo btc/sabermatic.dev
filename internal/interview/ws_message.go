@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/coder/websocket"
 
@@ -38,7 +39,7 @@ type WSMessage struct {
 	Content     string `json:"content,omitempty"`
 	Audio       []byte `json:"-"`
 	AudioBase64 string `json:"audio,omitempty"`
-	AudioFormat string `json:"audio_format,omitempty"`
+	AudioMIME   string `json:"audio_mime,omitempty"`
 	InputMethod string `json:"input_method,omitempty"`
 }
 
@@ -57,9 +58,15 @@ func ParseWSMessage(data []byte) (WSMessage, error) {
 			return WSMessage{}, fmt.Errorf("decode audio base64: %w", err)
 		}
 		msg.Audio = audio
-		if msg.AudioFormat == "" {
-			msg.AudioFormat = "webm"
+		if msg.AudioMIME == "" {
+			msg.AudioMIME = "audio/webm"
 		}
 	}
 	return msg, nil
+}
+
+// AudioExt returns the file extension derived from AudioMIME (e.g. "audio/webm" -> "webm").
+func (m WSMessage) AudioExt() string {
+	_, sub, _ := strings.Cut(m.AudioMIME, "/")
+	return sub
 }

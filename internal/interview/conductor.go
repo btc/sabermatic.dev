@@ -322,8 +322,8 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 			uploadCtx, span := tracer.Start(context.WithoutCancel(ctx), "storage.upload_audio")
 			defer span.End()
 
-			key := fmt.Sprintf("%s/%s.%s", c.sessionID, messageID, msg.AudioFormat)
-			url, err := c.backend.StoreAudio(uploadCtx, key, msg.Audio, "audio/"+msg.AudioFormat)
+			key := fmt.Sprintf("%s/%s.%s", c.sessionID, messageID, msg.AudioExt())
+			url, err := c.backend.StoreAudio(uploadCtx, key, msg.Audio, msg.AudioMIME)
 			if err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, "audio upload failed")
@@ -343,7 +343,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) error {
 		}()
 
 		// STT.
-		text, err := c.backend.Transcribe(ctx, msg.Audio, msg.AudioFormat)
+		text, err := c.backend.Transcribe(ctx, msg.Audio, msg.AudioExt())
 		if err != nil {
 			slog.Error("conductor: transcription failed", "error", err, "session_id", c.sessionID)
 			return fmt.Errorf("transcription: %w", err)
