@@ -8,6 +8,12 @@ import "./index.css";
 
 initTelemetry();
 
+// Prime CSRF cookie — Gorilla CSRF sets the cookie on every response.
+// In dev, the SPA is served by Vite (port 3000), so no Go server response
+// has occurred yet when the user lands on /login. This GET ensures the
+// drill_csrf cookie exists before any POST.
+fetch("/api/health", { credentials: "same-origin" });
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
