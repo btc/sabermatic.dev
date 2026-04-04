@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -50,19 +49,17 @@ func (b *Backend) CheckTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (
 	return &ent, nil
 }
 
-// EnsureFreeGrant creates the current-month free grant for the user if it does
-// not already exist. The SQL atomically creates both the grant and its ledger
-// entry in a single writable CTE. If the grant already exists (ON CONFLICT),
-// both inserts no-op.
-func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planName string) error {
-	plan, ok := billing.PlanByName(planName)
-	if !ok {
-		return fmt.Errorf("unknown plan %q", planName)
-	}
-	return db.New(b.pool).EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
+// EnsureFreeGrant creates the current-month free grant on the pool.
+func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID) error {
+	return b.EnsureFreeGrantTx(ctx, b.pool, userID)
+}
+
+// EnsureFreeGrantTx creates the current-month free grant on the given DBTX.
+func (b *Backend) EnsureFreeGrantTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) error {
+	return db.New(dbtx).EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
 		UserID:         userID,
-		InitialMinutes: int32(plan.MinutesPerMonth),
-		ExpiresAt:      pgtype.Timestamptz{Time: billing.EndOfMonth(time.Now().UTC()), Valid: true},
+		InitialMinutes: int32(billing.FreePlanMinutesPerMonth()),
+		ExpiresAt:      pgtype.Timestamptz{Time: billing.FreeGrantExpiry(), Valid: true},
 	})
 }
 
@@ -78,11 +75,7 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*Usage
 
 	q := db.New(tx)
 
-	if err := q.EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
-		UserID:         userID,
-		InitialMinutes: int32(billing.FreePlanMinutesPerMonth()),
-		ExpiresAt:      pgtype.Timestamptz{Time: billing.EndOfMonth(time.Now().UTC()), Valid: true},
-	}); err != nil {
+	if err := b.EnsureFreeGrantTx(ctx, tx, userID); err != nil {
 		return nil, fmt.Errorf("ensure free grant: %w", err)
 	}
 
