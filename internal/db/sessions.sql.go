@@ -13,6 +13,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelSession = `-- name: CancelSession :exec
+UPDATE interview_sessions
+SET status = 'completed', ended_at = NOW(), turn_count = $2, archived = TRUE, updated_at = NOW()
+WHERE id = $1
+`
+
+type CancelSessionParams struct {
+	ID        uuid.UUID `json:"id"`
+	TurnCount int32     `json:"turn_count"`
+}
+
+func (q *Queries) CancelSession(ctx context.Context, arg CancelSessionParams) error {
+	_, err := q.db.Exec(ctx, cancelSession, arg.ID, arg.TurnCount)
+	return err
+}
+
 const countActiveSessionsByUser = `-- name: CountActiveSessionsByUser :one
 SELECT COUNT(*)::int AS count
 FROM interview_sessions
