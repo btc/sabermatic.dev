@@ -50,26 +50,6 @@ func (q *Queries) CreateGrantFromStripe(ctx context.Context, arg CreateGrantFrom
 	return i, err
 }
 
-const debitGrant = `-- name: DebitGrant :one
-UPDATE grants
-SET remaining_minutes = remaining_minutes - $2
-WHERE id = $1
-  AND remaining_minutes >= $2
-RETURNING remaining_minutes
-`
-
-type DebitGrantParams struct {
-	ID               uuid.UUID `json:"id"`
-	RemainingMinutes int32     `json:"remaining_minutes"`
-}
-
-func (q *Queries) DebitGrant(ctx context.Context, arg DebitGrantParams) (int32, error) {
-	row := q.db.QueryRow(ctx, debitGrant, arg.ID, arg.RemainingMinutes)
-	var remaining_minutes int32
-	err := row.Scan(&remaining_minutes)
-	return remaining_minutes, err
-}
-
 const ensureFreeGrant = `-- name: EnsureFreeGrant :exec
 WITH new_grant AS (
   INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
@@ -462,31 +442,85 @@ func (q *Queries) RefundSessionMinutes(ctx context.Context, arg RefundSessionMin
 	return items, nil
 }
 
-const selectGrantsForReservation = `-- name: SelectGrantsForReservation :many
-SELECT id, remaining_minutes
-FROM grants
-WHERE user_id = $1
-  AND remaining_minutes > 0
-  AND (expires_at IS NULL OR expires_at > NOW())
-ORDER BY expires_at ASC NULLS LAST
-FOR UPDATE
+const reserveMinutes = `-- name: ReserveMinutes :many
+WITH RECURSIVE
+  locked AS (
+    SELECT id, remaining_minutes, expires_at
+    FROM grants
+    WHERE user_id = $1
+      AND remaining_minutes > 0
+      AND (expires_at IS NULL OR expires_at > NOW())
+    FOR UPDATE
+  ),
+  eligible AS (
+    SELECT id, remaining_minutes,
+           ROW_NUMBER() OVER (ORDER BY expires_at ASC NULLS LAST) AS rn
+    FROM locked
+  ),
+  balance_check AS (
+    SELECT COALESCE(SUM(remaining_minutes), 0) AS total
+    FROM eligible
+  ),
+  request AS (
+    SELECT $3::int AS requested
+    FROM balance_check
+    WHERE total >= $3
+  ),
+  distributed AS (
+    SELECT e.id AS grant_id, e.remaining_minutes,
+           LEAST(e.remaining_minutes, r.requested) AS debit,
+           r.requested - LEAST(e.remaining_minutes, r.requested) AS remaining,
+           e.rn
+    FROM eligible e, request r
+    WHERE e.rn = 1
+
+    UNION ALL
+
+    SELECT e.id, e.remaining_minutes,
+           LEAST(e.remaining_minutes, d.remaining) AS debit,
+           d.remaining - LEAST(e.remaining_minutes, d.remaining) AS remaining,
+           e.rn
+    FROM eligible e
+    JOIN distributed d ON e.rn = d.rn + 1
+    WHERE d.remaining > 0
+  ),
+  apply_debits AS (
+    UPDATE grants g
+    SET remaining_minutes = g.remaining_minutes - d.debit
+    FROM distributed d
+    WHERE g.id = d.grant_id AND d.debit > 0
+    RETURNING g.id AS grant_id, d.debit
+  )
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
+SELECT $1, ad.grant_id, -ad.debit, 'session_reserve', $2
+FROM apply_debits ad
+RETURNING grant_id, amount
 `
 
-type SelectGrantsForReservationRow struct {
-	ID               uuid.UUID `json:"id"`
-	RemainingMinutes int32     `json:"remaining_minutes"`
+type ReserveMinutesParams struct {
+	UserID    uuid.UUID   `json:"user_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+	Minutes   int32       `json:"minutes"`
 }
 
-func (q *Queries) SelectGrantsForReservation(ctx context.Context, userID uuid.UUID) ([]SelectGrantsForReservationRow, error) {
-	rows, err := q.db.Query(ctx, selectGrantsForReservation, userID)
+type ReserveMinutesRow struct {
+	GrantID uuid.UUID `json:"grant_id"`
+	Amount  int32     `json:"amount"`
+}
+
+// Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
+// Returns one row per grant debited. Returns zero rows if balance is insufficient
+// (all-or-nothing: no mutations occur when balance < requested).
+func (q *Queries) ReserveMinutes(ctx context.Context, arg ReserveMinutesParams) ([]ReserveMinutesRow, error) {
+	rows, err := q.db.Query(ctx, reserveMinutes, arg.UserID, arg.SessionID, arg.Minutes)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SelectGrantsForReservationRow
+	var items []ReserveMinutesRow
 	for rows.Next() {
-		var i SelectGrantsForReservationRow
-		if err := rows.Scan(&i.ID, &i.RemainingMinutes); err != nil {
+		var i ReserveMinutesRow
+		if err := rows.Scan(&i.GrantID, &i.Amount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

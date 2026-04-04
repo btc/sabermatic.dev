@@ -54,67 +54,22 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planNam
 // ReserveMinutes
 // ---------------------------------------------------------------------------
 
-// ReserveMinutes reserves the given number of minutes from the user's active
-// grants. Grants are consumed FIFO by expiry (soonest-expiring first). Each
-// debit is recorded as a ledger entry with reason "session_reserve".
-//
-// Returns ErrInsufficientBalance if the user's total available minutes are
-// less than the requested amount.
-// The caller must have already locked the grants via SelectGrantsForReservation
-// within the provided transaction.
+// reserveMinutesTx reserves minutes via a single SQL recursive CTE that
+// locks grants, checks balance, debits in FIFO order, and writes ledger
+// entries atomically. Returns ErrInsufficientBalance if balance < requested
+// (zero rows returned = no mutations occurred).
 func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID, sessionID uuid.UUID, minutes int32) error {
-	q := db.New(dbtx)
-
-	// Lock grants FOR UPDATE to prevent concurrent reservation races.
-	grants, err := q.SelectGrantsForReservation(ctx, userID)
+	rows, err := db.New(dbtx).ReserveMinutes(ctx, db.ReserveMinutesParams{
+		UserID:    userID,
+		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
+		Minutes:   minutes,
+	})
 	if err != nil {
-		return fmt.Errorf("select grants for reservation: %w", err)
+		return fmt.Errorf("reserve minutes: %w", err)
 	}
-
-	// Sum available minutes.
-	var total int32
-	for _, g := range grants {
-		total += g.RemainingMinutes
-	}
-	if total < minutes {
+	if len(rows) == 0 {
 		return ErrInsufficientBalance
 	}
-
-	remaining := minutes
-	sid := pgtype.UUID{Bytes: sessionID, Valid: true}
-
-	for _, g := range grants {
-		if remaining <= 0 {
-			break
-		}
-
-		debit := g.RemainingMinutes
-		if debit > remaining {
-			debit = remaining
-		}
-
-		_, err := q.DebitGrant(ctx, db.DebitGrantParams{
-			ID:               g.ID,
-			RemainingMinutes: debit,
-		})
-		if err != nil {
-			return fmt.Errorf("debit grant %s: %w", g.ID, err)
-		}
-
-		_, err = q.InsertLedgerEntry(ctx, db.InsertLedgerEntryParams{
-			UserID:    userID,
-			GrantID:   g.ID,
-			Amount:    -debit,
-			Reason:    "session_reserve",
-			SessionID: sid,
-		})
-		if err != nil {
-			return fmt.Errorf("insert ledger entry for grant %s: %w", g.ID, err)
-		}
-
-		remaining -= debit
-	}
-
 	return nil
 }
 
