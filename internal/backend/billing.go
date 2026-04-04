@@ -67,9 +67,24 @@ func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID, planNam
 }
 
 // GetUsageSummary returns the user's balance breakdown, active grants, and
-// recent ledger entries.
+// recent ledger entries. Ensures the current-month free grant exists and
+// reads everything in a single transaction for snapshot consistency.
 func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*UsageSummary, error) {
-	q := db.New(b.pool)
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin usage tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	q := db.New(tx)
+
+	if err := q.EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
+		UserID:         userID,
+		InitialMinutes: int32(billing.FreePlanMinutesPerMonth()),
+		ExpiresAt:      pgtype.Timestamptz{Time: billing.EndOfMonth(time.Now().UTC()), Valid: true},
+	}); err != nil {
+		return nil, fmt.Errorf("ensure free grant: %w", err)
+	}
 
 	summary, err := q.GetUserUsageSummary(ctx, userID)
 	if err != nil {
@@ -87,6 +102,10 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*Usage
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get recent ledger entries: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit usage tx: %w", err)
 	}
 
 	return &UsageSummary{

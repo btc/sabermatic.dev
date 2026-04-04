@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/billing"
 	"github.com/btc/drill/internal/db"
 )
 
@@ -148,6 +149,15 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 			return b.OAuthLogin(ctx, p)
 		}
 		return nil, fmt.Errorf("oauth login: create oauth user: %w", err)
+	}
+
+	// Create the first month's free grant for the new user.
+	if err := queries.EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
+		UserID:         user.ID,
+		InitialMinutes: int32(billing.FreePlanMinutesPerMonth()),
+		ExpiresAt:      pgtype.Timestamptz{Time: billing.EndOfMonth(time.Now().UTC()), Valid: true},
+	}); err != nil {
+		return nil, fmt.Errorf("create free grant: %w", err)
 	}
 
 	_, err = queries.CreateOAuthAccount(ctx, db.CreateOAuthAccountParams{
