@@ -5,7 +5,7 @@ import type {
   EducatorAnalysis, CoachAnalysis,
 } from "./types";
 
-interface SessionFixture {
+export interface SessionFixture {
   session: Session;
   messages: Message[];
 }
@@ -19,7 +19,7 @@ export interface CoachFixture extends CoachAnalysis {
   score_trend: ScoreTrendPoint[];
 }
 
-interface SampleQueryOptions {
+export interface SampleQueryOptions {
   enabled?: boolean;
 }
 
