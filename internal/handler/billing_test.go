@@ -51,7 +51,7 @@ func TestGetUsage_WithFreeGrant(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	// Create a free grant
-	_, err := db.New(pool).CreateFreeGrant(context.Background(), db.CreateFreeGrantParams{
+	err := db.New(pool).EnsureFreeGrant(context.Background(), db.EnsureFreeGrantParams{
 		UserID:         userID,
 		InitialMinutes: 60,
 		ExpiresAt:      pgtype.Timestamptz{Time: time.Now().Add(30 * 24 * time.Hour), Valid: true},
