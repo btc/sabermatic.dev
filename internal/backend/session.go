@@ -152,6 +152,9 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
+	if rows == nil {
+		rows = []db.ListSessionsByUserRow{}
+	}
 	return rows, nil
 }
 
@@ -311,7 +314,7 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 }
 
 // CancelSession ends a session early at the user's request. Sets status to
-// completed + archived (excluded from coach analysis and session lists).
+// cancelled + archived (excluded from coach analysis and session lists).
 // Refunds unused minutes based on wall-clock duration. Does NOT enqueue evaluation.
 func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCount int) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.CancelSession")
