@@ -352,7 +352,7 @@ WITH RECURSIVE
   sess AS (
     SELECT user_id, reserved_minutes, started_at, ended_at
     FROM interview_sessions
-    WHERE id = $2 AND reserved_minutes IS NOT NULL
+    WHERE id = $1 AND reserved_minutes IS NOT NULL
   ),
   refund_calc AS (
     SELECT GREATEST(0,
@@ -364,7 +364,7 @@ WITH RECURSIVE
     SELECT grant_id, -amount AS debit,
            ROW_NUMBER() OVER (ORDER BY created_at DESC) AS rn
     FROM ledger_entries
-    WHERE session_id = $2 AND reason = 'session_reserve'
+    WHERE session_id = $1 AND reason = 'session_reserve'
   ),
   distributed AS (
     SELECT r.grant_id, r.debit,
@@ -394,15 +394,10 @@ WITH RECURSIVE
     RETURNING g.id AS grant_id, d.credit
   )
 INSERT INTO ledger_entries (user_id, grant_id, amount, reason, session_id)
-SELECT (SELECT user_id FROM refund_calc), ac.grant_id, ac.credit, $1, $2
+SELECT (SELECT user_id FROM refund_calc), ac.grant_id, ac.credit, 'session_refund', $1
 FROM apply_credits ac
 RETURNING grant_id, amount
 `
-
-type RefundSessionMinutesParams struct {
-	Reason    string      `json:"reason"`
-	SessionID pgtype.UUID `json:"session_id"`
-}
 
 type RefundSessionMinutesRow struct {
 	GrantID uuid.UUID `json:"grant_id"`
@@ -410,9 +405,9 @@ type RefundSessionMinutesRow struct {
 }
 
 // Refunds unused minutes for a completed session based on wall-clock duration.
-// Derives user_id from the session — caller only needs session_id and reason.
-func (q *Queries) RefundSessionMinutes(ctx context.Context, arg RefundSessionMinutesParams) ([]RefundSessionMinutesRow, error) {
-	rows, err := q.db.Query(ctx, refundSessionMinutes, arg.Reason, arg.SessionID)
+// Derives user_id from the session — caller only needs session_id.
+func (q *Queries) RefundSessionMinutes(ctx context.Context, sessionID pgtype.UUID) ([]RefundSessionMinutesRow, error) {
+	rows, err := q.db.Query(ctx, refundSessionMinutes, sessionID)
 	if err != nil {
 		return nil, err
 	}

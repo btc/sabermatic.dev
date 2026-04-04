@@ -264,10 +264,7 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 
 	// Refund unused reserved minutes. The SQL derives user_id and duration
 	// from the session, distributes the refund, and writes ledger entries.
-	if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
-		Reason:    "session_refund",
-		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
-	}); err != nil {
+	if _, err := q.RefundSessionMinutes(ctx, pgtype.UUID{Bytes: sessionID, Valid: true}); err != nil {
 		slog.Warn("session refund failed", "session_id", sessionID, "error", err)
 	}
 
@@ -302,10 +299,7 @@ func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCo
 		return fmt.Errorf("cancel session: %w", err)
 	}
 
-	if _, err := q.RefundSessionMinutes(ctx, db.RefundSessionMinutesParams{
-		Reason:    "session_refund",
-		SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
-	}); err != nil {
+	if _, err := q.RefundSessionMinutes(ctx, pgtype.UUID{Bytes: sessionID, Valid: true}); err != nil {
 		slog.Warn("cancel session refund failed", "session_id", sessionID, "error", err)
 	}
 
