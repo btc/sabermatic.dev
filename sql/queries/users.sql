@@ -40,15 +40,12 @@ WHERE email = $1;
 SELECT * FROM users
 WHERE id = $1;
 
--- name: GetUserByStripeCustomerID :one
-SELECT * FROM users
-WHERE stripe_customer_id = $1 AND deleted_at IS NULL;
-
--- name: UpdateUserPlan :exec
-UPDATE users SET plan = $2, updated_at = NOW() WHERE id = $1;
-
 -- name: UpdateUserStripeCustomerID :exec
 UPDATE users SET stripe_customer_id = $2, updated_at = NOW() WHERE id = $1;
+
+-- name: UpdatePlanByStripeCustomer :execrows
+UPDATE users SET plan = @plan, updated_at = NOW()
+WHERE stripe_customer_id = @stripe_customer_id AND deleted_at IS NULL;
 
 -- name: IncrementFreeEducatorUsed :one
 UPDATE users
