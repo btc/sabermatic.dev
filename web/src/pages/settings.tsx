@@ -468,9 +468,9 @@ function MinuteBalance({ total, free, paid }: MinuteBalanceProps) {
 
 const FREE_LIMITS = [
   { feature: "Practice sessions", limit: "60 min free grant" },
-  { feature: "Session duration", limit: "Up to 45 min" },
+  { feature: "Session duration", limit: "Up to 30 min" },
   { feature: "Evaluation & scoring", limit: "Included" },
-  { feature: "Educator analysis", limit: "Included" },
+  { feature: "Educator analysis", limit: "1 full, then preview" },
   { feature: "Coach analysis", limit: "3 sessions minimum" },
   { feature: "Audio playback", limit: "Included" },
 ];

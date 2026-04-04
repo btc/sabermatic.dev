@@ -60,6 +60,11 @@ func RequestEducatorAnalysis(b *backend.Backend) http.HandlerFunc {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 			case errors.Is(err, backend.ErrEvaluationNotReady):
 				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			case errors.Is(err, backend.ErrNoPaidBalance):
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error":   "paid_balance_required",
+					"message": "Full educator analysis requires a paid plan or minute balance.",
+				})
 			default:
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
