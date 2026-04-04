@@ -20,17 +20,6 @@ import (
 // ---------------------------------------------------------------------------
 // Params
 // ---------------------------------------------------------------------------
-
-// CheckoutParams holds the parameters for CreateCheckoutSession.
-type CheckoutParams struct {
-	UserID      uuid.UUID
-	Email       string
-	Type        string // "subscription" or "pack"
-	Plan        string // for subscription
-	PackMinutes int    // for pack
-}
-
-// ---------------------------------------------------------------------------
 // Public methods
 // ---------------------------------------------------------------------------
 
@@ -108,6 +97,15 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (*Usage
 		Grants:         grants,
 		RecentActivity: entries,
 	}, nil
+}
+
+// CheckoutParams holds the parameters for CreateCheckoutSession.
+type CheckoutParams struct {
+	UserID      uuid.UUID
+	Email       string
+	Type        string // "subscription" or "pack"
+	Plan        string // for subscription
+	PackMinutes int    // for pack
 }
 
 // CreateCheckoutSession creates a Stripe Checkout session for a subscription or
