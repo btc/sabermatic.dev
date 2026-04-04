@@ -1,0 +1,30 @@
+# air configuration for Drill dev workflow
+# Go binary auto-rebuilds when web/dist/ or Go source changes
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build command: just the Go binary (frontend built by Vite watch)
+  cmd = "go build -o ./tmp/drill ./cmd/drill"
+  # Binary to run
+  bin = "./tmp/drill"
+  # Watch these extensions
+  include_ext = ["go", "sql", "html", "js", "css"]
+  # Watch these directories
+  include_dir = ["cmd", "internal", "web/dist", "sql"]
+  # Ignore these
+  exclude_dir = ["tmp", "web/node_modules", "web/src", "v0", "terraform", ".git"]
+  # Delay after file change before rebuilding (ms) — wait for Vite to finish
+  delay = 1000
+  # Send SIGINT for graceful shutdown
+  stop_on_error = true
+  kill_delay = 500
+  # Log
+  log = "build-errors.log"
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true
