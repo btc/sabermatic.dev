@@ -10,6 +10,7 @@ const TAGLINES = [
 ];
 
 const CYCLE_MS = 3000;
+const FADE_MS = 300;
 
 export function Hero() {
   const [index, setIndex] = useState(0);
@@ -17,26 +18,32 @@ export function Hero() {
   const isLast = index === TAGLINES.length - 1;
 
   useEffect(() => {
-    if (isLast) return; // Hold on final tagline
+    if (isLast) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
+    let fadeTimeout: ReturnType<typeof setTimeout>;
     const timer = setInterval(() => {
       setVisible(false);
-      setTimeout(() => {
-        setIndex((i) => i + 1);
+      fadeTimeout = setTimeout(() => {
+        setIndex((i) => Math.min(i + 1, TAGLINES.length - 1));
         setVisible(true);
-      }, 300); // fade out duration
+      }, FADE_MS);
     }, CYCLE_MS);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(fadeTimeout);
+    };
   }, [isLast]);
 
   return (
-    <section className="flex min-h-screen flex-col items-center justify-center gap-8 px-4">
-      <h1 className="text-5xl font-light tracking-tight text-foreground sm:text-7xl">
+    <section aria-labelledby="hero-heading" className="flex min-h-screen flex-col items-center justify-center gap-8 px-4">
+      <h1 id="hero-heading" className="text-5xl font-light tracking-tight text-foreground sm:text-7xl">
         sabermetric
       </h1>
       <p
-        className={`text-lg text-muted-foreground transition-opacity duration-300 sm:text-xl ${
+        aria-live="polite"
+        className={`text-lg text-muted-foreground transition-opacity duration-300 motion-reduce:transition-none sm:text-xl ${
           visible ? "opacity-100" : "opacity-0"
         }`}
       >
