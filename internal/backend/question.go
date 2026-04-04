@@ -22,5 +22,8 @@ func (b *Backend) ListQuestions(ctx context.Context, userID uuid.UUID) (_ []db.L
 	if err != nil {
 		return nil, fmt.Errorf("list questions: %w", err)
 	}
+	if rows == nil {
+		rows = []db.ListQuestionsForUserRow{}
+	}
 	return rows, nil
 }
