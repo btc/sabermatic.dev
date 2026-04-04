@@ -24,13 +24,16 @@ export function Annotations() {
 
   if (!sessionData?.messages || !evaluation?.annotations) return null;
 
+  // Sort messages by seq to ensure correct window selection
+  const sorted = [...sessionData.messages].sort((a, b) => a.seq - b.seq);
+
   // Pick a 3-5 message window that has annotations
   const annotatedSeqs = new Set(evaluation.annotations.map((a) => a.message_seq));
-  const firstAnnotated = sessionData.messages.find((m) => annotatedSeqs.has(m.seq));
+  const firstAnnotated = sorted.find((m) => annotatedSeqs.has(m.seq));
   if (!firstAnnotated) return null;
 
   const startSeq = Math.max(1, firstAnnotated.seq - 1);
-  const window = sessionData.messages.filter(
+  const window = sorted.filter(
     (m) => m.seq >= startSeq && m.seq < startSeq + 5,
   );
   const windowAnnotations = evaluation.annotations.filter(
@@ -66,7 +69,7 @@ export function Annotations() {
               </div>
               {msgAnnotations.map((ann, annIdx) => (
                 <div
-                  key={annIdx}
+                  key={`${ann.message_seq}-${ann.type}`}
                   className={cn(
                     "ml-8 border-l-2 pl-3 py-1 text-xs transition-all duration-500 motion-reduce:transition-none",
                     ANNOTATION_COLORS[ann.type],
