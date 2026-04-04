@@ -12,6 +12,17 @@ import (
 	"github.com/btc/drill/internal/interview/observer"
 )
 
+// Preferred file extension for audio MIME types.
+// stdlib mime DB either lacks these or returns unexpected first entries
+// (e.g. "audio/ogg" -> ".oga" instead of ".ogg").
+var audioExt = map[string]string{
+	"audio/webm": "webm",
+	"audio/wav":  "wav",
+	"audio/ogg":  "ogg",
+	"audio/mpeg": "mp3",
+	"audio/mp4":  "m4a",
+}
+
 // Conn wraps a *websocket.Conn to implement observer.WSConn.
 type Conn struct {
 	WS *websocket.Conn
@@ -67,6 +78,13 @@ func ParseWSMessage(data []byte) (WSMessage, error) {
 
 // AudioExt returns the file extension derived from AudioMIME (e.g. "audio/webm" -> "webm").
 func (m WSMessage) AudioExt() string {
-	_, sub, _ := strings.Cut(m.AudioMIME, "/")
-	return sub
+	if ext, ok := audioExt[m.AudioMIME]; ok {
+		return ext
+	}
+	// Fallback: extract subtype from MIME.
+	_, ext, _ := strings.Cut(m.AudioMIME, "/")
+	if ext == "" {
+		return "bin"
+	}
+	return ext
 }
