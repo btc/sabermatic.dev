@@ -136,7 +136,9 @@ func (b *Backend) RetryEvaluation(ctx context.Context, sessionID, userID uuid.UU
 		return fmt.Errorf("update status to evaluating: %w", err)
 	}
 
-	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, jobs.EvaluateSessionInsertOpts())
+	evalOpts := jobs.EvaluateSessionInsertOpts()
+	drilotel.SetTraceMetadata(ctx, evalOpts)
+	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, evalOpts)
 	if err != nil {
 		return fmt.Errorf("enqueue evaluate_session: %w", err)
 	}

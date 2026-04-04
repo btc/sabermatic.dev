@@ -296,7 +296,9 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		slog.Warn("session refund failed", "session_id", sessionID, "error", err)
 	}
 
-	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, jobs.EvaluateSessionInsertOpts())
+	evalOpts := jobs.EvaluateSessionInsertOpts()
+	drilotel.SetTraceMetadata(ctx, evalOpts)
+	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, evalOpts)
 	if err != nil {
 		return fmt.Errorf("enqueue evaluate_session: %w", err)
 	}

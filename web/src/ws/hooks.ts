@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { Span } from "@opentelemetry/api";
 import { ConnectionManager, ConnectionState } from "./connection";
-import type { ServerMessage, TraceContext } from "./protocol";
+import type { ServerMessage } from "./protocol";
+import { createTurnSpan, closeTurnSpan } from "@/telemetry/trace";
 
 interface InterviewMessage {
   id: string;
@@ -34,6 +36,8 @@ export function useInterview(sessionId: string) {
   // Use ref for streaming text to avoid stale closures in handleMessage
   const streamingTextRef = useRef("");
   const rawMessageHandlerRef = useRef<((msg: ServerMessage) => void) | null>(null);
+  // Active turn span — open from send to interviewer_done.
+  const turnSpanRef = useRef<Span | null>(null);
 
   const handleMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
@@ -88,6 +92,11 @@ export function useInterview(sessionId: string) {
           const seq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
           return [...prev, { id: msg.message_id, seq, role: "interviewer", content: finalText }];
         });
+        // Close the turn span — full round-trip from send to response complete.
+        if (turnSpanRef.current) {
+          closeTurnSpan(turnSpanRef.current);
+          turnSpanRef.current = null;
+        }
         break;
       }
 
@@ -97,6 +106,11 @@ export function useInterview(sessionId: string) {
 
       case "session_ended":
         setState("ended");
+        // Close any outstanding turn span on session end.
+        if (turnSpanRef.current) {
+          closeTurnSpan(turnSpanRef.current, false);
+          turnSpanRef.current = null;
+        }
         break;
 
       case "error":
@@ -117,7 +131,9 @@ export function useInterview(sessionId: string) {
     return () => cm.destroy();
   }, [sessionId, handleMessage]);
 
-  const sendText = useCallback((content: string, traceContext?: TraceContext) => {
+  const sendText = useCallback((content: string) => {
+    const { span, traceContext } = createTurnSpan("text");
+    turnSpanRef.current = span;
     // Use a local display seq derived from current messages — do NOT modify
     // lastSeqRef, which is reserved for server-acknowledged seqs used in
     // session_init.last_seq on reconnect.
@@ -129,7 +145,9 @@ export function useInterview(sessionId: string) {
     cmRef.current?.send({ type: "end_turn", content, input_method: "text", trace_context: traceContext });
   }, []);
 
-  const sendAudio = useCallback((audioBase64: string, traceContext?: TraceContext) => {
+  const sendAudio = useCallback((audioBase64: string) => {
+    const { span, traceContext } = createTurnSpan("voice");
+    turnSpanRef.current = span;
     setState("transcribing");
     cmRef.current?.send({ type: "end_turn", audio: audioBase64, input_method: "voice", trace_context: traceContext });
   }, []);
