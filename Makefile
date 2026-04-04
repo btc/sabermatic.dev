@@ -1,19 +1,27 @@
-.PHONY: dev dev-api dev-web seed test test-short cover cover-html cover-func clean-cover
+.PHONY: dev dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover
 
-# Start Go backend + Vite frontend dev server. Ctrl-C kills both.
+# Start embedded dev server. Vite rebuilds on save, air bounces Go binary.
+# One origin (port 8080), no proxy, no CSRF issues. Ctrl-C kills all.
 dev:
-	@echo "Starting Drill → http://localhost:3000"
+	@echo "Starting Drill → http://localhost:8080"
 	@trap 'kill 0' EXIT; \
-	$(MAKE) dev-api & \
-	$(MAKE) dev-web & \
-	sleep 2 && open http://localhost:3000 & \
+	$(MAKE) dev-build && \
+	$(MAKE) dev-watch & \
+	$(MAKE) dev-air & \
+	sleep 3 && open http://localhost:8080 & \
 	wait
 
-dev-api:
-	set -a && . ./.env && set +a && go run ./cmd/drill
+# Initial frontend build before air starts
+dev-build:
+	cd web && npm run build
 
-dev-web:
-	cd web && npm run dev
+# Vite watch mode — rebuilds web/dist/ on frontend file changes
+dev-watch:
+	cd web && npx vite build --watch
+
+# air watches web/dist/ + Go source, rebuilds and restarts Go binary
+dev-air:
+	set -a && . ./.env && set +a && air
 
 # Create dev user + seed questions. Run with server already up.
 seed:
