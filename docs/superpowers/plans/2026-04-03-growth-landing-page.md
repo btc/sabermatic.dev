@@ -804,7 +804,7 @@ Expected: FAIL — SPAHandler doesn't accept `fstest.MapFS` (it takes `embed.FS`
 
 - [ ] **Step 3: Refactor SPAHandler to accept fs.FS interface**
 
-Update `SPAHandler` in `internal/handler/routes.go` to accept `fs.FS` instead of `embed.FS` so it's testable:
+Update `SPAHandler` in `internal/handler/routes.go` to accept `fs.FS` instead of `embed.FS` so it's testable. Add `"strconv"` to the file's imports (needed for `Content-Length` header):
 
 ```go
 // SPAHandler serves the embedded SPA with OG meta tag injection for public routes.
@@ -855,6 +855,7 @@ func SPAHandler(fsys fs.FS) http.Handler {
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(html)))
 		w.Write([]byte(html))
 	})
 }
@@ -1035,10 +1036,12 @@ Add to `web/src/hooks/use-auth.ts`:
  * Distinguishes 401 (not authenticated) from 5xx (server error) so
  * server errors don't incorrectly show the landing page.
  */
+import { ApiError } from "@/api/client";
+
 export function useOptionalAuth() {
   const { data: user, isLoading, error } = useMe();
   // Only treat 401 as "not authenticated". Server errors should not show landing page.
-  const isAuthError = error && (error as any)?.status === 401;
+  const isAuthError = error instanceof ApiError && error.status === 401;
   return { user, isLoading, isAuthenticated: !!user, isAuthError };
 }
 ```
@@ -1447,6 +1450,9 @@ function FadeInCard({
         animate ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       }`}
       style={{
+        // NOTE: --strength and --gap CSS custom properties are defined in
+        // web/src/index.css (from the ui-phase design system). Verify they
+        // exist before using this component.
         borderColor: `hsl(var(--${accent}))`,
         transitionDelay: `${delay}ms`,
       }}
@@ -1792,7 +1798,11 @@ export function Coaching() {
         </h2>
       </div>
       <div className="w-full max-w-lg space-y-6">
-        {/* Score trend sparkline */}
+        {/* Score trend sparkline — score_trend is only available because
+            useSampleCoach returns CoachFixture (not CoachAnalysis). The
+            CoachFixture type extends CoachAnalysis with the score_trend
+            field, which is populated by the extraction tool from historical
+            evaluation data. This field does not exist on CoachAnalysis. */}
         {coach.score_trend && coach.score_trend.length > 1 && (
           <div
             className={`flex flex-col items-center gap-2 transition-all duration-500 ${
@@ -1908,7 +1918,10 @@ export function VoicePipeline() {
           ))}
         </div>
 
-        {/* Transcript stage */}
+        {/* Transcript stage
+            NOTE: The transcript line and annotation below are illustrative
+            examples for the pipeline animation, not verbatim session 27 data.
+            The spec allows this for the pipeline demonstration section. */}
         <div
           className={`w-full rounded-lg bg-muted px-4 py-3 text-sm text-foreground transition-all duration-500 ${
             stage === "transcript" || stage === "annotations"
@@ -1919,7 +1932,7 @@ export function VoicePipeline() {
           "I'd start by defining the API contract — the key endpoints for creating and retrieving resources..."
         </div>
 
-        {/* Annotation stage */}
+        {/* Annotation stage (illustrative — see note above) */}
         <div
           className={`ml-8 border-l-2 border-strength pl-3 py-1 text-xs text-strength transition-all duration-500 ${
             stage === "annotations"
@@ -2120,7 +2133,7 @@ export function useSession(
   options?: Pick<UseQueryOptions, "refetchInterval" | "enabled">,
 ) {
   return useQuery({
-    queryKey: ["session", id],
+    queryKey: ["sessions", id],
     queryFn: () => apiClient.get<Session>(`/api/sessions/${id}`),
     enabled: options?.enabled,
     refetchInterval: options?.refetchInterval,
@@ -2131,7 +2144,7 @@ export function useSession(
 export function useTranscript(sessionId: string, enabled?: boolean) {
   return useQuery({
     queryKey: ["transcript", sessionId],
-    queryFn: () => apiClient.get<Message[]>(`/api/sessions/${sessionId}/messages`),
+    queryFn: () => apiClient.get<Message[]>(`/api/sessions/${sessionId}/transcript`),
     enabled,
   });
 }
@@ -2206,46 +2219,119 @@ export { SessionDetailCtx, TabLink };
 
 - [ ] **Step 2: Update overview.tsx to use context**
 
-In `web/src/pages/session/overview.tsx`, add a check: if `dataSource === "sample"`, call `useSampleEvaluation()` and `useSampleSession()` instead of the authenticated hooks. Extract this into a helper:
+In `web/src/pages/session/overview.tsx`, make two changes:
+
+**a) Remove the `useParams` guard from the default export.** The current default export calls `useParams<{ id: string }>()` and redirects to `/` if `id` is undefined. This breaks the `/sample` route (which has no `:id` param). Replace it so the default export simply renders the inner component, which reads the session ID from context:
+
+```tsx
+// BEFORE (remove this):
+export default function Overview() {
+  const { id: sessionId } = useParams<{ id: string }>();
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <OverviewInner sessionId={sessionId} />;
+}
+
+// AFTER:
+export default function Overview() {
+  return <OverviewInner />;
+}
+```
+
+**b) Update `OverviewInner` to use context instead of a prop.** Remove the `sessionId` prop and read it from `useSessionDetail()`. Also add the `dataSource`-conditional hooks:
 
 ```tsx
 import { useSessionDetail } from "./layout";
 import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
 
-// At the top of the component:
-const { dataSource, sessionId } = useSessionDetail();
-const authSession = useSession(sessionId, { enabled: dataSource === "api" });
-const authEval = useEvaluation(sessionId, dataSource === "api");
-const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
-const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
+// OverviewInner no longer takes sessionId as a prop:
+function OverviewInner() {
+  const { dataSource, sessionId } = useSessionDetail();
+  const authSession = useSession(sessionId, { enabled: dataSource === "api" });
+  const authEval = useEvaluation(sessionId, dataSource === "api");
+  const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+  const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
 
-const session = dataSource === "api" ? authSession.data : sampleSession.data?.session;
-const evaluation = dataSource === "api" ? authEval.data : sampleEval.data;
+  const session = dataSource === "api" ? authSession.data : sampleSession.data?.session;
+  const evaluation = dataSource === "api" ? authEval.data : sampleEval.data;
+  // ... rest of component unchanged
+}
 ```
 
 - [ ] **Step 3: Update transcript.tsx similarly**
 
-Same pattern: check `dataSource`, use sample hooks for transcript messages and annotations.
+Make the same two changes as overview.tsx:
+
+**a) Remove the `useParams` guard from the default export:**
 
 ```tsx
-const { dataSource, sessionId } = useSessionDetail();
-const authTranscript = useTranscript(sessionId, dataSource === "api");
-const authEval = useEvaluation(sessionId, dataSource === "api");
-const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
-const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
+// BEFORE (remove this):
+export default function TranscriptPage() {
+  const { id: sessionId } = useParams<{ id: string }>();
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <TranscriptInner sessionId={sessionId} />;
+}
 
-const messages = dataSource === "api" ? authTranscript.data : sampleSession.data?.messages;
-const annotations = dataSource === "api" ? authEval.data?.annotations : sampleEval.data?.annotations;
+// AFTER:
+export default function TranscriptPage() {
+  return <TranscriptInner />;
+}
+```
+
+**b) Update `TranscriptInner` to use context instead of a prop:**
+
+```tsx
+import { useSessionDetail } from "./layout";
+import { useSampleSession, useSampleEvaluation } from "@/api/sample-queries";
+
+// TranscriptInner no longer takes sessionId as a prop:
+function TranscriptInner() {
+  const { dataSource, sessionId } = useSessionDetail();
+  const authTranscript = useTranscript(sessionId, dataSource === "api");
+  const authEval = useEvaluation(sessionId, dataSource === "api");
+  const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+  const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
+
+  const messages = dataSource === "api" ? authTranscript.data : sampleSession.data?.messages;
+  const annotations = dataSource === "api" ? authEval.data?.annotations : sampleEval.data?.annotations;
+  // ... rest of component unchanged
+}
 ```
 
 - [ ] **Step 4: Update deep-dive.tsx similarly**
 
-```tsx
-const { dataSource, sessionId } = useSessionDetail();
-const authEducator = useEducator(sessionId, dataSource === "api");
-const sampleEducator = useSampleEducator({ enabled: dataSource === "sample" });
+Make the same two changes as overview.tsx and transcript.tsx:
 
-const educator = dataSource === "api" ? authEducator.data : sampleEducator.data;
+**a) Remove the `useParams` guard from the default export:**
+
+```tsx
+// BEFORE (remove this):
+export default function DeepDive() {
+  const { id: sessionId } = useParams<{ id: string }>();
+  if (!sessionId) return <Navigate to="/" replace />;
+  return <DeepDiveInner sessionId={sessionId} />;
+}
+
+// AFTER:
+export default function DeepDive() {
+  return <DeepDiveInner />;
+}
+```
+
+**b) Update `DeepDiveInner` to use context instead of a prop:**
+
+```tsx
+import { useSessionDetail } from "./layout";
+import { useSampleEducator } from "@/api/sample-queries";
+
+// DeepDiveInner no longer takes sessionId as a prop:
+function DeepDiveInner() {
+  const { dataSource, sessionId } = useSessionDetail();
+  const authEducator = useEducator(sessionId, dataSource === "api");
+  const sampleEducator = useSampleEducator({ enabled: dataSource === "sample" });
+
+  const educator = dataSource === "api" ? authEducator.data : sampleEducator.data;
+  // ... rest of component unchanged
+}
 ```
 
 For sample mode, disable the "Generate" and "Retry" buttons since the data is static.
@@ -2274,7 +2360,6 @@ git commit -m "feat: session detail dataSource context for public/sample mode"
 // web/src/pages/sample.tsx
 import { Navigate } from "react-router-dom";
 import { SessionDetailCtx } from "@/pages/session/layout";
-import SessionLayoutInner from "@/pages/session/layout";
 
 // Re-export the inner layout — but we need the tab nav + outlet structure.
 // The simplest approach: render the session layout with sample context.
