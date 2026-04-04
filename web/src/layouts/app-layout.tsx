@@ -1,3 +1,4 @@
+import React from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@connectrpc/connect-query";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
@@ -10,7 +11,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function AppLayout() {
+export function AppLayout({ children }: { children?: React.ReactNode }) {
   const { isLoading, isAuthenticated } = useRequireAuth();
   const { data: meData } = useQuery(getMe, {});
   const user = meData?.user;
@@ -85,7 +86,7 @@ export function AppLayout() {
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-4 py-6">
-        <Outlet />
+        {children ?? <Outlet />}
       </main>
     </div>
   );
