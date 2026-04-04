@@ -319,9 +319,14 @@ func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) error {
 		return fmt.Errorf("update session status: %w", err)
 	}
 
-	// Full refund of reserved minutes.
+	// Full refund of reserved minutes via SQL recursive CTE.
 	if session.ReservedMinutes.Valid && session.ReservedMinutes.Int32 > 0 {
-		if err := b.refundMinutesTx(ctx, tx, session.UserID, sessionID, session.ReservedMinutes.Int32, "error_refund"); err != nil {
+		if _, err := q.FullRefundSessionMinutes(ctx, db.FullRefundSessionMinutesParams{
+			SessionID: pgtype.UUID{Bytes: sessionID, Valid: true},
+			Minutes:   session.ReservedMinutes.Int32,
+			UserID:    session.UserID,
+			Reason:    "error_refund",
+		}); err != nil {
 			slog.Warn("fail-session refund failed", "session_id", sessionID, "error", err)
 		}
 	}
