@@ -20,6 +20,16 @@ import (
 	"github.com/btc/drill/internal/db"
 )
 
+// snapshotFrom converts the sqlc-generated row to the billing package's snapshot type.
+func snapshotFrom(row db.GetBillingSnapshotRow) billing.BillingSnapshot {
+	return billing.BillingSnapshot{
+		Plan:                  row.Plan,
+		FreeFullEducatorsUsed: int(row.FreeFullEducatorsUsed),
+		TotalBalance:          int(row.TotalBalance),
+		PaidBalance:           int(row.PaidBalance),
+	}
+}
+
 // ---------------------------------------------------------------------------
 // EnsureFreeGrant
 // ---------------------------------------------------------------------------

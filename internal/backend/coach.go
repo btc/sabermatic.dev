@@ -27,11 +27,11 @@ type CoachResponse struct {
 // GetLatestCoachAnalysis returns the most recent coach analysis for a user.
 // Returns nil with no error if no analysis exists.
 func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) (*CoachResponse, error) {
-	paidBal, err := db.New(b.pool).GetUserPaidBalance(ctx, userID)
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get paid balance: %w", err)
+		return nil, fmt.Errorf("get billing snapshot: %w", err)
 	}
-	if !billing.CanAccessCoach(int(paidBal)) {
+	if !billing.Resolve(snapshotFrom(bs)).CanAccessCoach() {
 		return nil, ErrNoPaidBalance
 	}
 
@@ -68,11 +68,11 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 // RequestCoachAnalysis enqueues a coach analysis job.
 // If force is false, checks whether new sessions exist since the last analysis.
 func (b *Backend) RequestCoachAnalysis(ctx context.Context, userID uuid.UUID, force bool) error {
-	paidBal, err := db.New(b.pool).GetUserPaidBalance(ctx, userID)
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("get paid balance: %w", err)
+		return fmt.Errorf("get billing snapshot: %w", err)
 	}
-	if !billing.CanAccessCoach(int(paidBal)) {
+	if !billing.Resolve(snapshotFrom(bs)).CanAccessCoach() {
 		return ErrNoPaidBalance
 	}
 

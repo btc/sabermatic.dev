@@ -32,19 +32,12 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 		return nil, ErrEvaluationNotReady
 	}
 
-	// Determine educator access level.
-	paidBal, err := db.New(b.pool).GetUserPaidBalance(ctx, userID)
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get paid balance: %w", err)
+		return nil, fmt.Errorf("get billing snapshot: %w", err)
 	}
-
-	user, err := db.New(b.pool).GetUserByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
-	}
-
-	plan, _ := billing.PlanByName(user.Plan)
-	accessLevel := billing.DetermineEducatorAccess(int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
+	ent := billing.Resolve(snapshotFrom(bs))
+	accessLevel := ent.EducatorAccessLevel()
 
 	q := db.New(b.pool)
 	ea, err := q.GetEducatorAnalysisBySession(ctx, sessionID)
@@ -101,30 +94,22 @@ func (b *Backend) RequestEducatorAnalysis(ctx context.Context, sessionID, userID
 		return ErrEvaluationNotReady
 	}
 
-	// Determine educator access level.
-	paidBal, err := db.New(b.pool).GetUserPaidBalance(ctx, userID)
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("get paid balance: %w", err)
+		return fmt.Errorf("get billing snapshot: %w", err)
 	}
+	ent := billing.Resolve(snapshotFrom(bs))
 
-	user, err := db.New(b.pool).GetUserByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
-	}
-
-	plan, _ := billing.PlanByName(user.Plan)
-	accessLevel := billing.DetermineEducatorAccess(int(paidBal), int(user.FreeFullEducatorsUsed), plan.FreeEducatorLimit)
-
-	if accessLevel == billing.Preview {
+	if ent.EducatorAccessLevel() == billing.Preview {
 		return ErrNoPaidBalance
 	}
 
 	// Consume the free taste on request (POST), not on read (GET).
 	// The atomic increment ensures concurrent requests don't double-consume.
-	if accessLevel == billing.FreeTaste {
+	if ent.EducatorAccessLevel() == billing.FreeTaste {
 		if _, err := db.New(b.pool).IncrementFreeEducatorUsed(ctx, db.IncrementFreeEducatorUsedParams{
 			ID:                    userID,
-			FreeFullEducatorsUsed: int32(plan.FreeEducatorLimit),
+			FreeFullEducatorsUsed: int32(ent.FreeEducatorLimit()),
 		}); err != nil {
 			return fmt.Errorf("increment free educator used: %w", err)
 		}

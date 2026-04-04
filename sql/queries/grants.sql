@@ -173,6 +173,22 @@ SELECT @user_id, ac.grant_id, ac.credit, @reason, @session_id
 FROM apply_credits ac
 RETURNING grant_id, amount;
 
+-- name: GetBillingSnapshot :one
+-- Single query to fetch all billing state needed for entitlement checks.
+-- Fetch inside the caller's transaction to avoid TOCTOU.
+SELECT u.plan, u.free_full_educators_used,
+  COALESCE(SUM(g.remaining_minutes) FILTER (
+    WHERE g.remaining_minutes > 0 AND (g.expires_at IS NULL OR g.expires_at > NOW())
+  ), 0)::int AS total_balance,
+  COALESCE(SUM(g.remaining_minutes) FILTER (
+    WHERE g.remaining_minutes > 0 AND g.source != 'free_grant'
+    AND (g.expires_at IS NULL OR g.expires_at > NOW())
+  ), 0)::int AS paid_balance
+FROM users u
+LEFT JOIN grants g ON g.user_id = u.id
+WHERE u.id = $1
+GROUP BY u.id, u.plan, u.free_full_educators_used;
+
 -- name: GetUserUsageSummary :one
 SELECT
   COALESCE(SUM(remaining_minutes) FILTER (WHERE expires_at IS NULL OR expires_at > NOW()), 0)::int AS total_balance,

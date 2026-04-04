@@ -31,6 +31,9 @@ type Querier interface {
 	FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
+	// Single query to fetch all billing state needed for entitlement checks.
+	// Fetch inside the caller's transaction to avoid TOCTOU.
+	GetBillingSnapshot(ctx context.Context, id uuid.UUID) (GetBillingSnapshotRow, error)
 	GetEducatorAnalysisBySession(ctx context.Context, sessionID uuid.UUID) (EducatorAnalysis, error)
 	GetEvaluationBySession(ctx context.Context, sessionID uuid.UUID) (Evaluation, error)
 	GetEvaluationsBySessionIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Evaluation, error)

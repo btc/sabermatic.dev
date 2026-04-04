@@ -10,27 +10,52 @@ import (
 	"github.com/btc/drill/internal/billing"
 )
 
-func TestCanAccessEducator_PaidBalance(t *testing.T) {
-	level := billing.DetermineEducatorAccess(100, 0, 1)
-	assert.Equal(t, billing.Full, level)
+func bs(plan string, total, paid, freeEdu int) billing.BillingSnapshot {
+	return billing.BillingSnapshot{
+		Plan: plan, TotalBalance: total, PaidBalance: paid, FreeFullEducatorsUsed: freeEdu,
+	}
 }
 
-func TestCanAccessEducator_FreeTasteAvailable(t *testing.T) {
-	level := billing.DetermineEducatorAccess(0, 0, 1)
-	assert.Equal(t, billing.FreeTaste, level)
+func TestEntitlements_EducatorAccess(t *testing.T) {
+	assert.Equal(t, billing.Full, billing.Resolve(bs("pro", 600, 600, 0)).EducatorAccessLevel())
+	assert.Equal(t, billing.FreeTaste, billing.Resolve(bs("free", 60, 0, 0)).EducatorAccessLevel())
+	assert.Equal(t, billing.Preview, billing.Resolve(bs("free", 60, 0, 1)).EducatorAccessLevel())
 }
 
-func TestCanAccessEducator_FreeTasteExhausted(t *testing.T) {
-	level := billing.DetermineEducatorAccess(0, 1, 1)
-	assert.Equal(t, billing.Preview, level)
+func TestEntitlements_CanAccessCoach(t *testing.T) {
+	assert.True(t, billing.Resolve(bs("pro", 600, 600, 0)).CanAccessCoach())
+	assert.False(t, billing.Resolve(bs("free", 60, 0, 0)).CanAccessCoach())
 }
 
-func TestCanAccessCoach_PaidBalance(t *testing.T) {
-	assert.True(t, billing.CanAccessCoach(100))
+func TestEntitlements_CanStartSession(t *testing.T) {
+	ent := billing.Resolve(bs("free", 60, 0, 0))
+	assert.True(t, ent.CanStartSession(30))
+	assert.False(t, ent.CanStartSession(31))  // exceeds free plan max (30)
+	assert.False(t, ent.CanStartSession(61))  // exceeds balance
+
+	pro := billing.Resolve(bs("pro", 600, 600, 0))
+	assert.True(t, pro.CanStartSession(180))
+	assert.False(t, pro.CanStartSession(181)) // exceeds pro plan max
 }
 
-func TestCanAccessCoach_NoPaidBalance(t *testing.T) {
-	assert.False(t, billing.CanAccessCoach(0))
+func TestEntitlements_DurationAllowed(t *testing.T) {
+	assert.True(t, billing.Resolve(bs("free", 60, 0, 0)).DurationAllowed(30))
+	assert.False(t, billing.Resolve(bs("free", 60, 0, 0)).DurationAllowed(31))
+}
+
+func TestEntitlements_BalanceSufficient(t *testing.T) {
+	assert.True(t, billing.Resolve(bs("free", 60, 0, 0)).BalanceSufficient(60))
+	assert.False(t, billing.Resolve(bs("free", 60, 0, 0)).BalanceSufficient(61))
+}
+
+func TestEntitlements_ConcurrentSessionsAllowed(t *testing.T) {
+	free := billing.Resolve(bs("free", 60, 0, 0))
+	assert.True(t, free.ConcurrentSessionsAllowed(0))
+	assert.False(t, free.ConcurrentSessionsAllowed(1)) // free limit is 1
+
+	pro := billing.Resolve(bs("pro", 600, 600, 0))
+	assert.True(t, pro.ConcurrentSessionsAllowed(2))
+	assert.False(t, pro.ConcurrentSessionsAllowed(3)) // pro limit is 3
 }
 
 func TestPlanByName(t *testing.T) {
