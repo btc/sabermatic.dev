@@ -36,42 +36,41 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (db.
 		return db.InterviewSession{}, ErrInvalidDuration
 	}
 
-	// Look up plan; fall back to "free" if unset or unknown.
-	planName := p.Plan
-	if planName == "" {
-		planName = "free"
-	}
-	plan, ok := billing.PlanByName(planName)
-	if !ok {
-		plan, _ = billing.PlanByName("free")
-	}
-
-	// Enforce plan duration limit.
-	if p.DurationMinutes > plan.MaxDurationMinutes {
-		return db.InterviewSession{}, ErrDurationExceedsPlan
-	}
-
 	// Ensure the current-month free grant exists (idempotent, outside tx).
-	if err := b.EnsureFreeGrant(ctx, p.UserID, planName); err != nil {
+	if err := b.EnsureFreeGrant(ctx, p.UserID, p.Plan); err != nil {
 		return db.InterviewSession{}, fmt.Errorf("ensure free grant: %w", err)
 	}
 
-	// Begin transaction for all remaining checks and mutations.
+	// Begin transaction for all checks and mutations.
 	tx, err := b.pool.Begin(ctx)
 	if err != nil {
 		return db.InterviewSession{}, fmt.Errorf("begin create-session tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	q := db.New(tx)
 
-	// Check concurrent session limit.
+	// Single snapshot of all billing state, inside the transaction.
+	bs, err := q.GetBillingSnapshot(ctx, p.UserID)
+	if err != nil {
+		return db.InterviewSession{}, fmt.Errorf("get billing snapshot: %w", err)
+	}
+	ent := billing.Resolve(snapshotFrom(bs))
+
+	if !ent.DurationAllowed(p.DurationMinutes) {
+		return db.InterviewSession{}, ErrDurationExceedsPlan
+	}
+
 	activeCount, err := q.CountActiveSessionsByUser(ctx, p.UserID)
 	if err != nil {
 		return db.InterviewSession{}, fmt.Errorf("count active sessions: %w", err)
 	}
-	if int(activeCount) >= plan.ConcurrentSessions {
+	if !ent.ConcurrentSessionsAllowed(int(activeCount)) {
 		return db.InterviewSession{}, ErrConcurrentSessionLimit
+	}
+
+	if !ent.BalanceSufficient(p.DurationMinutes) {
+		return db.InterviewSession{}, ErrInsufficientBalance
 	}
 
 	// Verify the question exists (within tx for consistency).
