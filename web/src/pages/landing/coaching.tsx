@@ -9,10 +9,13 @@ function Sparkline({ data, animate }: { data: { date: string; overall_score: num
   const padding = 4;
   const maxScore = 5;
 
-  const points = data.map((d, i) => ({
-    x: padding + (i / (data.length - 1)) * (width - padding * 2),
-    y: padding + ((maxScore - d.overall_score) / maxScore) * (height - padding * 2),
-  }));
+  const points = data.map((d, i) => {
+    const score = Math.min(Math.max(d.overall_score, 0), maxScore);
+    return {
+      x: padding + (i / (data.length - 1)) * (width - padding * 2),
+      y: padding + ((maxScore - score) / maxScore) * (height - padding * 2),
+    };
+  });
 
   const pathData = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
