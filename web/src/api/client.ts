@@ -9,8 +9,7 @@ export class ApiError extends Error {
 }
 
 function getCsrfToken(): string {
-  const match = document.cookie.match(/drill_csrf=([^;]+)/);
-  return match?.[1] ?? "";
+  return (window as any).__csrfToken ?? "";
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {

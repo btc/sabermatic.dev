@@ -14,6 +14,7 @@ package handler_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/csrf"
@@ -66,4 +67,57 @@ func TestCSRF_AllowsGetRequests(t *testing.T) {
 	w := httptest.NewRecorder()
 	protected.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestCSRF_PostWithValidToken(t *testing.T) {
+	cfg := loadTestConfig(t, "postgres://unused")
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	csrfMiddleware := csrf.Protect(
+		csrfKey,
+		csrf.Secure(false),
+		csrf.HttpOnly(false),
+		csrf.CookieName("drill_csrf"),
+		csrf.Path("/"),
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/test", func(w http.ResponseWriter, r *http.Request) {
+		// Expose the masked token via response header (mirrors production handler).
+		w.Header().Set("X-CSRF-Token", csrf.Token(r))
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /api/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	protected := csrfMiddleware(mux)
+
+	// Step 1: GET to obtain the CSRF cookie + masked token.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	getReq = csrf.PlaintextHTTPRequest(getReq)
+	getW := httptest.NewRecorder()
+	protected.ServeHTTP(getW, getReq)
+	require.Equal(t, http.StatusOK, getW.Code)
+
+	csrfToken := getW.Header().Get("X-CSRF-Token")
+	require.NotEmpty(t, csrfToken, "GET response should include X-CSRF-Token header")
+
+	// Extract the cookie from the GET response.
+	var csrfCookie *http.Cookie
+	for _, c := range getW.Result().Cookies() {
+		if c.Name == "drill_csrf" {
+			csrfCookie = c
+			break
+		}
+	}
+	require.NotNil(t, csrfCookie, "GET response should set drill_csrf cookie")
+
+	// Step 2: POST with the cookie + masked token in the header.
+	postReq := httptest.NewRequest(http.MethodPost, "/api/test", strings.NewReader("{}"))
+	postReq = csrf.PlaintextHTTPRequest(postReq)
+	postReq.Header.Set("X-CSRF-Token", csrfToken)
+	postReq.Header.Set("Content-Type", "application/json")
+	postReq.AddCookie(csrfCookie)
+	postW := httptest.NewRecorder()
+	protected.ServeHTTP(postW, postReq)
+	require.Equal(t, http.StatusOK, postW.Code, "POST with valid CSRF token should succeed")
 }

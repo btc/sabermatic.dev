@@ -32,13 +32,23 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	)
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName)(mux)
-	csrfProtected := csrfProtect(otelHandler)
+
+	// Expose the masked CSRF token via response header so the SPA can read it.
+	csrfProtected := csrfProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-CSRF-Token", csrf.Token(r))
+		otelHandler.ServeHTTP(w, r)
+	}))
 
 	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
+	// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
+	// HTTPS-only referer/origin checks.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
 			otelHandler.ServeHTTP(w, r)
 			return
+		}
+		if !secureCookies {
+			r = csrf.PlaintextHTTPRequest(r)
 		}
 		csrfProtected.ServeHTTP(w, r)
 	})
