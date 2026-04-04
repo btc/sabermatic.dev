@@ -33,8 +33,8 @@ type Querier interface {
 	// produce zero rows — a no-op.
 	EnsureFreeGrant(ctx context.Context, arg EnsureFreeGrantParams) error
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
-	// Refunds exactly @minutes back to the grants that were originally debited
-	// for this session. Used by FailSession (platform error → full refund).
+	// Refunds all reserved minutes for a session. Used by FailSession (platform error).
+	// Derives user_id and reserved_minutes from the session — caller only needs session_id.
 	FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
@@ -80,6 +80,8 @@ type Querier interface {
 	MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
+	// Refunds unused minutes for a completed session based on wall-clock duration.
+	// Derives user_id from the session — caller only needs session_id and reason.
 	RefundSessionMinutes(ctx context.Context, arg RefundSessionMinutesParams) ([]RefundSessionMinutesRow, error)
 	// Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
 	// Returns one row per grant debited. Returns zero rows if balance is insufficient
