@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -131,6 +132,15 @@ func buildResource(serviceName string) (*resource.Resource, error) {
 
 func buildExporters(name string) (sdktrace.SpanExporter, sdkmetric.Exporter, error) {
 	switch name {
+	case "dev":
+		// One-line-per-span exporter for local development.
+		te := &devTraceExporter{}
+		me, err := stdoutmetric.New()
+		if err != nil {
+			return nil, nil, fmt.Errorf("stdout metric exporter: %w", err)
+		}
+		return te, me, nil
+
 	case "stdout":
 		te, err := stdouttrace.New()
 		if err != nil {
@@ -154,6 +164,43 @@ func buildExporters(name string) (sdktrace.SpanExporter, sdkmetric.Exporter, err
 		return te, me, nil
 
 	default:
-		return nil, nil, fmt.Errorf("unknown otel exporter: %q (want \"stdout\" or \"google\")", name)
+		return nil, nil, fmt.Errorf("unknown otel exporter: %q (want \"dev\", \"stdout\", or \"google\")", name)
 	}
 }
+
+// devTraceExporter logs one slog line per completed span. Only HTTP server
+// spans include method/path/status; other spans log name and duration.
+type devTraceExporter struct{}
+
+func (e *devTraceExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
+	for _, s := range spans {
+		attrs := make(map[string]any, len(s.Attributes()))
+		for _, kv := range s.Attributes() {
+			attrs[string(kv.Key)] = kv.Value.AsInterface()
+		}
+
+		method, _ := attrs["http.request.method"].(string)
+		route, _ := attrs["http.route"].(string)
+		status, _ := attrs["http.response.status_code"].(int64)
+		dur := s.EndTime().Sub(s.StartTime()).Round(time.Millisecond)
+
+		if method != "" {
+			level := slog.LevelInfo
+			if status >= 400 {
+				level = slog.LevelWarn
+			}
+			if status >= 500 {
+				level = slog.LevelError
+			}
+			slog.Log(context.Background(), level, "http",
+				"method", method,
+				"path", route,
+				"status", status,
+				"dur", dur,
+			)
+		}
+	}
+	return nil
+}
+
+func (e *devTraceExporter) Shutdown(context.Context) error { return nil }
