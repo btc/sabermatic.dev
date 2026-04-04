@@ -66,7 +66,7 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 }
 
 // RequestCoachAnalysis enqueues a coach analysis job.
-// If force is false, checks whether new sessions exist since the last analysis.
+// force skips the "no new sessions" check — used by admin or retry flows.
 func (b *Backend) RequestCoachAnalysis(ctx context.Context, userID uuid.UUID, force bool) error {
 	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
 	if err != nil {
