@@ -134,6 +134,10 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	c.initMsg = initMsg
 
 	// Phase 3: Main lifecycle.
+	// workCtx is deliberately not derived from serverCtx. Handlers must
+	// finish their current work (DB persist, LLM stream) before shutdown;
+	// serverCtx.Done() is only checked between turns in the select loop.
+	workCtx := context.Background()
 	readCtx, readCancel := context.WithCancel(context.Background())
 
 	msgCh := make(chan WSMessage)
@@ -170,9 +174,9 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	}()
 
 	// Load session state from DB.
-	if err := c.loadSession(serverCtx); err != nil {
+	if err := c.loadSession(workCtx); err != nil {
 		slog.Error("conductor: load session", "error", err, "session_id", c.sessionID)
-		c.send(serverCtx, msgError("load_failed", "failed to load session"))
+		c.send(workCtx, msgError("load_failed", "failed to load session"))
 		return
 	}
 
@@ -185,7 +189,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	reconnectTimer := time.After(55 * time.Minute)
 
 	// Initial messages to client.
-	if err := c.sendInitialMessage(serverCtx); err != nil {
+	if err := c.sendInitialMessage(workCtx); err != nil {
 		slog.Error("conductor: initial message", "error", err, "session_id", c.sessionID)
 		return
 	}
@@ -198,38 +202,42 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			if !ok {
 				return // client disconnected
 			}
+			if serverCtx.Err() != nil {
+				c.send(workCtx, msgReconnectPlease)
+				return
+			}
 			switch msg.Type {
 			case "end_turn":
-				if err := c.endTurn(serverCtx, msg); err != nil {
+				if err := c.endTurn(workCtx, msg); err != nil {
 					slog.Error("conductor: end_turn", "error", err, "session_id", c.sessionID)
 					c.sm.ForceState(StateWaitingForInput)
-					c.send(serverCtx, msgError("turn_failed", "failed to process turn, please try again"))
+					c.send(workCtx, msgError("turn_failed", "failed to process turn, please try again"))
 					continue
 				}
 				if reconnectPending {
-					c.send(serverCtx, msgReconnectPlease)
+					c.send(workCtx, msgReconnectPlease)
 					return
 				}
 			case "end_session":
-				if err := c.endSession(serverCtx); err != nil {
+				if err := c.endSession(workCtx); err != nil {
 					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
 				}
 				return
 			case "ping":
-				c.send(serverCtx, msgPong)
+				c.send(workCtx, msgPong)
 			default:
-				c.send(serverCtx, msgError("unknown_message_type", "unknown message type: "+msg.Type))
+				c.send(workCtx, msgError("unknown_message_type", "unknown message type: "+msg.Type))
 			}
 
 		case <-warningTimer:
-			c.send(serverCtx, msgTimerWarning(warningMinutes(c.duration)))
+			c.send(workCtx, msgTimerWarning(warningMinutes(c.duration)))
 
 		case <-overtimeTimer:
-			c.send(serverCtx, msgTimerOvertime)
+			c.send(workCtx, msgTimerOvertime)
 
 		case <-autoEndTimer:
 			slog.Info("conductor: auto-ending session", "session_id", c.sessionID)
-			if err := c.endSession(serverCtx); err != nil {
+			if err := c.endSession(workCtx); err != nil {
 				slog.Error("conductor: auto-end", "error", err, "session_id", c.sessionID)
 			}
 			return
@@ -238,7 +246,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			reconnectPending = true
 
 		case <-serverCtx.Done():
-			c.send(context.Background(), msgReconnectPlease)
+			c.send(workCtx, msgReconnectPlease)
 			return
 		}
 	}
