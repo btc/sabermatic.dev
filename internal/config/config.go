@@ -39,6 +39,11 @@ type Server struct {
 
 type Database struct {
 	URL         string `env:"DATABASE_URL,required"`
+	// AppURL is the connection string for the drill_app role used by
+	// Row-Level Security middleware. When set, the RLS middleware acquires
+	// connections from a separate pool connecting as drill_app. When
+	// empty, RLS middleware is not activated.
+	AppURL string `env:"DATABASE_APP_URL"`
 	// 80 leaves ~20 connections for superuser, psql, migrations under the
 	// Postgres default of 100 max_connections. Each active session holds a
 	// dedicated connection for its advisory lock, so this caps concurrent sessions.

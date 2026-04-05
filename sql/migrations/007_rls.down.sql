@@ -1,0 +1,27 @@
+-- 007_rls.down.sql: Remove Row-Level Security policies and drill_app role.
+
+DROP POLICY IF EXISTS user_isolation ON interview_sessions;
+DROP POLICY IF EXISTS user_isolation ON coach_analyses;
+DROP POLICY IF EXISTS user_isolation ON grants;
+DROP POLICY IF EXISTS user_isolation ON ledger_entries;
+DROP POLICY IF EXISTS user_isolation ON llm_calls;
+DROP POLICY IF EXISTS user_isolation ON user_events;
+DROP POLICY IF EXISTS questions_isolation ON questions;
+
+ALTER TABLE interview_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE coach_analyses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE grants DISABLE ROW LEVEL SECURITY;
+ALTER TABLE ledger_entries DISABLE ROW LEVEL SECURITY;
+ALTER TABLE llm_calls DISABLE ROW LEVEL SECURITY;
+ALTER TABLE user_events DISABLE ROW LEVEL SECURITY;
+ALTER TABLE questions DISABLE ROW LEVEL SECURITY;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM drill_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE USAGE ON SEQUENCES FROM drill_app;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM drill_app;
+REVOKE USAGE ON ALL SEQUENCES IN SCHEMA public FROM drill_app;
+
+DROP FUNCTION IF EXISTS app_current_user_id();
+
+REASSIGN OWNED BY drill_app TO CURRENT_USER;
+DROP ROLE IF EXISTS drill_app;
