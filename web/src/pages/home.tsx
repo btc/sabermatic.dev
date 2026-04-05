@@ -180,13 +180,11 @@ function ActiveSessionBanner({
           >
             Resume
           </Link>
-          {/* End Session navigates to interview page where the WS cancel protocol is available.
-              A direct REST cancel endpoint doesn't exist yet. */}
           <Link
             to={`/sessions/${session.id}/interview`}
-            className="border border-white/60 text-white px-4 py-2 rounded text-sm leading-none hover:bg-white/10 transition-colors"
+            className="text-sm text-blue-100 hover:text-white underline underline-offset-2"
           >
-            End Session
+            Go to session
           </Link>
         </div>
       </div>
@@ -268,6 +266,17 @@ function QuestionCard({
             }
           : undefined
       }
+      {...(startDisabled
+        ? {
+            role: "button",
+            tabIndex: 0,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                document.getElementById("active-session-banner")?.scrollIntoView({ behavior: "smooth" });
+              }
+            },
+          }
+        : {})}
     >
       {startDisabled && (
         <div className="absolute inset-0 rounded-lg flex items-center justify-center z-10 bg-card/70 backdrop-blur-sm cursor-pointer">
