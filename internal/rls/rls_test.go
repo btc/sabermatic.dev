@@ -26,9 +26,9 @@ import (
 )
 
 // startPostgresWithRLS starts a Postgres 16 container, runs migrations
-// (including 007_rls), creates the drill_app role and grants, and returns
+// (including 007_rls), creates the app role and grants, and returns
 // two connection strings: one for the superuser (for setup) and one for
-// drill_app (for RLS-scoped queries).
+// app (for RLS-scoped queries).
 func startPostgresWithRLS(t *testing.T) (superConnStr, appConnStr string) {
 	t.Helper()
 	ctx := context.Background()
@@ -50,7 +50,7 @@ func startPostgresWithRLS(t *testing.T) (superConnStr, appConnStr string) {
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err, "get connection string")
 
-	// Run migrations (includes 007_rls which creates drill_app role + policies).
+	// Run migrations (includes 007_rls which creates app role + policies).
 	d, err := iofs.New(migrations.FS, ".")
 	require.NoError(t, err, "create migration source")
 
@@ -68,16 +68,16 @@ func startPostgresWithRLS(t *testing.T) (superConnStr, appConnStr string) {
 	require.NoError(t, srcErr, "close migration source")
 	require.NoError(t, dbErr, "close migration db")
 
-	// Set a password for drill_app so we can connect as that role.
+	// Set a password for app so we can connect as that role.
 	superPool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err, "create super pool")
 	defer superPool.Close()
 
-	_, err = superPool.Exec(ctx, "ALTER ROLE drill_app PASSWORD 'drill_app_pass'")
-	require.NoError(t, err, "set drill_app password")
+	_, err = superPool.Exec(ctx, "ALTER ROLE app PASSWORD 'app_pass'")
+	require.NoError(t, err, "set app password")
 
 	// Build app connection string by replacing user:pass in the superuser URL.
-	appConn := strings.Replace(connStr, "test:test@", "drill_app:drill_app_pass@", 1)
+	appConn := strings.Replace(connStr, "test:test@", "app:app_pass@", 1)
 
 	return connStr, appConn
 }
@@ -139,7 +139,7 @@ func TestRLSIsolation(t *testing.T) {
 	require.NoError(t, err)
 	defer superPool.Close()
 
-	// App pool connects as drill_app (subject to RLS).
+	// App pool connects as app (subject to RLS).
 	appPool, err := pgxpool.New(ctx, appConnStr)
 	require.NoError(t, err)
 	defer appPool.Close()
@@ -218,7 +218,7 @@ func TestRLSIsolation(t *testing.T) {
 	})
 
 	t.Run("no_user_id_set_returns_zero_rows_for_user_tables", func(t *testing.T) {
-		// Connect as drill_app but do NOT call set_config.
+		// Connect as app but do NOT call set_config.
 		conn, err := appPool.Acquire(ctx)
 		require.NoError(t, err)
 		defer conn.Release()

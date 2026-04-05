@@ -1,22 +1,22 @@
 -- 007_rls.up.sql: Row-Level Security for user isolation.
 
 -- Create a restricted role for the application.
--- NOTE: In production, set a password for drill_app via:
---   ALTER ROLE drill_app PASSWORD 'strong-password-here';
+-- NOTE: In production, set a password for app via:
+--   ALTER ROLE app PASSWORD 'strong-password-here';
 -- The password should come from secrets management, not this migration file.
 -- Set DATABASE_APP_URL to use this role for the application pool.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'drill_app') THEN
-        CREATE ROLE drill_app LOGIN;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app') THEN
+        CREATE ROLE app LOGIN;
     END IF;
 END
 $$;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO drill_app;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO drill_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO drill_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE ON SEQUENCES TO drill_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE ON SEQUENCES TO app;
 
 -- Enable RLS on direct-user_id tables.
 ALTER TABLE interview_sessions ENABLE ROW LEVEL SECURITY;
