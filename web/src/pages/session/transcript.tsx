@@ -3,6 +3,7 @@ import { useParams, Navigate } from "react-router-dom";
 import { useTranscript, useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MessageSquare } from "lucide-react";
 import type { AnnotationType, AnnotationResponse, Message } from "@/api/types";
 
 // ---------------------------------------------------------------------------
@@ -235,13 +236,14 @@ function AnnotationRail({ annotations, messages, onDotClick }: AnnotationRailPro
 }
 
 // ---------------------------------------------------------------------------
-// Empty / no-annotation state
+// Empty transcript state
 // ---------------------------------------------------------------------------
 
-function NoAnnotationsView() {
+function EmptyTranscriptView() {
   return (
-    <div className="py-12 text-center text-sm text-muted-foreground">
-      No annotations for this session.
+    <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+      <MessageSquare className="size-8 opacity-30" />
+      <p className="text-sm">No messages in this session.</p>
     </div>
   );
 }
@@ -298,6 +300,11 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
   const sorted = [...messages].sort((a, b) => a.seq - b.seq);
   const annotations = evaluation?.annotations ?? [];
 
+  // Empty transcript — no messages at all
+  if (sorted.length === 0) {
+    return <EmptyTranscriptView />;
+  }
+
   // Group annotations by message_seq for efficient lookup
   const annotationsBySeq = annotations.reduce<Map<number, AnnotationResponse[]>>(
     (acc, ann) => {
@@ -319,16 +326,14 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
     <div className="flex gap-0 max-w-3xl mx-auto">
       {/* Main content column */}
       <div className="flex-1 min-w-0">
-        {/* Summary bar */}
-        {annotations.length > 0 ? (
+        {/* Summary bar — only shown when there are annotations */}
+        {annotations.length > 0 && (
           <SummaryBar
             annotations={annotations}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
             onJumpToFirst={handleJumpToFirst}
           />
-        ) : (
-          <NoAnnotationsView />
         )}
 
         {/* Message list */}

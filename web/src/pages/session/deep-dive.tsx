@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEducator, useRequestEducator, useMe } from "@/api/queries";
+import { useEducator, useRequestEducator, useMe, useSession } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { GENERATING_MESSAGES } from "@/lib/constants";
 
@@ -158,11 +158,30 @@ export default function DeepDive() {
 }
 
 function DeepDiveInner({ sessionId }: { sessionId: string }) {
+  const { data: session } = useSession(sessionId);
   const { data: educator, isError } = useEducator(sessionId);
   const requestEducator = useRequestEducator(sessionId);
   const { data: me } = useMe();
 
   const isPro = me?.plan === "pro";
+
+  // Evaluation failed — deep dive is not possible without a successful evaluation
+  if (session?.status === "evaluation_failed") {
+    return (
+      <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Evaluation failed — deep dive requires a completed evaluation.{" "}
+          <Link
+            to={`/sessions/${sessionId}/overview`}
+            className="text-foreground underline underline-offset-4 hover:text-muted-foreground transition-colors"
+          >
+            Retry evaluation
+          </Link>{" "}
+          from the overview page.
+        </p>
+      </div>
+    );
+  }
 
   // Error state — separate from "not requested"
   if (isError) {
@@ -184,6 +203,24 @@ function DeepDiveInner({ sessionId }: { sessionId: string }) {
 
   // Not yet requested (null data)
   if (!educator) {
+    // Session not yet reviewed — deep dive is unavailable
+    if (session && session.status !== "reviewed") {
+      return (
+        <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Deep dive not available — request it from the{" "}
+            <Link
+              to={`/sessions/${sessionId}/overview`}
+              className="text-foreground underline underline-offset-4 hover:text-muted-foreground transition-colors"
+            >
+              overview page
+            </Link>{" "}
+            once the evaluation is complete.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
         <p className="text-sm text-muted-foreground leading-relaxed">

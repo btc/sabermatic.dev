@@ -130,7 +130,7 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
   const { data: evaluation } = useEvaluation(sessionId);
   const retryEvaluation = useRetryEvaluation(sessionId);
 
-  if (!session || !evaluation) {
+  if (!session) {
     return (
       <div className="space-y-6 max-w-2xl">
         <Skeleton className="h-6 w-32" />
@@ -145,13 +145,16 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
     );
   }
 
-  // Evaluation failed state
+  // Evaluation failed state — show prominently before checking evaluation data
   if (session.status === "evaluation_failed") {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <p className="text-sm text-muted-foreground">Evaluation could not be completed.</p>
+        <p className="text-base font-medium">Evaluation Failed</p>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          The evaluation could not be completed. This can happen during high demand or due to a
+          transient error. Retrying usually resolves the issue.
+        </p>
         <Button
-          variant="outline"
           onClick={() => retryEvaluation.mutate()}
           disabled={retryEvaluation.isPending}
         >
@@ -161,9 +164,28 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
     );
   }
 
-  // Not yet reviewed — nothing to show in this tab
+  // Not yet reviewed — evaluation not available
   if (session.status !== "reviewed") {
-    return null;
+    return (
+      <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
+        <p className="text-sm text-muted-foreground">Evaluation not available.</p>
+      </div>
+    );
+  }
+
+  if (!evaluation) {
+    return (
+      <div className="space-y-6 max-w-2xl">
+        <Skeleton className="h-6 w-32" />
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+        </div>
+      </div>
+    );
   }
 
   const { scores, strengths, gaps, advice } = evaluation;

@@ -1,9 +1,32 @@
 import { useState, useEffect } from "react";
-import { Outlet, NavLink, useParams, useNavigate, Navigate } from "react-router-dom";
+import { Outlet, NavLink, useParams, useNavigate, Navigate, Link } from "react-router-dom";
 import { useSession, useEvaluation } from "@/api/queries";
 import type { Session } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
+
+// ---------------------------------------------------------------------------
+// Cancelled state card
+// ---------------------------------------------------------------------------
+
+function CancelledView() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-4 px-4 text-center">
+      <div className="rounded-lg border border-border bg-card px-8 py-10 max-w-sm w-full space-y-3">
+        <h2 className="text-base font-semibold">Session Cancelled</h2>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          This session was cancelled before completion. No evaluation is available.
+        </p>
+        <Link
+          to="/"
+          className="inline-block text-sm text-foreground underline underline-offset-4 hover:text-muted-foreground transition-colors"
+        >
+          Back to Home
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
@@ -107,6 +130,11 @@ function SessionLayoutInner({ id }: { id: string }) {
 
   // Suppress void warning — evaluation is fetched for cache priming
   void evaluation;
+
+  // Cancelled sessions get a standalone card — no tab chrome needed
+  if (status === "cancelled") {
+    return <CancelledView />;
+  }
 
   return (
     <div className="space-y-0">

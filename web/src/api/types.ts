@@ -32,7 +32,7 @@ export interface Question {
 }
 
 // --- Sessions ---
-export type SessionStatus = "active" | "completed" | "evaluating" | "reviewed" | "evaluation_failed" | "failed";
+export type SessionStatus = "active" | "completed" | "evaluating" | "reviewed" | "evaluation_failed" | "failed" | "cancelled";
 
 export interface Session {
   id: string;
