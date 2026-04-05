@@ -39,7 +39,10 @@ type Server struct {
 
 type Database struct {
 	URL         string `env:"DATABASE_URL,required"`
-	MaxPoolConns int32  `env:"DATABASE_MAX_POOL_SIZE,default=5"`
+	// 80 leaves ~20 connections for superuser, psql, migrations under the
+	// Postgres default of 100 max_connections. Each active session holds a
+	// dedicated connection for its advisory lock, so this caps concurrent sessions.
+	MaxPoolConns int32 `env:"DATABASE_MAX_POOL_SIZE,default=80"`
 }
 
 // NewPool creates a pgxpool connected to the configured database.
