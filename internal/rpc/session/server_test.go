@@ -235,13 +235,12 @@ func TestGetTranscript_Empty(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	// Transcript should be empty but not nil
+	// Transcript should be empty
 	resp, err := client.GetTranscript(context.Background(), connect.NewRequest(&drillv1.GetTranscriptRequest{
 		SessionId: createResp.Msg.Session.Id,
 	}))
 	require.NoError(t, err)
-	require.NotNil(t, resp.Msg.Messages)
-	require.Len(t, resp.Msg.Messages, 0)
+	require.Empty(t, resp.Msg.Messages, "expected no messages")
 }
 
 func TestGetTranscript_NotFound(t *testing.T) {
