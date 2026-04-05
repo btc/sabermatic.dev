@@ -264,6 +264,19 @@ func TestRLSIsolation(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("with_check_prevents_cross_user_insert", func(t *testing.T) {
+		// Alice should NOT be able to insert a session for Bob (WITH CHECK violation).
+		err := rls.WithUser(ctx, appPool, userA, func(ctx context.Context, db rls.DBTX) error {
+			_, err := db.Exec(ctx,
+				`INSERT INTO interview_sessions (user_id, question_id, status, config_duration_minutes) VALUES ($1, $2, 'active', 45)`,
+				userB, qShared,
+			)
+			require.Error(t, err, "Alice should not be able to insert a session for Bob")
+			return nil
+		})
+		require.NoError(t, err)
+	})
+
 	_ = qA // used to verify A's own question shows up
 }
 

@@ -1,6 +1,10 @@
 -- 007_rls.up.sql: Row-Level Security for tenant isolation.
 
 -- Create a restricted role for the application.
+-- NOTE: In production, set a password for drill_app via:
+--   ALTER ROLE drill_app PASSWORD 'strong-password-here';
+-- The password should come from secrets management, not this migration file.
+-- Set DATABASE_APP_URL to use this role for the application pool.
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'drill_app') THEN
@@ -22,6 +26,8 @@ ALTER TABLE ledger_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE llm_calls ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE oauth_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE auth_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Helper: safely convert the session variable to uuid.
 -- current_setting with missing_ok=true returns '' when unset.
@@ -58,3 +64,11 @@ CREATE POLICY user_isolation ON user_events
 CREATE POLICY questions_isolation ON questions
     USING (user_id IS NULL OR user_id = app_current_user_id())
     WITH CHECK (user_id IS NULL OR user_id = app_current_user_id());
+
+CREATE POLICY user_isolation ON oauth_accounts
+    USING (user_id = app_current_user_id())
+    WITH CHECK (user_id = app_current_user_id());
+
+CREATE POLICY user_isolation ON auth_sessions
+    USING (user_id = app_current_user_id())
+    WITH CHECK (user_id = app_current_user_id());

@@ -106,5 +106,5 @@ func WithUser(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, fn func
 		return fmt.Errorf("rls: set_config: %w", err)
 	}
 
-	return fn(ctx, conn)
+	return fn(withDB(ctx, conn), conn)
 }

@@ -1,5 +1,10 @@
 -- 007_rls.down.sql: Remove Row-Level Security policies and drill_app role.
 
+DROP POLICY IF EXISTS user_isolation ON oauth_accounts;
+DROP POLICY IF EXISTS user_isolation ON auth_sessions;
+ALTER TABLE oauth_accounts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE auth_sessions DISABLE ROW LEVEL SECURITY;
+
 DROP POLICY IF EXISTS user_isolation ON interview_sessions;
 DROP POLICY IF EXISTS user_isolation ON coach_analyses;
 DROP POLICY IF EXISTS user_isolation ON grants;
