@@ -12,11 +12,8 @@ plugins:
   # TypeScript message types
   - remote: buf.build/bufbuild/es:v2.11.0
     out: web/src/pb
-  # TypeScript Connect client
-  - remote: buf.build/connectrpc/es:v1.6.1
-    out: web/src/pb
   # TanStack Query hooks
-  - remote: buf.build/connectrpc/query-es
+  - remote: buf.build/connectrpc/query-es:v2.2.0
     out: web/src/pb
 inputs:
   - directory: pb
