@@ -212,6 +212,71 @@ func TestGetEducatorAnalysis_Completed(t *testing.T) {
 	require.Equal(t, "Gap deep dives.", *resp.Msg.Analysis.GapDeepDives)
 }
 
+// signupAndLoginAs creates a user with the given email+password and returns the raw token.
+func signupAndLoginAs(t *testing.T, b *backend.Backend, email, password string) string {
+	t.Helper()
+	ctx := context.Background()
+	_, err := b.Signup(ctx, backend.SignupParams{
+		Email:       email,
+		Password:    password,
+		DisplayName: "Test User",
+	})
+	require.NoError(t, err)
+	res, err := b.Login(ctx, backend.LoginParams{
+		Email:     email,
+		Password:  password,
+		IP:        "127.0.0.1:12345",
+		UserAgent: "test-agent",
+	})
+	require.NoError(t, err)
+	return res.Token
+}
+
+func TestRequestEducatorAnalysis_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	b := testutil.NewTestBackend(t)
+	srvURL := startEducatorServer(t, b)
+	token := signupAndLoginAs(t, b, "educator-req@example.com", "securepass123")
+	client := authedClient(t, srvURL, token)
+	userID := userIDFromToken(t, b, token)
+
+	questionID := seedQuestion(t, b)
+	sessionID := seedReviewedSession(t, b, userID, questionID)
+
+	_, err := client.RequestEducatorAnalysis(context.Background(), connect.NewRequest(&drillv1.RequestEducatorAnalysisRequest{
+		SessionId: sessionID.String(),
+	}))
+	require.NoError(t, err)
+}
+
+func TestGetEducatorAnalysis_WrongUser(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	b := testutil.NewTestBackend(t)
+	srvURL := startEducatorServer(t, b)
+
+	// User A creates a session.
+	tokenA := signupAndLoginAs(t, b, "user-a@example.com", "securepass123")
+	userAID := userIDFromToken(t, b, tokenA)
+	questionID := seedQuestion(t, b)
+	sessionID := seedReviewedSession(t, b, userAID, questionID)
+
+	// User B tries to get user A's educator analysis.
+	tokenB := signupAndLoginAs(t, b, "user-b@example.com", "securepass456")
+	clientB := authedClient(t, srvURL, tokenB)
+
+	_, err := clientB.GetEducatorAnalysis(context.Background(), connect.NewRequest(&drillv1.GetEducatorAnalysisRequest{
+		SessionId: sessionID.String(),
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
+
 func TestRequestEducatorAnalysis_Unauthenticated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

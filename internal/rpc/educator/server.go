@@ -6,6 +6,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
@@ -97,8 +98,12 @@ func mapBackendError(err error) *connect.Error {
 // EducatorAnalysis message.
 func educatorResponseToProto(resp *backend.EducatorResponse, sessionID string) *drillv1.EducatorAnalysis {
 	analysis := &drillv1.EducatorAnalysis{
+		Id:        resp.ID,
 		SessionId: sessionID,
 		Status:    statusToProto(resp.Status),
+	}
+	if !resp.CreatedAt.IsZero() {
+		analysis.CreateTime = timestamppb.New(resp.CreatedAt)
 	}
 	if resp.ModelAnswer != "" {
 		analysis.ModelAnswer = &resp.ModelAnswer
