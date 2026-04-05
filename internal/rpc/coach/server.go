@@ -82,28 +82,13 @@ func (s *Server) RequestCoachAnalysis(
 
 // coachResponseToProto converts a backend CoachResponse to a proto CoachAnalysis message.
 func coachResponseToProto(r *backend.CoachResponse) *drillv1.CoachAnalysis {
-	improvingDimensions := r.ImprovingDimensions
-	if improvingDimensions == nil {
-		improvingDimensions = make([]string, 0)
-	}
-
-	topicGaps := r.TopicGaps
-	if topicGaps == nil {
-		topicGaps = make([]string, 0)
-	}
-
-	sessionsAnalyzed := r.SessionsAnalyzed
-	if sessionsAnalyzed == nil {
-		sessionsAnalyzed = make([]string, 0)
-	}
-
 	ca := &drillv1.CoachAnalysis{
 		Id:                  r.ID,
 		UserId:              r.UserID,
 		Narrative:           r.Narrative,
-		ImprovingDimensions: improvingDimensions,
-		TopicGaps:           topicGaps,
-		SessionsAnalyzed:    sessionsAnalyzed,
+		ImprovingDimensions: r.ImprovingDimensions,
+		TopicGaps:           r.TopicGaps,
+		SessionsAnalyzed:    r.SessionsAnalyzed,
 		CreateTime:          timestamppb.New(r.CreatedAt),
 	}
 
