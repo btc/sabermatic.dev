@@ -162,12 +162,13 @@ func seedQuestions(t *testing.T, b *backend.Backend, n int) {
 			difficulty = "hard"
 		}
 		_, err := queries.InsertQuestion(ctx, db.InsertQuestionParams{
-			UserID:     pgtype.UUID{}, // NULL — seed question
-			Title:      "Seed Question " + strings.Repeat("A", i),
-			Prompt:     "Explain concept " + strings.Repeat("B", i),
-			Difficulty: difficulty,
-			Tags:       []string{"go", "testing"},
-			Source:     "seed",
+			UserID:         pgtype.UUID{},   // NULL — seed question
+			Title:          "Seed Question " + strings.Repeat("A", i),
+			Prompt:         "Explain concept " + strings.Repeat("B", i),
+			Difficulty:     difficulty,
+			Tags:           []string{"go", "testing"},
+			Source:         "seed",
+			CoachRationale: pgtype.Text{}, // NULL — not applicable for seed questions
 		})
 		require.NoError(t, err)
 	}
@@ -195,7 +196,7 @@ func TestListQuestions_Unauthenticated(t *testing.T) {
 	srvURL := startQuestionServer(t, b)
 
 	// No cookie — plain HTTP client.
-	client := drillv1connect.NewQuestionServiceClient(http.DefaultClient, srvURL)
+	client := drillv1connect.NewQuestionServiceClient(&http.Client{}, srvURL)
 	_, err := client.ListQuestions(context.Background(), connect.NewRequest(&drillv1.ListQuestionsRequest{}))
 	require.Error(t, err)
 	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
@@ -286,7 +287,7 @@ func TestListQuestions_EnumMapping(t *testing.T) {
 
 	resp, err := client.ListQuestions(context.Background(), connect.NewRequest(&drillv1.ListQuestionsRequest{}))
 	require.NoError(t, err)
-	require.NotEmpty(t, resp.Msg.Questions)
+	require.Len(t, resp.Msg.Questions, 4)
 
 	for _, q := range resp.Msg.Questions {
 		require.NotEqual(t, drillv1.Difficulty_DIFFICULTY_UNSPECIFIED, q.Difficulty,
