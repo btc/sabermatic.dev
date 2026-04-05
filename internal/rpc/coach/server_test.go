@@ -104,3 +104,22 @@ func TestRequestCoachAnalysis_Unauthenticated(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
 }
+
+func TestRequestCoachAnalysis_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	b := testutil.NewTestBackend(t)
+	srvURL := startCoachServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	// Authenticated user — should succeed or return FailedPrecondition (ErrNoPaidBalance)
+	// for fresh users without a paid balance, or ErrNoNewSessions which maps to success.
+	// Either outcome is correct: the request was authenticated and dispatched.
+	_, err := client.RequestCoachAnalysis(context.Background(), connect.NewRequest(&drillv1.RequestCoachAnalysisRequest{}))
+	if err != nil {
+		require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
+	}
+}

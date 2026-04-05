@@ -101,7 +101,7 @@ export default function SessionConfig() {
 
   const entitlementExceeded = usage != null && usage.totalBalance < effectiveDuration;
 
-  const hasCoach = coach != null && coach !== undefined;
+  const hasCoach = coach != null;
 
   async function handleEnableMic() {
     try {

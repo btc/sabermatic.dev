@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { useQuery, useMutation, createConnectQueryKey } from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { getCoachAnalysis, requestCoachAnalysis } from "@/pb/drill/v1/coach-CoachService_connectquery";
@@ -81,7 +82,14 @@ function CoachCard({ coach, isActive }: {
   coach: CoachAnalysis | undefined;
   isActive: boolean;
 }) {
-  const requestCoach = useMutation(requestCoachAnalysis);
+  const qc = useQueryClient();
+  const coachAnalysisKey = createConnectQueryKey({ schema: getCoachAnalysis, input: {}, cardinality: "finite" });
+  const requestCoach = useMutation(requestCoachAnalysis, {
+    onSuccess: () => {
+      toast.success("Coach analysis requested");
+      qc.invalidateQueries({ queryKey: coachAnalysisKey });
+    },
+  });
 
   if (!isActive) return null;
 
@@ -107,9 +115,7 @@ function CoachCard({ coach, isActive }: {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => requestCoach.mutate({}, {
-              onSuccess: () => toast.success("Coach analysis updated"),
-            })}
+            onClick={() => requestCoach.mutate({})}
           >
             Get strategic coaching
           </Button>
@@ -131,9 +137,7 @@ function CoachCard({ coach, isActive }: {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => requestCoach.mutate({}, {
-              onSuccess: () => toast.success("Coach analysis updated"),
-            })}
+            onClick={() => requestCoach.mutate({})}
             disabled={requestCoach.isPending}
           >
             Refresh
