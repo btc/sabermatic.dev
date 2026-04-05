@@ -15,6 +15,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check Go version consistency
+        run: ./scripts/check-go-version.sh
+
       # --- Frontend ---
 
       - name: Setup Node
