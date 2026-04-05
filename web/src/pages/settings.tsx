@@ -579,7 +579,7 @@ function BillingSettings() {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium capitalize">
-                {user?.plan ?? "Free"} plan
+                {isPro ? "Pro" : "Free"} plan
               </span>
               {isPro && (
                 <Badge variant="default" className="text-xs">Pro</Badge>

@@ -52,6 +52,7 @@ export function useCreateSession() {
       apiClient.post<Session>("/api/sessions", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
+      // TODO(batch-3): "usage" key is now a no-op — getUsage uses ConnectRPC query key.
       qc.invalidateQueries({ queryKey: ["usage"] });
     },
   });
@@ -140,6 +141,7 @@ export function useLogin() {
   return useMutation({
     mutationFn: (data: { email: string; password: string }) =>
       apiClient.post<User>("/api/auth/login", data),
+    // TODO(batch-8): "me" key is now a no-op — getMe uses ConnectRPC query key.
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
   });
 }
