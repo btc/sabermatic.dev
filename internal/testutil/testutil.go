@@ -23,20 +23,32 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/ratelimit"
 	migrations "github.com/btc/drill/sql/migrations"
 )
 
-// MustRegisterRoutes calls handler.RegisterRoutes and fails the test on error.
-// It defers closing of the returned closers (rate limiters) on test cleanup.
+// TestRateLimiters returns permissive rate limiters suitable for tests.
+// High burst values prevent tests from hitting rate limits unintentionally.
+func TestRateLimiters() *handler.RateLimiters {
+	return &handler.RateLimiters{
+		Auth: ratelimit.NewLimiter(ratelimit.Config{
+			Rate:       1000,
+			Burst:      1000,
+			MaxEntries: 10000,
+		}),
+		User: ratelimit.NewLimiter(ratelimit.Config{
+			Rate:       1000,
+			Burst:      1000,
+			MaxEntries: 10000,
+		}),
+	}
+}
+
+// MustRegisterRoutes calls handler.RegisterRoutes with permissive test rate
+// limiters and fails the test on error.
 func MustRegisterRoutes(t *testing.T, mux *http.ServeMux, b *backend.Backend) {
 	t.Helper()
-	closers, err := handler.RegisterRoutes(mux, b)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		for _, c := range closers {
-			c.Close()
-		}
-	})
+	require.NoError(t, handler.RegisterRoutes(mux, b, TestRateLimiters()))
 }
 
 // StartPostgres starts a Postgres 16 container, runs app migrations, and

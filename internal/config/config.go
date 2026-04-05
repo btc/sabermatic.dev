@@ -136,12 +136,11 @@ type Storage struct {
 }
 
 type RateLimit struct {
-	AuthRate      float64 `env:"RATE_LIMIT_AUTH_RATE,default=5"`
-	AuthBurst     int     `env:"RATE_LIMIT_AUTH_BURST,default=10"`
-	UserRate      float64 `env:"RATE_LIMIT_USER_RATE,default=2"`
-	UserBurst     int     `env:"RATE_LIMIT_USER_BURST,default=5"`
-	MaxEntries    int     `env:"RATE_LIMIT_MAX_ENTRIES,default=100000"`
-	CleanupAgeSec int     `env:"RATE_LIMIT_CLEANUP_AGE_SEC,default=600"`
+	AuthRate   float64 `env:"RATE_LIMIT_AUTH_RATE,default=5"`
+	AuthBurst  int     `env:"RATE_LIMIT_AUTH_BURST,default=10"`
+	UserRate   float64 `env:"RATE_LIMIT_USER_RATE,default=2"`
+	UserBurst  int     `env:"RATE_LIMIT_USER_BURST,default=5"`
+	MaxEntries int     `env:"RATE_LIMIT_MAX_ENTRIES,default=100000"`
 }
 
 type Stripe struct {

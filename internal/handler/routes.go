@@ -3,11 +3,9 @@ package handler
 import (
 	"embed"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gorilla/csrf"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -19,51 +17,38 @@ import (
 	"github.com/btc/drill/internal/rpc"
 )
 
+// RateLimiters holds the rate limiters used by HTTP routes.
+// Created externally and passed in -- RegisterRoutes just wires them up.
+type RateLimiters struct {
+	// Auth limits unauthenticated endpoints by client IP.
+	Auth *ratelimit.Limiter
+	// User limits authenticated mutation endpoints by user ID.
+	User *ratelimit.Limiter
+}
+
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
-// and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler and
-// a slice of io.Closers that must be closed at shutdown (e.g. rate limiters).
-func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) (http.Handler, []io.Closer, error) {
+// and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
+func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool, rl *RateLimiters) (http.Handler, error) {
 	mux := http.NewServeMux()
-	closers, err := RegisterRoutes(mux, b)
-	if err != nil {
-		return nil, nil, fmt.Errorf("register routes: %w", err)
+	if err := RegisterRoutes(mux, b, rl); err != nil {
+		return nil, fmt.Errorf("register routes: %w", err)
 	}
 	mux.Handle("/", SPAHandler(spaFS))
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName)(mux)
 
-	return csrfMiddleware(otelHandler, csrfKey, secureCookies), closers, nil
+	return csrfMiddleware(otelHandler, csrfKey, secureCookies), nil
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
-// Returns a slice of io.Closers (rate limiters) that must be closed at shutdown.
-func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) ([]io.Closer, error) {
+func RegisterRoutes(mux *http.ServeMux, b *backend.Backend, rl *RateLimiters) error {
 	// ConnectRPC services (migrated from REST)
 	if err := rpc.Register(mux, b); err != nil {
-		return nil, fmt.Errorf("rpc register: %w", err)
+		return fmt.Errorf("rpc register: %w", err)
 	}
 
-	cfg := b.Config()
-	rlCfg := cfg.RateLimit
-
-	// Auth rate limiter: limits unauthenticated endpoints by client IP.
-	authLimiter := ratelimit.NewLimiter(ratelimit.Config{
-		Rate:       rlCfg.AuthRate,
-		Burst:      rlCfg.AuthBurst,
-		MaxEntries: rlCfg.MaxEntries,
-		CleanupAge: time.Duration(rlCfg.CleanupAgeSec) * time.Second,
-	})
-
-	// User rate limiter: limits authenticated endpoints by user ID.
-	userLimiter := ratelimit.NewLimiter(ratelimit.Config{
-		Rate:       rlCfg.UserRate,
-		Burst:      rlCfg.UserBurst,
-		MaxEntries: rlCfg.MaxEntries,
-		CleanupAge: time.Duration(rlCfg.CleanupAgeSec) * time.Second,
-	})
-
-	userRL := userLimiter.MiddlewareByKey(func(r *http.Request) string {
+	userRL := rl.User.MiddlewareByKey(func(r *http.Request) string {
 		if u := auth.UserFromContext(r.Context()); u != nil {
 			return u.ID.String()
 		}
@@ -73,13 +58,13 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) ([]io.Closer, error)
 	mux.HandleFunc("GET /api/health", Health(b))
 	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
 
-	// Auth — rate-limited by client IP
-	mux.Handle("POST /api/auth/signup", authLimiter.Middleware(Signup(b)))
-	mux.Handle("POST /api/auth/login", authLimiter.Middleware(Login(b)))
+	// Auth -- rate-limited by client IP
+	mux.Handle("POST /api/auth/signup", rl.Auth.Middleware(Signup(b)))
+	mux.Handle("POST /api/auth/login", rl.Auth.Middleware(Login(b)))
 	mux.HandleFunc("POST /api/auth/logout", Logout(b))
-	mux.Handle("POST /api/auth/verify-email", authLimiter.Middleware(VerifyEmail(b)))
-	mux.Handle("POST /api/auth/forgot-password", authLimiter.Middleware(ForgotPassword(b)))
-	mux.Handle("POST /api/auth/reset-password", authLimiter.Middleware(ResetPassword(b)))
+	mux.Handle("POST /api/auth/verify-email", rl.Auth.Middleware(VerifyEmail(b)))
+	mux.Handle("POST /api/auth/forgot-password", rl.Auth.Middleware(ForgotPassword(b)))
+	mux.Handle("POST /api/auth/reset-password", rl.Auth.Middleware(ResetPassword(b)))
 
 	// OAuth
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", OAuthStart(b))
@@ -89,7 +74,7 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) ([]io.Closer, error)
 	requireAuth := auth.RequireAuth(b)
 	mux.Handle("GET /api/me", requireAuth(GetMe(b)))
 
-	// Sessions — user rate-limited
+	// Sessions -- user rate-limited
 	mux.Handle("POST /api/sessions", requireAuth(userRL(CreateSession(b))))
 	mux.Handle("GET /api/sessions", requireAuth(ListSessions(b)))
 	mux.Handle("GET /api/sessions/{id}", requireAuth(GetSession(b)))
@@ -99,25 +84,25 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) ([]io.Closer, error)
 	mux.Handle("GET /api/sessions/{id}/evaluation", requireAuth(GetEvaluation(b)))
 	mux.Handle("POST /api/sessions/{id}/evaluate", requireAuth(userRL(RetryEvaluation(b))))
 
-	// Educator — user rate-limited
+	// Educator -- user rate-limited
 	mux.Handle("GET /api/sessions/{id}/educator", requireAuth(GetEducatorAnalysis(b)))
 	mux.Handle("POST /api/sessions/{id}/educator", requireAuth(userRL(RequestEducatorAnalysis(b))))
 
-	// Coach — user rate-limited
+	// Coach -- user rate-limited
 	mux.Handle("GET /api/coach/latest", requireAuth(GetCoachAnalysis(b)))
 	mux.Handle("POST /api/coach/analyze", requireAuth(userRL(RequestCoachAnalysis(b))))
 
-	// Billing — user rate-limited
+	// Billing -- user rate-limited
 	mux.Handle("POST /api/billing/checkout", requireAuth(userRL(PostCheckout(b))))
 	mux.Handle("POST /api/billing/portal", requireAuth(userRL(PostPortal(b))))
 	mux.Handle("GET /api/me/usage", requireAuth(GetUsage(b)))
 
-	// Stripe webhook — no auth, signature verified.
+	// Stripe webhook -- no auth, signature verified.
 	// Must be exempt from CSRF middleware. Registered here before any
 	// CSRF wrapping, or add to CSRF exemption filter.
 	mux.HandleFunc("POST /api/webhooks/stripe", PostStripeWebhook(b))
 
-	return []io.Closer{authLimiter, userLimiter}, nil
+	return nil
 }
 
 // SPAHandler serves the embedded SPA. Static assets served directly.
@@ -170,12 +155,12 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 	connectPrefixes := rpc.ConnectPathPrefixes()
 
 	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
+		// Stripe webhook -- exempt from CSRF; uses Stripe signature verification.
 		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// ConnectRPC — exempt from CSRF; POST with custom Content-Type headers
+		// ConnectRPC -- exempt from CSRF; POST with custom Content-Type headers
 		// cannot be sent by simple HTML forms without CORS preflight.
 		for _, prefix := range connectPrefixes {
 			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {

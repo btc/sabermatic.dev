@@ -22,6 +22,7 @@ import (
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/ratelimit"
 	"github.com/btc/drill/sql/migrations"
 )
 
@@ -83,16 +84,25 @@ func runWithContext(ctx context.Context) error {
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
+	rlCfg := cfg.RateLimit
+	rl := &handler.RateLimiters{
+		Auth: ratelimit.NewLimiter(ratelimit.Config{
+			Rate:       rlCfg.AuthRate,
+			Burst:      rlCfg.AuthBurst,
+			MaxEntries: rlCfg.MaxEntries,
+		}),
+		User: ratelimit.NewLimiter(ratelimit.Config{
+			Rate:       rlCfg.UserRate,
+			Burst:      rlCfg.UserBurst,
+			MaxEntries: rlCfg.MaxEntries,
+		}),
+	}
+
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
-	h, closers, err := handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies())
+	h, err := handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies(), rl)
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
 	}
-	defer func() {
-		for _, c := range closers {
-			c.Close()
-		}
-	}()
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: h,

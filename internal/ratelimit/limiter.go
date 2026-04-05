@@ -1,4 +1,8 @@
 // Package ratelimit provides per-key token-bucket rate limiting for HTTP handlers.
+//
+// It uses hashicorp/golang-lru for thread-safe LRU eviction of per-key rate
+// limiters, eliminating manual mutex management, eviction code, and background
+// cleanup goroutines.
 package ratelimit
 
 import (
@@ -6,9 +10,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -18,12 +22,9 @@ type Config struct {
 	Rate float64
 	// Burst is the maximum burst size per key.
 	Burst int
-	// MaxEntries caps the number of tracked keys. When exceeded, the oldest
-	// entry is evicted.
+	// MaxEntries caps the number of tracked keys. When exceeded, the
+	// least-recently-used entry is evicted automatically by the LRU cache.
 	MaxEntries int
-	// CleanupAge is the duration after which idle entries are evicted by the
-	// background cleanup goroutine.
-	CleanupAge time.Duration
 }
 
 // entry holds a per-key rate limiter and the time it was last accessed.
@@ -33,17 +34,14 @@ type entry struct {
 }
 
 // Limiter is a per-key rate limiter backed by golang.org/x/time/rate token
-// buckets. It is safe for concurrent use.
+// buckets and hashicorp/golang-lru for thread-safe LRU eviction.
+// It is safe for concurrent use.
 type Limiter struct {
-	cfg       Config
-	mu        sync.Mutex
-	entries   map[string]*entry
-	done      chan struct{}
-	closeOnce sync.Once
+	cfg   Config
+	cache *lru.Cache[string, *entry]
 }
 
-// NewLimiter creates a Limiter and starts a background goroutine that evicts
-// stale entries every 5 minutes. Call Close to stop the goroutine.
+// NewLimiter creates a Limiter with an LRU cache of size MaxEntries.
 func NewLimiter(cfg Config) *Limiter {
 	if cfg.Rate <= 0 {
 		cfg.Rate = 1
@@ -51,58 +49,30 @@ func NewLimiter(cfg Config) *Limiter {
 	if cfg.Burst <= 0 {
 		cfg.Burst = 1
 	}
-	if cfg.CleanupAge <= 0 {
-		cfg.CleanupAge = 10 * time.Minute
+	if cfg.MaxEntries <= 0 {
+		cfg.MaxEntries = 1000
 	}
-	l := &Limiter{
-		cfg:     cfg,
-		entries: make(map[string]*entry),
-		done:    make(chan struct{}),
+	cache, _ := lru.New[string, *entry](cfg.MaxEntries)
+	return &Limiter{
+		cfg:   cfg,
+		cache: cache,
 	}
-	go l.cleanupLoop()
-	return l
 }
 
 // Allow reports whether a request with the given key should be allowed.
-// It creates a new token bucket for unseen keys and evicts the oldest entry
-// when MaxEntries is exceeded.
+// It creates a new token bucket for unseen keys. LRU eviction is handled
+// automatically by the cache when MaxEntries is exceeded.
 func (l *Limiter) Allow(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	e, ok := l.entries[key]
+	e, ok := l.cache.Get(key)
 	if !ok {
-		// Evict least-recently-seen entry if at capacity.
-		if l.cfg.MaxEntries > 0 && len(l.entries) >= l.cfg.MaxEntries {
-			l.evictOldestLocked()
-		}
 		e = &entry{
 			limiter:  rate.NewLimiter(rate.Limit(l.cfg.Rate), l.cfg.Burst),
 			lastSeen: time.Now(),
 		}
-		l.entries[key] = e
+		l.cache.Add(key, e)
 	}
-
 	e.lastSeen = time.Now()
 	return e.limiter.Allow()
-}
-
-// evictOldestLocked removes the entry with the earliest lastSeen timestamp (LRU).
-// Caller must hold l.mu.
-func (l *Limiter) evictOldestLocked() {
-	var oldestKey string
-	var oldestSeen time.Time
-	first := true
-	for k, e := range l.entries {
-		if first || e.lastSeen.Before(oldestSeen) {
-			oldestKey = k
-			oldestSeen = e.lastSeen
-			first = false
-		}
-	}
-	if oldestKey != "" {
-		delete(l.entries, oldestKey)
-	}
 }
 
 // Middleware returns an http.Handler that rate-limits requests by client IP.
@@ -129,7 +99,7 @@ func (l *Limiter) MiddlewareByKey(keyFunc func(*http.Request) string) func(http.
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyFunc(r)
 			if key == "" {
-				// No key available — pass through without limiting.
+				// No key available -- pass through without limiting.
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -144,39 +114,10 @@ func (l *Limiter) MiddlewareByKey(keyFunc func(*http.Request) string) func(http.
 	}
 }
 
-// Close stops the background cleanup goroutine. It implements io.Closer.
-// Safe to call multiple times.
+// Close is a no-op that satisfies io.Closer. The hashicorp LRU cache does
+// not require cleanup. Retained for interface compatibility.
 func (l *Limiter) Close() error {
-	l.closeOnce.Do(func() { close(l.done) })
 	return nil
-}
-
-// cleanupLoop runs every 5 minutes and evicts entries that haven't been seen
-// in CleanupAge.
-func (l *Limiter) cleanupLoop() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-l.done:
-			return
-		case <-ticker.C:
-			l.cleanup()
-		}
-	}
-}
-
-// cleanup evicts entries older than CleanupAge.
-func (l *Limiter) cleanup() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	cutoff := time.Now().Add(-l.cfg.CleanupAge)
-	for k, e := range l.entries {
-		if e.lastSeen.Before(cutoff) {
-			delete(l.entries, k)
-		}
-	}
 }
 
 // ClientIP extracts the client IP from the request.
