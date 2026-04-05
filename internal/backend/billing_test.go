@@ -15,22 +15,6 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Billing-specific seed helpers
-// ---------------------------------------------------------------------------
-
-// seedFreeGrant creates a free grant with the given minutes, expiring at the
-// end of the current month.
-func seedFreeGrant(t *testing.T, b *Backend, userID uuid.UUID, minutes int32) {
-	t.Helper()
-	err := db.New(b.pool).EnsureFreeGrant(context.Background(), db.EnsureFreeGrantParams{
-		UserID:         userID,
-		InitialMinutes: minutes,
-		ExpiresAt:      pgtype.Timestamptz{Time: time.Date(2099, 12, 31, 0, 0, 0, 0, time.UTC), Valid: true},
-	})
-	require.NoError(t, err)
-}
-
-// ---------------------------------------------------------------------------
 // CreateSession entitlement enforcement (reservation tested via CreateSession)
 // ---------------------------------------------------------------------------
 
@@ -41,16 +25,18 @@ func TestCreateSession_EnforcesBalance(t *testing.T) {
 	b := newTestBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := seedUser(t, b) // gets 60-min free trial
 	questionID := seedQuestion(t, b)
 
-	// No grants created (the free grant from EnsureFreeGrant gives 60 min).
-	// Request a session longer than the free plan max (30 min) to test
-	// ErrDurationExceedsPlan, then request within plan max but with 0 balance.
-	// First, exhaust balance by reserving all 60 free minutes via a direct session.
-	seedFreeGrant(t, b, userID, 10) // Only 10 minutes available.
+	// Expire the free trial grant so we can control balance precisely.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
 
-	_, err := b.CreateSession(ctx, CreateSessionParams{
+	// Seed a small purchase grant (10 min) to test insufficient balance.
+	seedPurchaseGrant(t, b, userID, 10)
+
+	_, err = b.CreateSession(ctx, CreateSessionParams{
 		UserID:          userID,
 		QuestionID:      questionID,
 		DurationMinutes: 30, // Need 30 but only have 10.
@@ -68,7 +54,6 @@ func TestCreateSession_WithSufficientBalance(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
 
 	session, err := b.CreateSession(ctx, CreateSessionParams{
 		UserID:          userID,
@@ -114,7 +99,7 @@ func TestCreateSession_EnforcesConcurrentLimit(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	// Free plan allows 1 concurrent session. Create one first.
 	_, err := b.CreateSession(ctx, CreateSessionParams{
@@ -148,7 +133,7 @@ func TestCompleteSession_RefundsUnusedMinutes(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	// Create a 30-min session (reserves 30 from the 60-min grant).
 	session, err := b.CreateSession(ctx, CreateSessionParams{
@@ -188,7 +173,7 @@ func TestCancelSession_SetsStatusCancelled(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	session, err := b.CreateSession(ctx, CreateSessionParams{
 		UserID:          userID,
@@ -218,7 +203,7 @@ func TestCancelSession_RefundsFullReservation(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	session, err := b.CreateSession(ctx, CreateSessionParams{
 		UserID:          userID,
@@ -254,15 +239,22 @@ func TestReserveMinutes_MultiGrant_FIFO(t *testing.T) {
 	b := newTestBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := seedUser(t, b) // gets 60-min free trial
 	questionID := seedQuestion(t, b)
 	q := db.New(b.pool)
 
+	// Expire the auto-provisioned free trial grant so we control the test scenario.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
 	// Create two grants: one expiring soon (20 min), one never-expiring (100 min).
+	// Use a subscription grant (which has its own source) for the soon-expiring one.
 	soonExpiry := pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true}
-	err := q.EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
-		UserID: userID, InitialMinutes: 20, ExpiresAt: soonExpiry,
-	})
+	_, err = b.pool.Exec(ctx,
+		`INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
+		 VALUES ($1, 'subscription', 20, 20, $2)`,
+		userID, soonExpiry.Time)
 	require.NoError(t, err)
 
 	// Purchase grant (never expires).
@@ -283,10 +275,9 @@ func TestReserveMinutes_MultiGrant_FIFO(t *testing.T) {
 	require.NoError(t, err)
 	_ = session
 
-	// Check: expiring grant should be at 0, purchase grant at 90.
+	// Check: purchase grant should have 90 remaining.
 	grants, err := q.ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
-	// Only the purchase grant should have remaining (the free grant is drained).
 	var purchaseRemaining int32
 	for _, g := range grants {
 		if g.Source == "purchase" {
@@ -308,11 +299,18 @@ func TestReserveMinutes_InsufficientBalance(t *testing.T) {
 	b := newTestBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := seedUser(t, b) // gets 60-min free trial
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 10)
 
-	_, err := b.CreateSession(ctx, CreateSessionParams{
+	// Expire the free trial grant so we can control balance precisely.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
+	// Seed a small purchase grant (10 min) to test insufficient balance.
+	seedPurchaseGrant(t, b, userID, 10)
+
+	_, err = b.CreateSession(ctx, CreateSessionParams{
 		UserID: userID, QuestionID: questionID, DurationMinutes: 30, Plan: "free",
 	})
 	require.ErrorIs(t, err, ErrInsufficientBalance)
@@ -323,18 +321,23 @@ func TestReserveMinutes_InsufficientBalance(t *testing.T) {
 	assert.Equal(t, int32(10), bs.TotalBalance)
 }
 
-func TestReserveMinutes_ZeroGrants(t *testing.T) {
+func TestReserveMinutes_ExpiredGrant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	b := newTestBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
-	questionID := seedQuestion(t, b)
-	// No grants at all.
+	userID := seedUser(t, b) // gets 60-min free trial
 
-	_, err := b.CreateSession(ctx, CreateSessionParams{
+	// Expire the grant to simulate trial ended.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
+	questionID := seedQuestion(t, b)
+
+	_, err = b.CreateSession(ctx, CreateSessionParams{
 		UserID: userID, QuestionID: questionID, DurationMinutes: 10, Plan: "free",
 	})
 	require.ErrorIs(t, err, ErrInsufficientBalance)
@@ -349,7 +352,7 @@ func TestRefundSessionMinutes_WallClock(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	session, err := b.CreateSession(ctx, CreateSessionParams{
 		UserID: userID, QuestionID: questionID, DurationMinutes: 30, Plan: "free",
@@ -380,7 +383,7 @@ func TestFullRefundSessionMinutes_FailSession(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	session, err := b.CreateSession(ctx, CreateSessionParams{
 		UserID: userID, QuestionID: questionID, DurationMinutes: 30, Plan: "free",
@@ -415,7 +418,7 @@ func TestRefundSessionMinutes_Idempotent(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	// Create a 30-min session (reserves 30 from 60-min grant).
 	session, err := b.CreateSession(ctx, CreateSessionParams{
@@ -459,7 +462,7 @@ func TestFullRefundSessionMinutes_Idempotent(t *testing.T) {
 
 	userID := seedUser(t, b)
 	questionID := seedQuestion(t, b)
-	seedFreeGrant(t, b, userID, 60)
+
 
 	// Create a 30-min session (reserves 30 from 60-min grant).
 	session, err := b.CreateSession(ctx, CreateSessionParams{
@@ -564,9 +567,17 @@ func TestHandleCheckoutCompleted_CreatesPurchaseGrant(t *testing.T) {
 
 	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
-	require.Len(t, grants, 1)
-	assert.Equal(t, "purchase", grants[0].Source)
-	assert.Equal(t, int32(120), grants[0].RemainingMinutes)
+	// User has free trial (from seedUser) + purchase grant = 2.
+	require.Len(t, grants, 2)
+	// Find the purchase grant and verify it.
+	var purchaseGrant db.ListActiveGrantsRow
+	for _, g := range grants {
+		if g.Source == "purchase" {
+			purchaseGrant = g
+		}
+	}
+	assert.Equal(t, "purchase", purchaseGrant.Source)
+	assert.Equal(t, int32(120), purchaseGrant.RemainingMinutes)
 }
 
 func TestHandleCheckoutCompleted_IgnoresSubscriptionMode(t *testing.T) {
@@ -589,10 +600,12 @@ func TestHandleCheckoutCompleted_IgnoresSubscriptionMode(t *testing.T) {
 	err := b.handleCheckoutCompleted(ctx, event)
 	require.NoError(t, err)
 
-	// No grants should be created for subscription-mode checkouts.
+	// No additional grants should be created for subscription-mode checkouts.
+	// Only the free trial grant from seedUser should exist.
 	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
-	assert.Empty(t, grants)
+	require.Len(t, grants, 1)
+	assert.Equal(t, "free_grant", grants[0].Source)
 }
 
 func TestHandleCheckoutCompleted_IdempotentOnDuplicateEventID(t *testing.T) {
@@ -619,7 +632,8 @@ func TestHandleCheckoutCompleted_IdempotentOnDuplicateEventID(t *testing.T) {
 
 	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
-	assert.Len(t, grants, 1, "duplicate stripe event should not create a second grant")
+	// Free trial (from seedUser) + one purchase grant = 2. Duplicate event should not create a third.
+	assert.Len(t, grants, 2, "duplicate stripe event should not create a second purchase grant")
 }
 
 func TestHandleInvoicePaid_CreatesSubscriptionGrantAndSetsPlan(t *testing.T) {
@@ -639,11 +653,18 @@ func TestHandleInvoicePaid_CreatesSubscriptionGrantAndSetsPlan(t *testing.T) {
 	err := b.handleInvoicePaid(ctx, event)
 	require.NoError(t, err)
 
-	// Subscription grant should exist.
+	// Free trial (from seedUser) + subscription grant = 2.
 	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
-	require.Len(t, grants, 1)
-	assert.Equal(t, "subscription", grants[0].Source)
+	require.Len(t, grants, 2)
+	// Find the subscription grant.
+	var subGrant db.ListActiveGrantsRow
+	for _, g := range grants {
+		if g.Source == "subscription" {
+			subGrant = g
+		}
+	}
+	assert.Equal(t, "subscription", subGrant.Source)
 
 	// Plan should have been upgraded to "pro".
 	user, err := db.New(b.pool).GetUserByID(ctx, userID)
@@ -688,7 +709,8 @@ func TestHandleInvoicePaid_IdempotentOnDuplicateEventID(t *testing.T) {
 
 	grants, err := db.New(b.pool).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
-	assert.Len(t, grants, 1, "duplicate invoice.paid should not create a second grant")
+	// Free trial + one subscription grant = 2. Duplicate event should not create a third.
+	assert.Len(t, grants, 2, "duplicate invoice.paid should not create a second subscription grant")
 }
 
 func TestHandleSubscriptionDeleted_SetsPlanToFree(t *testing.T) {
@@ -865,6 +887,127 @@ func TestHandleSubscriptionUpdated_UnknownCustomerIsNoOp(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// ---------------------------------------------------------------------------
+// Free grant expiry tests
+// ---------------------------------------------------------------------------
+
+func TestFreeGrant_ExpiredExcludedFromBalance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+	userID := seedUser(t, b) // gets 60-min free trial
+
+	// Expire the grant to simulate trial ended.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
+	// Balance should be 0 — expired grant doesn't count.
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(0), bs.TotalBalance)
+}
+
+func TestFreeGrant_ExpiredBlocksSessionCreation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+	userID := seedUser(t, b) // gets 60-min free trial
+	questionID := seedQuestion(t, b)
+
+	// Expire the grant to simulate trial ended.
+	_, err := b.pool.Exec(ctx,
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
+	// Session creation should fail — no valid balance.
+	_, err = b.CreateSession(ctx, CreateSessionParams{
+		UserID: userID, QuestionID: questionID, DurationMinutes: 10, Plan: "free",
+	})
+	require.ErrorIs(t, err, ErrInsufficientBalance)
+}
+
+// ---------------------------------------------------------------------------
+// One-time grant uniqueness across months
+// ---------------------------------------------------------------------------
+
+func TestEnsureFreeGrant_UniquePerUser_AcrossMonths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+	userID := seedUser(t, b)
+
+	// Explicit call is a no-op — seedUser already provisioned the free trial grant.
+	err := b.EnsureFreeGrant(ctx, userID)
+	require.NoError(t, err)
+
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(60), bs.TotalBalance)
+
+	// Manually update the grant's created_at to a previous month to simulate
+	// a cross-month scenario. The old monthly index would allow a second grant;
+	// the new per-user index should not.
+	_, err = b.pool.Exec(ctx,
+		`UPDATE grants SET created_at = created_at - INTERVAL '2 months' WHERE user_id = $1`,
+		userID,
+	)
+	require.NoError(t, err)
+
+	// Second call: should be a no-op (ON CONFLICT DO NOTHING).
+	err = b.EnsureFreeGrant(ctx, userID)
+	require.NoError(t, err)
+
+	// Balance should still be 60, not 120.
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(60), bs.TotalBalance, "second EnsureFreeGrant should not create a duplicate grant")
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end signup → free trial → session creation
+// ---------------------------------------------------------------------------
+
+func TestSignupGrantsFreeTrial_EnablesSessionCreation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	// Sign up a new user (this should auto-create the free trial grant).
+	result, err := b.Signup(ctx, SignupParams{
+		Email:       "test-e2e@example.com",
+		Password:    "securepassword123",
+		DisplayName: "E2E Test User",
+	})
+	require.NoError(t, err)
+
+	// Verify: user has 60-minute free trial balance.
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, result.UserID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(60), bs.TotalBalance, "signup should provision free trial grant")
+
+	// Verify: user can create a session using their free trial minutes.
+	questionID := seedQuestion(t, b)
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID: result.UserID, QuestionID: questionID, DurationMinutes: 10, Plan: "free",
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, session.ID)
+
+	// Verify: balance reduced by reservation.
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, result.UserID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(50), bs.TotalBalance, "balance should be reduced by session reservation")
+}
+
 func TestEnsureFreeGrant_Idempotent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -893,5 +1036,5 @@ func TestEnsureFreeGrant_Idempotent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Len(t, entries, 1)
-	assert.Equal(t, "free_monthly", entries[0].Reason)
+	assert.Equal(t, "free_trial", entries[0].Reason)
 }

@@ -154,9 +154,9 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 		return nil, fmt.Errorf("oauth login: create oauth user: %w", err)
 	}
 
-	// Create the first month's free grant for the new user.
-	if err := b.EnsureFreeGrantTx(ctx, tx, user.ID); err != nil {
-		return nil, fmt.Errorf("create free grant: %w", err)
+	// Provision the new user's account (free trial grant, etc.).
+	if err := b.provisionNewUser(ctx, tx, user.ID); err != nil {
+		return nil, fmt.Errorf("provision new user: %w", err)
 	}
 
 	_, err = queries.CreateOAuthAccount(ctx, db.CreateOAuthAccountParams{

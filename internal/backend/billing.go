@@ -42,25 +42,27 @@ func (b *Backend) CheckTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (
 	return &ent, nil
 }
 
-// EnsureFreeGrant creates the current-month free grant on the pool.
+// EnsureFreeGrant creates the one-time free trial grant on the pool.
+// Called only at account creation (Signup, OAuthLogin).
 func (b *Backend) EnsureFreeGrant(ctx context.Context, userID uuid.UUID) error {
 	return b.EnsureFreeGrantTx(ctx, b.pool, userID)
 }
 
-// EnsureFreeGrantTx creates the current-month free grant on the given DBTX.
+// EnsureFreeGrantTx creates the one-time free trial grant on the given DBTX.
+// Called only at account creation (Signup, OAuthLogin).
 func (b *Backend) EnsureFreeGrantTx(ctx context.Context, dbtx db.DBTX, userID uuid.UUID) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.EnsureFreeGrantTx")
 	defer func() { drilotel.End(span, err) }()
 	return db.New(dbtx).EnsureFreeGrant(ctx, db.EnsureFreeGrantParams{
 		UserID:         userID,
-		InitialMinutes: int32(billing.FreePlanMinutesPerMonth()),
+		InitialMinutes: int32(billing.FreeTrialMinutes()),
 		ExpiresAt:      pgtype.Timestamptz{Time: billing.FreeGrantExpiry(), Valid: true},
 	})
 }
 
 // GetUsageSummary returns the user's balance breakdown, active grants, and
-// recent ledger entries. Ensures the current-month free grant exists and
-// reads everything in a single transaction for snapshot consistency.
+// recent ledger entries. Reads everything in a single transaction for snapshot
+// consistency.
 func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (_ *UsageSummary, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.GetUsageSummary")
 	defer func() { drilotel.End(span, err) }()
@@ -73,9 +75,10 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (_ *Usa
 
 	q := db.New(tx)
 
-	if err := b.EnsureFreeGrantTx(ctx, tx, userID); err != nil {
-		return nil, fmt.Errorf("ensure free grant: %w", err)
-	}
+	// NOTE: Free trial grants are provisioned once at account creation
+	// (Signup in auth.go, OAuthLogin in oauth.go). Do NOT call
+	// EnsureFreeGrantTx here — GetUsageSummary must reflect the user's
+	// actual balance, not silently top it up.
 
 	summary, err := q.GetUserUsageSummary(ctx, userID)
 	if err != nil {
@@ -360,7 +363,7 @@ func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) (er
 	result, err := db.New(b.pool).CreateSubscriptionGrant(ctx, db.CreateSubscriptionGrantParams{
 		CustID:        pgtype.Text{String: custID, Valid: true},
 		StripeEventID: pgtype.Text{String: event.ID, Valid: true},
-		Minutes:       int32(plan.MinutesPerMonth),
+		Minutes:       int32(plan.GrantMinutes),
 		Plan:          "pro",
 	})
 	if err != nil {

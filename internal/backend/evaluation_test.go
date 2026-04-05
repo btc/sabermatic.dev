@@ -19,17 +19,16 @@ import (
 // Evaluation-specific seed helpers
 // ---------------------------------------------------------------------------
 
-// seedUser creates a user directly via sqlc and returns their ID.
+// seedUser creates a user via the real production Signup path.
 func seedUser(t *testing.T, b *Backend) uuid.UUID {
 	t.Helper()
-	q := db.New(b.pool)
-	user, err := q.CreateUser(context.Background(), db.CreateUserParams{
-		Email:        fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$dummy", Valid: true},
-		DisplayName:  "Test User",
+	result, err := b.Signup(context.Background(), SignupParams{
+		Email:       fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
+		Password:    "testpassword123",
+		DisplayName: "Test User",
 	})
 	require.NoError(t, err)
-	return user.ID
+	return result.UserID
 }
 
 // seedQuestion creates a question directly via raw SQL and returns its ID.

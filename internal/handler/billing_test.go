@@ -6,18 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
-func TestGetUsage_EmptyBalance(t *testing.T) {
+func TestGetUsage_ExpiredGrant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -25,7 +22,13 @@ func TestGetUsage_EmptyBalance(t *testing.T) {
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b) // gets 60-min free trial
+
+	// Expire the grant to simulate trial ended.
+	_, err := pool.Exec(context.Background(),
+		`UPDATE grants SET expires_at = NOW() - INTERVAL '1 hour' WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
 	cookie := createAuthCookie(t, pool, userID)
 
 	req := authedRequest(t, http.MethodGet, "/api/me/usage", nil, cookie)
@@ -48,16 +51,8 @@ func TestGetUsage_WithFreeGrant(t *testing.T) {
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b) // gets 60-min free trial
 	cookie := createAuthCookie(t, pool, userID)
-
-	// Create a free grant
-	err := db.New(pool).EnsureFreeGrant(context.Background(), db.EnsureFreeGrantParams{
-		UserID:         userID,
-		InitialMinutes: 60,
-		ExpiresAt:      pgtype.Timestamptz{Time: time.Now().Add(30 * 24 * time.Hour), Valid: true},
-	})
-	require.NoError(t, err)
 
 	req := authedRequest(t, http.MethodGet, "/api/me/usage", nil, cookie)
 	w := httptest.NewRecorder()

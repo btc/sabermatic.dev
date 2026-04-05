@@ -105,9 +105,9 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, 
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	// Create the first month's free grant within the same transaction.
-	if err := b.EnsureFreeGrantTx(ctx, tx, user.ID); err != nil {
-		return nil, fmt.Errorf("create free grant: %w", err)
+	// Provision the new user's account (free trial grant, etc.).
+	if err := b.provisionNewUser(ctx, tx, user.ID); err != nil {
+		return nil, fmt.Errorf("provision new user: %w", err)
 	}
 
 	// Enqueue verification email within the same transaction.
@@ -308,6 +308,12 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) (err
 		return fmt.Errorf("delete user sessions: %w", err)
 	}
 	return nil
+}
+
+// provisionNewUser sets up a newly created user's account within the
+// registration transaction. Currently provisions the one-time free trial grant.
+func (b *Backend) provisionNewUser(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {
+	return b.EnsureFreeGrantTx(ctx, tx, userID)
 }
 
 // parseClientIP extracts a netip.Addr from a RemoteAddr string (which may

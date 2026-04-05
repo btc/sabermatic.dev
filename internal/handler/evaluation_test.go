@@ -119,7 +119,7 @@ func TestGetEvaluation_Returns200WithJSON(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.pool)
+	userID := createTestUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
@@ -153,8 +153,8 @@ func TestGetEvaluation_Returns403ForWrongUser(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	ownerID := createTestUser(t, env.pool)
-	otherID := createTestUser(t, env.pool)
+	ownerID := createTestUser(t, env.backend)
+	otherID := createTestUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, ownerID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
@@ -177,7 +177,7 @@ func TestGetEvaluation_Returns404WhenNotReady(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.pool)
+	userID := createTestUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID) // status=active
 
@@ -203,7 +203,7 @@ func TestRetryEvaluation_Returns202(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.pool)
+	userID := createTestUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "evaluation_failed")
@@ -226,7 +226,7 @@ func TestRetryEvaluation_Returns409WhenNotFailed(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.pool)
+	userID := createTestUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
