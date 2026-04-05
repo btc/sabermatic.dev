@@ -45,6 +45,9 @@ type Limiter struct {
 // NewLimiter creates a Limiter and starts a background goroutine that evicts
 // stale entries every 5 minutes. Call Close to stop the goroutine.
 func NewLimiter(cfg Config) *Limiter {
+	if cfg.Rate <= 0 {
+		cfg.Rate = 1
+	}
 	l := &Limiter{
 		cfg:     cfg,
 		entries: make(map[string]*entry),

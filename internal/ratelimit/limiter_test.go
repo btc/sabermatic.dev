@@ -133,6 +133,7 @@ func TestAllow_EvictsOldest(t *testing.T) {
 
 	// Add two entries
 	lim.Allow("key1")
+	time.Sleep(time.Millisecond) // ensure distinct lastSeen timestamps
 	lim.Allow("key2")
 
 	// Adding a third should evict the oldest (key1)
