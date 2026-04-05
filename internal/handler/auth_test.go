@@ -18,6 +18,7 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestSignup_Success(t *testing.T) {
@@ -25,7 +26,7 @@ func TestSignup_Success(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -50,7 +51,7 @@ func TestSignup_DuplicateEmail(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -82,7 +83,7 @@ func TestLogin_Success(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -129,7 +130,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -161,7 +162,7 @@ func TestVerifyEmail(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	cfg := b.Config()
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -202,7 +203,7 @@ func TestForgotAndResetPassword(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	cfg := b.Config()
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -264,7 +265,7 @@ func TestLogout(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 

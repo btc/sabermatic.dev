@@ -30,51 +30,6 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	return csrfMiddleware(otelHandler, csrfKey, secureCookies), nil
 }
 
-// csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes
-// the CSRF token via response header, and exempts routes that have their own
-// protection (Stripe webhooks use signature verification; ConnectRPC uses
-// custom Content-Type headers that prevent cross-origin form submissions).
-func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.Handler {
-	csrfProtect := csrf.Protect(
-		csrfKey,
-		csrf.Secure(secureCookies),
-		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
-		csrf.Path("/"),
-		csrf.SameSite(csrf.SameSiteLaxMode),
-	)
-
-	// CSRF-protected handler that exposes the masked token via response header.
-	csrfProtected := csrfProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-CSRF-Token", csrf.Token(r))
-		next.ServeHTTP(w, r)
-	}))
-
-	connectPrefixes := rpc.ConnectPathPrefixes()
-
-	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
-		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// ConnectRPC — exempt from CSRF; POST with custom Content-Type headers
-		// cannot be sent by simple HTML forms without CORS preflight.
-		for _, prefix := range connectPrefixes {
-			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-		// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
-		// HTTPS-only referer/origin checks.
-		if !secureCookies {
-			r = csrf.PlaintextHTTPRequest(r)
-		}
-		csrfProtected.ServeHTTP(w, r)
-	}))
-}
-
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
@@ -158,4 +113,49 @@ func SPAHandler(fsys embed.FS) http.Handler {
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes
+// the CSRF token via response header, and exempts routes that have their own
+// protection (Stripe webhooks use signature verification; ConnectRPC uses
+// custom Content-Type headers that prevent cross-origin form submissions).
+func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.Handler {
+	csrfProtect := csrf.Protect(
+		csrfKey,
+		csrf.Secure(secureCookies),
+		csrf.HttpOnly(false),
+		csrf.CookieName("drill_csrf"),
+		csrf.Path("/"),
+		csrf.SameSite(csrf.SameSiteLaxMode),
+	)
+
+	// CSRF-protected handler that exposes the masked token via response header.
+	csrfProtected := csrfProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-CSRF-Token", csrf.Token(r))
+		next.ServeHTTP(w, r)
+	}))
+
+	connectPrefixes := rpc.ConnectPathPrefixes()
+
+	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
+		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// ConnectRPC — exempt from CSRF; POST with custom Content-Type headers
+		// cannot be sent by simple HTML forms without CORS preflight.
+		for _, prefix := range connectPrefixes {
+			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
+		// HTTPS-only referer/origin checks.
+		if !secureCookies {
+			r = csrf.PlaintextHTTPRequest(r)
+		}
+		csrfProtected.ServeHTTP(w, r)
+	}))
 }

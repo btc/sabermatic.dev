@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/testutil"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 )
@@ -91,7 +92,7 @@ type evalTestEnv struct {
 
 func newEvalTestEnv(t *testing.T) evalTestEnv {
 	t.Helper()
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	return evalTestEnv{backend: b, mux: mux, pool: b.Pool()}

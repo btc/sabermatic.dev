@@ -21,10 +21,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
-	cfg := loadTestConfig(t, "postgres://unused")
+	cfg := testutil.LoadTestConfig(t, "postgres://unused")
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
@@ -47,7 +48,7 @@ func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
 }
 
 func TestCSRF_AllowsGetRequests(t *testing.T) {
-	cfg := loadTestConfig(t, "postgres://unused")
+	cfg := testutil.LoadTestConfig(t, "postgres://unused")
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
@@ -70,7 +71,7 @@ func TestCSRF_AllowsGetRequests(t *testing.T) {
 }
 
 func TestCSRF_PostWithValidToken(t *testing.T) {
-	cfg := loadTestConfig(t, "postgres://unused")
+	cfg := testutil.LoadTestConfig(t, "postgres://unused")
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
