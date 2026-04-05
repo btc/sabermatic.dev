@@ -44,6 +44,6 @@ createRoot(document.getElementById("root")!).render(
         </TransportProvider>
       </QueryClientProvider>
     </ErrorBoundary>
-    <Toaster theme="dark" position="bottom-right" />
+    <Toaster theme="dark" position="bottom-right" richColors />
   </StrictMode>,
 );
