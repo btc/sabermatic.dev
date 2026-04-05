@@ -104,16 +104,6 @@ func mapRetryError(err error) error {
 
 // evaluationToProto converts a backend EvaluationResponse to the proto EvaluationResult.
 func evaluationToProto(e *backend.EvaluationResponse) *drillv1.EvaluationResult {
-	strengths := e.Strengths
-	if strengths == nil {
-		strengths = []string{}
-	}
-
-	gaps := e.Gaps
-	if gaps == nil {
-		gaps = []string{}
-	}
-
 	annotations := make([]*drillv1.Annotation, len(e.Annotations))
 	for i, a := range e.Annotations {
 		annotations[i] = &drillv1.Annotation{
@@ -125,8 +115,8 @@ func evaluationToProto(e *backend.EvaluationResponse) *drillv1.EvaluationResult 
 
 	result := &drillv1.EvaluationResult{
 		Status:      e.Status,
-		Strengths:   strengths,
-		Gaps:        gaps,
+		Strengths:   e.Strengths,
+		Gaps:        e.Gaps,
 		Advice:      e.Advice,
 		Annotations: annotations,
 	}
