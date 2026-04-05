@@ -17,3 +17,9 @@ ConnectRPC services follow Google AIPs where practical. Standard methods (Get, L
 `repeated` fields in proto responses must map to empty slices, not nil. Same principle as the existing nil-slice rule, extended to proto conversion: always return an initialized slice from db-to-proto converters.
 
 ConnectRPC service handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are being incrementally migrated. New API endpoints should be implemented as ConnectRPC services, not REST handlers.
+
+Never panic at init time. Propagate errors explicitly up to main. This applies to `rpc.Register`, `handler.NewHandler`, and any startup-path function.
+
+Never use `git add -A` or `git add .` when untracked files exist that shouldn't be committed. Stage specific files by name. This is especially dangerous during rebase conflict resolution where untracked files get swept in silently.
+
+Verify library API signatures against installed versions before writing implementation code in plans. Plan code blocks that haven't been compiled against real type definitions can be wrong (e.g., `credentials` option that doesn't exist, single-return function that actually returns error).
