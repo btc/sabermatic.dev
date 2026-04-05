@@ -3,7 +3,7 @@ package question
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -40,9 +40,11 @@ func (s *Server) ListQuestions(
 	ctx context.Context,
 	req *connect.Request[drillv1.ListQuestionsRequest],
 ) (*connect.Response[drillv1.ListQuestionsResponse], error) {
+	// Defense-in-depth: AuthInterceptor should always populate the user, but
+	// guard here for callers in tests that construct the handler without it.
 	user := auth.UserFromContext(ctx)
 	if user == nil {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("authentication required"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
 
 	// AIP-132: validate and apply page size defaults.
@@ -59,17 +61,17 @@ func (s *Server) ListQuestions(
 	if req.Msg.PageToken != "" {
 		decoded, err := base64.StdEncoding.DecodeString(req.Msg.PageToken)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid page token"))
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid page token"))
 		}
 		offset, err = strconv.Atoi(string(decoded))
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid page token"))
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid page token"))
 		}
 	}
 
 	rows, err := s.b.ListQuestions(ctx, user.ID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list questions failed"))
+		return nil, connect.NewError(connect.CodeInternal, errors.New("list questions failed"))
 	}
 
 	// Apply pagination over the full result set.
@@ -104,18 +106,19 @@ func (s *Server) ListQuestions(
 
 // questionToProto converts a database row to a proto Question message.
 func questionToProto(row db.ListQuestionsForUserRow) *drillv1.Question {
+	tags := row.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	q := &drillv1.Question{
 		Id:         row.ID.String(),
 		Title:      row.Title,
 		Prompt:     row.Prompt,
 		Difficulty: difficultyToProto(row.Difficulty),
-		Tags:       row.Tags,
+		Tags:       tags,
 		Source:     sourceToProto(row.Source),
 		CreateTime: timestamppb.New(row.CreatedAt),
-	}
-
-	if q.Tags == nil {
-		q.Tags = []string{}
 	}
 
 	if row.UserID.Valid {
