@@ -61,9 +61,13 @@ CREATE POLICY user_isolation ON user_events
     USING (user_id = app_current_user_id())
     WITH CHECK (user_id = app_current_user_id());
 
+-- Questions: seed/coach-generated questions have NULL user_id (visible to all via USING).
+-- WITH CHECK restricts inserts to user's own questions only. Background job workers
+-- (coach, educator) use the owner pool which bypasses RLS, so they can still insert
+-- shared questions (user_id = NULL).
 CREATE POLICY questions_isolation ON questions
     USING (user_id IS NULL OR user_id = app_current_user_id())
-    WITH CHECK (user_id IS NULL OR user_id = app_current_user_id());
+    WITH CHECK (user_id = app_current_user_id());
 
 CREATE POLICY user_isolation ON oauth_accounts
     USING (user_id = app_current_user_id())
