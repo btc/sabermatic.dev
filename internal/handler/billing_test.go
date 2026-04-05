@@ -22,7 +22,7 @@ func TestGetUsage_EmptyBalance(t *testing.T) {
 	}
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
 	cookie := createAuthCookie(t, pool, userID)
@@ -45,7 +45,7 @@ func TestGetUsage_WithFreeGrant(t *testing.T) {
 	}
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
 	cookie := createAuthCookie(t, pool, userID)

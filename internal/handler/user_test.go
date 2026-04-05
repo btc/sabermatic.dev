@@ -19,7 +19,7 @@ func TestGetMe_Authenticated(t *testing.T) {
 
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	// Sign up
 	signupBody, _ := json.Marshal(map[string]string{
@@ -77,7 +77,7 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	w := httptest.NewRecorder()

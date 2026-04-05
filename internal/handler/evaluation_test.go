@@ -93,7 +93,7 @@ func newEvalTestEnv(t *testing.T) evalTestEnv {
 	t.Helper()
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	return evalTestEnv{backend: b, mux: mux, pool: b.Pool()}
 }
 

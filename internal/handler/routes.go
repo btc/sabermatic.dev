@@ -18,9 +18,11 @@ import (
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook CSRF exemption. Returns a ready-to-use http.Handler.
-func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) http.Handler {
+func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) (http.Handler, error) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, b)
+	if err := RegisterRoutes(mux, b); err != nil {
+		return nil, fmt.Errorf("register routes: %w", err)
+	}
 	mux.Handle("/", SPAHandler(spaFS))
 
 	csrfProtect := csrf.Protect(
@@ -61,14 +63,16 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 			r = csrf.PlaintextHTTPRequest(r)
 		}
 		csrfProtected.ServeHTTP(w, r)
-	}))
+	})), nil
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
-func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
+func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	// ConnectRPC services (migrated from REST)
-	rpc.Register(mux, b)
+	if err := rpc.Register(mux, b); err != nil {
+		return fmt.Errorf("rpc register: %w", err)
+	}
 
 	mux.HandleFunc("GET /api/health", Health(b))
 	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
@@ -116,6 +120,8 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 	// Must be exempt from CSRF middleware. Registered here before any
 	// CSRF wrapping, or add to CSRF exemption filter.
 	mux.HandleFunc("POST /api/webhooks/stripe", PostStripeWebhook(b))
+
+	return nil
 }
 
 // SPAHandler serves the embedded SPA. Static assets served directly.
