@@ -1,4 +1,4 @@
-.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover
+.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate
 
 # Start embedded dev server. Vite rebuilds on save, air bounces Go binary.
 # One origin (port 8080), no proxy, no CSRF issues. Ctrl-C kills all.
