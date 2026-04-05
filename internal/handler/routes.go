@@ -17,7 +17,7 @@ import (
 )
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
-// and webhook CSRF exemption. Returns a ready-to-use http.Handler.
+// and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
 func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if err := RegisterRoutes(mux, b); err != nil {
@@ -25,6 +25,16 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	}
 	mux.Handle("/", SPAHandler(spaFS))
 
+	otelHandler := otelhttp.NewMiddleware(drilotel.AppName)(mux)
+
+	return csrfMiddleware(otelHandler, csrfKey, secureCookies), nil
+}
+
+// csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes
+// the CSRF token via response header, and exempts routes that have their own
+// protection (Stripe webhooks use signature verification; ConnectRPC uses
+// custom Content-Type headers that prevent cross-origin form submissions).
+func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.Handler {
 	csrfProtect := csrf.Protect(
 		csrfKey,
 		csrf.Secure(secureCookies),
@@ -34,36 +44,35 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 		csrf.SameSite(csrf.SameSiteLaxMode),
 	)
 
-	otelHandler := otelhttp.NewMiddleware(drilotel.AppName)(mux)
-
-	// Expose the masked CSRF token via response header so the SPA can read it.
+	// CSRF-protected handler that exposes the masked token via response header.
 	csrfProtected := csrfProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-CSRF-Token", csrf.Token(r))
-		otelHandler.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	}))
 
-	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
-	// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
-	// HTTPS-only referer/origin checks.
 	connectPrefixes := rpc.ConnectPathPrefixes()
+
 	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
 		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
-			otelHandler.ServeHTTP(w, r)
+			next.ServeHTTP(w, r)
 			return
 		}
-		// Connect protocol uses POST with custom Content-Type headers that
-		// cannot be sent by simple HTML forms, providing implicit CSRF protection.
+		// ConnectRPC — exempt from CSRF; POST with custom Content-Type headers
+		// cannot be sent by simple HTML forms without CORS preflight.
 		for _, prefix := range connectPrefixes {
 			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
-				otelHandler.ServeHTTP(w, r)
+				next.ServeHTTP(w, r)
 				return
 			}
 		}
+		// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
+		// HTTPS-only referer/origin checks.
 		if !secureCookies {
 			r = csrf.PlaintextHTTPRequest(r)
 		}
 		csrfProtected.ServeHTTP(w, r)
-	})), nil
+	}))
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
