@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 // ---------------------------------------------------------------------------
 
 const ANNOTATION_LABELS: Record<number, string> = {
+  [AnnotationType.UNSPECIFIED]: "notes",
   [AnnotationType.STRENGTH]: "strengths",
   [AnnotationType.GAP]: "gaps",
   [AnnotationType.MISSED_OPPORTUNITY]: "missed opportunities",
@@ -21,6 +22,7 @@ const ANNOTATION_LABELS: Record<number, string> = {
 };
 
 const ANNOTATION_BORDER: Record<number, string> = {
+  [AnnotationType.UNSPECIFIED]: "border-note",
   [AnnotationType.STRENGTH]: "border-strength",
   [AnnotationType.GAP]: "border-gap",
   [AnnotationType.MISSED_OPPORTUNITY]: "border-missed",
@@ -28,6 +30,7 @@ const ANNOTATION_BORDER: Record<number, string> = {
 };
 
 const ANNOTATION_TEXT: Record<number, string> = {
+  [AnnotationType.UNSPECIFIED]: "text-note",
   [AnnotationType.STRENGTH]: "text-strength",
   [AnnotationType.GAP]: "text-gap",
   [AnnotationType.MISSED_OPPORTUNITY]: "text-missed",
@@ -35,6 +38,7 @@ const ANNOTATION_TEXT: Record<number, string> = {
 };
 
 const ANNOTATION_BG: Record<number, string> = {
+  [AnnotationType.UNSPECIFIED]: "bg-note",
   [AnnotationType.STRENGTH]: "bg-strength",
   [AnnotationType.GAP]: "bg-gap",
   [AnnotationType.MISSED_OPPORTUNITY]: "bg-missed",

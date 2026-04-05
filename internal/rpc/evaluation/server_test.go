@@ -309,3 +309,50 @@ func TestRetryEvaluation_FailedPrecondition(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, connect.CodeFailedPrecondition, connect.CodeOf(err))
 }
+
+func TestRetryEvaluation_Success(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
+
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	setSessionStatus(t, pool, session.ID, "evaluation_failed")
+
+	token := createAuthToken(t, pool, userID)
+	srvURL := startEvaluationServer(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.RetryEvaluation(context.Background(), connect.NewRequest(&drillv1.RetryEvaluationRequest{
+		SessionId: session.ID.String(),
+	}))
+	require.NoError(t, err)
+}
+
+func TestGetEvaluation_EvaluationNotReady(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
+
+	userID := createTestUser(t, pool)
+	question := createTestQuestion(t, pool)
+	// Session starts in "active" status — not reviewed or evaluation_failed.
+	session := createTestSession(t, pool, userID, question.ID)
+
+	token := createAuthToken(t, pool, userID)
+	srvURL := startEvaluationServer(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.GetEvaluation(context.Background(), connect.NewRequest(&drillv1.GetEvaluationRequest{
+		SessionId: session.ID.String(),
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
