@@ -57,10 +57,7 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", OAuthStart(b))
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", OAuthCallback(b))
 
-	// Sessions
-	mux.Handle("POST /api/sessions", requireAuth(http.HandlerFunc(CreateSession(b))))
-	mux.Handle("GET /api/sessions", requireAuth(http.HandlerFunc(ListSessions(b))))
-	mux.Handle("GET /api/sessions/{id}", requireAuth(http.HandlerFunc(GetSession(b))))
+	// Sessions (REST CRUD migrated to ConnectRPC SessionService; WS stays)
 	mux.Handle("GET /api/sessions/{id}/ws", requireAuth(http.HandlerFunc(SessionWS(b))))
 
 	// Evaluations
