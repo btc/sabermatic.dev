@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
@@ -49,7 +50,7 @@ func TestCreateSession_Success(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 
 	question := createTestQuestion(t, pool)
 	cookie := createAuthCookie(t, pool, userID)
@@ -82,7 +83,7 @@ func TestCreateSession_InvalidDuration(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	question := createTestQuestion(t, pool)
 	cookie := createAuthCookie(t, pool, userID)
 
@@ -118,7 +119,7 @@ func TestCreateSession_QuestionNotFound(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 
 	cookie := createAuthCookie(t, pool, userID)
 
@@ -142,7 +143,7 @@ func TestCreateSession_InvalidJSON(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	cookie := createAuthCookie(t, pool, userID)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString("{bad json"))
@@ -185,7 +186,7 @@ func TestListSessions_Success(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	question := createTestQuestion(t, pool)
 	cookie := createAuthCookie(t, pool, userID)
 
@@ -213,8 +214,8 @@ func TestListSessions_EmptyForOtherUser(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userA := createTestUser(t, b)
-	userB := createTestUser(t, b)
+	userA := backendtest.SeedUser(t, b)
+	userB := backendtest.SeedUser(t, b)
 	question := createTestQuestion(t, pool)
 	cookieB := createAuthCookie(t, pool, userB)
 
@@ -246,7 +247,7 @@ func TestGetSession_Success(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -271,7 +272,7 @@ func TestGetSession_NotFound(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	cookie := createAuthCookie(t, pool, userID)
 
 	req := authedRequest(t, http.MethodGet, "/api/sessions/"+uuid.New().String(), nil, cookie)
@@ -291,8 +292,8 @@ func TestGetSession_WrongUser(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userA := createTestUser(t, b)
-	userB := createTestUser(t, b)
+	userA := backendtest.SeedUser(t, b)
+	userB := backendtest.SeedUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userA, question.ID)
 	cookieB := createAuthCookie(t, pool, userB)
@@ -314,7 +315,7 @@ func TestGetSession_InvalidUUID(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	cookie := createAuthCookie(t, pool, userID)
 
 	req := authedRequest(t, http.MethodGet, "/api/sessions/not-a-uuid", nil, cookie)
@@ -333,9 +334,9 @@ func TestListQuestions_Success(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
 	userID := backendtest.SeedUser(t, b)
@@ -371,7 +372,7 @@ func TestCreateSession_BoundaryDurations(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	pool := b.Pool()
-	userID := createTestUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 
 	question := createTestQuestion(t, pool)
 	cookie := createAuthCookie(t, pool, userID)

@@ -14,9 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/backend"
-	"github.com/btc/drill/internal/testutil"
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ func TestGetEvaluation_Returns200WithJSON(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.backend)
+	userID := backendtest.SeedUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
@@ -153,8 +154,8 @@ func TestGetEvaluation_Returns403ForWrongUser(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	ownerID := createTestUser(t, env.backend)
-	otherID := createTestUser(t, env.backend)
+	ownerID := backendtest.SeedUser(t, env.backend)
+	otherID := backendtest.SeedUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, ownerID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
@@ -177,7 +178,7 @@ func TestGetEvaluation_Returns404WhenNotReady(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.backend)
+	userID := backendtest.SeedUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID) // status=active
 
@@ -203,7 +204,7 @@ func TestRetryEvaluation_Returns202(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.backend)
+	userID := backendtest.SeedUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "evaluation_failed")
@@ -226,7 +227,7 @@ func TestRetryEvaluation_Returns409WhenNotFailed(t *testing.T) {
 
 	env := newEvalTestEnv(t)
 
-	userID := createTestUser(t, env.backend)
+	userID := backendtest.SeedUser(t, env.backend)
 	question := createTestQuestion(t, env.pool)
 	session := createTestSession(t, env.pool, userID, question.ID)
 	setSessionStatus(t, env.pool, session.ID, "reviewed")
