@@ -159,24 +159,38 @@ function ActiveSessionBanner({
   const session = active[0]!;
 
   return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-1">
-      <div className="flex items-center justify-between">
-        <p className="text-sm">
-          You have a session in progress
-          {session.question_title ? (
-            <> &mdash; <span className="font-medium">{session.question_title}</span></>
-          ) : null}
-        </p>
-        <Link
-          to={`/sessions/${session.id}/interview`}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          Resume
-        </Link>
+    <div
+      id="active-session-banner"
+      className="rounded-lg bg-blue-600 px-5 py-4 space-y-2"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="flex-shrink-0 h-2.5 w-2.5 rounded-full bg-white animate-pulse" />
+          <p className="text-sm text-white">
+            Session in progress
+            {session.question_title ? (
+              <> &mdash; <span className="font-semibold">{session.question_title}</span></>
+            ) : null}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Link
+            to={`/sessions/${session.id}/interview`}
+            className="bg-white text-blue-600 font-semibold px-4 py-2 rounded text-sm leading-none hover:bg-blue-50 transition-colors"
+          >
+            Resume
+          </Link>
+          <Link
+            to={`/sessions/${session.id}/interview`}
+            className="border border-white/60 text-white px-4 py-2 rounded text-sm leading-none hover:bg-white/10 transition-colors"
+          >
+            End Session
+          </Link>
+        </div>
       </div>
       {atConcurrentLimit && (
-        <p className="text-xs text-muted-foreground">
-          End or resume your active session first.
+        <p className="text-xs text-blue-100">
+          Resume or end your active session to start a new one.
         </p>
       )}
     </div>
@@ -238,12 +252,28 @@ function QuestionCard({
 }) {
   const isRecommended = suggestedId === question.id;
 
-  return (
+  const cardContent = (
     <div
-      className={`flex items-start justify-between gap-4 rounded-lg border px-4 py-3 ${
+      className={`relative flex items-start justify-between gap-4 rounded-lg border px-4 py-3 ${
         isRecommended ? "border-amber-400/50 bg-amber-50/40 dark:bg-amber-900/10" : "border-border bg-card"
-      }`}
+      } ${startDisabled ? "opacity-60 cursor-pointer" : ""}`}
+      onClick={
+        startDisabled
+          ? () => {
+              document
+                .getElementById("active-session-banner")
+                ?.scrollIntoView({ behavior: "smooth" });
+            }
+          : undefined
+      }
     >
+      {startDisabled && (
+        <div className="absolute inset-0 rounded-lg bg-background/60 flex items-center justify-center z-10">
+          <p className="text-xs text-muted-foreground text-center px-4">
+            Resume or end your active session to start a new one
+          </p>
+        </div>
+      )}
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium">{question.title}</span>
@@ -295,6 +325,21 @@ function QuestionCard({
       )}
     </div>
   );
+
+  if (startDisabled) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger render={<div />} className="w-full text-left">
+            {cardContent}
+          </TooltipTrigger>
+          <TooltipContent>Active session in progress</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return cardContent;
 }
 
 // CreateQuestionDialog
