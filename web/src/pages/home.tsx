@@ -455,7 +455,10 @@ function CreateQuestionDialog() {
 export default function Home() {
   const { data: user } = useMe();
   const { data: questionsResp } = useQuery(listQuestions, {});
-  const questions = questionsResp?.questions ?? [];
+  const questions = useMemo(
+    () => questionsResp?.questions ?? [],
+    [questionsResp],
+  );
   const { data: sessions = [] } = useSessions();
   const { data: coach } = useCoachLatest();
 
