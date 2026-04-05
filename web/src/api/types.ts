@@ -34,19 +34,6 @@ export interface Question {
 // (Evaluation types migrated to proto-generated code)
 // (Session/Message types migrated to proto-generated code)
 
-// --- Coach ---
-export interface CoachAnalysis {
-  id: string;
-  user_id: string;
-  narrative: string;
-  weakest_dimension: string | null;
-  improving_dimensions: string[] | null;
-  topic_gaps: string[] | null;
-  suggested_question_id: string | null;
-  sessions_analyzed: string[];
-  created_at: string;
-}
-
 // --- Usage & Billing ---
 export interface Grant {
   id: string;

@@ -1,20 +1,20 @@
 import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { useQuery } from "@connectrpc/connect-query";
+import { useQuery, useMutation } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getCoachAnalysis, requestCoachAnalysis } from "@/pb/drill/v1/coach-CoachService_connectquery";
 import { Difficulty, QuestionSource } from "@/pb/drill/v1/question_pb";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import type { Question as ProtoQuestion } from "@/pb/drill/v1/question_pb";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
 import type { SessionSummary } from "@/pb/drill/v1/session_pb";
+import type { CoachAnalysis } from "@/pb/drill/v1/coach_pb";
 import {
-  useCoachLatest,
-  useRequestCoachAnalysis, useCreateQuestion,
+  useCreateQuestion,
 } from "@/api/queries";
-import type { CoachAnalysis } from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -78,10 +78,10 @@ function SummaryStrip({ sessions }: { sessions: SessionSummary[] }) {
 
 // CoachCard
 function CoachCard({ coach, isActive }: {
-  coach: CoachAnalysis | null | undefined;
+  coach: CoachAnalysis | undefined;
   isActive: boolean;
 }) {
-  const requestCoach = useRequestCoachAnalysis();
+  const requestCoach = useMutation(requestCoachAnalysis);
 
   if (!isActive) return null;
 
@@ -107,7 +107,7 @@ function CoachCard({ coach, isActive }: {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => requestCoach.mutate(undefined, {
+            onClick={() => requestCoach.mutate({}, {
               onSuccess: () => toast.success("Coach analysis updated"),
             })}
           >
@@ -131,7 +131,7 @@ function CoachCard({ coach, isActive }: {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => requestCoach.mutate(undefined, {
+            onClick={() => requestCoach.mutate({}, {
               onSuccess: () => toast.success("Coach analysis updated"),
             })}
             disabled={requestCoach.isPending}
@@ -144,10 +144,10 @@ function CoachCard({ coach, isActive }: {
         <p className="text-sm text-foreground leading-relaxed">
           {narrativeExcerpt}
         </p>
-        {coach.weakest_dimension && (
+        {coach.weakestDimension && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Focus area:</span>
-            <Badge variant="outline">{coach.weakest_dimension}</Badge>
+            <Badge variant="outline">{coach.weakestDimension}</Badge>
           </div>
         )}
       </CardContent>
@@ -467,7 +467,8 @@ export default function Home() {
   );
   const { data: sessionsResp } = useQuery(listSessions, {});
   const sessions = sessionsResp?.sessions ?? [];
-  const { data: coach } = useCoachLatest();
+  const { data: coachResp } = useQuery(getCoachAnalysis, {});
+  const coach = coachResp?.analysis;
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -512,7 +513,7 @@ export default function Home() {
   }, [questions, difficultyEnum, selectedTags]);
 
   // Sort: recommended first if coach suggests one
-  const suggestedId = coach?.suggested_question_id ?? null;
+  const suggestedId = coach?.suggestedQuestionId ?? null;
   const sorted = useMemo(() => {
     if (!suggestedId) return filtered;
     return [...filtered].sort((a, b) => {

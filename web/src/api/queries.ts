@@ -5,7 +5,6 @@ import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery"
 import { apiClient } from "./client";
 import type {
   User, Question,
-  CoachAnalysis,
 } from "./types";
 
 // --- Questions ---
@@ -20,23 +19,6 @@ export function useCreateQuestion() {
 }
 
 // (Evaluation hooks migrated to ConnectRPC EvaluationService)
-
-// --- Coach ---
-
-export function useCoachLatest() {
-  return useQuery({
-    queryKey: ["coach"],
-    queryFn: () => apiClient.get<CoachAnalysis | null>("/api/coach/latest"),
-  });
-}
-
-export function useRequestCoachAnalysis() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/coach/analyze"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["coach"] }),
-  });
-}
 
 // --- Auth mutations ---
 
