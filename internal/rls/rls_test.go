@@ -12,6 +12,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -272,6 +273,9 @@ func TestRLSIsolation(t *testing.T) {
 				userB, qShared,
 			)
 			require.Error(t, err, "Alice should not be able to insert a session for Bob")
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, err, &pgErr)
+			require.Equal(t, "42501", pgErr.Code, "should be RLS policy violation")
 			return nil
 		})
 		require.NoError(t, err)

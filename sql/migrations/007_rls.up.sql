@@ -1,4 +1,4 @@
--- 007_rls.up.sql: Row-Level Security for tenant isolation.
+-- 007_rls.up.sql: Row-Level Security for user isolation.
 
 -- Create a restricted role for the application.
 -- NOTE: In production, set a password for drill_app via:
