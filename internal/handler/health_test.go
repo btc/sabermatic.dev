@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +16,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 

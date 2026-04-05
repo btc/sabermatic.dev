@@ -14,6 +14,7 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 )
 
 // setupGothForTest registers the faux provider and overrides CompleteUserAuth
@@ -53,7 +54,7 @@ func TestOAuthStart_UnknownProvider(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -78,7 +79,7 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	}
 
 	t.Setenv("BASE_URL", "http://localhost:3000")
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -118,7 +119,7 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 	}
 
 	t.Setenv("BASE_URL", "http://localhost:3000")
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -163,7 +164,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	}
 
 	t.Setenv("BASE_URL", "http://localhost:3000")
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -210,7 +211,7 @@ func TestOAuthCallback_UnknownProvider(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
