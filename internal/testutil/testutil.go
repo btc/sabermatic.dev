@@ -5,6 +5,7 @@ package testutil
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -105,6 +107,21 @@ func NewTestBackend(t *testing.T) *backend.Backend {
 	t.Cleanup(func() { b.Close() })
 
 	return b
+}
+
+// Signup creates a new user account via backend.Signup and returns the new
+// user's ID. It uses a unique email to avoid conflicts when called multiple
+// times within the same test.
+func Signup(t *testing.T, b *backend.Backend, displayName string) uuid.UUID {
+	t.Helper()
+	email := fmt.Sprintf("testuser-%s@example.com", uuid.New().String()[:8])
+	result, err := b.Signup(context.Background(), backend.SignupParams{
+		Email:       email,
+		Password:    "securepass123",
+		DisplayName: displayName,
+	})
+	require.NoError(t, err)
+	return result.UserID
 }
 
 // SignupAndLogin creates a user via HTTP signup+login endpoints and returns

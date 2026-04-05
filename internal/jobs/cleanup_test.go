@@ -14,6 +14,7 @@ import (
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 	"github.com/btc/drill/internal/jobs/jobtest"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestCleanupAbandonedSessions_CancelsEmptySessions(t *testing.T) {
@@ -22,10 +23,11 @@ func TestCleanupAbandonedSessions_CancelsEmptySessions(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Seed a session with 0 candidate messages.
-	seed := seedSessionWithMessages(t, ctx, pool, 0)
+	seed := seedSessionWithMessages(t, ctx, b, 0)
 
 	q := db.New(pool)
 
@@ -102,10 +104,11 @@ func TestCleanupAbandonedSessions_CompletesSessionsWithMessages(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Seed a session with candidate messages (seedSessionWithMessages inserts alternating roles).
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	q := db.New(pool)
 
@@ -182,9 +185,10 @@ func TestCleanupAbandonedSessions_RecentSessionNotAffected(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	// Set back to "active" but keep started_at recent (default NOW()).
 	q := db.New(pool)

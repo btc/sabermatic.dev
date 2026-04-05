@@ -9,15 +9,16 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/testutil"
 )
 
 // ---------------- coach test helpers ----------------
@@ -29,23 +30,19 @@ type coachSeedResult struct {
 	SessionIDs []uuid.UUID
 }
 
-func seedCoachData(t *testing.T, ctx context.Context, pool *pgxpool.Pool) coachSeedResult {
+func seedCoachData(t *testing.T, ctx context.Context, b *backend.Backend) coachSeedResult {
 	t.Helper()
+	pool := b.Pool()
 	q := db.New(pool)
 
-	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("coach-%s@example.com", uuid.New().String()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$fakehash", Valid: true},
-		DisplayName:  "Coach Test User",
-	})
-	require.NoError(t, err)
+	userID := testutil.Signup(t, b, "Coach Test User")
 
 	var sessionIDs []uuid.UUID
 	for i := 0; i < 3; i++ {
 		questionID := seedQuestion(t, ctx, pool)
 
 		session, err := q.CreateSession(ctx, db.CreateSessionParams{
-			UserID:                user.ID,
+			UserID:                userID,
 			QuestionID:            questionID,
 			ConfigDurationMinutes: 45,
 			ConfigTtsEnabled:      false,
@@ -100,7 +97,7 @@ func seedCoachData(t *testing.T, ctx context.Context, pool *pgxpool.Pool) coachS
 	}
 
 	return coachSeedResult{
-		UserID:     user.ID,
+		UserID:     userID,
 		SessionIDs: sessionIDs,
 	}
 }
@@ -182,11 +179,12 @@ func TestRunCoachAnalysisWorker_HappyPath(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeCoachServer(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedCoachData(t, ctx, pool)
+	seed := seedCoachData(t, ctx, b)
 	worker := newCoachWorker(t, pool, srv.URL)
 
 	// Run the worker directly.
@@ -243,11 +241,12 @@ func TestRunCoachAnalysisWorker_NoGeneratedQuestion(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeCoachServerNoQuestion(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedCoachData(t, ctx, pool)
+	seed := seedCoachData(t, ctx, b)
 	worker := newCoachWorker(t, pool, srv.URL)
 
 	err := worker.Work(ctx, &river.Job[jobs.RunCoachAnalysisArgs]{
@@ -269,24 +268,19 @@ func TestRunCoachAnalysisWorker_NoReviewedSessions(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeCoachServer(t)
 	t.Cleanup(srv.Close)
 
 	// Create a user with no sessions at all.
-	q := db.New(pool)
-	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("empty-%s@example.com", uuid.New().String()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$fakehash", Valid: true},
-		DisplayName:  "Empty User",
-	})
-	require.NoError(t, err)
+	userID := testutil.Signup(t, b, "Empty User")
 
 	worker := newCoachWorker(t, pool, srv.URL)
 
 	// Work should return nil (skip, no reviewed sessions).
-	err = worker.Work(ctx, &river.Job[jobs.RunCoachAnalysisArgs]{
-		Args: jobs.RunCoachAnalysisArgs{UserID: user.ID},
+	err := worker.Work(ctx, &river.Job[jobs.RunCoachAnalysisArgs]{
+		Args: jobs.RunCoachAnalysisArgs{UserID: userID},
 	})
 	require.NoError(t, err)
 
@@ -294,7 +288,7 @@ func TestRunCoachAnalysisWorker_NoReviewedSessions(t *testing.T) {
 	var count int
 	err = pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM coach_analyses WHERE user_id = $1`,
-		user.ID,
+		userID,
 	).Scan(&count)
 	require.NoError(t, err)
 	require.Equal(t, 0, count)
@@ -306,7 +300,8 @@ func TestRunCoachAnalysisWorker_EmptyResponse(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Fake server returns a text content block only — no tool_use block.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -320,7 +315,7 @@ func TestRunCoachAnalysisWorker_EmptyResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	seed := seedCoachData(t, ctx, pool)
+	seed := seedCoachData(t, ctx, b)
 	worker := newCoachWorker(t, pool, srv.URL)
 
 	// Work should return an error because there is no tool_use block.
@@ -337,7 +332,8 @@ func TestRunCoachAnalysisWorker_MalformedResponse(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Fake server returns tool_use with semantically invalid content (empty narrative).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +347,7 @@ func TestRunCoachAnalysisWorker_MalformedResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	seed := seedCoachData(t, ctx, pool)
+	seed := seedCoachData(t, ctx, b)
 	worker := newCoachWorker(t, pool, srv.URL)
 
 	// Work should return an error because narrative is empty.

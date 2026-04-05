@@ -15,9 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/testutil"
 )
 
 // ---------------- educator test helpers ----------------
@@ -29,21 +31,17 @@ type educatorSeedResult struct {
 	SessionID uuid.UUID
 }
 
-func seedEducatorData(t *testing.T, ctx context.Context, pool *pgxpool.Pool) educatorSeedResult {
+func seedEducatorData(t *testing.T, ctx context.Context, b *backend.Backend) educatorSeedResult {
 	t.Helper()
+	pool := b.Pool()
 	q := db.New(pool)
 
-	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("educator-%s@example.com", uuid.New().String()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$fakehash", Valid: true},
-		DisplayName:  "Educator Test User",
-	})
-	require.NoError(t, err)
+	userID := testutil.Signup(t, b, "Educator Test User")
 
 	questionID := seedQuestion(t, ctx, pool)
 
 	session, err := q.CreateSession(ctx, db.CreateSessionParams{
-		UserID:                user.ID,
+		UserID:                userID,
 		QuestionID:            questionID,
 		ConfigDurationMinutes: 45,
 		ConfigTtsEnabled:      false,
@@ -95,7 +93,7 @@ func seedEducatorData(t *testing.T, ctx context.Context, pool *pgxpool.Pool) edu
 	require.NoError(t, err)
 
 	return educatorSeedResult{
-		UserID:    user.ID,
+		UserID:    userID,
 		SessionID: session.ID,
 	}
 }
@@ -143,11 +141,12 @@ func TestGenerateEducatorContentWorker_HappyPath(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEducatorServer(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedEducatorData(t, ctx, pool)
+	seed := seedEducatorData(t, ctx, b)
 	worker := newEducatorWorker(t, pool, srv.URL)
 
 	// Run the worker directly (educator creates the generating row itself).
@@ -182,11 +181,12 @@ func TestGenerateEducatorContentWorker_PreExistingGeneratingRow(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEducatorServer(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedEducatorData(t, ctx, pool)
+	seed := seedEducatorData(t, ctx, b)
 
 	// Pre-insert a generating row to simulate a retry.
 	q := db.New(pool)
@@ -215,11 +215,12 @@ func TestGenerateEducatorContentWorker_IdempotentCompleted(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEducatorServer(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedEducatorData(t, ctx, pool)
+	seed := seedEducatorData(t, ctx, b)
 
 	// Pre-insert a completed row.
 	q := db.New(pool)
@@ -252,12 +253,13 @@ func TestGenerateEducatorContentWorker_SessionNotReviewed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEducatorServer(t)
 	t.Cleanup(srv.Close)
 
 	// Seed a session that's only "completed", not "reviewed".
-	seed := seedSessionWithMessages(t, ctx, pool, 4)
+	seed := seedSessionWithMessages(t, context.Background(), b, 4)
 	worker := newEducatorWorker(t, pool, srv.URL)
 
 	// Work should return nil (skip, not reviewed).
@@ -282,7 +284,8 @@ func TestGenerateEducatorContentWorker_MalformedResponse(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Fake server returns a tool_use block with empty model_answer.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +299,7 @@ func TestGenerateEducatorContentWorker_MalformedResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	seed := seedEducatorData(t, ctx, pool)
+	seed := seedEducatorData(t, ctx, b)
 	worker := newEducatorWorker(t, pool, srv.URL)
 
 	// Work should return an error because model_answer is empty.
@@ -319,7 +322,8 @@ func TestGenerateEducatorContentWorker_EmptyResponse(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Fake server returns message with no tool_use blocks.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +337,7 @@ func TestGenerateEducatorContentWorker_EmptyResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	seed := seedEducatorData(t, ctx, pool)
+	seed := seedEducatorData(t, ctx, b)
 	worker := newEducatorWorker(t, pool, srv.URL)
 
 	// Work should return an error because there's no tool_use block.

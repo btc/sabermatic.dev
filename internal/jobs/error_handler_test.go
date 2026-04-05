@@ -13,6 +13,7 @@ import (
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
@@ -21,9 +22,10 @@ func TestErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	// Set session status to "evaluating" (the state it would be in during eval).
 	q := db.New(pool)
@@ -59,9 +61,10 @@ func TestErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	// Set session status to "evaluating".
 	q := db.New(pool)
@@ -97,9 +100,10 @@ func TestErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	// Set session status to "evaluating".
 	q := db.New(pool)
@@ -135,9 +139,10 @@ func TestErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	q := db.New(pool)
 	err := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
@@ -171,9 +176,10 @@ func TestErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	q := db.New(pool)
 	err := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
@@ -207,9 +213,10 @@ func TestErrorHandler_InvalidEncodedArgs(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
-	seed := seedSessionWithMessages(t, ctx, pool, 2)
+	seed := seedSessionWithMessages(t, ctx, b, 2)
 
 	q := db.New(pool)
 	err := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
@@ -242,7 +249,8 @@ func TestErrorHandler_NonExistentSession(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 
 	// Use a random session ID that doesn't exist in DB.
 	fakeSessionID := uuid.New()

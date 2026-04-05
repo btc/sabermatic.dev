@@ -6,86 +6,23 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	"github.com/riverqueue/river/rivermigrate"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/testutil"
 )
 
 // ---------------- test helpers ----------------
-
-// startTestPostgres starts a Postgres 16 container, runs app migrations, and
-// returns a connected pool. Container and pool are cleaned up on test end.
-func startTestPostgres(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx := context.Background()
-
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("drill_test"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { pgContainer.Terminate(ctx) })
-
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	// Run app migrations.
-	d, err := iofs.New(os.DirFS("../../sql/migrations"), ".")
-	require.NoError(t, err)
-
-	trimmed := strings.TrimPrefix(connStr, "postgresql://")
-	trimmed = strings.TrimPrefix(trimmed, "postgres://")
-	pgxURL := "pgx5://" + trimmed
-	m, err := migrate.NewWithSourceInstance("iofs", d, pgxURL)
-	require.NoError(t, err)
-	err = m.Up()
-	if err != nil && err != migrate.ErrNoChange {
-		t.Fatalf("migrate up: %v", err)
-	}
-
-	pool, err := pgxpool.New(ctx, connStr)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-
-	// Run River migrations (River needs its own internal tables).
-	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
-	require.NoError(t, err)
-	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
-	require.NoError(t, err)
-
-	return pool
-}
 
 // seedQuestion inserts a question directly via SQL (no sqlc CreateQuestion query exists).
 func seedQuestion(t *testing.T, ctx context.Context, pool *pgxpool.Pool) uuid.UUID {
@@ -112,21 +49,17 @@ type seedResult struct {
 	SessionID  uuid.UUID
 }
 
-func seedSessionWithMessages(t *testing.T, ctx context.Context, pool *pgxpool.Pool, numMessages int) seedResult {
+func seedSessionWithMessages(t *testing.T, ctx context.Context, b *backend.Backend, numMessages int) seedResult {
 	t.Helper()
+	pool := b.Pool()
 	q := db.New(pool)
 
-	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("test-%s@example.com", uuid.New().String()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$fakehash", Valid: true},
-		DisplayName:  "Test User",
-	})
-	require.NoError(t, err)
+	userID := testutil.Signup(t, b, "Test User")
 
 	questionID := seedQuestion(t, ctx, pool)
 
 	session, err := q.CreateSession(ctx, db.CreateSessionParams{
-		UserID:                user.ID,
+		UserID:                userID,
 		QuestionID:            questionID,
 		ConfigDurationMinutes: 45,
 		ConfigTtsEnabled:      false,
@@ -164,7 +97,7 @@ func seedSessionWithMessages(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	}
 
 	return seedResult{
-		UserID:     user.ID,
+		UserID:     userID,
 		QuestionID: questionID,
 		SessionID:  session.ID,
 	}
@@ -233,11 +166,12 @@ func TestEvaluateSessionWorker_HappyPath(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEvalServer(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedSessionWithMessages(t, ctx, pool, 4)
+	seed := seedSessionWithMessages(t, ctx, b, 4)
 	worker := newEvalWorker(t, pool, srv.URL)
 
 	// Run the worker directly.
@@ -303,11 +237,12 @@ func TestEvaluateSessionWorker_Idempotent(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEvalServer(t)
 	t.Cleanup(srv.Close)
 
-	seed := seedSessionWithMessages(t, ctx, pool, 4)
+	seed := seedSessionWithMessages(t, ctx, b, 4)
 
 	// Pre-insert an evaluation to simulate a previous run.
 	q := db.New(pool)
@@ -349,12 +284,13 @@ func TestEvaluateSessionWorker_EmptyTranscript(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	b := testutil.NewTestBackend(t)
+	pool := b.Pool()
 	srv := newFakeEvalServer(t)
 	t.Cleanup(srv.Close)
 
 	// Seed a session with zero messages.
-	seed := seedSessionWithMessages(t, ctx, pool, 0)
+	seed := seedSessionWithMessages(t, ctx, b, 0)
 	worker := newEvalWorker(t, pool, srv.URL)
 
 	// Run the worker.
