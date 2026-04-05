@@ -25,19 +25,6 @@ export function useUsage() {
 
 // --- Questions ---
 
-export function useQuestions(params?: { difficulty?: string; tags?: string }) {
-  const searchParams = new URLSearchParams();
-  if (params?.difficulty) searchParams.set("difficulty", params.difficulty);
-  if (params?.tags) searchParams.set("tags", params.tags);
-  const qs = searchParams.toString();
-  const url = `/api/questions${qs ? `?${qs}` : ""}`;
-
-  return useQuery({
-    queryKey: ["questions", params],
-    queryFn: () => apiClient.get<Question[]>(url),
-  });
-}
-
 export function useCreateQuestion() {
   const qc = useQueryClient();
   return useMutation({

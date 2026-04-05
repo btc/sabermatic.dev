@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
+import { useQuery } from "@connectrpc/connect-query";
+import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import {
-  useQuestions,
   useCoachLatest,
   useCreateSession,
   useMe,
@@ -59,7 +60,8 @@ export default function SessionConfig() {
 
   const questionId = searchParams.get("question");
 
-  const { data: questions = [] } = useQuestions();
+  const { data: questionsResp } = useQuery(listQuestions, {});
+  const questions = questionsResp?.questions ?? [];
   const { data: coach } = useCoachLatest();
   const { data: me } = useMe();
   const { data: usage } = useUsage();
