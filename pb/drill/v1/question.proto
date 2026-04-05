@@ -1,0 +1,45 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum Difficulty {
+  DIFFICULTY_UNSPECIFIED = 0;
+  DIFFICULTY_MEDIUM = 1;
+  DIFFICULTY_HARD = 2;
+}
+
+enum QuestionSource {
+  QUESTION_SOURCE_UNSPECIFIED = 0;
+  QUESTION_SOURCE_SEED = 1;
+  QUESTION_SOURCE_CUSTOM = 2;
+  QUESTION_SOURCE_COACH_GENERATED = 3;
+}
+
+service QuestionService {
+  rpc ListQuestions(ListQuestionsRequest) returns (ListQuestionsResponse);
+}
+
+message ListQuestionsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListQuestionsResponse {
+  repeated Question questions = 1;
+  string next_page_token = 2;
+}
+
+message Question {
+  string id = 1;
+  optional string user_id = 2;
+  string title = 3;
+  string prompt = 4;
+  Difficulty difficulty = 5;
+  repeated string tags = 6;
+  optional string hints = 7;
+  QuestionSource source = 8;
+  google.protobuf.Timestamp create_time = 9;
+}
