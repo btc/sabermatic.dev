@@ -23,3 +23,5 @@ Never panic at init time. Propagate errors explicitly up to main. This applies t
 Never use `git add -A` or `git add .` when untracked files exist that shouldn't be committed. Stage specific files by name. This is especially dangerous during rebase conflict resolution where untracked files get swept in silently.
 
 Verify library API signatures against installed versions before writing implementation code in plans. Plan code blocks that haven't been compiled against real type definitions can be wrong (e.g., `credentials` option that doesn't exist, single-return function that actually returns error).
+
+Update methods should use field masks for partial updates. AIP compliance (AIP-134).
