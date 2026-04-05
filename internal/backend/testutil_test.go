@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -77,6 +79,19 @@ func newTestBackend(t *testing.T) *Backend {
 	t.Cleanup(func() { b.Close() })
 
 	return b
+}
+
+// seedUser creates a user via the real production Signup path and returns the
+// user ID. Shared across all backend integration tests.
+func seedUser(t *testing.T, b *Backend) uuid.UUID {
+	t.Helper()
+	result, err := b.Signup(context.Background(), SignupParams{
+		Email:       fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
+		Password:    "testpassword123",
+		DisplayName: "Test User",
+	})
+	require.NoError(t, err)
+	return result.UserID
 }
 
 // loadTestConfig loads a config.Config suitable for backend integration tests.
