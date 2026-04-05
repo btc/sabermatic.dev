@@ -1,4 +1,4 @@
-.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate
+.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate lint
 
 # Start embedded dev server. Vite rebuilds on save, air bounces Go binary.
 # One origin (port 8080), no proxy, no CSRF issues. Ctrl-C kills all.
@@ -85,3 +85,7 @@ deps:
 # Regenerate protobuf code from .proto sources.
 generate:
 	buf generate
+
+# Run golangci-lint (same config as CI).
+lint:
+	golangci-lint run ./...
