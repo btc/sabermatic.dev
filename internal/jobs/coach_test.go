@@ -223,6 +223,9 @@ func TestRunCoachAnalysisWorker_HappyPath(t *testing.T) {
 	require.Equal(t, "hard", genQuestion.Difficulty)
 	require.Equal(t, "coach_generated", genQuestion.Source)
 	require.Equal(t, []string{"message-queues", "distributed-systems"}, genQuestion.Tags)
+	require.NotEmpty(t, genQuestion.Prompt, "generated question prompt should be populated")
+	require.True(t, genQuestion.CoachRationale.Valid, "generated question coach_rationale should be valid")
+	require.NotEmpty(t, genQuestion.CoachRationale.String, "generated question coach_rationale should be populated")
 
 	// Assert: LLM call logged with role=coach.
 	var callCount int
@@ -336,7 +339,7 @@ func TestRunCoachAnalysisWorker_MalformedResponse(t *testing.T) {
 	ctx := context.Background()
 	pool := startTestPostgres(t)
 
-	// Fake server returns tool_use with invalid JSON in input.
+	// Fake server returns tool_use with semantically invalid content (empty narrative).
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{

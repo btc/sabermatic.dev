@@ -305,6 +305,12 @@ func TestGenerateEducatorContentWorker_MalformedResponse(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse educator")
+
+	// Verify the "generating" row persists (enables retry).
+	var status string
+	err = pool.QueryRow(ctx, "SELECT status FROM educator_analyses WHERE session_id = $1", seed.SessionID).Scan(&status)
+	require.NoError(t, err)
+	require.Equal(t, "generating", status)
 }
 
 func TestGenerateEducatorContentWorker_EmptyResponse(t *testing.T) {
@@ -336,4 +342,10 @@ func TestGenerateEducatorContentWorker_EmptyResponse(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "call educator LLM")
+
+	// Verify the "generating" row persists (enables retry).
+	var status string
+	err = pool.QueryRow(ctx, "SELECT status FROM educator_analyses WHERE session_id = $1", seed.SessionID).Scan(&status)
+	require.NoError(t, err)
+	require.Equal(t, "generating", status)
 }
