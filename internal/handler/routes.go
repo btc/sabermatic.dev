@@ -13,6 +13,7 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/drilotel"
+	"github.com/btc/drill/internal/rpc"
 )
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
@@ -42,10 +43,19 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
 	// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
 	// HTTPS-only referer/origin checks.
+	connectPrefixes := rpc.ConnectPathPrefixes()
 	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
 			otelHandler.ServeHTTP(w, r)
 			return
+		}
+		// Connect protocol uses POST with custom Content-Type headers that
+		// cannot be sent by simple HTML forms, providing implicit CSRF protection.
+		for _, prefix := range connectPrefixes {
+			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
+				otelHandler.ServeHTTP(w, r)
+				return
+			}
 		}
 		if !secureCookies {
 			r = csrf.PlaintextHTTPRequest(r)
@@ -57,6 +67,9 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
+	// ConnectRPC services (migrated from REST)
+	rpc.Register(mux, b)
+
 	mux.HandleFunc("GET /api/health", Health(b))
 	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
 
@@ -93,9 +106,6 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) {
 	// Coach
 	mux.Handle("GET /api/coach/latest", requireAuth(http.HandlerFunc(GetCoachAnalysis(b))))
 	mux.Handle("POST /api/coach/analyze", requireAuth(http.HandlerFunc(RequestCoachAnalysis(b))))
-
-	// Questions
-	mux.Handle("GET /api/questions", requireAuth(http.HandlerFunc(ListQuestions(b))))
 
 	// Billing
 	mux.Handle("POST /api/billing/checkout", requireAuth(http.HandlerFunc(PostCheckout(b))))
