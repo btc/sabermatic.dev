@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/markbates/goth"
@@ -195,7 +196,8 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	}
 	require.NotNil(t, sessionCookie)
 
-	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq := httptest.NewRequest(http.MethodPost, "/drill.v1.UserService/GetMe", strings.NewReader("{}"))
+	meReq.Header.Set("Content-Type", "application/json")
 	meReq.AddCookie(sessionCookie)
 	meW := httptest.NewRecorder()
 	mux.ServeHTTP(meW, meReq)
@@ -203,7 +205,8 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	assert.Equal(t, http.StatusOK, meW.Code)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(meW.Body.Bytes(), &body))
-	assert.Equal(t, "octocat", body["display_name"])
+	user := body["user"].(map[string]any)
+	assert.Equal(t, "octocat", user["displayName"])
 }
 
 func TestOAuthCallback_UnknownProvider(t *testing.T) {

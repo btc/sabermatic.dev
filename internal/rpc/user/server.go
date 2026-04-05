@@ -86,6 +86,9 @@ func (s *Server) UpdateProfile(
 	ctx context.Context,
 	req *connect.Request[drillv1.UpdateProfileRequest],
 ) (*connect.Response[drillv1.UpdateProfileResponse], error) {
+	if auth.UserFromContext(ctx) == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("UpdateProfile not yet implemented"))
 }
 
@@ -95,6 +98,9 @@ func (s *Server) ExportData(
 	ctx context.Context,
 	req *connect.Request[drillv1.ExportDataRequest],
 ) (*connect.Response[drillv1.ExportDataResponse], error) {
+	if auth.UserFromContext(ctx) == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ExportData not yet implemented"))
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/require"
@@ -80,6 +81,8 @@ func TestGetMe_Authenticated(t *testing.T) {
 	require.Equal(t, drillv1.UserPlan_USER_PLAN_FREE, resp.Msg.User.Plan)
 	require.NotEmpty(t, resp.Msg.User.Id)
 	require.NotNil(t, resp.Msg.User.CreateTime)
+	require.True(t, resp.Msg.User.CreateTime.AsTime().After(time.Now().Add(-15*time.Minute)),
+		"CreateTime should be recent, got %v", resp.Msg.User.CreateTime.AsTime())
 }
 
 func TestGetUsage_Unauthenticated(t *testing.T) {

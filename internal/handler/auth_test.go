@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -300,8 +301,9 @@ func TestLogout(t *testing.T) {
 	}
 	require.NotNil(t, sessionCookie)
 
-	// GET /api/me works with session cookie
-	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	// ConnectRPC GetMe works with session cookie
+	req = httptest.NewRequest(http.MethodPost, "/drill.v1.UserService/GetMe", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(sessionCookie)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -325,8 +327,9 @@ func TestLogout(t *testing.T) {
 	require.NotNil(t, clearCookie)
 	require.Equal(t, -1, clearCookie.MaxAge)
 
-	// GET /api/me now returns 401
-	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	// ConnectRPC GetMe returns 401 after logout
+	req = httptest.NewRequest(http.MethodPost, "/drill.v1.UserService/GetMe", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(sessionCookie)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)

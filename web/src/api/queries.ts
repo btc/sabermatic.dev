@@ -1,4 +1,6 @@
 import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
+import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
 import { apiClient } from "./client";
 import type {
   User, Question, Session, CreateSessionRequest,
@@ -52,8 +54,7 @@ export function useCreateSession() {
       apiClient.post<Session>("/api/sessions", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
-      // TODO(batch-3): "usage" key is now a no-op — getUsage uses ConnectRPC query key.
-      qc.invalidateQueries({ queryKey: ["usage"] });
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getUsage, input: {}, cardinality: undefined }) });
     },
   });
 }
@@ -141,8 +142,7 @@ export function useLogin() {
   return useMutation({
     mutationFn: (data: { email: string; password: string }) =>
       apiClient.post<User>("/api/auth/login", data),
-    // TODO(batch-8): "me" key is now a no-op — getMe uses ConnectRPC query key.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getMe, input: {}, cardinality: undefined }) }),
   });
 }
 
