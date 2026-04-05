@@ -17,6 +17,7 @@ const TranscriptPage = lazy(() => import("@/pages/session/transcript"));
 const DeepDive = lazy(() => import("@/pages/session/deep-dive"));
 const History = lazy(() => import("@/pages/history"));
 const Settings = lazy(() => import("@/pages/settings"));
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 function Loading() {
   return <div className="flex h-screen items-center justify-center text-muted-foreground">Loading...</div>;
@@ -52,6 +53,9 @@ export function App() {
         <Route element={<ImmersiveLayout />}>
           <Route path="/sessions/:id/interview" element={<Interview />} />
         </Route>
+
+        {/* Catch-all — 404 */}
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );
