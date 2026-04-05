@@ -1,6 +1,6 @@
-// Package ratelimit provides per-key token-bucket rate limiting for HTTP handlers.
+// Package ratelimit provides per-IP token-bucket rate limiting for HTTP handlers.
 //
-// It uses hashicorp/golang-lru for thread-safe LRU eviction of per-key rate
+// It uses hashicorp/golang-lru for thread-safe LRU eviction of per-IP rate
 // limiters, eliminating manual mutex management, eviction code, and background
 // cleanup goroutines.
 package ratelimit
@@ -14,18 +14,9 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/time/rate"
-)
 
-// Config controls the rate limiter behaviour.
-type Config struct {
-	// Rate is the number of requests per second allowed per key.
-	Rate float64
-	// Burst is the maximum burst size per key.
-	Burst int
-	// MaxEntries caps the number of tracked keys. When exceeded, the
-	// least-recently-used entry is evicted automatically by the LRU cache.
-	MaxEntries int
-}
+	"github.com/btc/drill/internal/config"
+)
 
 // entry holds a per-key rate limiter and the time it was last accessed.
 type entry struct {
@@ -33,29 +24,36 @@ type entry struct {
 	lastSeen time.Time
 }
 
-// Limiter is a per-key rate limiter backed by golang.org/x/time/rate token
+// Limiter is a per-IP rate limiter backed by golang.org/x/time/rate token
 // buckets and hashicorp/golang-lru for thread-safe LRU eviction.
 // It is safe for concurrent use.
 type Limiter struct {
-	cfg   Config
-	cache *lru.Cache[string, *entry]
+	rate       float64
+	burst      int
+	maxEntries int
+	cache      *lru.Cache[string, *entry]
 }
 
-// NewLimiter creates a Limiter with an LRU cache of size MaxEntries.
-func NewLimiter(cfg Config) *Limiter {
-	if cfg.Rate <= 0 {
-		cfg.Rate = 1
+// New creates a Limiter from the application rate limit config.
+func New(cfg config.RateLimit) *Limiter {
+	r := cfg.AuthRate
+	if r <= 0 {
+		r = 1
 	}
-	if cfg.Burst <= 0 {
-		cfg.Burst = 1
+	burst := cfg.AuthBurst
+	if burst <= 0 {
+		burst = 1
 	}
-	if cfg.MaxEntries <= 0 {
-		cfg.MaxEntries = 1000
+	maxEntries := cfg.MaxEntries
+	if maxEntries <= 0 {
+		maxEntries = 1000
 	}
-	cache, _ := lru.New[string, *entry](cfg.MaxEntries)
+	cache, _ := lru.New[string, *entry](maxEntries)
 	return &Limiter{
-		cfg:   cfg,
-		cache: cache,
+		rate:       r,
+		burst:      burst,
+		maxEntries: maxEntries,
+		cache:      cache,
 	}
 }
 
@@ -66,7 +64,7 @@ func (l *Limiter) Allow(key string) bool {
 	e, ok := l.cache.Get(key)
 	if !ok {
 		e = &entry{
-			limiter:  rate.NewLimiter(rate.Limit(l.cfg.Rate), l.cfg.Burst),
+			limiter:  rate.NewLimiter(rate.Limit(l.rate), l.burst),
 			lastSeen: time.Now(),
 		}
 		l.cache.Add(key, e)
@@ -82,36 +80,13 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := ClientIP(r)
 		if !l.Allow(key) {
-			retryAfter := fmt.Sprintf("%.0f", 1.0/l.cfg.Rate)
+			retryAfter := fmt.Sprintf("%.0f", 1.0/l.rate)
 			w.Header().Set("Retry-After", retryAfter)
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// MiddlewareByKey returns middleware that rate-limits requests using a
-// caller-supplied key function. This is useful for user-keyed limiting where
-// the user ID is extracted from the request context after authentication.
-func (l *Limiter) MiddlewareByKey(keyFunc func(*http.Request) string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := keyFunc(r)
-			if key == "" {
-				// No key available -- pass through without limiting.
-				next.ServeHTTP(w, r)
-				return
-			}
-			if !l.Allow(key) {
-				retryAfter := fmt.Sprintf("%.0f", 1.0/l.cfg.Rate)
-				w.Header().Set("Retry-After", retryAfter)
-				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }
 
 // Close is a no-op that satisfies io.Closer. The hashicorp LRU cache does

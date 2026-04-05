@@ -27,28 +27,21 @@ import (
 	migrations "github.com/btc/drill/sql/migrations"
 )
 
-// TestRateLimiters returns permissive rate limiters suitable for tests.
+// TestRateLimiter returns a permissive rate limiter suitable for tests.
 // High burst values prevent tests from hitting rate limits unintentionally.
-func TestRateLimiters() *handler.RateLimiters {
-	return &handler.RateLimiters{
-		Auth: ratelimit.NewLimiter(ratelimit.Config{
-			Rate:       1000,
-			Burst:      1000,
-			MaxEntries: 10000,
-		}),
-		User: ratelimit.NewLimiter(ratelimit.Config{
-			Rate:       1000,
-			Burst:      1000,
-			MaxEntries: 10000,
-		}),
-	}
+func TestRateLimiter() *ratelimit.Limiter {
+	return ratelimit.New(config.RateLimit{
+		AuthRate:   1000,
+		AuthBurst:  1000,
+		MaxEntries: 10000,
+	})
 }
 
-// MustRegisterRoutes calls handler.RegisterRoutes with permissive test rate
-// limiters and fails the test on error.
+// MustRegisterRoutes calls handler.RegisterRoutes with a permissive test rate
+// limiter and fails the test on error.
 func MustRegisterRoutes(t *testing.T, mux *http.ServeMux, b *backend.Backend) {
 	t.Helper()
-	require.NoError(t, handler.RegisterRoutes(mux, b, TestRateLimiters()))
+	require.NoError(t, handler.RegisterRoutes(mux, b, TestRateLimiter()))
 }
 
 // StartPostgres starts a Postgres 16 container, runs app migrations, and

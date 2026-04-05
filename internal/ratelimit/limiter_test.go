@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/btc/drill/internal/config"
 )
 
 func TestClientIP_XForwardedFor(t *testing.T) {
@@ -81,9 +83,9 @@ func TestClientIP_FallbackRemoteAddr(t *testing.T) {
 }
 
 func TestAllow_UnderLimit(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       10,
-		Burst:      5,
+	lim := New(config.RateLimit{
+		AuthRate:   10,
+		AuthBurst:  5,
 		MaxEntries: 100,
 	})
 
@@ -95,9 +97,9 @@ func TestAllow_UnderLimit(t *testing.T) {
 }
 
 func TestAllow_OverLimit(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       0.1, // very slow refill
-		Burst:      3,
+	lim := New(config.RateLimit{
+		AuthRate:   0.1, // very slow refill
+		AuthBurst:  3,
 		MaxEntries: 100,
 	})
 
@@ -115,9 +117,9 @@ func TestAllow_OverLimit(t *testing.T) {
 }
 
 func TestAllow_EvictsLRU(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       100,
-		Burst:      100,
+	lim := New(config.RateLimit{
+		AuthRate:   100,
+		AuthBurst:  100,
 		MaxEntries: 2,
 	})
 
@@ -143,9 +145,9 @@ func TestAllow_EvictsLRU(t *testing.T) {
 }
 
 func TestAllow_LRURespectsAccess(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       100,
-		Burst:      100,
+	lim := New(config.RateLimit{
+		AuthRate:   100,
+		AuthBurst:  100,
 		MaxEntries: 2,
 	})
 
@@ -171,9 +173,9 @@ func TestAllow_LRURespectsAccess(t *testing.T) {
 }
 
 func TestMiddleware_Returns429(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       0.001, // near-zero refill
-		Burst:      1,
+	lim := New(config.RateLimit{
+		AuthRate:   0.001, // near-zero refill
+		AuthBurst:  1,
 		MaxEntries: 100,
 	})
 
@@ -208,74 +210,10 @@ func TestMiddleware_Returns429(t *testing.T) {
 	}
 }
 
-func TestMiddlewareByKey(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       0.001,
-		Burst:      1,
-		MaxEntries: 100,
-	})
-
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	keyFunc := func(r *http.Request) string {
-		return r.Header.Get("X-User-ID")
-	}
-	mw := lim.MiddlewareByKey(keyFunc)
-	handler := mw(inner)
-
-	// First request for user-A: success
-	req1 := httptest.NewRequest("GET", "/", nil)
-	req1.Header.Set("X-User-ID", "user-A")
-	rec1 := httptest.NewRecorder()
-	handler.ServeHTTP(rec1, req1)
-	if rec1.Code != http.StatusOK {
-		t.Fatalf("user-A first request: got status %d, want %d", rec1.Code, http.StatusOK)
-	}
-
-	// Second request for user-A: rate-limited
-	req2 := httptest.NewRequest("GET", "/", nil)
-	req2.Header.Set("X-User-ID", "user-A")
-	rec2 := httptest.NewRecorder()
-	handler.ServeHTTP(rec2, req2)
-	if rec2.Code != http.StatusTooManyRequests {
-		t.Fatalf("user-A second request: got status %d, want %d", rec2.Code, http.StatusTooManyRequests)
-	}
-
-	// First request for user-B: should succeed (different key)
-	req3 := httptest.NewRequest("GET", "/", nil)
-	req3.Header.Set("X-User-ID", "user-B")
-	rec3 := httptest.NewRecorder()
-	handler.ServeHTTP(rec3, req3)
-	if rec3.Code != http.StatusOK {
-		t.Fatalf("user-B first request: got status %d, want %d", rec3.Code, http.StatusOK)
-	}
-}
-
-func TestMiddlewareByKey_EmptyKeyPassthrough(t *testing.T) {
-	l := NewLimiter(Config{Rate: 1, Burst: 1, MaxEntries: 100})
-
-	mw := l.MiddlewareByKey(func(r *http.Request) string { return "" })
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	// Multiple requests should all pass since key is empty
-	for i := 0; i < 5; i++ {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/", nil)
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Errorf("request %d: got %d, want 200", i, rec.Code)
-		}
-	}
-}
-
 func TestClose_IsNoop(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       10,
-		Burst:      10,
+	lim := New(config.RateLimit{
+		AuthRate:   10,
+		AuthBurst:  10,
 		MaxEntries: 100,
 	})
 
@@ -285,10 +223,10 @@ func TestClose_IsNoop(t *testing.T) {
 	}
 }
 
-func TestNewLimiter_DefaultsForInvalidConfig(t *testing.T) {
-	lim := NewLimiter(Config{
-		Rate:       -1,
-		Burst:      0,
+func TestNew_DefaultsForInvalidConfig(t *testing.T) {
+	lim := New(config.RateLimit{
+		AuthRate:   -1,
+		AuthBurst:  0,
 		MaxEntries: 0,
 	})
 

@@ -84,19 +84,7 @@ func runWithContext(ctx context.Context) error {
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
-	rlCfg := cfg.RateLimit
-	rl := &handler.RateLimiters{
-		Auth: ratelimit.NewLimiter(ratelimit.Config{
-			Rate:       rlCfg.AuthRate,
-			Burst:      rlCfg.AuthBurst,
-			MaxEntries: rlCfg.MaxEntries,
-		}),
-		User: ratelimit.NewLimiter(ratelimit.Config{
-			Rate:       rlCfg.UserRate,
-			Burst:      rlCfg.UserBurst,
-			MaxEntries: rlCfg.MaxEntries,
-		}),
-	}
+	rl := ratelimit.New(cfg.RateLimit)
 
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	h, err := handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies(), rl)
