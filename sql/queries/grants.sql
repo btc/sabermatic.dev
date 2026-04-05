@@ -100,18 +100,19 @@ FROM apply_debits ad
 RETURNING grant_id, amount;
 
 -- name: EnsureFreeGrant :exec
--- Creates the monthly free grant + ledger entry atomically. If the grant
--- already exists (ON CONFLICT), both the INSERT and the ledger SELECT
--- produce zero rows — a no-op.
+-- Creates the one-time free trial grant + ledger entry atomically. Called
+-- only at account creation (Signup, OAuthLogin). If the grant already exists
+-- (ON CONFLICT), both the INSERT and the ledger SELECT produce zero rows — a
+-- no-op.
 WITH new_grant AS (
   INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
   VALUES ($1, 'free_grant', $2, $2, $3)
-  ON CONFLICT (user_id, date_trunc('month', timezone('UTC', created_at))) WHERE source = 'free_grant'
+  ON CONFLICT (user_id) WHERE source = 'free_grant'
   DO NOTHING
   RETURNING id, user_id, initial_minutes
 )
 INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
-SELECT user_id, id, initial_minutes, 'free_monthly'
+SELECT user_id, id, initial_minutes, 'free_trial'
 FROM new_grant;
 
 -- name: ListActiveGrants :many

@@ -61,15 +61,26 @@ func TestEntitlements_ConcurrentSessionsAllowed(t *testing.T) {
 func TestPlanByName(t *testing.T) {
 	plan, ok := billing.PlanByName("free")
 	require.True(t, ok)
-	assert.Equal(t, 60, plan.MinutesPerMonth)
+	assert.Equal(t, 60, plan.GrantMinutes)
 	assert.Equal(t, 30, plan.MaxDurationMinutes)
 
 	plan, ok = billing.PlanByName("pro")
 	require.True(t, ok)
-	assert.Equal(t, 600, plan.MinutesPerMonth)
+	assert.Equal(t, 600, plan.GrantMinutes)
 
 	_, ok = billing.PlanByName("nonexistent")
 	assert.False(t, ok)
+}
+
+func TestFreeTrialMinutes(t *testing.T) {
+	assert.Equal(t, 60, billing.FreeTrialMinutes())
+}
+
+func TestFreeGrantExpiry(t *testing.T) {
+	expiry := billing.FreeGrantExpiry()
+	// Free trial grants expire ~10 years in the future, not at end of month.
+	assert.True(t, expiry.After(time.Now().AddDate(9, 0, 0)),
+		"free grant expiry should be far in the future (10 years)")
 }
 
 func TestValidPackSize(t *testing.T) {
@@ -77,14 +88,4 @@ func TestValidPackSize(t *testing.T) {
 	assert.True(t, billing.ValidPackSize(300))
 	assert.True(t, billing.ValidPackSize(600))
 	assert.False(t, billing.ValidPackSize(999))
-}
-
-func TestEndOfMonth(t *testing.T) {
-	d := time.Date(2026, 4, 15, 10, 30, 0, 0, time.UTC)
-	eom := billing.EndOfMonth(d)
-	assert.Equal(t, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), eom)
-
-	d = time.Date(2026, 12, 25, 0, 0, 0, 0, time.UTC)
-	eom = billing.EndOfMonth(d)
-	assert.Equal(t, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), eom)
 }

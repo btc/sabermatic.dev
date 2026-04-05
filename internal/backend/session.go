@@ -39,10 +39,10 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (_ d
 		return db.InterviewSession{}, ErrInvalidDuration
 	}
 
-	// Ensure the current-month free grant exists (idempotent, outside tx).
-	if err := b.EnsureFreeGrant(ctx, p.UserID); err != nil {
-		return db.InterviewSession{}, fmt.Errorf("ensure free grant: %w", err)
-	}
+	// NOTE: Free trial grants are provisioned once at account creation
+	// (Signup in auth.go, OAuthLogin in oauth.go). Do NOT call
+	// EnsureFreeGrant here — CreateSession must reflect the user's actual
+	// balance, not silently top it up.
 
 	// Begin transaction for all checks and mutations.
 	tx, err := b.pool.Begin(ctx)

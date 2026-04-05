@@ -14,7 +14,7 @@ const (
 // Plan defines the limits and features for a billing tier.
 type Plan struct {
 	Name               string
-	MinutesPerMonth    int
+	GrantMinutes       int // Minutes granted per billing event (one-time for free, per-cycle for subscriptions)
 	MaxDurationMinutes int
 	ConcurrentSessions int
 	CoachAccess        bool
@@ -25,7 +25,7 @@ type Plan struct {
 var plans = map[string]Plan{
 	"free": {
 		Name:               "Free",
-		MinutesPerMonth:    60,
+		GrantMinutes:       60,
 		MaxDurationMinutes: 30,
 		ConcurrentSessions: 1,
 		CoachAccess:        false,
@@ -34,7 +34,7 @@ var plans = map[string]Plan{
 	},
 	"pro": {
 		Name:               "Pro",
-		MinutesPerMonth:    600,
+		GrantMinutes:       600,
 		MaxDurationMinutes: 180,
 		ConcurrentSessions: 3,
 		CoachAccess:        true,
@@ -43,9 +43,9 @@ var plans = map[string]Plan{
 	},
 }
 
-// FreePlanMinutesPerMonth returns the free tier's monthly minute allocation.
-func FreePlanMinutesPerMonth() int {
-	return plans["free"].MinutesPerMonth
+// FreeTrialMinutes returns the one-time free trial minute allocation for new accounts.
+func FreeTrialMinutes() int {
+	return plans["free"].GrantMinutes
 }
 
 func PlanByName(name string) (Plan, bool) {
@@ -73,12 +73,8 @@ func AllPackSizes() []int {
 	return []int{120, 300, 600}
 }
 
-// FreeGrantExpiry returns the expiry timestamp for a free grant created now.
+// FreeGrantExpiry returns the expiry timestamp for a one-time free trial grant.
+// Set far in the future since free trial grants do not expire monthly.
 func FreeGrantExpiry() time.Time {
-	return EndOfMonth(time.Now().UTC())
-}
-
-func EndOfMonth(t time.Time) time.Time {
-	y, m, _ := t.Date()
-	return time.Date(y, m+1, 1, 0, 0, 0, 0, time.UTC)
+	return time.Now().UTC().AddDate(10, 0, 0)
 }

@@ -35,9 +35,10 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
-	// Creates the monthly free grant + ledger entry atomically. If the grant
-	// already exists (ON CONFLICT), both the INSERT and the ledger SELECT
-	// produce zero rows — a no-op.
+	// Creates the one-time free trial grant + ledger entry atomically. Called
+	// only at account creation (Signup, OAuthLogin). If the grant already exists
+	// (ON CONFLICT), both the INSERT and the ledger SELECT produce zero rows — a
+	// no-op.
 	EnsureFreeGrant(ctx context.Context, arg EnsureFreeGrantParams) error
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
 	// Refunds all reserved minutes for a session. Used by FailSession (platform error).

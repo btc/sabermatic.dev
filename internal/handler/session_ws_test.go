@@ -14,7 +14,6 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,17 +85,17 @@ func newFakeAnthropicServer(t *testing.T, tokens []string) *httptest.Server {
 // DB helpers — direct SQL, bypass backend business logic
 // ---------------------------------------------------------------------------
 
-// createTestUser inserts a user directly and returns their ID.
-func createTestUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+// createTestUser creates a user via the real production Signup path.
+// Returns the new user's ID.
+func createTestUser(t *testing.T, b *backend.Backend) uuid.UUID {
 	t.Helper()
-	ctx := context.Background()
-	user, err := db.New(pool).CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$dummy", Valid: true},
-		DisplayName:  "Test User",
+	result, err := b.Signup(context.Background(), backend.SignupParams{
+		Email:       fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
+		Password:    "testpassword123",
+		DisplayName: "Test User",
 	})
 	require.NoError(t, err)
-	return user.ID
+	return result.UserID
 }
 
 // createTestQuestion inserts a question directly using raw SQL (no sqlc InsertQuestion).
@@ -299,7 +298,7 @@ func TestWS_HappyPath_Text(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -409,7 +408,7 @@ func TestWS_VoiceInput(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -490,7 +489,7 @@ func TestWS_CancelTTS(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -541,7 +540,7 @@ func TestWS_Reconnection(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -591,7 +590,7 @@ func TestWS_InvalidTransition(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -656,7 +655,7 @@ func TestWS_MalformedMessages(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -711,8 +710,8 @@ func TestWS_SessionOwnership(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userA := createTestUser(t, pool)
-	userB := createTestUser(t, pool)
+	userA := createTestUser(t, b)
+	userB := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userA, question.ID)
 	cookieB := createAuthCookie(t, pool, userB)
@@ -756,7 +755,7 @@ func TestWS_InactiveSession(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -831,7 +830,7 @@ func TestWS_GracefulShutdown(t *testing.T) {
 	t.Cleanup(httpSrv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -879,7 +878,7 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -921,9 +920,10 @@ func TestWS_AbandonedCleanup(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := testutil.NewTestBackend(t).Pool()
+	b := newTestBackend(t)
+	pool := b.Pool()
 
-	userID := createTestUser(t, pool)
+	userID := backendtest.SeedUser(t, b)
 	question := createTestQuestion(t, pool)
 
 	// Create session with a very short duration and backdate started_at.
@@ -978,7 +978,7 @@ func TestWS_UnknownMessageType(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1022,7 +1022,7 @@ func TestWS_Unauthenticated(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 
@@ -1059,7 +1059,7 @@ func TestWS_NonexistentSession(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	cookie := createAuthCookie(t, pool, userID)
 
 	// Try to connect to a nonexistent session.
@@ -1100,7 +1100,7 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1174,7 +1174,7 @@ func TestWS_MultiTurn(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1265,7 +1265,7 @@ func TestWS_EmptyTextInput(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1321,7 +1321,7 @@ func TestWS_EmptyVoiceInput(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1421,7 +1421,7 @@ func TestWS_LLMStreamError(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1481,7 +1481,7 @@ func TestWS_TTSEnabled(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 
 	// Create TTS-enabled session.
@@ -1563,7 +1563,7 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 	t.Cleanup(httpSrv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 
 	// Create a 1-minute session.
@@ -1657,7 +1657,7 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1730,7 +1730,7 @@ func TestWS_PingPong(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
@@ -1768,7 +1768,7 @@ func TestWS_CancelSession(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pool := b.Pool()
-	userID := createTestUser(t, pool)
+	userID := createTestUser(t, b)
 	question := createTestQuestion(t, pool)
 	session := createTestSession(t, pool, userID, question.ID)
 	cookie := createAuthCookie(t, pool, userID)
