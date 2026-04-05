@@ -69,7 +69,8 @@ func (q *Queries) DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) 
 }
 
 const getAuthSessionByToken = `-- name: GetAuthSessionByToken :one
-SELECT s.id, s.user_id, s.token_hash, s.expires_at, s.last_active, s.ip_address, s.user_agent, s.created_at, u.email, u.display_name, u.role, u.plan, u.email_verified
+SELECT s.id, s.user_id, s.token_hash, s.expires_at, s.last_active, s.ip_address, s.user_agent, s.created_at, u.email, u.display_name, u.role, u.plan, u.email_verified,
+       u.created_at AS user_created_at
 FROM auth_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -91,6 +92,7 @@ type GetAuthSessionByTokenRow struct {
 	Role          string      `json:"role"`
 	Plan          string      `json:"plan"`
 	EmailVerified bool        `json:"email_verified"`
+	UserCreatedAt time.Time   `json:"user_created_at"`
 }
 
 func (q *Queries) GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error) {
@@ -110,6 +112,7 @@ func (q *Queries) GetAuthSessionByToken(ctx context.Context, tokenHash string) (
 		&i.Role,
 		&i.Plan,
 		&i.EmailVerified,
+		&i.UserCreatedAt,
 	)
 	return i, err
 }

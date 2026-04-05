@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -18,6 +19,7 @@ type AuthUser struct {
 	Role          string
 	Plan          string
 	EmailVerified bool
+	CreatedAt     time.Time
 }
 
 type contextKey string
