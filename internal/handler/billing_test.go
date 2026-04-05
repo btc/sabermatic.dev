@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -23,7 +22,7 @@ func TestGetUsage_EmptyBalance(t *testing.T) {
 	}
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
 	cookie := createAuthCookie(t, pool, userID)
@@ -46,7 +45,7 @@ func TestGetUsage_WithFreeGrant(t *testing.T) {
 	}
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
 	cookie := createAuthCookie(t, pool, userID)

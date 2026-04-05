@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -46,7 +45,7 @@ func TestCreateSession_Success(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -78,7 +77,7 @@ func TestCreateSession_InvalidDuration(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -114,7 +113,7 @@ func TestCreateSession_QuestionNotFound(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -137,7 +136,7 @@ func TestCreateSession_InvalidJSON(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -159,7 +158,7 @@ func TestCreateSession_Unauthenticated(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions", bytes.NewBufferString("{}"))
 	req.Header.Set("Content-Type", "application/json")
@@ -180,7 +179,7 @@ func TestListSessions_Success(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -208,7 +207,7 @@ func TestListSessions_EmptyForOtherUser(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userA := createTestUser(t, pool)
@@ -241,7 +240,7 @@ func TestGetSession_Success(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -266,7 +265,7 @@ func TestGetSession_NotFound(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -286,7 +285,7 @@ func TestGetSession_WrongUser(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userA := createTestUser(t, pool)
@@ -309,7 +308,7 @@ func TestGetSession_InvalidUUID(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)
@@ -333,7 +332,7 @@ func TestCreateSession_BoundaryDurations(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	pool := b.Pool()
 	userID := createTestUser(t, pool)

@@ -24,7 +24,8 @@ type Config struct {
 	OAuth    OAuth
 	Otel     Otel
 	Storage  Storage
-	Stripe   Stripe
+	Stripe    Stripe
+	RateLimit RateLimit
 }
 
 type Log struct {
@@ -132,6 +133,15 @@ type Storage struct {
 	Backend  string `env:"STORAGE_BACKEND,default=local"`
 	Bucket   string `env:"STORAGE_BUCKET"`
 	LocalDir string `env:"STORAGE_LOCAL_DIR,default=data/audio"`
+}
+
+type RateLimit struct {
+	AuthRate      float64 `env:"RATE_LIMIT_AUTH_RATE,default=5"`
+	AuthBurst     int     `env:"RATE_LIMIT_AUTH_BURST,default=10"`
+	UserRate      float64 `env:"RATE_LIMIT_USER_RATE,default=2"`
+	UserBurst     int     `env:"RATE_LIMIT_USER_BURST,default=5"`
+	MaxEntries    int     `env:"RATE_LIMIT_MAX_ENTRIES,default=100000"`
+	CleanupAgeSec int     `env:"RATE_LIMIT_CLEANUP_AGE_SEC,default=600"`
 }
 
 type Stripe struct {

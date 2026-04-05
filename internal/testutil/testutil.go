@@ -26,6 +26,19 @@ import (
 	migrations "github.com/btc/drill/sql/migrations"
 )
 
+// MustRegisterRoutes calls handler.RegisterRoutes and fails the test on error.
+// It defers closing of the returned closers (rate limiters) on test cleanup.
+func MustRegisterRoutes(t *testing.T, mux *http.ServeMux, b *backend.Backend) {
+	t.Helper()
+	closers, err := handler.RegisterRoutes(mux, b)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		for _, c := range closers {
+			c.Close()
+		}
+	})
+}
+
 // StartPostgres starts a Postgres 16 container, runs app migrations, and
 // returns the connection string. The container is terminated on test cleanup.
 func StartPostgres(t *testing.T) string {
@@ -112,7 +125,7 @@ func NewTestBackend(t *testing.T) *backend.Backend {
 func SignupAndLogin(t *testing.T, b *backend.Backend) string {
 	t.Helper()
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	MustRegisterRoutes(t, mux, b)
 
 	body := `{"email":"testuser@example.com","password":"securepass123","display_name":"Test User"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/signup", bytes.NewBufferString(body))

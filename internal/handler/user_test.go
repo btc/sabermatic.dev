@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -20,7 +19,7 @@ func TestGetMe_Authenticated(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// Sign up
 	signupBody, _ := json.Marshal(map[string]string{
@@ -78,7 +77,7 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	w := httptest.NewRecorder()

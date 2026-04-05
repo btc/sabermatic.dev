@@ -84,10 +84,15 @@ func runWithContext(ctx context.Context) error {
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
-	h, err := handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies())
+	h, closers, err := handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies())
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
 	}
+	defer func() {
+		for _, c := range closers {
+			c.Close()
+		}
+	}()
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: h,

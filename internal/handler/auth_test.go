@@ -17,7 +17,6 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -29,7 +28,7 @@ func TestSignup_Success(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	body := `{"email":"alice@example.com","password":"securepass","display_name":"Alice"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/signup", bytes.NewBufferString(body))
@@ -54,7 +53,7 @@ func TestSignup_DuplicateEmail(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	body := `{"email":"dup@example.com","password":"securepass","display_name":"First"}`
 
@@ -86,7 +85,7 @@ func TestLogin_Success(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// Signup first.
 	signupBody := `{"email":"bob@example.com","password":"securepass","display_name":"Bob"}`
@@ -133,7 +132,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// Signup first.
 	signupBody := `{"email":"carol@example.com","password":"securepass","display_name":"Carol"}`
@@ -165,7 +164,7 @@ func TestVerifyEmail(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 	cfg := b.Config()
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// Sign up
 	signupBody, _ := json.Marshal(map[string]string{
@@ -206,7 +205,7 @@ func TestForgotAndResetPassword(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 	cfg := b.Config()
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// Sign up
 	signupBody, _ := json.Marshal(map[string]string{
@@ -267,7 +266,7 @@ func TestLogout(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// Sign up and login to get a session cookie
 	signupBody, _ := json.Marshal(map[string]string{

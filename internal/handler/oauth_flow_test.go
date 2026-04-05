@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/auth"
-	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -56,7 +55,7 @@ func TestOAuthStart_UnknownProvider(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// No providers registered → any provider returns 404.
 	goth.ClearProviders()
@@ -82,7 +81,7 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	setupGothForTest(t, goth.User{
 		Provider: "faux",
@@ -122,7 +121,7 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	oauthUser := goth.User{
 		Provider: "faux",
@@ -167,7 +166,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	b := testutil.NewTestBackend(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	// GitHub sometimes has empty Name but non-empty NickName.
 	setupGothForTest(t, goth.User{
@@ -213,7 +212,7 @@ func TestOAuthCallback_UnknownProvider(t *testing.T) {
 
 	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	testutil.MustRegisterRoutes(t, mux, b)
 
 	goth.ClearProviders()
 	t.Cleanup(goth.ClearProviders)
