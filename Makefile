@@ -76,3 +76,12 @@ clean-cover:
 
 $(COVER_OUT):
 	@$(MAKE) cover
+
+# Install project-level dev tools (CLIs, linters, codegen).
+# Run once after clone, or when tool versions change.
+deps:
+	brew install bufbuild/buf/buf
+
+# Regenerate protobuf code from .proto sources.
+generate:
+	buf generate
