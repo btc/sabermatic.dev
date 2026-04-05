@@ -30,19 +30,16 @@ type Config struct {
 type entry struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
-	// insertOrder tracks the insertion order so we can evict the oldest entry
-	// when MaxEntries is exceeded.
-	insertOrder int64
 }
 
 // Limiter is a per-key rate limiter backed by golang.org/x/time/rate token
 // buckets. It is safe for concurrent use.
 type Limiter struct {
-	cfg     Config
-	mu      sync.Mutex
-	entries map[string]*entry
-	counter int64 // monotonic counter for insertion order
-	done    chan struct{}
+	cfg       Config
+	mu        sync.Mutex
+	entries   map[string]*entry
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // NewLimiter creates a Limiter and starts a background goroutine that evicts
@@ -66,15 +63,13 @@ func (l *Limiter) Allow(key string) bool {
 
 	e, ok := l.entries[key]
 	if !ok {
-		// Evict oldest if at capacity.
+		// Evict least-recently-seen entry if at capacity.
 		if l.cfg.MaxEntries > 0 && len(l.entries) >= l.cfg.MaxEntries {
 			l.evictOldestLocked()
 		}
-		l.counter++
 		e = &entry{
-			limiter:     rate.NewLimiter(rate.Limit(l.cfg.Rate), l.cfg.Burst),
-			lastSeen:    time.Now(),
-			insertOrder: l.counter,
+			limiter:  rate.NewLimiter(rate.Limit(l.cfg.Rate), l.cfg.Burst),
+			lastSeen: time.Now(),
 		}
 		l.entries[key] = e
 	}
@@ -83,15 +78,17 @@ func (l *Limiter) Allow(key string) bool {
 	return e.limiter.Allow()
 }
 
-// evictOldestLocked removes the entry with the smallest insertOrder.
+// evictOldestLocked removes the entry with the earliest lastSeen timestamp (LRU).
 // Caller must hold l.mu.
 func (l *Limiter) evictOldestLocked() {
 	var oldestKey string
-	var oldestOrder int64 = -1
+	var oldestSeen time.Time
+	first := true
 	for k, e := range l.entries {
-		if oldestOrder == -1 || e.insertOrder < oldestOrder {
+		if first || e.lastSeen.Before(oldestSeen) {
 			oldestKey = k
-			oldestOrder = e.insertOrder
+			oldestSeen = e.lastSeen
+			first = false
 		}
 	}
 	if oldestKey != "" {
@@ -139,8 +136,9 @@ func (l *Limiter) MiddlewareByKey(keyFunc func(*http.Request) string) func(http.
 }
 
 // Close stops the background cleanup goroutine. It implements io.Closer.
+// Safe to call multiple times.
 func (l *Limiter) Close() error {
-	close(l.done)
+	l.closeOnce.Do(func() { close(l.done) })
 	return nil
 }
 

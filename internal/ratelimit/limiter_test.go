@@ -248,6 +248,26 @@ func TestMiddlewareByKey(t *testing.T) {
 	}
 }
 
+func TestMiddlewareByKey_EmptyKeyPassthrough(t *testing.T) {
+	l := NewLimiter(Config{Rate: 1, Burst: 1, MaxEntries: 100, CleanupAge: time.Minute})
+	defer l.Close()
+
+	mw := l.MiddlewareByKey(func(r *http.Request) string { return "" })
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Multiple requests should all pass since key is empty
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: got %d, want 200", i, rec.Code)
+		}
+	}
+}
+
 func TestClose_StopsCleanup(t *testing.T) {
 	cfg := Config{
 		Rate:       10,
