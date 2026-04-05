@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   LineChart,
   Line,
@@ -331,9 +332,17 @@ function ActionBar({ selectedIds, sessions, onClear }: ActionBarProps) {
   const shouldArchive = !allArchived;
 
   function handleAction() {
+    const count = selectedIds.size;
     archive.mutate(
       { session_ids: Array.from(selectedIds), archive: shouldArchive },
-      { onSuccess: onClear },
+      {
+        onSuccess: () => {
+          if (shouldArchive) {
+            toast.success(`${count} session${count === 1 ? "" : "s"} archived`);
+          }
+          onClear();
+        },
+      },
     );
   }
 

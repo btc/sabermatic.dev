@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useQuery } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import {
@@ -131,6 +132,9 @@ export default function SessionConfig() {
       {
         onSuccess: (session) => {
           navigate(`/sessions/${session.id}/interview`);
+        },
+        onError: () => {
+          toast.error("Failed to start session");
         },
       }
     );
