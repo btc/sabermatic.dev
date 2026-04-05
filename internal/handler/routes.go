@@ -42,7 +42,7 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	// Exempt the Stripe webhook from CSRF — it uses Stripe signature verification.
 	// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
 	// HTTPS-only referer/origin checks.
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
 			otelHandler.ServeHTTP(w, r)
 			return
@@ -51,7 +51,7 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 			r = csrf.PlaintextHTTPRequest(r)
 		}
 		csrfProtected.ServeHTTP(w, r)
-	})
+	}))
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
