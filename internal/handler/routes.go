@@ -62,10 +62,6 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	// (Educator routes migrated to ConnectRPC EducatorService)
 	// (Evaluation routes migrated to ConnectRPC EvaluationService)
 
-	// Coach
-	mux.Handle("GET /api/coach/latest", requireAuth(http.HandlerFunc(GetCoachAnalysis(b))))
-	mux.Handle("POST /api/coach/analyze", requireAuth(http.HandlerFunc(RequestCoachAnalysis(b))))
-
 	// Billing
 	mux.Handle("POST /api/billing/checkout", requireAuth(http.HandlerFunc(PostCheckout(b))))
 	mux.Handle("POST /api/billing/portal", requireAuth(http.HandlerFunc(PostPortal(b))))
