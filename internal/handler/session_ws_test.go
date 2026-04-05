@@ -22,6 +22,7 @@ import (
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/testutil"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 )
@@ -270,7 +271,7 @@ func drainUntilDone(t *testing.T, ws *websocket.Conn) (string, []wsMsg) {
 // newWSTestBackend creates a Backend with real Postgres + River but fake AI deps.
 func newWSTestBackend(t *testing.T, anthropicURL string) *backend.Backend {
 	t.Helper()
-	b := newTestBackend(t) // from testutil_test.go -- starts Postgres, runs migrations
+	b := testutil.NewTestBackend(t) // from testutil_test.go -- starts Postgres, runs migrations
 	b.ApplyTestOverrides(backend.TestOverrides{
 		LLM: ai.NewTestClient(anthropicURL, b.Pool()),
 		STT: &fakeTranscriber{text: "I would use a hash-based approach."},
@@ -920,7 +921,7 @@ func TestWS_AbandonedCleanup(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	pool := newTestBackend(t).Pool()
+	pool := testutil.NewTestBackend(t).Pool()
 
 	userID := createTestUser(t, pool)
 	question := createTestQuestion(t, pool)

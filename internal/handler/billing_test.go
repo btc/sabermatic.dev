@@ -14,13 +14,14 @@ import (
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestGetUsage_EmptyBalance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
@@ -43,7 +44,7 @@ func TestGetUsage_WithFreeGrant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()

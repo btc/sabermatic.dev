@@ -15,6 +15,7 @@ import (
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 )
 
 // authedRequest creates an HTTP request with the given session cookie.
@@ -43,7 +44,7 @@ func TestCreateSession_Success(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -75,7 +76,7 @@ func TestCreateSession_InvalidDuration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -111,7 +112,7 @@ func TestCreateSession_QuestionNotFound(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -134,7 +135,7 @@ func TestCreateSession_InvalidJSON(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -156,7 +157,7 @@ func TestCreateSession_Unauthenticated(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -177,7 +178,7 @@ func TestListSessions_Success(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -205,7 +206,7 @@ func TestListSessions_EmptyForOtherUser(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -238,7 +239,7 @@ func TestGetSession_Success(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -263,7 +264,7 @@ func TestGetSession_NotFound(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -283,7 +284,7 @@ func TestGetSession_WrongUser(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -306,7 +307,7 @@ func TestGetSession_InvalidUUID(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -330,7 +331,7 @@ func TestCreateSession_BoundaryDurations(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 

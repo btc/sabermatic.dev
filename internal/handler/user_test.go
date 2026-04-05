@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/handler"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestGetMe_Authenticated(t *testing.T) {
@@ -17,7 +18,7 @@ func TestGetMe_Authenticated(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -75,7 +76,7 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	b := newTestBackend(t)
+	b := testutil.NewTestBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 

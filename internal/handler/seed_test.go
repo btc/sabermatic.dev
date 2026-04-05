@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/testutil"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +16,7 @@ func TestSeedQuestions(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	connStr := startPostgres(t)
+	connStr := testutil.StartPostgres(t)
 	ctx := context.Background()
 
 	pool, err := pgxpool.New(ctx, connStr)
