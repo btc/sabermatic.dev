@@ -1,0 +1,13 @@
+# buf.yaml
+version: v2
+modules:
+  - path: pb
+    name: buf.build/btc/drill
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
