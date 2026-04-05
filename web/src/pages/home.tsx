@@ -270,7 +270,7 @@ function QuestionCard({
       }
     >
       {startDisabled && (
-        <div className="absolute inset-0 rounded-lg flex items-center justify-center z-10">
+        <div className="absolute inset-0 rounded-lg flex items-center justify-center z-10 bg-card/70 backdrop-blur-sm cursor-pointer">
           <p className="text-xs text-muted-foreground text-center px-4">
             Resume or end your active session to start a new one
           </p>
