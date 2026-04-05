@@ -160,7 +160,7 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 
 // ArchiveSessions sets or clears archived_at for sessions owned by userID.
 // Returns the number of sessions updated.
-func (b *Backend) ArchiveSessions(ctx context.Context, userID uuid.UUID, sessionIDs []uuid.UUID, archive bool) (_ int, err error) {
+func (b *Backend) ArchiveSessions(ctx context.Context, userID uuid.UUID, sessionIDs []uuid.UUID, archive bool) (_ int64, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.ArchiveSessions")
 	defer func() { drilotel.End(span, err) }()
 
@@ -168,34 +168,12 @@ func (b *Backend) ArchiveSessions(ctx context.Context, userID uuid.UUID, session
 		return 0, nil
 	}
 
-	tx, err := b.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin archive tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	var updated int
-	for _, sid := range sessionIDs {
-		// Use raw SQL since sqlc doesn't have a bulk archive query.
-		var sqlStr string
-		if archive {
-			sqlStr = `UPDATE interview_sessions SET archived_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2 AND archived_at IS NULL`
-		} else {
-			sqlStr = `UPDATE interview_sessions SET archived_at = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2 AND archived_at IS NOT NULL`
-		}
-
-		ct, err := tx.Exec(ctx, sqlStr, sid, userID)
-		if err != nil {
-			return 0, fmt.Errorf("archive session %s: %w", sid, err)
-		}
-		updated += int(ct.RowsAffected())
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit archive tx: %w", err)
-	}
-
-	return updated, nil
+	q := db.New(b.pool)
+	return q.ArchiveSessionsByIDs(ctx, db.ArchiveSessionsByIDsParams{
+		Archive: archive,
+		Ids:     sessionIDs,
+		UserID:  userID,
+	})
 }
 
 // GetTranscript returns the messages for a session owned by the given user.
@@ -273,7 +251,7 @@ type PersistMessageParams struct {
 }
 
 // persistMessage is the internal helper that inserts a message using any DBTX (pool or tx).
-func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMessageParams) (_ db.Message, err error) {
+func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p *PersistMessageParams) (_ db.Message, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.persistMessage")
 	defer func() { drilotel.End(span, err) }()
 
@@ -297,14 +275,14 @@ func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMes
 }
 
 // PersistMessage inserts a message using the pool.
-func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (db.Message, error) {
+func (b *Backend) PersistMessage(ctx context.Context, p *PersistMessageParams) (db.Message, error) {
 	return b.persistMessage(ctx, b.pool, p)
 }
 
 // PersistInterviewerTurn atomically persists the interviewer message AND the
 // LLM call record. The TokenStream's CloseWithTx is called within the
 // transaction.
-func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p PersistMessageParams) (_ db.Message, err error) {
+func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p *PersistMessageParams) (_ db.Message, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.PersistInterviewerTurn")
 	defer func() { drilotel.End(span, err) }()
 
@@ -312,7 +290,7 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 	if err != nil {
 		return db.Message{}, fmt.Errorf("begin tx for interviewer msg: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	msg, err := b.persistMessage(ctx, tx, p)
 	if err != nil {
@@ -341,7 +319,7 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 	if err != nil {
 		return fmt.Errorf("begin end-session tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := db.New(tx)
 
@@ -463,7 +441,7 @@ func (b *Backend) Synthesize(ctx context.Context, text string) (_ io.ReadCloser,
 }
 
 // StreamLLM creates a streaming LLM call via the Anthropic SDK.
-func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (_ *ai.TokenStream, err error) {
+func (b *Backend) StreamLLM(ctx context.Context, p *ai.StreamParams) (_ *ai.TokenStream, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.StreamLLM")
 	defer func() { drilotel.End(span, err) }()
 	return b.llm.StreamAndLog(ctx, p)

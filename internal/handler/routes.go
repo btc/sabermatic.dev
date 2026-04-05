@@ -33,7 +33,6 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
-	// ConnectRPC services (migrated from REST)
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 )
 
 type Querier interface {
+	ArchiveSessionsByIDs(ctx context.Context, arg ArchiveSessionsByIDsParams) (int64, error)
 	// Batch-cancels abandoned sessions that have zero candidate messages.
 	// These are empty sessions where no interview happened.
 	CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error)

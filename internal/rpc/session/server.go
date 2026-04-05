@@ -183,7 +183,7 @@ func (s *Server) ArchiveSessions(
 	}
 
 	return connect.NewResponse(&drillv1.ArchiveSessionsResponse{
-		UpdatedCount: int32(updated),
+		UpdatedCount: int32(updated), //nolint:gosec // row count fits int32
 	}), nil
 }
 

@@ -92,5 +92,13 @@ SELECT COUNT(*)::int AS count
 FROM interview_sessions
 WHERE user_id = $1 AND status = 'active';
 
+-- name: ArchiveSessionsByIDs :execrows
+UPDATE interview_sessions
+SET archived_at = CASE WHEN @archive::bool THEN NOW() ELSE NULL END,
+    updated_at = NOW()
+WHERE id = ANY(@ids::uuid[])
+  AND user_id = @user_id
+  AND CASE WHEN @archive::bool THEN archived_at IS NULL ELSE archived_at IS NOT NULL END;
+
 -- name: GetSessionByID :one
 SELECT * FROM interview_sessions WHERE id = $1;
