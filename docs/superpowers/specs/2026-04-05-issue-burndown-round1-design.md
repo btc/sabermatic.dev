@@ -334,6 +334,7 @@ After review passes, the impl agent (or a follow-up step):
 
 ### Merge order
 
-No inter-track dependencies. PRs can be merged in any order. Two potential merge conflicts, both trivially resolvable:
+No inter-track dependencies. PRs can be merged in any order. Potential merge conflicts (all trivially resolvable):
 1. Track C and Track F both touch `.github/workflows/ci.yml` (C adds a version check step, F restructures the workflow to add Node/frontend steps)
-2. Track E modifies `web/src/main.tsx` (adds ErrorBoundary), which the connectRPC migration will later modify (adds TransportProvider) — but the connectRPC work hasn't started yet, so no conflict in this round
+2. Track D wraps `NewHandler()` outermost return with security headers; the connectRPC migration will later modify the same function body for CSRF exemption
+3. Track E modifies `web/src/main.tsx` (adds ErrorBoundary); the connectRPC migration will later add `TransportProvider` to the same file — no conflict in this round since connectRPC work hasn't started
