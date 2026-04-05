@@ -102,6 +102,13 @@ func (b *Backend) GetUsageSummary(ctx context.Context, userID uuid.UUID) (_ *Usa
 		return nil, fmt.Errorf("commit usage tx: %w", err)
 	}
 
+	if grants == nil {
+		grants = []db.ListActiveGrantsRow{}
+	}
+	if entries == nil {
+		entries = []db.GetRecentLedgerEntriesRow{}
+	}
+
 	return &UsageSummary{
 		TotalBalance:   summary.TotalBalance,
 		FreeBalance:    summary.FreeBalance,

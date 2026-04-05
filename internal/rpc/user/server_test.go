@@ -79,6 +79,7 @@ func TestGetMe_Authenticated(t *testing.T) {
 	require.Equal(t, drillv1.UserRole_USER_ROLE_CANDIDATE, resp.Msg.User.Role)
 	require.Equal(t, drillv1.UserPlan_USER_PLAN_FREE, resp.Msg.User.Plan)
 	require.NotEmpty(t, resp.Msg.User.Id)
+	require.NotNil(t, resp.Msg.User.CreateTime)
 }
 
 func TestGetUsage_Unauthenticated(t *testing.T) {
@@ -107,8 +108,8 @@ func TestGetUsage_Authenticated(t *testing.T) {
 
 	resp, err := client.GetUsage(context.Background(), connect.NewRequest(&drillv1.GetUsageRequest{}))
 	require.NoError(t, err)
-	// Fresh user should have a free grant after GetUsageSummary calls EnsureFreeGrantTx.
-	require.GreaterOrEqual(t, resp.Msg.TotalBalance, int32(0))
-	require.NotNil(t, resp.Msg.Grants)
+	// EnsureFreeGrantTx creates a free grant for new users, so balance > 0.
+	require.Greater(t, resp.Msg.TotalBalance, int32(0))
+	require.Len(t, resp.Msg.Grants, 1)
 	require.NotNil(t, resp.Msg.RecentActivity)
 }

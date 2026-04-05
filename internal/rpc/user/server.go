@@ -15,8 +15,8 @@ import (
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 )
 
-// NOTE: auth.UserFromContext returns *auth.AuthUser (not *db.User).
-// Task 2 adds CreatedAt to AuthUser so create_time is populated.
+// auth.UserFromContext returns *auth.AuthUser, which includes CreatedAt
+// populated from the users join in GetAuthSessionByToken.
 
 // Server implements the UserService Connect handler.
 type Server struct {
@@ -60,11 +60,6 @@ func (s *Server) GetUsage(
 		return nil, connect.NewError(connect.CodeInternal, errors.New("get usage failed"))
 	}
 
-	// Per CLAUDE.md: nil slice coercion belongs in the backend method.
-	// backend.GetUsageSummary should already return non-nil slices for
-	// Grants and RecentActivity. If not, fix it there (not here).
-	// make([]T, 0) from len(nil)==0 produces a non-nil empty slice,
-	// so the proto encoding is safe regardless.
 	grants := make([]*drillv1.Grant, len(summary.Grants))
 	for i, g := range summary.Grants {
 		grants[i] = grantToProto(g)
