@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
@@ -22,7 +23,7 @@ func TestGetUsage_ExpiredGrant(t *testing.T) {
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
-	userID := createTestUser(t, b) // gets 60-min free trial
+	userID := backendtest.SeedUser(t, b) // gets 60-min free trial
 
 	// Expire the grant to simulate trial ended.
 	_, err := pool.Exec(context.Background(),
@@ -51,7 +52,7 @@ func TestGetUsage_WithFreeGrant(t *testing.T) {
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 	pool := b.Pool()
-	userID := createTestUser(t, b) // gets 60-min free trial
+	userID := backendtest.SeedUser(t, b) // gets 60-min free trial
 	cookie := createAuthCookie(t, pool, userID)
 
 	req := authedRequest(t, http.MethodGet, "/api/me/usage", nil, cookie)

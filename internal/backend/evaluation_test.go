@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,18 +17,6 @@ import (
 // ---------------------------------------------------------------------------
 // Evaluation-specific seed helpers
 // ---------------------------------------------------------------------------
-
-// seedUser creates a user via the real production Signup path.
-func seedUser(t *testing.T, b *Backend) uuid.UUID {
-	t.Helper()
-	result, err := b.Signup(context.Background(), SignupParams{
-		Email:       fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
-		Password:    "testpassword123",
-		DisplayName: "Test User",
-	})
-	require.NoError(t, err)
-	return result.UserID
-}
 
 // seedQuestion creates a question directly via raw SQL and returns its ID.
 func seedQuestion(t *testing.T, b *Backend) uuid.UUID {
