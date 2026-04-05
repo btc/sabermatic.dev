@@ -70,6 +70,21 @@ func RequireAuth(sa SessionAuthenticator) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireAdmin returns middleware that checks the authenticated user has
+// the admin role. Must be applied after RequireAuth.
+func RequireAdmin() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := UserFromContext(r.Context())
+			if user == nil || user.Role != "admin" {
+				writeAuthError(w, http.StatusForbidden, "admin access required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

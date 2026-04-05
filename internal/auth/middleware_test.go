@@ -41,3 +41,35 @@ func TestRequireAuth_NoCookie(t *testing.T) {
 
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
+
+func TestRequireAdmin_NoUser(t *testing.T) {
+	handler := auth.RequireAdmin()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/jobs", nil)
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRequireAdmin_CandidateRole(t *testing.T) {
+	handler := auth.RequireAdmin()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/jobs", nil)
+	req = req.WithContext(auth.WithUser(req.Context(), &auth.AuthUser{ID: uuid.New(), Role: "candidate"}))
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestRequireAdmin_AdminRole(t *testing.T) {
+	handler := auth.RequireAdmin()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/jobs", nil)
+	req = req.WithContext(auth.WithUser(req.Context(), &auth.AuthUser{ID: uuid.New(), Role: "admin"}))
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
