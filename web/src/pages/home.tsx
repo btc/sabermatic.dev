@@ -180,6 +180,8 @@ function ActiveSessionBanner({
           >
             Resume
           </Link>
+          {/* End Session navigates to interview page where the WS cancel protocol is available.
+              A direct REST cancel endpoint doesn't exist yet. */}
           <Link
             to={`/sessions/${session.id}/interview`}
             className="border border-white/60 text-white px-4 py-2 rounded text-sm leading-none hover:bg-white/10 transition-colors"
@@ -268,7 +270,7 @@ function QuestionCard({
       }
     >
       {startDisabled && (
-        <div className="absolute inset-0 rounded-lg bg-background/60 flex items-center justify-center z-10">
+        <div className="absolute inset-0 rounded-lg flex items-center justify-center z-10">
           <p className="text-xs text-muted-foreground text-center px-4">
             Resume or end your active session to start a new one
           </p>
