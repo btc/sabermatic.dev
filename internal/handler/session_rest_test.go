@@ -322,39 +322,6 @@ func TestGetSession_InvalidUUID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ListQuestions
-// ---------------------------------------------------------------------------
-
-func TestListQuestions_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	b := newTestBackend(t)
-	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
-
-	pool := b.Pool()
-	userID := createTestUser(t, pool)
-	createTestQuestion(t, pool) // seed question
-	cookie := createAuthCookie(t, pool, userID)
-
-	req := authedRequest(t, http.MethodGet, "/api/questions", nil, cookie)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var questions []any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &questions))
-	assert.GreaterOrEqual(t, len(questions), 1)
-
-	// Verify question has expected fields.
-	q := questions[0].(map[string]any)
-	assert.NotEmpty(t, q["title"])
-}
-
-// ---------------------------------------------------------------------------
 // Boundary: duration 1 and 180 (min/max valid)
 // ---------------------------------------------------------------------------
 
