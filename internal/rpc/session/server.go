@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"strconv"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -13,6 +15,11 @@ import (
 	"github.com/btc/drill/internal/db"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
+)
+
+const (
+	defaultPageSize = 50
+	maxPageSize     = 100
 )
 
 // Server implements the SessionService Connect handler.
@@ -48,11 +55,12 @@ func (s *Server) GetSession(
 	}
 
 	return connect.NewResponse(&drillv1.GetSessionResponse{
-		Session: getSessionRowToProto(row),
+		Session: getSessionRowToProto(&row),
 	}), nil
 }
 
-// ListSessions returns all sessions for the authenticated user.
+// ListSessions returns sessions for the authenticated user.
+// Follows AIP-132: validates page_size, supports cursor-based pagination.
 func (s *Server) ListSessions(
 	ctx context.Context,
 	req *connect.Request[drillv1.ListSessionsRequest],
@@ -62,18 +70,58 @@ func (s *Server) ListSessions(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
 
+	// AIP-132: validate and apply page size defaults.
+	pageSize := int(req.Msg.PageSize)
+	if pageSize <= 0 {
+		pageSize = defaultPageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+
+	// Decode page token (offset-based cursor for simplicity).
+	offset := 0
+	if req.Msg.PageToken != "" {
+		decoded, err := base64.StdEncoding.DecodeString(req.Msg.PageToken)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid page token"))
+		}
+		offset, err = strconv.Atoi(string(decoded))
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid page token"))
+		}
+	}
+
 	rows, err := s.b.ListSessions(ctx, user.ID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("list sessions failed"))
 	}
 
-	sessions := make([]*drillv1.SessionSummary, len(rows))
-	for i, row := range rows {
-		sessions[i] = listSessionRowToProto(row)
+	// Apply pagination over the full result set.
+	total := len(rows)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	page := rows[start:end]
+
+	sessions := make([]*drillv1.SessionSummary, len(page))
+	for i := range page {
+		sessions[i] = listSessionRowToProto(&page[i])
+	}
+
+	var nextPageToken string
+	if end < total {
+		nextPageToken = base64.StdEncoding.EncodeToString([]byte(strconv.Itoa(end)))
 	}
 
 	return connect.NewResponse(&drillv1.ListSessionsResponse{
-		Sessions: sessions,
+		Sessions:      sessions,
+		NextPageToken: nextPageToken,
 	}), nil
 }
 
@@ -106,7 +154,7 @@ func (s *Server) CreateSession(
 	// CreateSession returns db.InterviewSession (no joined question fields).
 	// Return the minimal Session proto with what we have.
 	return connect.NewResponse(&drillv1.CreateSessionResponse{
-		Session: interviewSessionToProto(session),
+		Session: interviewSessionToProto(&session),
 	}), nil
 }
 
@@ -160,8 +208,8 @@ func (s *Server) GetTranscript(
 	}
 
 	protoMsgs := make([]*drillv1.Message, len(msgs))
-	for i, msg := range msgs {
-		protoMsgs[i] = messageToProto(msg)
+	for i := range msgs {
+		protoMsgs[i] = messageToProto(&msgs[i])
 	}
 
 	return connect.NewResponse(&drillv1.GetTranscriptResponse{
@@ -216,7 +264,7 @@ func statusToProto(s string) drillv1.SessionStatus {
 }
 
 // getSessionRowToProto converts the full GetSessionRow (with joined question fields) to proto.
-func getSessionRowToProto(row db.GetSessionRow) *drillv1.Session {
+func getSessionRowToProto(row *db.GetSessionRow) *drillv1.Session {
 	s := &drillv1.Session{
 		Id:                    row.ID.String(),
 		UserId:                row.UserID.String(),
@@ -249,7 +297,7 @@ func getSessionRowToProto(row db.GetSessionRow) *drillv1.Session {
 
 // interviewSessionToProto converts db.InterviewSession (from CreateSession) to proto.
 // This type has no joined question fields.
-func interviewSessionToProto(row db.InterviewSession) *drillv1.Session {
+func interviewSessionToProto(row *db.InterviewSession) *drillv1.Session {
 	s := &drillv1.Session{
 		Id:                    row.ID.String(),
 		UserId:                row.UserID.String(),
@@ -275,7 +323,7 @@ func interviewSessionToProto(row db.InterviewSession) *drillv1.Session {
 }
 
 // listSessionRowToProto converts the list summary row to proto.
-func listSessionRowToProto(row db.ListSessionsByUserRow) *drillv1.SessionSummary {
+func listSessionRowToProto(row *db.ListSessionsByUserRow) *drillv1.SessionSummary {
 	s := &drillv1.SessionSummary{
 		Id:                    row.ID.String(),
 		UserId:                row.UserID.String(),
@@ -299,7 +347,7 @@ func listSessionRowToProto(row db.ListSessionsByUserRow) *drillv1.SessionSummary
 	return s
 }
 
-func messageToProto(msg db.Message) *drillv1.Message {
+func messageToProto(msg *db.Message) *drillv1.Message {
 	m := &drillv1.Message{
 		Id:         msg.ID.String(),
 		SessionId:  msg.SessionID.String(),

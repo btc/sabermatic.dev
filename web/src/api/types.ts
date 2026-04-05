@@ -31,47 +31,6 @@ export interface Question {
   best_score?: number | null;
 }
 
-// --- Sessions ---
-export type SessionStatus = "active" | "completed" | "evaluating" | "reviewed" | "evaluation_failed" | "failed";
-
-export interface Session {
-  id: string;
-  user_id: string;
-  question_id: string;
-  status: SessionStatus;
-  config_duration_minutes: number;
-  config_tts_enabled: boolean;
-  config_coach_briefing: boolean;
-  started_at: string;
-  ended_at: string | null;
-  turn_count: number;
-  archived_at: string | null;
-  created_at: string;
-  updated_at: string;
-  question_title?: string;
-}
-
-export interface CreateSessionRequest {
-  question_id: string;
-  duration_minutes: number;
-  tts_enabled: boolean;
-  coach_briefing?: boolean; // TODO(backend): handler does not yet accept this field
-}
-
-// --- Messages ---
-export type MessageRole = "interviewer" | "candidate";
-
-export interface Message {
-  id: string;
-  session_id: string;
-  seq: number;
-  role: MessageRole;
-  content: string;
-  input_method: string | null;
-  audio_url: string | null;
-  created_at: string;
-}
-
 // --- Evaluation ---
 // NB: Matches EvaluationResponse from internal/backend/evaluation.go
 export interface EvaluationResponse {

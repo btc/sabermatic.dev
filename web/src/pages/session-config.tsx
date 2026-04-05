@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
-import { createSession, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { createSession as createSessionMethod, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
 import {
   useCoachLatest,
@@ -70,7 +70,7 @@ export default function SessionConfig() {
   const me = meData?.user;
   const { data: usage } = useQuery(getUsage, {});
   const qc = useQueryClient();
-  const createSessionMut = useMutation(createSession, {
+  const createSession = useMutation(createSessionMethod, {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
       qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getUsage, input: {}, cardinality: undefined }) });
@@ -129,9 +129,9 @@ export default function SessionConfig() {
   }
 
   function handleBegin() {
-    if (!questionId || entitlementExceeded || createSessionMut.isPending) return;
+    if (!questionId || entitlementExceeded || createSession.isPending) return;
 
-    createSessionMut.mutate(
+    createSession.mutate(
       {
         questionId: questionId,
         durationMinutes: effectiveDuration,
@@ -334,10 +334,10 @@ export default function SessionConfig() {
       <Button
         type="button"
         className="w-full h-10 bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-500 dark:hover:bg-amber-600 font-medium"
-        disabled={entitlementExceeded || createSessionMut.isPending || !question}
+        disabled={entitlementExceeded || createSession.isPending || !question}
         onClick={handleBegin}
       >
-        {createSessionMut.isPending ? "Starting..." : "Begin session"}
+        {createSession.isPending ? "Starting..." : "Begin session"}
       </Button>
     </div>
   );
