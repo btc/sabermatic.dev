@@ -54,7 +54,7 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: latest
-          args: --new-from-rev=origin/main
+          only-new-issues: true
 
       - name: Install tools
         run: |
