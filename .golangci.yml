@@ -13,21 +13,18 @@ linters:
     - gocritic
     - misspell
     - revive
-
-linters-settings:
-  errcheck:
-    check-blank: false
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-  revive:
-    rules:
-      - name: exported
-        disabled: true
-
-issues:
-  exclude-dirs:
-    - internal/pb
-  exclude-files:
-    - ".*\\.sql\\.go$"
+  settings:
+    errcheck:
+      check-blank: false
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    paths:
+      - internal/pb
+      - ".*\\.sql\\.go$"
