@@ -18,7 +18,9 @@ type CleanupAbandonedSessionsArgs struct{}
 
 func (CleanupAbandonedSessionsArgs) Kind() string { return "cleanup_abandoned_sessions" }
 
-// CleanupAbandonedSessionsWorker marks timed-out active sessions as completed.
+// CleanupAbandonedSessionsWorker handles timed-out active sessions.
+// Sessions with candidate messages are completed and evaluated.
+// Sessions with no candidate messages are cancelled and archived.
 type CleanupAbandonedSessionsWorker struct {
 	river.WorkerDefaults[CleanupAbandonedSessionsArgs]
 	Pool *pgxpool.Pool
@@ -32,20 +34,31 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 	}
 	defer tx.Rollback(ctx)
 
-	// Batch-mark all abandoned sessions as completed in a single UPDATE.
-	ids, err := db.New(tx).MarkAbandonedSessionsCompleted(ctx)
-	if err != nil {
-		return fmt.Errorf("mark abandoned sessions: %w", err)
-	}
-
 	q := db.New(tx)
 
-	// Refund unused minutes and enqueue evaluation for each.
-	for _, id := range ids {
-		if _, err := q.RefundSessionMinutes(ctx, pgtype.UUID{Bytes: id, Valid: true}); err != nil {
-			slog.Warn("cleanup: refund failed", "session_id", id, "error", err)
+	// 1. Cancel empty abandoned sessions (no candidate messages).
+	cancelledIDs, err := q.CancelAbandonedEmptySessions(ctx)
+	if err != nil {
+		return fmt.Errorf("cancel abandoned empty sessions: %w", err)
+	}
+	for _, id := range cancelledIDs {
+		if _, err := q.FullRefundSessionMinutes(ctx, db.FullRefundSessionMinutesParams{
+			Reason:    "session_refund",
+			SessionID: pgtype.UUID{Bytes: id, Valid: true},
+		}); err != nil {
+			return fmt.Errorf("full refund for cancelled session %s: %w", id, err)
 		}
+	}
 
+	// 2. Complete abandoned sessions with candidate messages.
+	// No refund: wall clock always exceeds reserved time for abandoned sessions
+	// (config_duration_minutes + 5 min threshold), so RefundSessionMinutes
+	// would return 0. Just enqueue evaluation.
+	completedIDs, err := q.CompleteAbandonedActiveSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("complete abandoned active sessions: %w", err)
+	}
+	for _, id := range completedIDs {
 		if _, err := w.Jobs.InsertTx(ctx, tx, EvaluateSessionArgs{SessionID: id}, EvaluateSessionInsertOpts()); err != nil {
 			return fmt.Errorf("enqueue evaluation for session %s: %w", id, err)
 		}
@@ -55,9 +68,10 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 		return fmt.Errorf("commit cleanup: %w", err)
 	}
 
-	if len(ids) > 0 {
-		slog.Info("cleaned up abandoned sessions", "count", len(ids))
+	if n := len(cancelledIDs) + len(completedIDs); n > 0 {
+		slog.Info("cleaned up abandoned sessions",
+			"cancelled", len(cancelledIDs),
+			"completed", len(completedIDs))
 	}
 	return nil
 }
-
