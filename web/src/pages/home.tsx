@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { useQuery } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { Difficulty, QuestionSource } from "@/pb/drill/v1/question_pb";
@@ -101,7 +102,9 @@ function CoachCard({ coach, isActive }: {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => requestCoach.mutate()}
+            onClick={() => requestCoach.mutate(undefined, {
+              onSuccess: () => toast.success("Coach analysis updated"),
+            })}
           >
             Get strategic coaching
           </Button>
@@ -123,7 +126,9 @@ function CoachCard({ coach, isActive }: {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => requestCoach.mutate()}
+            onClick={() => requestCoach.mutate(undefined, {
+              onSuccess: () => toast.success("Coach analysis updated"),
+            })}
             disabled={requestCoach.isPending}
           >
             Refresh

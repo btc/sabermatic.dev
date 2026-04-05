@@ -1,5 +1,6 @@
 import { useState, useRef, KeyboardEvent } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
+import { toast } from "sonner";
 import {
   useMe, useUsage, useLogout,
   useUpdateProfile, useExportData, useDeleteAccount,
@@ -149,10 +150,14 @@ function ProfileSection() {
     updateProfile.mutate(
       { display_name: displayName.trim() },
       {
-        onSuccess: () => setLocalEdit(null),
+        onSuccess: () => {
+          setLocalEdit(null);
+          toast.success("Profile saved");
+        },
         onError: (err) => {
           const msg = err instanceof ApiError ? `Save failed (${err.status})` : "Save failed";
           setSaveError(msg);
+          toast.error("Save failed");
           setLocalEdit(null);
         },
       },
@@ -286,7 +291,9 @@ function DataExportSection() {
       : null;
 
   function handleExport() {
-    exportData.mutate();
+    exportData.mutate(undefined, {
+      onSuccess: () => toast.success("Export requested — check your email"),
+    });
   }
 
   return (
@@ -344,6 +351,7 @@ function AccountDeletionSection() {
           ? `Deletion failed (${err.status})`
           : "Deletion failed. Please try again.";
         setDeleteError(msg);
+        toast.error(msg);
       },
     });
   }
