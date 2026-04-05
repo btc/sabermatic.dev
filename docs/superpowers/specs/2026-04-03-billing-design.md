@@ -15,7 +15,7 @@
 | Payment processor | Stripe (Checkout + Customer Portal + webhooks) | Already set up. Handles subscriptions and one-time payments. We handle entitlements. |
 | Webhook processing | Synchronous in handler (verify signature, create grant, return 200) | User always exists before Stripe interaction. Grant creation is a single transaction. Stripe retries on failure. |
 | Plan configuration | Go map compiled into binary | Code deploy to change pricing/limits. No schema or infrastructure changes required (FR-007). |
-| Minute expiration | Free grants expire monthly. Purchased/subscription grants do not expire. | Industry standard. Prevents free-tier accumulation without penalizing paying customers. |
+| Minute expiration | Free trial grants do not expire (10-year expiry). Purchased/subscription grants do not expire. | One-time allocation at signup. No monthly reset or accumulation concern. |
 | Consumption order | FIFO by expiry (earliest-expiring first, never-expiring last) | Preserves purchased minutes. Users always consume the most perishable balance first. |
 | Session reservation | Reserve full configured duration upfront, refund unused on completion | Prevents mid-session balance exhaustion. Clean debit/credit ledger entries. |
 | Failed session handling | Full refund of reserved minutes | Goodwill-maximizing. Platform errors should be rare; cost is negligible. |
@@ -25,9 +25,9 @@
 | Multi-grant debit | Single code path | FIFO walk handles one grant (base case) and multiple grants (general case) identically. No branching. |
 | Existing `usage_periods` table | Superseded by grants + ledger | The ledger provides strictly more granularity for usage tracking. Migration drops `usage_periods`. |
 | `users.plan` column | Kept, updated by webhooks | Quick read for feature gates without joining grants. Webhook sets to plan name on subscription create/change, resets to `free` on subscription delete. |
-| Free grant creation | Lazy (on first session of month), not cron | Simpler than a periodic River job. No missed-execution risk. Protected against races by a partial unique index. |
+| Free trial grant creation | At account creation (Signup, OAuthLogin) | One-time grant at signup. Protected against duplicate creation by a partial unique index (one free grant per user). |
 | Concurrent sessions limit | 3 for pro (changed from 2 in original spec) | More generous limit appropriate for a platform where sessions can be short. |
-| Billing unit vs FR-008 | Minutes replace "sessions per month" | Original FR-008 specified sessions/month. Minutes are a strictly better unit — they correlate with actual cost and allow variable session lengths. The original requirement's intent (limit usage per period) is preserved. |
+| Billing unit vs FR-008 | Minutes replace "sessions per month" | Original FR-008 specified sessions/month. Minutes are a strictly better unit — they correlate with actual cost and allow variable session lengths. The original requirement's intent (limit usage) is preserved: free users get a one-time trial allocation, pro users get a recurring per-cycle allocation. |
 
 ---
 
@@ -52,9 +52,9 @@ CREATE TABLE grants (
 CREATE INDEX idx_grants_user_balance ON grants(user_id)
     WHERE remaining_minutes > 0;
 
--- Prevents duplicate free grants per calendar month per user.
-CREATE UNIQUE INDEX idx_grants_free_per_month
-    ON grants(user_id, date_trunc('month', created_at))
+-- Prevents duplicate free trial grants per user (one-time allocation).
+CREATE UNIQUE INDEX idx_grants_free_per_user
+    ON grants(user_id)
     WHERE source = 'free_grant';
 
 CREATE INDEX idx_users_stripe_customer ON users(stripe_customer_id)
@@ -67,7 +67,7 @@ CREATE TABLE ledger_entries (
     amount      INT NOT NULL,  -- positive = credit, negative = debit
     reason      TEXT NOT NULL
                 CHECK (reason IN (
-                    'free_monthly', 'subscription_renewal', 'purchase', 'admin_grant',
+                    'free_trial', 'subscription_renewal', 'purchase', 'admin_grant',
                     'session_reserve', 'session_refund', 'error_refund'
                 )),
     session_id  UUID REFERENCES interview_sessions(id),
@@ -109,16 +109,16 @@ DROP TABLE usage_periods;
 
 ## 3. Grant Lifecycle
 
-### Free Monthly Grant
+### Free Trial Grant
 
-On the first of each month (or on signup), create a free grant:
+At account creation (Signup or OAuthLogin), create a one-time free trial grant:
 
 ```
-grants: source=free_grant, initial_minutes=60, remaining_minutes=60, expires_at=end_of_month
-ledger: amount=+60, reason=free_monthly
+grants: source=free_grant, initial_minutes=60, remaining_minutes=60, expires_at=NOW()+10years
+ledger: amount=+60, reason=free_trial
 ```
 
-Triggered lazily on first session of the month (or on signup). `CreateFreeGrant` uses `ON CONFLICT DO NOTHING` against the partial unique index `idx_grants_free_per_month`, so concurrent calls are race-safe — one wins, the other gets a no-op. No cron job needed.
+Created once at account creation. `CreateFreeGrant` uses `ON CONFLICT DO NOTHING` against the partial unique index `idx_grants_free_per_user`, so concurrent calls are race-safe — one wins, the other gets a no-op. No cron job needed.
 
 ### Subscription Grant
 
@@ -158,7 +158,7 @@ ledger: amount=+N, reason=admin_grant
 ```go
 type Plan struct {
     Name               string
-    MinutesPerMonth    int    // subscription grant size (0 for free)
+    GrantMinutes       int    // free = one-time trial allocation, pro = per billing cycle grant size
     MaxDurationMinutes int    // max configurable session length
     ConcurrentSessions int    // max active sessions
     CoachAccess        bool
@@ -178,7 +178,7 @@ const (
 var Plans = map[string]Plan{
     "free": {
         Name:               "Free",
-        MinutesPerMonth:    60,
+        GrantMinutes:       60,  // one-time trial allocation at signup
         MaxDurationMinutes: 30,
         ConcurrentSessions: 1,
         CoachAccess:        false,
@@ -187,7 +187,7 @@ var Plans = map[string]Plan{
     },
     "pro": {
         Name:               "Pro",
-        MinutesPerMonth:    600, // subscription grant size per billing cycle
+        GrantMinutes:       600, // subscription grant size per billing cycle (renews monthly)
         MaxDurationMinutes: 180,
         ConcurrentSessions: 3,
         CoachAccess:        true,
@@ -291,7 +291,7 @@ All other events: log and return 200 (ignore gracefully).
    a. Check concurrent sessions: COUNT(active) < plan.ConcurrentSessions.
    b. Get available balance: SUM(remaining_minutes) from non-expired grants.
    c. If balance < config_duration_minutes → 403 with balance info and upgrade message.
-4. Ensure current-month free grant exists (lazy creation via CreateFreeGrant).
+4. Ensure free trial grant exists (created at signup; CreateFreeGrant is a no-op if already present).
 5. Begin transaction (this is the authoritative enforcement):
    a. Re-check concurrent sessions under the transaction.
    b. SELECT grants FOR UPDATE, ordered by expires_at ASC NULLS LAST, remaining > 0.
@@ -321,7 +321,7 @@ Step 3 is an optimistic pre-check to avoid unnecessary transactions. Step 5 is t
 
 Reserved minutes stored on `interview_sessions.reserved_minutes` (added in migration).
 
-**Edge case — refund to expired grant:** If a session reserved minutes from a free grant that expires during the session, the refund credits back to the expired grant row. The balance query's `expires_at > NOW()` filter excludes it, so the refunded minutes are effectively lost. This is correct — you cannot un-expire minutes. The ledger still records the refund for auditability.
+**Edge case — refund to expired grant:** If a session reserved minutes from a grant that expires during the session (unlikely for free trial grants with 10-year expiry, but possible for future grant types), the refund credits back to the expired grant row. The balance query's `expires_at > NOW()` filter excludes it, so the refunded minutes are effectively lost. This is correct — you cannot un-expire minutes. The ledger still records the refund for auditability.
 
 ### Session Failure
 
@@ -450,33 +450,32 @@ ON CONFLICT (stripe_event_id) DO NOTHING
 RETURNING *;
 ```
 
-Returns no rows if the `stripe_event_id` already exists (duplicate webhook delivery). Caller checks for empty result and treats as success. Not used for free grants — those use `CreateFreeGrant` which has its own `ON CONFLICT DO NOTHING` clause against the partial unique index.
+Returns no rows if the `stripe_event_id` already exists (duplicate webhook delivery). Caller checks for empty result and treats as success. Not used for free trial grants — those use `CreateFreeGrant` which has its own `ON CONFLICT DO NOTHING` clause against the partial unique index.
 
-### Create Free Grant (idempotent via partial unique index)
+### Create Free Trial Grant (idempotent via partial unique index)
 
 ```sql
 -- name: CreateFreeGrant :one
 INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
 VALUES ($1, 'free_grant', $2, $2, $3)
-ON CONFLICT (user_id, date_trunc('month', created_at)) WHERE source = 'free_grant'
+ON CONFLICT (user_id) WHERE source = 'free_grant'
 DO NOTHING
 RETURNING *;
 ```
 
-Returns no rows if a free grant already exists for this calendar month (protected by `idx_grants_free_per_month`). Race-safe — concurrent calls both attempt the insert, one wins, the other gets a no-op.
+Returns no rows if a free trial grant already exists for this user (protected by `idx_grants_free_per_user`). Race-safe — concurrent calls both attempt the insert, one wins, the other gets a no-op.
 
-### Check Free Grant Exists for Period
+### Check Free Trial Grant Exists
 
 ```sql
--- name: GetFreeGrantForMonth :one
+-- name: GetFreeGrantForUser :one
 SELECT id FROM grants
 WHERE user_id = $1
   AND source = 'free_grant'
-  AND expires_at = $2
 LIMIT 1;
 ```
 
-Informational query only — used by the usage endpoint to show the current free grant, not for idempotency. The authoritative deduplication is the partial unique index on `CreateFreeGrant`. Uses `expires_at` (end of month) as the period identifier since free grants are semantically defined by when they expire.
+Informational query only — used by the usage endpoint to show the user's free trial grant, not for idempotency. The authoritative deduplication is the partial unique index on `CreateFreeGrant`.
 
 ### Get User by Stripe Customer ID (webhook lookup)
 
@@ -600,7 +599,7 @@ cmd/drill/
       "source": "free_grant",
       "initial_minutes": 60,
       "remaining_minutes": 18,
-      "expires_at": "2026-05-01T00:00:00Z"
+      "expires_at": "2036-04-07T00:00:00Z"
     },
     {
       "id": "uuid",
@@ -648,7 +647,7 @@ Response: `{"url": "https://billing.stripe.com/..."}`
 | FR | Requirement | Design |
 |---|---|---|
 | FR-007 | Plan structures modifiable without architectural changes | Plans are a Go map compiled into the binary. Code deploy to change, no schema changes. See Section 4. |
-| FR-008 | Plans gate sessions/month, duration, features, concurrency | **Changed from sessions/month to minutes/month** — minutes correlate with actual cost and allow variable session lengths, preserving the original intent (limit usage per period). Duration validated against plan max. Coach/educator gated by paid balance. Concurrent sessions via COUNT(active). See Section 6. |
+| FR-008 | Plans gate sessions/month, duration, features, concurrency | **Changed from sessions/month to minutes** — minutes correlate with actual cost and allow variable session lengths. Free users get a one-time trial allocation; pro users get a recurring per-cycle allocation. Duration validated against plan max. Coach/educator gated by paid balance. Concurrent sessions via COUNT(active). See Section 6. |
 | FR-009 | Free tier same quality as paid | Same AI model, prompts, voice I/O. Only minute allowance and feature access differ. |
 | FR-010 | Educator: full for paid, preview for free | Paid balance → full. Free tier gets one full analysis (conversion hook), then preview via shorter prompt. See Section 6. |
 | FR-011 | Real-time entitlement enforcement | Reserve minutes atomically at session creation via SELECT FOR UPDATE + decrement. 403 with balance info if insufficient. See Section 6. |
