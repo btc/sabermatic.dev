@@ -12,7 +12,13 @@ import (
 )
 
 type Querier interface {
+	// Batch-cancels abandoned sessions that have zero candidate messages.
+	// These are empty sessions where no interview happened.
+	CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error)
 	CancelSession(ctx context.Context, arg CancelSessionParams) error
+	// Batch-completes abandoned sessions that have at least one candidate message.
+	// These are real interviews that the user forgot to end.
+	CompleteAbandonedActiveSessions(ctx context.Context) ([]uuid.UUID, error)
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	CountSeedQuestions(ctx context.Context) (int64, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
@@ -36,6 +42,7 @@ type Querier interface {
 	FindAbandonedSessions(ctx context.Context) ([]uuid.UUID, error)
 	// Refunds all reserved minutes for a session. Used by FailSession (platform error).
 	// Derives user_id and reserved_minutes from the session — caller only needs session_id.
+	// Idempotent: returns 0 rows if session_refund ledger entries already exist.
 	FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
@@ -76,13 +83,11 @@ type Querier interface {
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
-	// Batch-marks all abandoned sessions as completed and returns their IDs.
-	// A session is abandoned if it's active and past its duration + 5 min buffer.
-	MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	// Refunds unused minutes for a completed session based on wall-clock duration.
 	// Derives user_id from the session — caller only needs session_id.
+	// Idempotent: returns 0 rows if session_refund ledger entries already exist.
 	RefundSessionMinutes(ctx context.Context, sessionID pgtype.UUID) ([]RefundSessionMinutesRow, error)
 	// Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
 	// Returns one row per grant debited. Returns zero rows if balance is insufficient

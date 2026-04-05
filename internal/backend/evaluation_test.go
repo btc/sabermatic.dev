@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/jobs/jobtest"
 )
 
 // ---------------------------------------------------------------------------
@@ -265,11 +266,7 @@ func TestRetryEvaluation_Success(t *testing.T) {
 	assert.Equal(t, "evaluating", session.Status)
 
 	// Verify river job was enqueued.
-	var jobCount int
-	err = b.pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM river_job WHERE kind = 'evaluate_session'").Scan(&jobCount)
-	require.NoError(t, err)
-	assert.Equal(t, 1, jobCount)
+	jobtest.AssertJobEnqueued(t, b.pool, "evaluate_session", 1)
 
 	// Verify the job args contain the correct session ID.
 	jobs := riverJobs(t, b, "evaluate_session")

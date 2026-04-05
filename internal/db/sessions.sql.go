@@ -13,6 +13,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelAbandonedEmptySessions = `-- name: CancelAbandonedEmptySessions :many
+UPDATE interview_sessions
+SET status = 'cancelled', ended_at = NOW(), archived_at = NOW(), updated_at = NOW()
+WHERE status = 'active'
+  AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
+  AND NOT EXISTS (
+    SELECT 1 FROM messages m
+    WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
+  )
+RETURNING id
+`
+
+// Batch-cancels abandoned sessions that have zero candidate messages.
+// These are empty sessions where no interview happened.
+func (q *Queries) CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, cancelAbandonedEmptySessions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelSession = `-- name: CancelSession :exec
 UPDATE interview_sessions
 SET status = 'cancelled', ended_at = NOW(), turn_count = $2, archived_at = NOW(), updated_at = NOW()
@@ -27,6 +61,40 @@ type CancelSessionParams struct {
 func (q *Queries) CancelSession(ctx context.Context, arg CancelSessionParams) error {
 	_, err := q.db.Exec(ctx, cancelSession, arg.ID, arg.TurnCount)
 	return err
+}
+
+const completeAbandonedActiveSessions = `-- name: CompleteAbandonedActiveSessions :many
+UPDATE interview_sessions
+SET status = 'completed', ended_at = NOW(), updated_at = NOW()
+WHERE status = 'active'
+  AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
+  AND EXISTS (
+    SELECT 1 FROM messages m
+    WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
+  )
+RETURNING id
+`
+
+// Batch-completes abandoned sessions that have at least one candidate message.
+// These are real interviews that the user forgot to end.
+func (q *Queries) CompleteAbandonedActiveSessions(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, completeAbandonedActiveSessions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countActiveSessionsByUser = `-- name: CountActiveSessionsByUser :one
@@ -311,36 +379,6 @@ func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]L
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const markAbandonedSessionsCompleted = `-- name: MarkAbandonedSessionsCompleted :many
-UPDATE interview_sessions
-SET status = 'completed', ended_at = NOW(), updated_at = NOW()
-WHERE status = 'active'
-  AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
-RETURNING id
-`
-
-// Batch-marks all abandoned sessions as completed and returns their IDs.
-// A session is abandoned if it's active and past its duration + 5 min buffer.
-func (q *Queries) MarkAbandonedSessionsCompleted(ctx context.Context) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, markAbandonedSessionsCompleted)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
