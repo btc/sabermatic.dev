@@ -293,7 +293,7 @@ func TestWS_HappyPath_Text(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -403,7 +403,7 @@ func TestWS_VoiceInput(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -484,7 +484,7 @@ func TestWS_CancelTTS(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -535,7 +535,7 @@ func TestWS_Reconnection(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -585,7 +585,7 @@ func TestWS_InvalidTransition(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -650,7 +650,7 @@ func TestWS_MalformedMessages(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -705,7 +705,7 @@ func TestWS_SessionOwnership(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -750,7 +750,7 @@ func TestWS_InactiveSession(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -825,7 +825,7 @@ func TestWS_GracefulShutdown(t *testing.T) {
 	b := newWSTestBackend(t, srv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	httpSrv := httptest.NewServer(mux)
 	t.Cleanup(httpSrv.Close)
 
@@ -873,7 +873,7 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -972,7 +972,7 @@ func TestWS_UnknownMessageType(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1016,7 +1016,7 @@ func TestWS_Unauthenticated(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1053,7 +1053,7 @@ func TestWS_NonexistentSession(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1094,7 +1094,7 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1168,7 +1168,7 @@ func TestWS_MultiTurn(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1259,7 +1259,7 @@ func TestWS_EmptyTextInput(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1315,7 +1315,7 @@ func TestWS_EmptyVoiceInput(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1415,7 +1415,7 @@ func TestWS_LLMStreamError(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1475,7 +1475,7 @@ func TestWS_TTSEnabled(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1557,7 +1557,7 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 	b := newWSTestBackend(t, srv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	httpSrv := httptest.NewServer(mux)
 	t.Cleanup(httpSrv.Close)
 
@@ -1651,7 +1651,7 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1724,7 +1724,7 @@ func TestWS_PingPong(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -1762,7 +1762,7 @@ func TestWS_CancelSession(t *testing.T) {
 	b := newWSTestBackend(t, anthropicSrv.URL)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 

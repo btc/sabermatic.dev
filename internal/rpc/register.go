@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"fmt"
 	"net/http"
 
 	"connectrpc.com/connect"
@@ -20,10 +21,10 @@ func ConnectPathPrefixes() []string {
 }
 
 // Register mounts all ConnectRPC services on the given mux.
-func Register(mux *http.ServeMux, b *backend.Backend) {
+func Register(mux *http.ServeMux, b *backend.Backend) error {
 	otelInterceptor, err := otelconnect.NewInterceptor()
 	if err != nil {
-		panic("otelconnect: " + err.Error())
+		return fmt.Errorf("otelconnect: %w", err)
 	}
 
 	opts := connect.WithInterceptors(
@@ -32,4 +33,5 @@ func Register(mux *http.ServeMux, b *backend.Backend) {
 	)
 
 	mux.Handle(drillv1connect.NewQuestionServiceHandler(question.NewServer(b), opts))
+	return nil
 }

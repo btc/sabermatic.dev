@@ -55,7 +55,7 @@ func TestOAuthStart_UnknownProvider(t *testing.T) {
 
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	// No providers registered → any provider returns 404.
 	goth.ClearProviders()
@@ -81,7 +81,7 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	b := newTestBackend(t)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	setupGothForTest(t, goth.User{
 		Provider: "faux",
@@ -121,7 +121,7 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 	b := newTestBackend(t)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	oauthUser := goth.User{
 		Provider: "faux",
@@ -166,7 +166,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	b := newTestBackend(t)
 
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	// GitHub sometimes has empty Name but non-empty NickName.
 	setupGothForTest(t, goth.User{
@@ -212,7 +212,7 @@ func TestOAuthCallback_UnknownProvider(t *testing.T) {
 
 	b := newTestBackend(t)
 	mux := http.NewServeMux()
-	handler.RegisterRoutes(mux, b)
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	goth.ClearProviders()
 	t.Cleanup(goth.ClearProviders)
