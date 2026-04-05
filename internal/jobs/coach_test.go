@@ -297,6 +297,37 @@ func TestRunCoachAnalysisWorker_NoReviewedSessions(t *testing.T) {
 	require.Equal(t, 0, count)
 }
 
+func TestRunCoachAnalysisWorker_EmptyResponse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool := startTestPostgres(t)
+
+	// Fake server returns a text content block only — no tool_use block.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_empty", "type": "message", "role": "assistant",
+			"content": [{"type": "text", "text": "I cannot analyze this."}],
+			"model": "claude-sonnet-4-20250514", "stop_reason": "end_turn",
+			"usage": {"input_tokens": 100, "output_tokens": 20}
+		}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	seed := seedCoachData(t, ctx, pool)
+	worker := newCoachWorker(t, pool, srv.URL)
+
+	// Work should return an error because there is no tool_use block.
+	err := worker.Work(ctx, &river.Job[jobs.RunCoachAnalysisArgs]{
+		Args: jobs.RunCoachAnalysisArgs{UserID: seed.UserID},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "call coach LLM")
+}
+
 func TestRunCoachAnalysisWorker_MalformedResponse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

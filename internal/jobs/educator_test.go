@@ -276,6 +276,37 @@ func TestGenerateEducatorContentWorker_SessionNotReviewed(t *testing.T) {
 	require.Equal(t, 0, count)
 }
 
+func TestGenerateEducatorContentWorker_MalformedResponse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool := startTestPostgres(t)
+
+	// Fake server returns a tool_use block with empty model_answer.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "msg_bad", "type": "message", "role": "assistant",
+			"content": [{"type": "tool_use", "id": "toolu_bad", "name": "submit_education", "input": {"model_answer": "", "gap_deep_dives": "Some deep dives."}}],
+			"model": "claude-opus-4-20250514", "stop_reason": "tool_use",
+			"usage": {"input_tokens": 100, "output_tokens": 50}
+		}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	seed := seedEducatorData(t, ctx, pool)
+	worker := newEducatorWorker(t, pool, srv.URL)
+
+	// Work should return an error because model_answer is empty.
+	err := worker.Work(ctx, &river.Job[jobs.GenerateEducatorContentArgs]{
+		Args: jobs.GenerateEducatorContentArgs{SessionID: seed.SessionID},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse educator")
+}
+
 func TestGenerateEducatorContentWorker_EmptyResponse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
