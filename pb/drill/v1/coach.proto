@@ -1,0 +1,35 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "google/protobuf/timestamp.proto";
+
+service CoachService {
+  rpc GetCoachAnalysis(GetCoachAnalysisRequest) returns (GetCoachAnalysisResponse);
+  rpc RequestCoachAnalysis(RequestCoachAnalysisRequest) returns (RequestCoachAnalysisResponse);
+}
+
+message CoachAnalysis {
+  string id = 1;
+  string user_id = 2;
+  string narrative = 3;
+  optional string weakest_dimension = 4;
+  repeated string improving_dimensions = 5;
+  repeated string topic_gaps = 6;
+  optional string suggested_question_id = 7;
+  repeated string sessions_analyzed = 8;
+  google.protobuf.Timestamp create_time = 9;
+}
+
+message GetCoachAnalysisRequest {}
+
+message GetCoachAnalysisResponse {
+  optional CoachAnalysis analysis = 1;
+}
+
+message RequestCoachAnalysisRequest {
+  bool force = 1;
+}
+
+message RequestCoachAnalysisResponse {}
