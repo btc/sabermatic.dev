@@ -48,6 +48,12 @@ func NewLimiter(cfg Config) *Limiter {
 	if cfg.Rate <= 0 {
 		cfg.Rate = 1
 	}
+	if cfg.Burst <= 0 {
+		cfg.Burst = 1
+	}
+	if cfg.CleanupAge <= 0 {
+		cfg.CleanupAge = 10 * time.Minute
+	}
 	l := &Limiter{
 		cfg:     cfg,
 		entries: make(map[string]*entry),
@@ -173,9 +179,14 @@ func (l *Limiter) cleanup() {
 	}
 }
 
-// ClientIP extracts the client IP address from the request. It uses the
-// leftmost IP from X-Forwarded-For if present, falling back to RemoteAddr
-// with the port stripped.
+// ClientIP extracts the client IP from the request.
+// TRUST ASSUMPTION: The service runs behind a reverse proxy that sets
+// X-Forwarded-For. If clients can connect directly, they can spoof this
+// header and bypass per-IP rate limiting. In direct-connect deployments,
+// use RemoteAddr only.
+//
+// It uses the leftmost IP from X-Forwarded-For if present, falling back to
+// RemoteAddr with the port stripped.
 func ClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		// Take the leftmost (client) IP.

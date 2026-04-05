@@ -74,12 +74,12 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) ([]io.Closer, error)
 	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
 
 	// Auth — rate-limited by client IP
-	mux.Handle("POST /api/auth/signup", authLimiter.Middleware(http.HandlerFunc(Signup(b))))
-	mux.Handle("POST /api/auth/login", authLimiter.Middleware(http.HandlerFunc(Login(b))))
+	mux.Handle("POST /api/auth/signup", authLimiter.Middleware(Signup(b)))
+	mux.Handle("POST /api/auth/login", authLimiter.Middleware(Login(b)))
 	mux.HandleFunc("POST /api/auth/logout", Logout(b))
-	mux.HandleFunc("POST /api/auth/verify-email", VerifyEmail(b))
-	mux.Handle("POST /api/auth/forgot-password", authLimiter.Middleware(http.HandlerFunc(ForgotPassword(b))))
-	mux.Handle("POST /api/auth/reset-password", authLimiter.Middleware(http.HandlerFunc(ResetPassword(b))))
+	mux.Handle("POST /api/auth/verify-email", authLimiter.Middleware(VerifyEmail(b)))
+	mux.Handle("POST /api/auth/forgot-password", authLimiter.Middleware(ForgotPassword(b)))
+	mux.Handle("POST /api/auth/reset-password", authLimiter.Middleware(ResetPassword(b)))
 
 	// OAuth
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", OAuthStart(b))
@@ -87,30 +87,30 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) ([]io.Closer, error)
 
 	// User
 	requireAuth := auth.RequireAuth(b)
-	mux.Handle("GET /api/me", requireAuth(http.HandlerFunc(GetMe(b))))
+	mux.Handle("GET /api/me", requireAuth(GetMe(b)))
 
 	// Sessions — user rate-limited
-	mux.Handle("POST /api/sessions", requireAuth(userRL(http.HandlerFunc(CreateSession(b)))))
-	mux.Handle("GET /api/sessions", requireAuth(http.HandlerFunc(ListSessions(b))))
-	mux.Handle("GET /api/sessions/{id}", requireAuth(http.HandlerFunc(GetSession(b))))
-	mux.Handle("GET /api/sessions/{id}/ws", requireAuth(userRL(http.HandlerFunc(SessionWS(b)))))
+	mux.Handle("POST /api/sessions", requireAuth(userRL(CreateSession(b))))
+	mux.Handle("GET /api/sessions", requireAuth(ListSessions(b)))
+	mux.Handle("GET /api/sessions/{id}", requireAuth(GetSession(b)))
+	mux.Handle("GET /api/sessions/{id}/ws", requireAuth(userRL(SessionWS(b))))
 
 	// Evaluations
-	mux.Handle("GET /api/sessions/{id}/evaluation", requireAuth(http.HandlerFunc(GetEvaluation(b))))
-	mux.Handle("POST /api/sessions/{id}/evaluate", requireAuth(userRL(http.HandlerFunc(RetryEvaluation(b)))))
+	mux.Handle("GET /api/sessions/{id}/evaluation", requireAuth(GetEvaluation(b)))
+	mux.Handle("POST /api/sessions/{id}/evaluate", requireAuth(userRL(RetryEvaluation(b))))
 
 	// Educator — user rate-limited
-	mux.Handle("GET /api/sessions/{id}/educator", requireAuth(http.HandlerFunc(GetEducatorAnalysis(b))))
-	mux.Handle("POST /api/sessions/{id}/educator", requireAuth(userRL(http.HandlerFunc(RequestEducatorAnalysis(b)))))
+	mux.Handle("GET /api/sessions/{id}/educator", requireAuth(GetEducatorAnalysis(b)))
+	mux.Handle("POST /api/sessions/{id}/educator", requireAuth(userRL(RequestEducatorAnalysis(b))))
 
 	// Coach — user rate-limited
-	mux.Handle("GET /api/coach/latest", requireAuth(http.HandlerFunc(GetCoachAnalysis(b))))
-	mux.Handle("POST /api/coach/analyze", requireAuth(userRL(http.HandlerFunc(RequestCoachAnalysis(b)))))
+	mux.Handle("GET /api/coach/latest", requireAuth(GetCoachAnalysis(b)))
+	mux.Handle("POST /api/coach/analyze", requireAuth(userRL(RequestCoachAnalysis(b))))
 
 	// Billing — user rate-limited
-	mux.Handle("POST /api/billing/checkout", requireAuth(userRL(http.HandlerFunc(PostCheckout(b)))))
-	mux.Handle("POST /api/billing/portal", requireAuth(userRL(http.HandlerFunc(PostPortal(b)))))
-	mux.Handle("GET /api/me/usage", requireAuth(http.HandlerFunc(GetUsage(b))))
+	mux.Handle("POST /api/billing/checkout", requireAuth(userRL(PostCheckout(b))))
+	mux.Handle("POST /api/billing/portal", requireAuth(userRL(PostPortal(b))))
+	mux.Handle("GET /api/me/usage", requireAuth(GetUsage(b)))
 
 	// Stripe webhook — no auth, signature verified.
 	// Must be exempt from CSRF middleware. Registered here before any
