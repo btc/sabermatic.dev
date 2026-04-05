@@ -158,6 +158,67 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 	return rows, nil
 }
 
+// ArchiveSessions sets or clears archived_at for sessions owned by userID.
+// Returns the number of sessions updated.
+func (b *Backend) ArchiveSessions(ctx context.Context, userID uuid.UUID, sessionIDs []uuid.UUID, archive bool) (_ int, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ArchiveSessions")
+	defer func() { drilotel.End(span, err) }()
+
+	if len(sessionIDs) == 0 {
+		return 0, nil
+	}
+
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin archive tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var updated int
+	for _, sid := range sessionIDs {
+		// Use raw SQL since sqlc doesn't have a bulk archive query.
+		var sqlStr string
+		if archive {
+			sqlStr = `UPDATE interview_sessions SET archived_at = NOW(), updated_at = NOW() WHERE id = $1 AND user_id = $2 AND archived_at IS NULL`
+		} else {
+			sqlStr = `UPDATE interview_sessions SET archived_at = NULL, updated_at = NOW() WHERE id = $1 AND user_id = $2 AND archived_at IS NOT NULL`
+		}
+
+		ct, err := tx.Exec(ctx, sqlStr, sid, userID)
+		if err != nil {
+			return 0, fmt.Errorf("archive session %s: %w", sid, err)
+		}
+		updated += int(ct.RowsAffected())
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit archive tx: %w", err)
+	}
+
+	return updated, nil
+}
+
+// GetTranscript returns the messages for a session owned by the given user.
+func (b *Backend) GetTranscript(ctx context.Context, sessionID, userID uuid.UUID) (_ []db.Message, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetTranscript")
+	defer func() { drilotel.End(span, err) }()
+
+	// Verify ownership first.
+	_, err = b.GetSessionForUser(ctx, sessionID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	msgs, err := b.GetMessagesBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if msgs == nil {
+		msgs = []db.Message{}
+	}
+	return msgs, nil
+}
+
 // ---------------------------------------------------------------------------
 // Conductor-facing methods
 // ---------------------------------------------------------------------------
