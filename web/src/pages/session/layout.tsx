@@ -29,6 +29,29 @@ function CancelledView() {
 }
 
 // ---------------------------------------------------------------------------
+// Failed state card
+// ---------------------------------------------------------------------------
+
+function FailedView() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-4 px-4 text-center">
+      <div className="rounded-lg border border-border bg-card px-8 py-10 max-w-sm w-full space-y-3">
+        <h2 className="text-base font-semibold">Session Failed</h2>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          This session encountered an error and could not be completed. No evaluation is available.
+        </p>
+        <Link
+          to="/"
+          className="inline-block text-sm text-foreground underline underline-offset-4 hover:text-muted-foreground transition-colors"
+        >
+          Back to Home
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
 // ---------------------------------------------------------------------------
 
@@ -134,6 +157,11 @@ function SessionLayoutInner({ id }: { id: string }) {
   // Cancelled sessions get a standalone card — no tab chrome needed
   if (status === "cancelled") {
     return <CancelledView />;
+  }
+
+  // Failed sessions get a standalone card — no tab chrome needed
+  if (status === "failed") {
+    return <FailedView />;
   }
 
   return (

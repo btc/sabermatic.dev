@@ -184,6 +184,13 @@ function StatusBadge({ status }: { status: SessionStatus }) {
       </Badge>
     );
   }
+  if (status === "failed") {
+    return (
+      <Badge variant="destructive" className="text-xs">
+        Failed
+      </Badge>
+    );
+  }
   if (status === "cancelled") {
     return (
       <Badge variant="secondary" className="text-xs text-muted-foreground">
