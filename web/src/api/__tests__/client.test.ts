@@ -4,6 +4,7 @@ import { apiClient, ApiError } from "../client";
 describe("apiClient", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete window.__csrfToken;
   });
 
   it("sends GET request and parses JSON", async () => {
@@ -26,10 +27,7 @@ describe("apiClient", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ id: "456" }), { status: 200 }),
     );
-    Object.defineProperty(document, "cookie", {
-      value: "drill_csrf=abc123",
-      writable: true,
-    });
+    window.__csrfToken = "abc123";
     await apiClient.post("/api/sessions", { question_id: "q1" });
     expect(fetch).toHaveBeenCalledWith("/api/sessions", expect.objectContaining({
       method: "POST",
