@@ -1,0 +1,22 @@
+# buf.gen.yaml
+version: v2
+plugins:
+  # Go message types
+  - remote: buf.build/protocolbuffers/go
+    out: internal/pb
+    opt: paths=source_relative
+  # Go Connect service stubs
+  - remote: buf.build/connectrpc/go
+    out: internal/pb
+    opt: paths=source_relative
+  # TypeScript message types
+  - remote: buf.build/bufbuild/es:v2.11.0
+    out: web/src/pb
+  # TypeScript Connect client
+  - remote: buf.build/connectrpc/es:v1.6.1
+    out: web/src/pb
+  # TanStack Query hooks
+  - remote: buf.build/connectrpc/query-es
+    out: web/src/pb
+inputs:
+  - directory: pb
