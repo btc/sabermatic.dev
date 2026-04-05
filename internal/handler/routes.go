@@ -39,7 +39,11 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	}
 
 	mux.HandleFunc("GET /api/health", Health(b))
-	mux.HandleFunc("GET /admin/jobs", AdminJobsPlaceholder())
+
+	// Admin — requires both auth and admin role.
+	requireAuth := auth.RequireAuth(b)
+	requireAdmin := auth.RequireAdmin()
+	mux.Handle("GET /admin/jobs", requireAuth(requireAdmin(AdminJobsPlaceholder())))
 
 	// Auth
 	mux.HandleFunc("POST /api/auth/signup", Signup(b))
@@ -54,7 +58,6 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", OAuthCallback(b))
 
 	// User
-	requireAuth := auth.RequireAuth(b)
 	mux.Handle("GET /api/me", requireAuth(http.HandlerFunc(GetMe(b))))
 
 	// Sessions
