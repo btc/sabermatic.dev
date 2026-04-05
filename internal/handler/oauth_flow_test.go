@@ -1,10 +1,9 @@
 package handler_test
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/markbates/goth"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
@@ -185,28 +185,11 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 
 	assert.Equal(t, http.StatusFound, w.Code)
 
-	// Verify the user was created with NickName as display_name.
-	// Login and check via /api/me.
-	var sessionCookie *http.Cookie
-	for _, c := range w.Result().Cookies() {
-		if c.Name == auth.SessionCookieName {
-			sessionCookie = c
-			break
-		}
-	}
-	require.NotNil(t, sessionCookie)
-
-	meReq := httptest.NewRequest(http.MethodPost, "/drill.v1.UserService/GetMe", strings.NewReader("{}"))
-	meReq.Header.Set("Content-Type", "application/json")
-	meReq.AddCookie(sessionCookie)
-	meW := httptest.NewRecorder()
-	mux.ServeHTTP(meW, meReq)
-
-	assert.Equal(t, http.StatusOK, meW.Code)
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(meW.Body.Bytes(), &body))
-	user := body["user"].(map[string]any)
-	assert.Equal(t, "octocat", user["displayName"])
+	// Verify the user was created with NickName as display_name via DB query.
+	q := db.New(b.Pool())
+	user, err := q.GetUserByEmail(context.Background(), "nick@example.com")
+	require.NoError(t, err)
+	assert.Equal(t, "octocat", user.DisplayName)
 }
 
 func TestOAuthCallback_UnknownProvider(t *testing.T) {

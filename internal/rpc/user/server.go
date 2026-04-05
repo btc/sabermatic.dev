@@ -60,23 +60,30 @@ func (s *Server) GetUsage(
 		return nil, connect.NewError(connect.CodeInternal, errors.New("get usage failed"))
 	}
 
-	grants := make([]*drillv1.Grant, len(summary.Grants))
-	for i, g := range summary.Grants {
+	return connect.NewResponse(usageSummaryToProto(summary)), nil
+}
+
+// usageSummaryToProto converts a backend UsageSummary to a GetUsageResponse.
+// make() with len() produces non-nil empty slices even when the input is nil,
+// so proto encoding always emits [] rather than null.
+func usageSummaryToProto(s *backend.UsageSummary) *drillv1.GetUsageResponse {
+	grants := make([]*drillv1.Grant, len(s.Grants))
+	for i, g := range s.Grants {
 		grants[i] = grantToProto(g)
 	}
 
-	entries := make([]*drillv1.LedgerEntry, len(summary.RecentActivity))
-	for i, e := range summary.RecentActivity {
+	entries := make([]*drillv1.LedgerEntry, len(s.RecentActivity))
+	for i, e := range s.RecentActivity {
 		entries[i] = ledgerEntryToProto(e)
 	}
 
-	return connect.NewResponse(&drillv1.GetUsageResponse{
-		TotalBalance:   summary.TotalBalance,
-		FreeBalance:    summary.FreeBalance,
-		PaidBalance:    summary.PaidBalance,
+	return &drillv1.GetUsageResponse{
+		TotalBalance:   s.TotalBalance,
+		FreeBalance:    s.FreeBalance,
+		PaidBalance:    s.PaidBalance,
 		Grants:         grants,
 		RecentActivity: entries,
-	}), nil
+	}
 }
 
 // UpdateProfile updates the authenticated user's profile fields.
