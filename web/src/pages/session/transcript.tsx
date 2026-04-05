@@ -2,49 +2,57 @@ import { useState, useRef, useCallback } from "react";
 import { useParams, Navigate } from "react-router-dom";
 import { useQuery } from "@connectrpc/connect-query";
 import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
+import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
+import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
 import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
-import { useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AnnotationType, AnnotationResponse } from "@/api/types";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
 // ---------------------------------------------------------------------------
 
-const ANNOTATION_LABELS: Record<AnnotationType, string> = {
-  strength: "strengths",
-  gap: "gaps",
-  missed_opportunity: "missed opportunities",
-  note: "notes",
+const ANNOTATION_LABELS: Record<number, string> = {
+  [AnnotationType.STRENGTH]: "strengths",
+  [AnnotationType.GAP]: "gaps",
+  [AnnotationType.MISSED_OPPORTUNITY]: "missed opportunities",
+  [AnnotationType.NOTE]: "notes",
 };
 
-const ANNOTATION_BORDER: Record<AnnotationType, string> = {
-  strength: "border-strength",
-  gap: "border-gap",
-  missed_opportunity: "border-missed",
-  note: "border-note",
+const ANNOTATION_BORDER: Record<number, string> = {
+  [AnnotationType.STRENGTH]: "border-strength",
+  [AnnotationType.GAP]: "border-gap",
+  [AnnotationType.MISSED_OPPORTUNITY]: "border-missed",
+  [AnnotationType.NOTE]: "border-note",
 };
 
-const ANNOTATION_TEXT: Record<AnnotationType, string> = {
-  strength: "text-strength",
-  gap: "text-gap",
-  missed_opportunity: "text-missed",
-  note: "text-note",
+const ANNOTATION_TEXT: Record<number, string> = {
+  [AnnotationType.STRENGTH]: "text-strength",
+  [AnnotationType.GAP]: "text-gap",
+  [AnnotationType.MISSED_OPPORTUNITY]: "text-missed",
+  [AnnotationType.NOTE]: "text-note",
 };
 
-const ANNOTATION_BG: Record<AnnotationType, string> = {
-  strength: "bg-strength",
-  gap: "bg-gap",
-  missed_opportunity: "bg-missed",
-  note: "bg-note",
+const ANNOTATION_BG: Record<number, string> = {
+  [AnnotationType.STRENGTH]: "bg-strength",
+  [AnnotationType.GAP]: "bg-gap",
+  [AnnotationType.MISSED_OPPORTUNITY]: "bg-missed",
+  [AnnotationType.NOTE]: "bg-note",
+};
+
+const ANNOTATION_TYPE_DISPLAY: Record<number, string> = {
+  [AnnotationType.STRENGTH]: "strength",
+  [AnnotationType.GAP]: "gap",
+  [AnnotationType.MISSED_OPPORTUNITY]: "missed opportunity",
+  [AnnotationType.NOTE]: "note",
 };
 
 const ANNOTATION_TYPES: AnnotationType[] = [
-  "strength",
-  "gap",
-  "missed_opportunity",
-  "note",
+  AnnotationType.STRENGTH,
+  AnnotationType.GAP,
+  AnnotationType.MISSED_OPPORTUNITY,
+  AnnotationType.NOTE,
 ];
 
 type FilterType = "all" | AnnotationType;
@@ -54,7 +62,7 @@ type FilterType = "all" | AnnotationType;
 // ---------------------------------------------------------------------------
 
 interface SummaryBarProps {
-  annotations: AnnotationResponse[];
+  annotations: Annotation[];
   activeFilter: FilterType;
   onFilterChange: (filter: FilterType) => void;
   onJumpToFirst: (type: AnnotationType) => void;
@@ -66,12 +74,12 @@ function SummaryBar({
   onFilterChange,
   onJumpToFirst,
 }: SummaryBarProps) {
-  const counts = ANNOTATION_TYPES.reduce<Record<AnnotationType, number>>(
+  const counts = ANNOTATION_TYPES.reduce<Record<number, number>>(
     (acc, type) => {
       acc[type] = annotations.filter((a) => a.type === type).length;
       return acc;
     },
-    { strength: 0, gap: 0, missed_opportunity: 0, note: 0 },
+    { [AnnotationType.STRENGTH]: 0, [AnnotationType.GAP]: 0, [AnnotationType.MISSED_OPPORTUNITY]: 0, [AnnotationType.NOTE]: 0 },
   );
 
   const total = annotations.length;
@@ -116,7 +124,7 @@ function SummaryBar({
 // ---------------------------------------------------------------------------
 
 interface AnnotationCardProps {
-  annotation: AnnotationResponse;
+  annotation: Annotation;
   dimmed: boolean;
 }
 
@@ -130,7 +138,7 @@ function AnnotationCard({ annotation, dimmed }: AnnotationCardProps) {
       )}
     >
       <span className={cn("font-medium uppercase tracking-wide text-[10px] mr-2", ANNOTATION_TEXT[annotation.type])}>
-        {annotation.type.replace("_", " ")}
+        {ANNOTATION_TYPE_DISPLAY[annotation.type] ?? "unknown"}
       </span>
       {annotation.content}
     </div>
@@ -143,7 +151,7 @@ function AnnotationCard({ annotation, dimmed }: AnnotationCardProps) {
 
 interface MessageRowProps {
   message: ProtoMessage;
-  annotations: AnnotationResponse[];
+  annotations: Annotation[];
   activeFilter: FilterType;
   msgRef: (el: HTMLDivElement | null) => void;
 }
@@ -181,7 +189,7 @@ function MessageRow({ message, annotations, activeFilter, msgRef }: MessageRowPr
 // ---------------------------------------------------------------------------
 
 interface RailDotProps {
-  annotation: AnnotationResponse;
+  annotation: Annotation;
   totalMessages: number;
   msgIndex: number;
   onClick: () => void;
@@ -194,7 +202,7 @@ function RailDot({ annotation, totalMessages, msgIndex, onClick }: RailDotProps)
   return (
     <button
       onClick={onClick}
-      title={`${annotation.type.replace("_", " ")}: ${annotation.content.slice(0, 60)}...`}
+      title={`${ANNOTATION_TYPE_DISPLAY[annotation.type] ?? "unknown"}: ${annotation.content.slice(0, 60)}...`}
       className={cn(
         "absolute size-2 rounded-full -translate-x-1/2 -translate-y-1/2 transition-transform hover:scale-150 cursor-pointer",
         ANNOTATION_BG[annotation.type],
@@ -205,7 +213,7 @@ function RailDot({ annotation, totalMessages, msgIndex, onClick }: RailDotProps)
 }
 
 interface AnnotationRailProps {
-  annotations: AnnotationResponse[];
+  annotations: Annotation[];
   messages: ProtoMessage[];
   onDotClick: (seq: number) => void;
 }
@@ -222,14 +230,14 @@ function AnnotationRail({ annotations, messages, onDotClick }: AnnotationRailPro
       <div className="absolute inset-y-0 left-1/2 w-px bg-border -translate-x-1/2" />
 
       {annotations.map((ann, i) => {
-        const msgIndex = seqToIndex.get(ann.message_seq) ?? 0;
+        const msgIndex = seqToIndex.get(ann.messageSeq) ?? 0;
         return (
           <RailDot
             key={i}
             annotation={ann}
             totalMessages={messages.length}
             msgIndex={msgIndex}
-            onClick={() => onDotClick(ann.message_seq)}
+            onClick={() => onDotClick(ann.messageSeq)}
           />
         );
       })}
@@ -262,7 +270,8 @@ export default function TranscriptPage() {
 function TranscriptInner({ sessionId }: { sessionId: string }) {
   const { data: transcriptResp } = useQuery(getTranscript, { sessionId });
   const messages = transcriptResp?.messages;
-  const { data: evaluation } = useEvaluation(sessionId);
+  const { data: evalResp } = useQuery(getEvaluation, { sessionId });
+  const evaluation = evalResp?.evaluation;
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
@@ -302,11 +311,11 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
   const sorted = [...messages].sort((a, b) => a.seq - b.seq);
   const annotations = evaluation?.annotations ?? [];
 
-  // Group annotations by message_seq for efficient lookup
-  const annotationsBySeq = annotations.reduce<Map<number, AnnotationResponse[]>>(
+  // Group annotations by messageSeq for efficient lookup
+  const annotationsBySeq = annotations.reduce<Map<number, Annotation[]>>(
     (acc, ann) => {
-      const existing = acc.get(ann.message_seq) ?? [];
-      acc.set(ann.message_seq, [...existing, ann]);
+      const existing = acc.get(ann.messageSeq) ?? [];
+      acc.set(ann.messageSeq, [...existing, ann]);
       return acc;
     },
     new Map(),
@@ -315,7 +324,7 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
   const handleJumpToFirst = (type: AnnotationType) => {
     const first = annotations.find((a) => a.type === type);
     if (first) {
-      scrollToSeq(first.message_seq);
+      scrollToSeq(first.messageSeq);
     }
   };
 

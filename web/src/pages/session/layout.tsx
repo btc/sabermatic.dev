@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Outlet, NavLink, useParams, useNavigate, Navigate } from "react-router-dom";
 import { useQuery } from "@connectrpc/connect-query";
+import { skipToken } from "@tanstack/react-query";
 import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import { useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
 
@@ -89,7 +90,8 @@ function SessionLayoutInner({ id }: { id: string }) {
     },
   });
   const session = sessionResp?.session;
-  const { data: evaluation } = useEvaluation(id, session?.status === SessionStatus.REVIEWED || session?.status === SessionStatus.EVALUATION_FAILED);
+  const evalEnabled = session?.status === SessionStatus.REVIEWED || session?.status === SessionStatus.EVALUATION_FAILED;
+  const { data: evaluation } = useQuery(getEvaluation, evalEnabled ? { sessionId: id } : skipToken);
 
   // Redirect active sessions to the interview page
   useEffect(() => {
