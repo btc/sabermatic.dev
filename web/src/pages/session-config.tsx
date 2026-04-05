@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useQuery } from "@connectrpc/connect-query";
+import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
+import { createSession, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
 import {
   useCoachLatest,
-  useCreateSession,
 } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,7 +69,13 @@ export default function SessionConfig() {
   const { data: meData } = useQuery(getMe, {});
   const me = meData?.user;
   const { data: usage } = useQuery(getUsage, {});
-  const createSession = useCreateSession();
+  const qc = useQueryClient();
+  const createSessionMut = useMutation(createSession, {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getUsage, input: {}, cardinality: undefined }) });
+    },
+  });
 
   const planMax = me?.plan === UserPlan.PRO ? PRO_PLAN_MAX : FREE_PLAN_MAX;
 
@@ -121,18 +129,17 @@ export default function SessionConfig() {
   }
 
   function handleBegin() {
-    if (!questionId || entitlementExceeded || createSession.isPending) return;
+    if (!questionId || entitlementExceeded || createSessionMut.isPending) return;
 
-    createSession.mutate(
+    createSessionMut.mutate(
       {
-        question_id: questionId,
-        duration_minutes: effectiveDuration,
-        tts_enabled: ttsEnabled,
-        ...(hasCoach ? { coach_briefing: coachBriefing } : {}),
+        questionId: questionId,
+        durationMinutes: effectiveDuration,
+        ttsEnabled: ttsEnabled,
       },
       {
-        onSuccess: (session) => {
-          navigate(`/sessions/${session.id}/interview`);
+        onSuccess: (resp) => {
+          navigate(`/sessions/${resp.session?.id}/interview`);
         },
         onError: () => {
           toast.error("Failed to start session");
@@ -327,10 +334,10 @@ export default function SessionConfig() {
       <Button
         type="button"
         className="w-full h-10 bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-500 dark:hover:bg-amber-600 font-medium"
-        disabled={entitlementExceeded || createSession.isPending || !question}
+        disabled={entitlementExceeded || createSessionMut.isPending || !question}
         onClick={handleBegin}
       >
-        {createSession.isPending ? "Starting..." : "Begin session"}
+        {createSessionMut.isPending ? "Starting..." : "Begin session"}
       </Button>
     </div>
   );

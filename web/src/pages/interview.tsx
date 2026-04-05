@@ -11,7 +11,9 @@ import { useInterview } from "@/ws/hooks";
 import { useTimer } from "@/hooks/use-timer";
 import { useAudioRecorder } from "@/audio/hooks";
 import { useAudioPlayer } from "@/audio/hooks";
-import { useSession } from "@/api/queries";
+import { useQuery } from "@connectrpc/connect-query";
+import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import { ConnectionState } from "@/ws/connection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,16 +125,17 @@ function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: Waitin
   }, []);
 
   // Poll for evaluation completion
-  const { data: session } = useSession(sessionId, {
+  const { data: sessionResp } = useQuery(getSession, { id: sessionId }, {
     refetchInterval: 3000,
   });
 
   // Navigate when evaluation is done
   useEffect(() => {
-    if (session?.status === "reviewed" || session?.status === "evaluation_failed") {
+    const status = sessionResp?.session?.status;
+    if (status === SessionStatus.REVIEWED || status === SessionStatus.EVALUATION_FAILED) {
       navigate(`/sessions/${sessionId}/overview`);
     }
-  }, [session?.status, sessionId, navigate]);
+  }, [sessionResp?.session?.status, sessionId, navigate]);
 
   const candidateTurns = Math.ceil(messageCount / 2);
 
@@ -186,12 +189,13 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   } = useInterview(sessionId);
 
   const navigate = useNavigate();
-  const { data: session } = useSession(sessionId);
+  const { data: sessionResp } = useQuery(getSession, { id: sessionId });
+  const session = sessionResp?.session;
   const audioRecorder = useAudioRecorder();
   const audioPlayer = useAudioPlayer();
 
   const { display: timerDisplay, phase: timerPhase, elapsed } = useTimer(
-    session?.started_at ?? null,
+    session?.startTime ? new Date(Number(session.startTime.seconds) * 1000).toISOString() : null,
     sessionInfo?.duration ?? 0,
   );
 

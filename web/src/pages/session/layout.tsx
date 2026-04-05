@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { Outlet, NavLink, useParams, useNavigate, Navigate } from "react-router-dom";
-import { useSession, useEvaluation } from "@/api/queries";
-import type { Session } from "@/api/types";
+import { useQuery } from "@connectrpc/connect-query";
+import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import { useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
 
@@ -79,18 +81,19 @@ export default function SessionLayout() {
 function SessionLayoutInner({ id }: { id: string }) {
   const navigate = useNavigate();
 
-  const { data: session } = useSession(id, {
+  const { data: sessionResp } = useQuery(getSession, { id }, {
     refetchInterval: (query) => {
-      const s = query.state.data as Session | undefined;
-      if (s?.status === "completed" || s?.status === "evaluating") return 3000;
+      const s = query.state.data?.session;
+      if (s?.status === SessionStatus.COMPLETED || s?.status === SessionStatus.EVALUATING) return 3000;
       return false;
     },
   });
-  const { data: evaluation } = useEvaluation(id, session?.status === "reviewed" || session?.status === "evaluation_failed");
+  const session = sessionResp?.session;
+  const { data: evaluation } = useEvaluation(id, session?.status === SessionStatus.REVIEWED || session?.status === SessionStatus.EVALUATION_FAILED);
 
   // Redirect active sessions to the interview page
   useEffect(() => {
-    if (session?.status === "active") {
+    if (session?.status === SessionStatus.ACTIVE) {
       navigate(`/sessions/${id}/interview`, { replace: true });
     }
   }, [session?.status, id, navigate]);
@@ -98,12 +101,12 @@ function SessionLayoutInner({ id }: { id: string }) {
   const status = session?.status;
 
   // Tabs are only fully enabled when reviewed or evaluation_failed
-  const overviewEnabled = status === "reviewed" || status === "evaluation_failed";
-  const transcriptEnabled = status === "reviewed" || status === "evaluation_failed" || status === "completed" || status === "evaluating";
-  const deepDiveEnabled = status === "reviewed";
+  const overviewEnabled = status === SessionStatus.REVIEWED || status === SessionStatus.EVALUATION_FAILED;
+  const transcriptEnabled = status === SessionStatus.REVIEWED || status === SessionStatus.EVALUATION_FAILED || status === SessionStatus.COMPLETED || status === SessionStatus.EVALUATING;
+  const deepDiveEnabled = status === SessionStatus.REVIEWED;
 
   // Show the evaluating spinner in the content area while processing
-  const showWaiting = status === "completed" || status === "evaluating";
+  const showWaiting = status === SessionStatus.COMPLETED || status === SessionStatus.EVALUATING;
 
   // Suppress void warning — evaluation is fetched for cache priming
   void evaluation;
