@@ -18,14 +18,22 @@ fi
 
 echo "Step 2: Verify table state..."
 ROW_COUNT=$(psql "$DB" -tA -c "SELECT count(*) FROM schema_migrations")
+echo "  Rows: $ROW_COUNT (expected: 1)"
+
+if [[ "$ROW_COUNT" -ne 1 ]]; then
+    echo ""
+    echo "ERROR: Expected exactly 1 row, got $ROW_COUNT."
+    echo "Aborting. Do NOT drop without manual investigation."
+    exit 1
+fi
+
 VERSION=$(psql "$DB" -tA -c "SELECT version FROM schema_migrations")
 DIRTY=$(psql "$DB" -tA -c "SELECT dirty FROM schema_migrations")
 
-echo "  Rows: $ROW_COUNT (expected: 1)"
 echo "  Version: $VERSION (expected: 1)"
 echo "  Dirty: $DIRTY (expected: f)"
 
-if [[ "$ROW_COUNT" -ne 1 ]] || [[ "$VERSION" -ne 1 ]] || [[ "$DIRTY" != "f" ]]; then
+if [[ "$VERSION" -ne 1 ]] || [[ "$DIRTY" != "f" ]]; then
     echo ""
     echo "ERROR: Table state does not match expected orphan state."
     echo "Aborting. Do NOT drop without manual investigation."
