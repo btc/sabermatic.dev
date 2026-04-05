@@ -13,29 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const archiveSessionsByIDs = `-- name: ArchiveSessionsByIDs :execrows
-UPDATE interview_sessions
-SET archived_at = CASE WHEN $1::bool THEN NOW() ELSE NULL END,
-    updated_at = NOW()
-WHERE id = ANY($2::uuid[])
-  AND user_id = $3
-  AND CASE WHEN $1::bool THEN archived_at IS NULL ELSE archived_at IS NOT NULL END
-`
-
-type ArchiveSessionsByIDsParams struct {
-	Archive bool        `json:"archive"`
-	Ids     []uuid.UUID `json:"ids"`
-	UserID  uuid.UUID   `json:"user_id"`
-}
-
-func (q *Queries) ArchiveSessionsByIDs(ctx context.Context, arg ArchiveSessionsByIDsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, archiveSessionsByIDs, arg.Archive, arg.Ids, arg.UserID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const cancelAbandonedEmptySessions = `-- name: CancelAbandonedEmptySessions :many
 UPDATE interview_sessions
 SET status = 'cancelled', ended_at = NOW(), archived_at = NOW(), updated_at = NOW()

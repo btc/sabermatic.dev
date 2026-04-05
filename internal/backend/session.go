@@ -158,45 +158,6 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 	return rows, nil
 }
 
-// ArchiveSessions sets or clears archived_at for sessions owned by userID.
-// Returns the number of sessions updated.
-func (b *Backend) ArchiveSessions(ctx context.Context, userID uuid.UUID, sessionIDs []uuid.UUID, archive bool) (_ int64, err error) {
-	ctx, span := tracer.Start(ctx, "Backend.ArchiveSessions")
-	defer func() { drilotel.End(span, err) }()
-
-	if len(sessionIDs) == 0 {
-		return 0, nil
-	}
-
-	q := db.New(b.pool)
-	return q.ArchiveSessionsByIDs(ctx, db.ArchiveSessionsByIDsParams{
-		Archive: archive,
-		Ids:     sessionIDs,
-		UserID:  userID,
-	})
-}
-
-// GetTranscript returns the messages for a session owned by the given user.
-func (b *Backend) GetTranscript(ctx context.Context, sessionID, userID uuid.UUID) (_ []db.Message, err error) {
-	ctx, span := tracer.Start(ctx, "Backend.GetTranscript")
-	defer func() { drilotel.End(span, err) }()
-
-	// Verify ownership first.
-	_, err = b.GetSessionForUser(ctx, sessionID, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	msgs, err := b.GetMessagesBySession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if msgs == nil {
-		msgs = []db.Message{}
-	}
-	return msgs, nil
-}
-
 // ---------------------------------------------------------------------------
 // Conductor-facing methods
 // ---------------------------------------------------------------------------
@@ -444,7 +405,7 @@ func (b *Backend) Synthesize(ctx context.Context, text string) (_ io.ReadCloser,
 func (b *Backend) StreamLLM(ctx context.Context, p *ai.StreamParams) (_ *ai.TokenStream, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.StreamLLM")
 	defer func() { drilotel.End(span, err) }()
-	return b.llm.StreamAndLog(ctx, p)
+	return b.llm.StreamAndLog(ctx, *p)
 }
 
 // StoreAudio uploads audio bytes to object storage and returns the URL.
