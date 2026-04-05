@@ -21,7 +21,10 @@ The connectRPC migration (issues #47, #48) is actively replacing REST handlers i
 - `web/src/main.tsx` — app entry (connectRPC adds `TransportProvider` but doesn't restructure wrapping)
 - HTTP middleware in `internal/handler/routes.go:NewHandler()` — connectRPC adds `rpc.Register()` call in `RegisterRoutes()` but `NewHandler()` middleware chain is structurally stable
 
-**Risky overlap:** Track F (#24, #40) modifies `.github/workflows/ci.yml`. The connectRPC migration may also add CI steps (proto lint, etc. per #48). Low risk — additive changes to different sections of the same file. Easily resolvable if merge conflict arises.
+**Risky overlaps (all low risk, trivially resolvable):**
+- Track F (#24, #40) modifies `.github/workflows/ci.yml`. The connectRPC migration may also add CI steps (proto lint, etc. per #48). Additive changes to different sections of the same file.
+- Track D (#8) wraps the outermost return in `NewHandler()` with security headers middleware. The connectRPC migration will also modify `NewHandler()` to extend the CSRF exemption for Connect service paths. Both are additive changes to the same function body — different lines, but will produce a merge conflict that needs manual resolution.
+- Track E (#34) modifies `web/src/main.tsx` to add ErrorBoundary. The connectRPC migration will later add `TransportProvider` to the same file. No conflict in this round since connectRPC work hasn't started.
 
 ---
 
@@ -42,7 +45,7 @@ The evaluator (`internal/jobs/evaluate.go:80-90`) already has a guard for zero m
 
 2. **Refund minutes.** The cleanup worker already calls `RefundSessionMinutes` — this stays. Cancelled sessions still get refunds.
 
-3. **Do not auto-archive.** Issue #21 suggests auto-archiving, but the `sessions` table has no `archived` column (archiving is frontend-only via `ListSessions` query params). Skip this — out of scope.
+3. **Archive cancelled sessions.** The `interview_sessions` table has an `archived_at TIMESTAMPTZ` column (migration `005_archived_at.up.sql`). The existing `CancelSession` SQL query already sets `archived_at = NOW()` when cancelling. The new `MarkAbandonedSessionsCancelled` query should also set `archived_at = NOW()` for consistency — abandoned cancelled sessions should not appear in active session lists.
 
 4. **Keep evaluator guard.** The zero-message guard in `evaluate.go:80-90` remains as defense-in-depth for sessions that reach the evaluator through other paths.
 
@@ -51,14 +54,15 @@ The evaluator (`internal/jobs/evaluate.go:80-90`) already has a guard for zero m
 - Modify: `sql/queries/sessions.sql` — add `MarkAbandonedSessionsCancelled` query (or rename existing)
 - Modify: `internal/db/sessions.sql.go` — regenerate via `sqlc generate`
 - Modify: `internal/jobs/cleanup.go` — use cancel query, skip evaluation enqueue
-- Create: `internal/jobs/cleanup_test.go` — test that cleanup cancels (not completes) and does not enqueue evaluation
+- Modify: `internal/jobs/cleanup_test.go` — update existing `TestCleanupAbandonedSessions_MarksCompleted` to assert `"cancelled"` status (currently asserts `"completed"` on line 58), add new test for no-evaluation-enqueue behavior
 - Modify: `internal/db/querier.go` — regenerated
 
 ### Testing
 
 - **Red:** Test that after cleanup runs on an abandoned session with zero messages, session status is `cancelled` (not `completed`) and no evaluation job is enqueued.
 - **Green:** Implement the fix.
-- Verify existing `TestCancelSession_*` tests still pass.
+- Update existing `TestCleanupAbandonedSessions_MarksCompleted` to assert `"cancelled"` status and verify it passes.
+- Run `sqlc diff` to ensure generated code matches queries.
 
 ---
 
@@ -79,7 +83,7 @@ These are investigation tasks. The subagent must:
 1. Run each test in isolation to capture the exact failure output
 2. Read the test code and the functions under test
 3. Diagnose the root cause (likely a missing DB seed, a query that returns an error on zero rows, or a billing snapshot function that doesn't handle the no-grants case)
-4. Fix the root cause in the backend/handler code (not the tests, unless the tests have wrong assertions)
+4. Fix the root cause in the backend/handler code (not the tests, unless the tests have wrong assertions). If the tests are correctly written but test behavior that was never implemented, implement the missing feature rather than deleting the test
 
 ### Files
 
@@ -90,7 +94,7 @@ These are investigation tasks. The subagent must:
 
 ### Testing
 
-- **Red:** Confirm both tests fail with `go test -run TestReserveMinutes_ZeroGrants ./internal/backend/` and `go test -run TestGetUsage_EmptyBalance ./internal/handler/`
+- **Red:** Confirm both tests still fail on `main` with `go test -run TestReserveMinutes_ZeroGrants ./internal/backend/` and `go test -run TestGetUsage_EmptyBalance ./internal/handler/`. If either test already passes, skip it and note in the PR
 - **Green:** Fix the root cause, confirm both tests pass
 - Run full `go test ./internal/backend/... ./internal/handler/...` to verify no regressions
 
@@ -105,7 +109,7 @@ These are investigation tasks. The subagent must:
 
 `Dockerfile` line 10: `FROM golang:1.24-alpine`
 `go.mod` line 3: `go 1.25.4`
-`.github/workflows/ci.yml` line 20: `go-version: "1.25.x"`
+`.github/workflows/ci.yml` line 21: `go-version: "1.25.x"`
 
 Production Docker builds use Go 1.24; local dev and CI use Go 1.25.
 
@@ -154,7 +158,7 @@ Headers:
 - `X-Frame-Options: DENY` — always
 - `Referrer-Policy: strict-origin-when-cross-origin` — always
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains` — only when `secureCookies` is true (production/HTTPS)
-- `Content-Security-Policy` — `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss:; font-src 'self'; frame-ancestors 'none'` — this is a starting CSP. The `'unsafe-inline'` for styles is needed because Tailwind/shadcn injects inline styles. The `wss:` in `connect-src` is required for WebSocket interview connections. The agent should verify the CSP doesn't break the app by loading it in the browser.
+- `Content-Security-Policy` — `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss:; font-src 'self'; frame-ancestors 'none'` — this is a starting CSP. The `'unsafe-inline'` for styles is needed because Tailwind/shadcn injects inline styles. The `wss:` in `connect-src` is required for WebSocket interview connections. If the frontend sends telemetry to an external OTLP endpoint, `connect-src` may need that origin too — the agent should check `web/src/telemetry/` for external URLs. The agent must verify the CSP doesn't break the app by loading it in the browser and checking the console for CSP violations.
 
 ### Middleware placement
 
@@ -222,7 +226,7 @@ return securityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWrite
      <Route path="*" element={<NotFound />} />
    </Route>
    ```
-3. Also add a top-level catch-all after all route groups for URLs that don't match any layout
+3. Also add a top-level catch-all after all route groups (auth, AppLayout, ImmersiveLayout) for URLs that don't match any layout. Note: this top-level catch-all will render WITHOUT AppLayout navigation chrome. The implementer should decide whether to render a standalone 404 page or redirect to the AppLayout 404 — a standalone page is simpler and acceptable for this round
 
 **Testing:**
 - **Red:** Vitest + MemoryRouter test navigates to `/nonexistent`, asserts "Page not found" text is visible and a link to `/` exists
@@ -269,7 +273,7 @@ return securityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWrite
   working-directory: web
 ```
 
-These steps must come before `go vet`, `go test`, etc.
+These steps must come before `go vet`, `staticcheck`, and `go test` — all three require `web/dist` to exist because they analyze `web.go` which has the `//go:embed web/dist` directive. Place the Node/build steps immediately after `Setup Go` and `Install tools`.
 
 ### #40: Run frontend tests in CI
 
