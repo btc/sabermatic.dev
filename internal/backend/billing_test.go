@@ -403,6 +403,114 @@ func TestFullRefundSessionMinutes_FailSession(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Idempotency tests for refund queries
+// ---------------------------------------------------------------------------
+
+func TestRefundSessionMinutes_Idempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	// Create a 30-min session (reserves 30 from 60-min grant).
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID: userID, QuestionID: questionID, DurationMinutes: 30, Plan: "free",
+	})
+	require.NoError(t, err)
+
+	// Complete immediately → actual ~1 min, refund ~29.
+	err = b.CompleteSession(ctx, session.ID, 3)
+	require.NoError(t, err)
+
+	// Balance after first refund: should be ~59.
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	balanceAfterFirstRefund := bs.TotalBalance
+	assert.GreaterOrEqual(t, balanceAfterFirstRefund, int32(58))
+
+	// Artificially reduce the grant's remaining_minutes so there is room for a
+	// double-refund to slip through (defeats the remaining <= initial guard).
+	_, err = b.pool.Exec(ctx,
+		`UPDATE grants SET remaining_minutes = remaining_minutes - 29 WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
+	// Call RefundSessionMinutes again on the same session — should be a no-op (0 rows).
+	rows, err := db.New(b.pool).RefundSessionMinutes(ctx, pgtype.UUID{Bytes: session.ID, Valid: true})
+	require.NoError(t, err)
+	assert.Empty(t, rows, "second call to RefundSessionMinutes should return 0 rows")
+
+	// Balance should be (balanceAfterFirstRefund - 29) — only the manual deduction.
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, balanceAfterFirstRefund-29, bs.TotalBalance, "balance should not change on duplicate refund")
+}
+
+func TestFullRefundSessionMinutes_Idempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	b := newTestBackend(t)
+	ctx := context.Background()
+
+	userID := seedUser(t, b)
+	questionID := seedQuestion(t, b)
+	seedFreeGrant(t, b, userID, 60)
+
+	// Create a 30-min session (reserves 30 from 60-min grant).
+	session, err := b.CreateSession(ctx, CreateSessionParams{
+		UserID: userID, QuestionID: questionID, DurationMinutes: 30, Plan: "free",
+	})
+	require.NoError(t, err)
+
+	// Balance after reservation: 60 - 30 = 30.
+	bs, err := db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), bs.TotalBalance)
+
+	// Full refund — returns all 30 reserved minutes.
+	rows, err := db.New(b.pool).FullRefundSessionMinutes(ctx, db.FullRefundSessionMinutesParams{
+		Reason:    "session_refund",
+		SessionID: pgtype.UUID{Bytes: session.ID, Valid: true},
+	})
+	require.NoError(t, err)
+	assert.NotEmpty(t, rows, "first call should return refund rows")
+
+	// Balance restored to 60.
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(60), bs.TotalBalance)
+
+	// Artificially reduce the grant's remaining_minutes so there is room for a
+	// double-refund to slip through (defeats the remaining <= initial guard).
+	_, err = b.pool.Exec(ctx,
+		`UPDATE grants SET remaining_minutes = remaining_minutes - 30 WHERE user_id = $1`, userID)
+	require.NoError(t, err)
+
+	// Balance: 60 - 30 = 30.
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), bs.TotalBalance)
+
+	// Call FullRefundSessionMinutes again on first session — should be a no-op (0 rows).
+	rows, err = db.New(b.pool).FullRefundSessionMinutes(ctx, db.FullRefundSessionMinutesParams{
+		Reason:    "session_refund",
+		SessionID: pgtype.UUID{Bytes: session.ID, Valid: true},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, rows, "second call to FullRefundSessionMinutes should return 0 rows")
+
+	// Balance unchanged at 30 (no double refund).
+	bs, err = db.New(b.pool).GetBillingSnapshot(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), bs.TotalBalance, "balance should not change on duplicate refund")
+}
+
+// ---------------------------------------------------------------------------
 // Stripe webhook handler integration tests
 // ---------------------------------------------------------------------------
 

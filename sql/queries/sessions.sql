@@ -38,13 +38,30 @@ UPDATE interview_sessions
 SET status = 'completed', ended_at = NOW(), updated_at = NOW()
 WHERE id = $1;
 
--- name: MarkAbandonedSessionsCompleted :many
--- Batch-marks all abandoned sessions as completed and returns their IDs.
--- A session is abandoned if it's active and past its duration + 5 min buffer.
+-- name: CancelAbandonedEmptySessions :many
+-- Batch-cancels abandoned sessions that have zero candidate messages.
+-- These are empty sessions where no interview happened.
+UPDATE interview_sessions
+SET status = 'cancelled', ended_at = NOW(), archived_at = NOW(), updated_at = NOW()
+WHERE status = 'active'
+  AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
+  AND NOT EXISTS (
+    SELECT 1 FROM messages m
+    WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
+  )
+RETURNING id;
+
+-- name: CompleteAbandonedActiveSessions :many
+-- Batch-completes abandoned sessions that have at least one candidate message.
+-- These are real interviews that the user forgot to end.
 UPDATE interview_sessions
 SET status = 'completed', ended_at = NOW(), updated_at = NOW()
 WHERE status = 'active'
   AND started_at + (config_duration_minutes + 5) * INTERVAL '1 minute' < NOW()
+  AND EXISTS (
+    SELECT 1 FROM messages m
+    WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
+  )
 RETURNING id;
 
 -- name: UpdateSessionStatusOnly :exec

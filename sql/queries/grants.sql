@@ -132,11 +132,16 @@ LIMIT $2;
 -- name: RefundSessionMinutes :many
 -- Refunds unused minutes for a completed session based on wall-clock duration.
 -- Derives user_id from the session — caller only needs session_id.
+-- Idempotent: returns 0 rows if session_refund ledger entries already exist.
 WITH RECURSIVE
   sess AS (
     SELECT user_id, reserved_minutes, started_at, ended_at
     FROM interview_sessions
     WHERE id = @session_id AND reserved_minutes IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_entries
+        WHERE session_id = @session_id AND reason = 'session_refund'
+      )
   ),
   refund_calc AS (
     SELECT GREATEST(0,
@@ -185,11 +190,16 @@ RETURNING grant_id, amount;
 -- name: FullRefundSessionMinutes :many
 -- Refunds all reserved minutes for a session. Used by FailSession (platform error).
 -- Derives user_id and reserved_minutes from the session — caller only needs session_id.
+-- Idempotent: returns 0 rows if session_refund ledger entries already exist.
 WITH RECURSIVE
   sess AS (
     SELECT user_id, reserved_minutes
     FROM interview_sessions
     WHERE id = @session_id AND reserved_minutes IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_entries
+        WHERE session_id = @session_id AND reason = 'session_refund'
+      )
   ),
   reserves AS (
     SELECT grant_id, -amount AS debit,
