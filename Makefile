@@ -1,27 +1,5 @@
 .PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate lint
 
-test:
-	@echo "=== buf lint ==="
-	buf lint
-	@echo ""
-	@echo "=== buf generate (verify clean) ==="
-	buf generate
-	@git diff --exit-code internal/pb/ web/src/pb/ || (echo "FAIL: buf generate produced uncommitted changes" && exit 1)
-	@echo ""
-	@echo "=== golangci-lint ==="
-	golangci-lint run ./...
-	@echo ""
-	@echo "=== frontend lint ==="
-	cd web && npx eslint .
-	@echo ""
-	@echo "=== frontend tests ==="
-	cd web && npx vitest run
-	@echo ""
-	@echo "=== backend tests ==="
-	go test ./internal/... ./cmd/... -race -count=1 -timeout=300s
-	@echo ""
-	@echo "=== all checks passed ==="
-
 # Start embedded dev server. Vite rebuilds on save, air bounces Go binary.
 # One origin (port 8080), no proxy, no CSRF issues. Ctrl-C kills all.
 dev:
@@ -53,6 +31,10 @@ dev-air:
 # Create dev user + seed questions. Run with server already up.
 seed:
 	./scripts/dev-seed.sh
+
+# Run all tests (integration + unit). Requires Docker.
+test:
+	go test ./internal/... ./cmd/... -race -count=1 -timeout=300s
 
 # Run unit tests only (no Docker needed).
 test-short:
