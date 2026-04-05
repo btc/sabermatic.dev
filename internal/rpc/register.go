@@ -10,6 +10,7 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	"github.com/btc/drill/internal/rpc/question"
+	"github.com/btc/drill/internal/rpc/session"
 	"github.com/btc/drill/internal/rpc/user"
 )
 
@@ -18,6 +19,7 @@ import (
 func ConnectPathPrefixes() []string {
 	return []string{
 		drillv1connect.QuestionServiceName,
+		drillv1connect.SessionServiceName,
 		drillv1connect.UserServiceName,
 	}
 }
@@ -35,6 +37,7 @@ func Register(mux *http.ServeMux, b *backend.Backend) error {
 	)
 
 	mux.Handle(drillv1connect.NewQuestionServiceHandler(question.NewServer(b), opts))
+	mux.Handle(drillv1connect.NewSessionServiceHandler(session.NewServer(b), opts))
 	mux.Handle(drillv1connect.NewUserServiceHandler(user.NewServer(b), opts))
 	return nil
 }
