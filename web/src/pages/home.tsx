@@ -21,6 +21,8 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 
+// DB constraint enforces difficulty IN ('medium', 'hard'), so UNSPECIFIED
+// should never appear in ListQuestions responses. Defaults are defensive.
 function difficultyVariant(d: Difficulty): "secondary" | "destructive" {
   return d === Difficulty.HARD ? "destructive" : "secondary";
 }
