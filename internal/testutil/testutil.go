@@ -7,7 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +23,7 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/handler"
+	migrations "github.com/btc/drill/sql/migrations"
 )
 
 // StartPostgres starts a Postgres 16 container, runs app migrations, and
@@ -53,8 +53,8 @@ func StartPostgres(t *testing.T) string {
 		t.Fatalf("get connection string: %v", err)
 	}
 
-	// Run migrations (path from internal/testutil/ to sql/migrations/).
-	d, err := iofs.New(os.DirFS("../../sql/migrations"), ".")
+	// Run migrations using the embedded FS — works regardless of test CWD.
+	d, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		t.Fatalf("create migration source: %v", err)
 	}
@@ -68,6 +68,13 @@ func StartPostgres(t *testing.T) string {
 	}
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		t.Fatalf("migrate up: %v", err)
+	}
+	srcErr, dbErr := m.Close()
+	if srcErr != nil {
+		t.Fatalf("close migration source: %v", srcErr)
+	}
+	if dbErr != nil {
+		t.Fatalf("close migration db: %v", dbErr)
 	}
 
 	return connStr
