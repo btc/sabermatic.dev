@@ -169,6 +169,9 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
         <p className="text-sm text-muted-foreground">Evaluation not available.</p>
+        <p className="text-sm text-zinc-400">
+          This session has not been evaluated yet. Evaluation begins automatically when a session ends.
+        </p>
       </div>
     );
   }
