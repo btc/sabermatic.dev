@@ -82,13 +82,13 @@ func (s *Server) RequestEducatorAnalysis(
 func mapBackendError(err error) *connect.Error {
 	switch {
 	case errors.Is(err, backend.ErrSessionNotFound):
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, errors.New("session not found"))
 	case errors.Is(err, backend.ErrSessionNotOwned):
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, errors.New("session not found"))
 	case errors.Is(err, backend.ErrEvaluationNotReady):
-		return connect.NewError(connect.CodeFailedPrecondition, err)
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("session not yet reviewed"))
 	case errors.Is(err, backend.ErrNoPaidBalance):
-		return connect.NewError(connect.CodeFailedPrecondition, err)
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("insufficient paid balance"))
 	default:
 		return connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
