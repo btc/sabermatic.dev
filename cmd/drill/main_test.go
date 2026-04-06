@@ -10,35 +10,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/btc/drill/internal/testutil"
 )
 
+var pg testutil.PG
+
+func TestMain(m *testing.M) {
+	pg = testutil.SharedPostgres()
+	pg.RunTests(m)
+}
+
 func TestFullStartup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx := context.Background()
-
-	// Start Postgres container
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("drill_test"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { pgContainer.Terminate(ctx) })
-
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	connStr := pg.NewDatabase(t)
 
 	// Find a free port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -46,7 +30,7 @@ func TestFullStartup(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
-	// Set env vars
+	// Set env vars — runWithContext calls config.Load which reads from env.
 	t.Setenv("DATABASE_URL", connStr)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
@@ -54,6 +38,7 @@ func TestFullStartup(t *testing.T) {
 	t.Setenv("SERVER_PORT", fmt.Sprintf("%d", port))
 
 	// Start server with cancellable context
+	ctx := context.Background()
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -89,7 +74,6 @@ func TestFullStartup(t *testing.T) {
 	// Wait for shutdown to complete
 	select {
 	case err := <-errCh:
-		// nil or http.ErrServerClosed are both fine
 		if err != nil {
 			require.ErrorIs(t, err, http.ErrServerClosed)
 		}
