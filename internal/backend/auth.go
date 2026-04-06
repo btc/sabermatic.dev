@@ -214,7 +214,7 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (_ *LoginResult, err
 		UserAgent: p.UserAgent,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("login: %w", err)
 	}
 
 	return &LoginResult{

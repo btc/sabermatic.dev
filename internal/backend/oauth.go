@@ -187,7 +187,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
 		UserAgent: p.UserAgent,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("oauth login: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
