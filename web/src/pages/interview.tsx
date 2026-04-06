@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -137,7 +138,7 @@ function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: Waitin
     }
   }, [sessionResp?.session?.status, sessionId, navigate]);
 
-  const candidateTurns = Math.ceil(messageCount / 2);
+  const candidateTurns = Math.floor(messageCount / 2);
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8 px-4">
@@ -180,6 +181,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     state,
     connectionState,
     sessionInfo,
+    lastError,
     sendText,
     sendAudio,
     endSession,
@@ -206,6 +208,13 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     }
   }, [state, navigate]);
 
+  // Show server errors as toasts
+  useEffect(() => {
+    if (lastError) {
+      toast.error(lastError);
+    }
+  }, [lastError]);
+
   // Local state
   const [textInput, setTextInput] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
@@ -226,7 +235,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
         audioPlayer.done();
       }
     });
-  }, [setRawMessageHandler, audioPlayer, audioPlayer.enqueue, audioPlayer.done]);
+  }, [setRawMessageHandler, audioPlayer]);
 
   // ------ AudioContext init on first interaction ------
   const ensureAudioContext = useCallback(() => {
@@ -235,6 +244,12 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       setAudioContextInitialized(true);
     }
   }, [audioContextInitialized, audioPlayer]);
+
+  // ------ Derived state (hoisted above effects that reference it) ------
+  const isStreaming = state === "streaming";
+  const isProcessing = state === "transcribing" || state === "processing";
+  const isEnded = state === "ended" || state === "cancelled";
+  const inputDisabled = isStreaming || isEnded || connectionState === ConnectionState.Reconnecting;
 
   // ------ Auto-scroll ------
   useEffect(() => {
@@ -251,7 +266,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const { isRecording: recIsRecording, start: recStart, stop: recStop } = audioRecorder;
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !inputFocused && !recIsRecording) {
+      if (e.code === "Space" && !inputFocused && !inputDisabled && !recIsRecording) {
         e.preventDefault();
         stopTts();
         ensureAudioContext();
@@ -270,7 +285,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("keyup", handleKeyUp);
     };
-  }, [inputFocused, recIsRecording, recStart, recStop, ensureAudioContext, stopTts]);
+  }, [inputFocused, inputDisabled, recIsRecording, recStart, recStop, ensureAudioContext, stopTts]);
 
   // ------ Escape to blur input ------
   useEffect(() => {
@@ -294,12 +309,14 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   }, [textInput, sendText, ensureAudioContext, stopTts]);
 
   const handleSendAudio = useCallback(async () => {
+    if (audioRecorder.segmentCount === 0) return;
+    stopTts();
     ensureAudioContext();
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
       sendAudio(audioBase64);
     }
-  }, [audioRecorder, sendAudio, ensureAudioContext]);
+  }, [audioRecorder, sendAudio, ensureAudioContext, stopTts]);
 
   const handleSend = useCallback(() => {
     if (textInput.trim()) {
@@ -316,12 +333,19 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     }
   };
 
-  // ------ Derived state ------
-  const isStreaming = state === "streaming";
-  const isProcessing = state === "transcribing" || state === "processing";
-  const isEnded = state === "ended" || state === "cancelled";
-  const inputDisabled = isStreaming || isEnded;
   const canSend = (textInput.trim().length > 0 || audioRecorder.segmentCount > 0) && !inputDisabled;
+
+  // ------ Global Enter to submit (e.g. after spacebar audio recording) ------
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Enter" && !inputFocused && !inputDisabled && !cancelDialogOpen && !endDialogOpen) {
+        e.preventDefault();
+        handleSend();
+      }
+    };
+    document.addEventListener("keydown", handleGlobalKeyDown);
+    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [inputFocused, inputDisabled, cancelDialogOpen, endDialogOpen, handleSend]);
 
   // ------ Timer color ------
   const timerColor =
@@ -384,7 +408,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
         className="flex-1 overflow-y-auto"
         onClick={ensureAudioContext}
       >
-        <div className="flex flex-col justify-end min-h-full px-4 py-6 max-w-2xl mx-auto">
+        <div className="flex flex-col justify-center min-h-full px-4 py-6 max-w-2xl mx-auto">
           <div className="space-y-4">
             {messages.map((msg) =>
               msg.role === "interviewer" ? (
@@ -411,6 +435,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
           <Button
             variant="ghost"
             size="icon"
+            aria-label={audioRecorder.isRecording ? "Stop recording" : "Start recording"}
             disabled={inputDisabled}
             className={cn(
               audioRecorder.isRecording && "ring-2 ring-red-500 animate-pulse",
@@ -461,6 +486,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
           <Button
             variant="default"
             size="icon"
+            aria-label="Send message"
             disabled={!canSend}
             onClick={handleSend}
           >

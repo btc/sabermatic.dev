@@ -31,6 +31,7 @@ export function useInterview(sessionId: string) {
     tts_enabled: boolean;
     question: { title: string; prompt: string };
   } | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   const cmRef = useRef<ConnectionManager | null>(null);
   const lastSeqRef = useRef<number | null>(null);
@@ -48,14 +49,17 @@ export function useInterview(sessionId: string) {
           tts_enabled: msg.tts_enabled,
           question: msg.question,
         });
-        setState("streaming"); // opening message incoming
+        // State will be set by the next message: either interviewer_token
+        // (new session) or reconnect_state (page refresh of existing session).
         break;
 
       case "reconnect_state": {
+        // Do not update lastSeqRef here. The CM getter always reads the
+        // current ref value, and keeping it null ensures every reconnect
+        // takes the page-refresh path (server sends all messages). This
+        // avoids message loss when setMessages replaces the array with
+        // only a delta on second+ reconnects.
         const msgs = msg.messages;
-        if (msgs.length > 0) {
-          lastSeqRef.current = msgs[msgs.length - 1]!.seq;
-        }
         setMessages(
           msgs.map((m) => ({
             id: m.id,
@@ -101,9 +105,15 @@ export function useInterview(sessionId: string) {
         break;
       }
 
-      case "transcription_result":
-        // Transcription text is informational (no edit window per spec)
+      case "transcription_result": {
+        // Add the candidate's voice message to the chat using transcribed text.
+        const text = msg.text;
+        setMessages((prev) => {
+          const displaySeq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
+          return [...prev, { id: `local-${displaySeq}`, seq: displaySeq, role: "candidate", content: text }];
+        });
         break;
+      }
 
       case "session_ended":
         setState(msg.reason === "cancelled" ? "cancelled" : "ended");
@@ -116,6 +126,7 @@ export function useInterview(sessionId: string) {
 
       case "error":
         console.error(`WS error: ${msg.code} — ${msg.message}`);
+        setLastError(msg.message);
         break;
 
       // timer_warning, timer_overtime: handled by useTimer
@@ -128,7 +139,7 @@ export function useInterview(sessionId: string) {
   useEffect(() => {
     const cm = new ConnectionManager(sessionId, handleMessage, setConnectionState);
     cmRef.current = cm;
-    cm.connect(lastSeqRef.current);
+    cm.connect(() => lastSeqRef.current);
     return () => cm.destroy();
   }, [sessionId, handleMessage]);
 
@@ -186,6 +197,7 @@ export function useInterview(sessionId: string) {
     state,
     connectionState,
     sessionInfo,
+    lastError,
     sendText,
     sendAudio,
     endSession,
