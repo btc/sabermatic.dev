@@ -79,11 +79,9 @@ func startQuestionServer(t *testing.T, b *backend.Backend) string {
 }
 
 func TestListQuestions_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startQuestionServer(t, b)
 
 	// No cookie — plain HTTP client.
@@ -94,11 +92,9 @@ func TestListQuestions_Unauthenticated(t *testing.T) {
 }
 
 func TestListQuestions_Authenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	seedQuestions(t, b, 3)
 
 	srvURL := startQuestionServer(t, b)
@@ -112,11 +108,9 @@ func TestListQuestions_Authenticated(t *testing.T) {
 }
 
 func TestListQuestions_Pagination(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	seedQuestions(t, b, 3)
 
 	srvURL := startQuestionServer(t, b)
@@ -148,11 +142,9 @@ func TestListQuestions_Pagination(t *testing.T) {
 }
 
 func TestListQuestions_InvalidPageToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startQuestionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -165,11 +157,9 @@ func TestListQuestions_InvalidPageToken(t *testing.T) {
 }
 
 func TestListQuestions_EnumMapping(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	seedQuestions(t, b, 4)
 
 	srvURL := startQuestionServer(t, b)
