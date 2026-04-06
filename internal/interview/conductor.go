@@ -550,7 +550,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 	c.send(ctx, msgStateChange(StateProcessingInput))
 
 	// Persist candidate message.
-	candidateMsg, err := c.persistMessage(ctx, messageID, "candidate", candidateContent, msg.InputMethod)
+	candidateMsg, err := c.persistMessage(context.WithoutCancel(ctx), messageID, "candidate", candidateContent, msg.InputMethod)
 	if err != nil {
 		slog.Error("conductor: persist candidate message", "error", err, "session_id", c.sessionID)
 		return fmt.Errorf("persist candidate message: %w", err)
