@@ -11,6 +11,7 @@ export class ConnectionManager {
   ws: WebSocket | null = null;
   private getLastSeq: () => number | null = () => null;
   private retryCount = 0;
+  private static readonly MAX_RETRIES = 20;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private healthCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
@@ -65,6 +66,11 @@ export class ConnectionManager {
     }, 3000);
   }
 
+  retry() {
+    this.retryCount = 0;
+    this.open();
+  }
+
   private open() {
     if (this.destroyed) return;
     this.onStateChange(ConnectionState.Connecting);
@@ -108,6 +114,10 @@ export class ConnectionManager {
         return;
       }
       // Unexpected close — reconnect with backoff
+      if (this.retryCount >= ConnectionManager.MAX_RETRIES) {
+        this.onStateChange(ConnectionState.Disconnected);
+        return;
+      }
       this.onStateChange(ConnectionState.Reconnecting);
       const delay = Math.min(1000 * Math.pow(2, this.retryCount), 30000);
       const jitter = delay * (0.5 + Math.random() * 0.5);
