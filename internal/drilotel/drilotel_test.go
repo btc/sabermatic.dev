@@ -33,7 +33,7 @@ func TestInit_StdoutExporter(t *testing.T) {
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
 	defer func() {
-		p.Shutdown(context.Background())
+		p.Shutdown(context.Background()) //nolint:errcheck // test cleanup
 		otel.SetTracerProvider(trace.NewNoopTracerProvider())
 	}()
 

@@ -16,7 +16,7 @@ func NewBackend(t *testing.T, cfg *config.Config) *backend.Backend {
 	t.Helper()
 	b, err := backend.New(cfg)
 	require.NoError(t, err)
-	t.Cleanup(func() { b.Close() })
+	t.Cleanup(func() { b.Close() }) //nolint:errcheck // test cleanup
 	return b
 }
 
