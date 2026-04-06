@@ -98,7 +98,13 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
 
     p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
-    tx, err := b.pool.Begin(ctx)
+    // Read Committed: FOR UPDATE blocks concurrent access to existing rows,
+    // and ON CONFLICT DO NOTHING handles concurrent inserts. Higher isolation
+    // levels would convert these into serialization failures requiring
+    // full-transaction retries.
+    tx, err := b.pool.BeginTx(ctx, pgx.TxOptions{
+        IsoLevel: pgx.ReadCommitted,
+    })
     // ...
     q := db.New(tx)
 
