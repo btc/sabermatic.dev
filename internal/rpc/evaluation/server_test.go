@@ -2,18 +2,15 @@ package evaluation_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"testing"
-	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -62,74 +59,52 @@ func startEvaluationServer(t *testing.T, b *backend.Backend) string {
 	return srv.URL
 }
 
-// createTestUser inserts a user directly and returns their ID.
-func createTestUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+// userIDFromToken resolves the user ID from a raw session token by hashing it
+// and looking up the auth session in the database.
+func userIDFromToken(t *testing.T, b *backend.Backend, rawToken string) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
-	user, err := db.New(pool).CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("test-%s@example.com", uuid.NewString()[:8]),
-		PasswordHash: pgtype.Text{String: "$2a$04$dummy", Valid: true},
-		DisplayName:  "Test User",
+	tokenHash := auth.HashSessionToken(rawToken)
+	row, err := db.New(b.Pool()).GetAuthSessionByToken(ctx, tokenHash)
+	require.NoError(t, err)
+	return row.UserID
+}
+
+// seedQuestion inserts a question via sqlc and returns its UUID.
+func seedQuestion(t *testing.T, b *backend.Backend) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	id, err := db.New(b.Pool()).InsertQuestion(ctx, db.InsertQuestionParams{
+		UserID:         pgtype.UUID{},
+		Title:          "Design a URL Shortener",
+		Prompt:         "Design a URL shortening service like bit.ly.",
+		Difficulty:     "medium",
+		Tags:           []string{"system-design"},
+		Source:         "seed",
+		CoachRationale: pgtype.Text{},
 	})
 	require.NoError(t, err)
-	return user.ID
+	return id
 }
 
-// createTestQuestion inserts a question directly using raw SQL.
-func createTestQuestion(t *testing.T, pool *pgxpool.Pool) db.Question {
+// seedSession creates an interview session via the production backend method.
+func seedSession(t *testing.T, b *backend.Backend, userID, questionID uuid.UUID) db.InterviewSession {
 	t.Helper()
 	ctx := context.Background()
-	qID := uuid.New()
-	_, err := pool.Exec(ctx,
-		`INSERT INTO questions (id, title, prompt, difficulty, tags, source)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		qID,
-		"Design a URL Shortener",
-		"Design a URL shortening service like bit.ly.",
-		"medium",
-		[]string{"system-design"},
-		"seed",
-	)
-	require.NoError(t, err)
-	q, err := db.New(pool).GetQuestion(ctx, qID)
-	require.NoError(t, err)
-	return q
-}
-
-// createTestSession inserts an active interview session and returns it.
-func createTestSession(t *testing.T, pool *pgxpool.Pool, userID, questionID uuid.UUID) db.InterviewSession {
-	t.Helper()
-	ctx := context.Background()
-	s, err := db.New(pool).CreateSession(ctx, db.CreateSessionParams{
-		UserID:                userID,
-		QuestionID:            questionID,
-		ConfigDurationMinutes: 45,
-		ConfigTtsEnabled:      false,
+	s, err := b.CreateSession(ctx, backend.CreateSessionParams{
+		UserID:          userID,
+		QuestionID:      questionID,
+		DurationMinutes: 15,
+		TTSEnabled:      false,
 	})
 	require.NoError(t, err)
 	return s
 }
 
-// createAuthCookie creates an auth session in the DB and returns the raw token.
-func createAuthToken(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) string {
+// setSessionStatus updates a session's status directly via sqlc.
+func setSessionStatus(t *testing.T, b *backend.Backend, sessionID uuid.UUID, status string) {
 	t.Helper()
-	ctx := context.Background()
-	rawToken, tokenHash, err := auth.GenerateSessionToken()
-	require.NoError(t, err)
-
-	_, err = db.New(pool).CreateAuthSession(ctx, db.CreateAuthSessionParams{
-		UserID:    userID,
-		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
-	})
-	require.NoError(t, err)
-	return rawToken
-}
-
-// setSessionStatus updates a session's status directly via SQL.
-func setSessionStatus(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID, status string) {
-	t.Helper()
-	err := db.New(pool).UpdateSessionStatusOnly(context.Background(), db.UpdateSessionStatusOnlyParams{
+	err := db.New(b.Pool()).UpdateSessionStatusOnly(context.Background(), db.UpdateSessionStatusOnlyParams{
 		ID:     sessionID,
 		Status: status,
 	})
@@ -137,9 +112,9 @@ func setSessionStatus(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID, sta
 }
 
 // seedEvaluation inserts an evaluation row and returns its ID.
-func seedEvaluation(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID) uuid.UUID {
+func seedEvaluation(t *testing.T, b *backend.Backend, sessionID uuid.UUID) uuid.UUID {
 	t.Helper()
-	evalID, err := db.New(pool).InsertEvaluation(context.Background(), db.InsertEvaluationParams{
+	evalID, err := db.New(b.Pool()).InsertEvaluation(context.Background(), db.InsertEvaluationParams{
 		SessionID:          sessionID,
 		ScoreRequirements:  3,
 		ScoreArchitecture:  4,
@@ -156,9 +131,9 @@ func seedEvaluation(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID) uuid.
 }
 
 // seedMessage inserts a message into a session.
-func seedMessage(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID, seq int32, role, content string) db.Message {
+func seedMessage(t *testing.T, b *backend.Backend, sessionID uuid.UUID, seq int32, role, content string) db.Message {
 	t.Helper()
-	msg, err := db.New(pool).InsertMessage(context.Background(), db.InsertMessageParams{
+	msg, err := db.New(b.Pool()).InsertMessage(context.Background(), db.InsertMessageParams{
 		ID:          uuid.New(),
 		SessionID:   sessionID,
 		Seq:         seq,
@@ -171,9 +146,9 @@ func seedMessage(t *testing.T, pool *pgxpool.Pool, sessionID uuid.UUID, seq int3
 }
 
 // seedAnnotation inserts an annotation for the given evaluation and message.
-func seedAnnotation(t *testing.T, pool *pgxpool.Pool, evalID, msgID uuid.UUID, annType, content string) {
+func seedAnnotation(t *testing.T, b *backend.Backend, evalID, msgID uuid.UUID, annType, content string) {
 	t.Helper()
-	err := db.New(pool).InsertAnnotation(context.Background(), db.InsertAnnotationParams{
+	err := db.New(b.Pool()).InsertAnnotation(context.Background(), db.InsertAnnotationParams{
 		EvaluationID:   evalID,
 		MessageID:      msgID,
 		AnnotationType: annType,
@@ -209,18 +184,16 @@ func TestGetEvaluation_Success(t *testing.T) {
 	}
 
 	b := testutil.NewTestBackend(t)
-	pool := b.Pool()
+	token := testutil.SignupAndLogin(t, b)
+	userID := userIDFromToken(t, b, token)
+	questionID := seedQuestion(t, b)
+	session := seedSession(t, b, userID, questionID)
+	setSessionStatus(t, b, session.ID, "reviewed")
 
-	userID := createTestUser(t, pool)
-	question := createTestQuestion(t, pool)
-	session := createTestSession(t, pool, userID, question.ID)
-	setSessionStatus(t, pool, session.ID, "reviewed")
+	msg1 := seedMessage(t, b, session.ID, 1, "interviewer", "Tell me about requirements.")
+	evalID := seedEvaluation(t, b, session.ID)
+	seedAnnotation(t, b, evalID, msg1.ID, "strength", "Good opening question.")
 
-	msg1 := seedMessage(t, pool, session.ID, 1, "interviewer", "Tell me about requirements.")
-	evalID := seedEvaluation(t, pool, session.ID)
-	seedAnnotation(t, pool, evalID, msg1.ID, "strength", "Good opening question.")
-
-	token := createAuthToken(t, pool, userID)
 	srvURL := startEvaluationServer(t, b)
 	client := authedClient(t, srvURL, token)
 
@@ -254,11 +227,7 @@ func TestGetEvaluation_NotFound(t *testing.T) {
 	}
 
 	b := testutil.NewTestBackend(t)
-	pool := b.Pool()
-
-	userID := createTestUser(t, pool)
-	token := createAuthToken(t, pool, userID)
-
+	token := testutil.SignupAndLogin(t, b)
 	srvURL := startEvaluationServer(t, b)
 	client := authedClient(t, srvURL, token)
 
@@ -292,14 +261,12 @@ func TestRetryEvaluation_FailedPrecondition(t *testing.T) {
 	}
 
 	b := testutil.NewTestBackend(t)
-	pool := b.Pool()
+	token := testutil.SignupAndLogin(t, b)
+	userID := userIDFromToken(t, b, token)
+	questionID := seedQuestion(t, b)
+	session := seedSession(t, b, userID, questionID)
+	setSessionStatus(t, b, session.ID, "reviewed") // Not evaluation_failed
 
-	userID := createTestUser(t, pool)
-	question := createTestQuestion(t, pool)
-	session := createTestSession(t, pool, userID, question.ID)
-	setSessionStatus(t, pool, session.ID, "reviewed") // Not evaluation_failed
-
-	token := createAuthToken(t, pool, userID)
 	srvURL := startEvaluationServer(t, b)
 	client := authedClient(t, srvURL, token)
 
@@ -316,14 +283,12 @@ func TestRetryEvaluation_Success(t *testing.T) {
 	}
 
 	b := testutil.NewTestBackend(t)
-	pool := b.Pool()
+	token := testutil.SignupAndLogin(t, b)
+	userID := userIDFromToken(t, b, token)
+	questionID := seedQuestion(t, b)
+	session := seedSession(t, b, userID, questionID)
+	setSessionStatus(t, b, session.ID, "evaluation_failed")
 
-	userID := createTestUser(t, pool)
-	question := createTestQuestion(t, pool)
-	session := createTestSession(t, pool, userID, question.ID)
-	setSessionStatus(t, pool, session.ID, "evaluation_failed")
-
-	token := createAuthToken(t, pool, userID)
 	srvURL := startEvaluationServer(t, b)
 	client := authedClient(t, srvURL, token)
 
@@ -339,14 +304,12 @@ func TestGetEvaluation_EvaluationNotReady(t *testing.T) {
 	}
 
 	b := testutil.NewTestBackend(t)
-	pool := b.Pool()
-
-	userID := createTestUser(t, pool)
-	question := createTestQuestion(t, pool)
+	token := testutil.SignupAndLogin(t, b)
+	userID := userIDFromToken(t, b, token)
+	questionID := seedQuestion(t, b)
 	// Session starts in "active" status — not reviewed or evaluation_failed.
-	session := createTestSession(t, pool, userID, question.ID)
+	session := seedSession(t, b, userID, questionID)
 
-	token := createAuthToken(t, pool, userID)
 	srvURL := startEvaluationServer(t, b)
 	client := authedClient(t, srvURL, token)
 
