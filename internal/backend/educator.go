@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,9 +19,11 @@ const previewModelAnswerLen = 200
 
 // EducatorResponse is the API response for educator analysis.
 type EducatorResponse struct {
-	Status       string `json:"status"`
-	ModelAnswer  string `json:"model_answer,omitempty"`
-	GapDeepDives string `json:"gap_deep_dives,omitempty"`
+	ID           string
+	CreatedAt    time.Time
+	Status       string
+	ModelAnswer  string
+	GapDeepDives string
 }
 
 // GetEducatorAnalysis returns the educator analysis for a session.
@@ -53,12 +56,14 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 
 	switch ea.Status {
 	case "generating":
-		return &EducatorResponse{Status: "generating"}, nil
+		return &EducatorResponse{ID: ea.ID.String(), CreatedAt: ea.CreatedAt, Status: "generating"}, nil
 	case "failed":
-		return &EducatorResponse{Status: "failed"}, nil
+		return &EducatorResponse{ID: ea.ID.String(), CreatedAt: ea.CreatedAt, Status: "failed"}, nil
 	case "completed":
 		if accessLevel == billing.Preview {
 			return &EducatorResponse{
+				ID:          ea.ID.String(),
+				CreatedAt:   ea.CreatedAt,
 				Status:      "completed",
 				ModelAnswer: truncateRunes(ea.ModelAnswer.String, previewModelAnswerLen),
 			}, nil
@@ -66,12 +71,14 @@ func (b *Backend) GetEducatorAnalysis(ctx context.Context, sessionID, userID uui
 		// FreeTaste users see full content on GET — the increment happens at
 		// request time (POST /educator) to avoid double-counting on page refresh.
 		return &EducatorResponse{
+			ID:           ea.ID.String(),
+			CreatedAt:    ea.CreatedAt,
 			Status:       "completed",
 			ModelAnswer:  ea.ModelAnswer.String,
 			GapDeepDives: ea.GapDeepDives.String,
 		}, nil
 	default:
-		return &EducatorResponse{Status: ea.Status}, nil
+		return &EducatorResponse{ID: ea.ID.String(), CreatedAt: ea.CreatedAt, Status: ea.Status}, nil
 	}
 }
 

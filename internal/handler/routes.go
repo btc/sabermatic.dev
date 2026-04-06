@@ -59,9 +59,8 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	// Sessions (REST CRUD migrated to ConnectRPC SessionService; WS stays)
 	mux.Handle("GET /api/sessions/{id}/ws", requireAuth(http.HandlerFunc(SessionWS(b))))
 
-	// Educator
-	mux.Handle("GET /api/sessions/{id}/educator", requireAuth(http.HandlerFunc(GetEducatorAnalysis(b))))
-	mux.Handle("POST /api/sessions/{id}/educator", requireAuth(http.HandlerFunc(RequestEducatorAnalysis(b))))
+	// (Educator routes migrated to ConnectRPC EducatorService)
+	// (Evaluation routes migrated to ConnectRPC EvaluationService)
 
 	// Coach
 	mux.Handle("GET /api/coach/latest", requireAuth(http.HandlerFunc(GetCoachAnalysis(b))))

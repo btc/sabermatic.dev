@@ -34,18 +34,6 @@ export interface Question {
 // (Evaluation types migrated to proto-generated code)
 // (Session/Message types migrated to proto-generated code)
 
-// --- Educator ---
-export type EducatorStatus = "generating" | "completed" | "failed";
-
-export interface EducatorAnalysis {
-  id: string;
-  session_id: string;
-  status: EducatorStatus;
-  model_answer: string | null;
-  gap_deep_dives: string | null;
-  created_at: string;
-}
-
 // --- Coach ---
 export interface CoachAnalysis {
   id: string;
