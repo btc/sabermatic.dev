@@ -9,6 +9,7 @@ import (
 
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
+	authsvc "github.com/btc/drill/internal/rpc/auth"
 	"github.com/btc/drill/internal/rpc/billing"
 	"github.com/btc/drill/internal/rpc/coach"
 	"github.com/btc/drill/internal/rpc/educator"
@@ -22,6 +23,7 @@ import (
 // services. Used by the CSRF middleware to exempt Connect routes.
 func ConnectPathPrefixes() []string {
 	return []string{
+		drillv1connect.AuthServiceName,
 		drillv1connect.BillingServiceName,
 		drillv1connect.EducatorServiceName,
 		drillv1connect.QuestionServiceName,
@@ -43,6 +45,10 @@ func Register(mux *http.ServeMux, b *backend.Backend) error {
 		otelInterceptor,
 		AuthInterceptor(b),
 	)
+
+	// Public endpoints (no auth interceptor).
+	publicOpts := connect.WithInterceptors(otelInterceptor)
+	mux.Handle(drillv1connect.NewAuthServiceHandler(authsvc.NewServer(b), publicOpts))
 
 	mux.Handle(drillv1connect.NewBillingServiceHandler(billing.NewServer(b), opts))
 	mux.Handle(drillv1connect.NewEducatorServiceHandler(educator.NewServer(b), opts))
