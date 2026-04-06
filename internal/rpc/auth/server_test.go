@@ -335,7 +335,6 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 }
 
 func TestDeleteAccount_RequiresAuth(t *testing.T) {
-	t.Skip("TODO: DeleteAccount RPC not yet implemented. See #87")
 	t.Parallel()
 
 	b := pg.NewBackend(t)
@@ -348,7 +347,6 @@ func TestDeleteAccount_RequiresAuth(t *testing.T) {
 }
 
 func TestDeleteAccount_Success(t *testing.T) {
-	t.Skip("TODO: DeleteAccount RPC not yet implemented. See #87")
 	t.Parallel()
 
 	b := pg.NewBackend(t)
@@ -363,16 +361,36 @@ func TestDeleteAccount_Success(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	cookieClient, _ := clientWithCookies(t, srvURL)
+	cookieClient, jar := clientWithCookies(t, srvURL)
 	_, err = cookieClient.Login(context.Background(), connect.NewRequest(&drillv1.LoginRequest{
 		Email:    "delete@example.com",
 		Password: "securepass123",
 	}))
 	require.NoError(t, err)
 
+	// Verify cookie was set after login.
+	u, _ := url.Parse(srvURL)
+	cookies := jar.Cookies(u)
+	var found bool
+	for _, c := range cookies {
+		if c.Name == iauth.SessionCookieName {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "expected session cookie after login")
+
 	// Delete account.
 	_, err = cookieClient.DeleteAccount(context.Background(), connect.NewRequest(&drillv1.DeleteAccountRequest{}))
 	require.NoError(t, err)
+
+	// Cookie should be cleared after deletion (MaxAge=-1 causes jar to remove it).
+	cookies = jar.Cookies(u)
+	for _, c := range cookies {
+		if c.Name == iauth.SessionCookieName {
+			require.Empty(t, c.Value, "session cookie should be cleared after account deletion")
+		}
+	}
 
 	// Login should fail after deletion (user is soft-deleted, sessions cleared).
 	_, err = client.Login(context.Background(), connect.NewRequest(&drillv1.LoginRequest{

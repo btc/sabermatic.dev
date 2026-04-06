@@ -100,9 +100,7 @@ func (s *Server) Logout(
 	}
 
 	resp := connect.NewResponse(&drillv1.LogoutResponse{})
-	resp.Header().Set("Set-Cookie", iauth.SessionCookie(
-		"", -1, s.b.Config().Auth.SecureCookies(),
-	).String())
+	clearSessionCookie(resp.Header(), s.b.Config().Auth.SecureCookies())
 	return resp, nil
 }
 
@@ -158,10 +156,34 @@ func (s *Server) ResetPassword(
 }
 
 // DeleteAccount soft-deletes the authenticated user's account.
-// TODO: implement when backend DeleteAccount method is added.
+// AuthService has no auth interceptor, so authentication is performed manually
+// by reading the session cookie from the request header.
 func (s *Server) DeleteAccount(
 	ctx context.Context,
 	req *connect.Request[drillv1.DeleteAccountRequest],
 ) (*connect.Response[drillv1.DeleteAccountResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("DeleteAccount not yet implemented"))
+	cookie, err := (&http.Request{Header: req.Header()}).Cookie(iauth.SessionCookieName)
+	if err != nil || cookie.Value == "" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
+
+	tokenHash := iauth.HashSessionToken(cookie.Value)
+	user, err := s.b.AuthenticateSession(ctx, tokenHash)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid or expired session"))
+	}
+
+	if err := s.b.DeleteAccount(ctx, user.ID); err != nil {
+		slog.Error("delete account failed", "error", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+	}
+
+	resp := connect.NewResponse(&drillv1.DeleteAccountResponse{})
+	clearSessionCookie(resp.Header(), s.b.Config().Auth.SecureCookies())
+	return resp, nil
+}
+
+// clearSessionCookie writes a Set-Cookie header that expires the session cookie.
+func clearSessionCookie(header http.Header, secureCookies bool) {
+	header.Set("Set-Cookie", iauth.SessionCookie("", -1, secureCookies).String())
 }

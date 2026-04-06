@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
@@ -107,4 +108,116 @@ func TestGetUsage_Authenticated(t *testing.T) {
 	require.Greater(t, resp.Msg.TotalBalance, int32(0))
 	require.Len(t, resp.Msg.Grants, 1)
 	require.NotNil(t, resp.Msg.RecentActivity)
+}
+
+// ---------------------------------------------------------------------------
+// UpdateProfile tests
+// ---------------------------------------------------------------------------
+
+func TestUpdateProfile_Success(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startUserServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	resp, err := client.UpdateProfile(context.Background(), connect.NewRequest(&drillv1.UpdateProfileRequest{
+		User: &drillv1.User{DisplayName: "New Name"},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"display_name"},
+		},
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, resp.Msg.User)
+	require.Equal(t, "New Name", resp.Msg.User.DisplayName)
+	require.NotEmpty(t, resp.Msg.User.Id)
+	require.Equal(t, "testuser@example.com", resp.Msg.User.Email)
+}
+
+func TestUpdateProfile_EmptyMask(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startUserServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.UpdateProfile(context.Background(), connect.NewRequest(&drillv1.UpdateProfileRequest{
+		User:       &drillv1.User{DisplayName: "New Name"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{}},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestUpdateProfile_UnknownField(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startUserServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.UpdateProfile(context.Background(), connect.NewRequest(&drillv1.UpdateProfileRequest{
+		User: &drillv1.User{DisplayName: "New Name"},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"bogus"},
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestUpdateProfile_UnsupportedField(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startUserServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.UpdateProfile(context.Background(), connect.NewRequest(&drillv1.UpdateProfileRequest{
+		User: &drillv1.User{},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"email"},
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestUpdateProfile_EmptyDisplayName(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startUserServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.UpdateProfile(context.Background(), connect.NewRequest(&drillv1.UpdateProfileRequest{
+		User: &drillv1.User{DisplayName: ""},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"display_name"},
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestUpdateProfile_Unauthenticated(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startUserServer(t, b)
+
+	client := drillv1connect.NewUserServiceClient(&http.Client{}, srvURL)
+	_, err := client.UpdateProfile(context.Background(), connect.NewRequest(&drillv1.UpdateProfileRequest{
+		User: &drillv1.User{DisplayName: "New Name"},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"display_name"},
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
 }
