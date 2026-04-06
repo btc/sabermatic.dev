@@ -508,7 +508,6 @@ func TestWS_CancelTTS(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_Reconnection(t *testing.T) {
-	t.Skip("TODO: flaky under parallel execution — advisory lock release timing. See #84")
 	t.Parallel()
 
 	tokens := []string{"Welcome."}
@@ -1590,7 +1589,6 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
-	t.Skip("TODO: flaky under parallel execution — advisory lock release timing. See #84")
 	t.Parallel()
 
 	tokens := []string{"Response."}
