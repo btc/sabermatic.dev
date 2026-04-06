@@ -74,18 +74,15 @@ func (s *Server) Login(
 		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
 
-	cfg := s.b.Config()
-	cookie := iauth.SessionCookie(
-		result.Token,
-		int(cfg.Auth.SessionTTL.Seconds()),
-		cfg.Auth.SecureCookies(),
-	)
-
 	resp := connect.NewResponse(&drillv1.LoginResponse{
 		Id:    result.UserID.String(),
 		Email: result.Email,
 	})
-	resp.Header().Set("Set-Cookie", cookie.String())
+	resp.Header().Set("Set-Cookie", iauth.SessionCookie(
+		result.Token,
+		int(s.b.Config().Auth.SessionTTL.Seconds()),
+		s.b.Config().Auth.SecureCookies(),
+	).String())
 	return resp, nil
 }
 
@@ -102,12 +99,10 @@ func (s *Server) Logout(
 		}
 	}
 
-	// Clear cookie regardless.
-	cfg := s.b.Config()
-	clearCookie := iauth.SessionCookie("", -1, cfg.Auth.SecureCookies())
-
 	resp := connect.NewResponse(&drillv1.LogoutResponse{})
-	resp.Header().Set("Set-Cookie", clearCookie.String())
+	resp.Header().Set("Set-Cookie", iauth.SessionCookie(
+		"", -1, s.b.Config().Auth.SecureCookies(),
+	).String())
 	return resp, nil
 }
 
