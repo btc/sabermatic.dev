@@ -187,19 +187,19 @@ func (s *Server) GetTranscript(
 func backendToConnectError(err error) *connect.Error {
 	switch {
 	case errors.Is(err, backend.ErrSessionNotFound):
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, errors.New("session not found"))
 	case errors.Is(err, backend.ErrSessionNotOwned):
-		return connect.NewError(connect.CodePermissionDenied, err)
+		return connect.NewError(connect.CodeNotFound, errors.New("session not found"))
 	case errors.Is(err, backend.ErrInvalidDuration):
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("invalid duration"))
 	case errors.Is(err, backend.ErrDurationExceedsPlan):
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("duration exceeds plan limit"))
 	case errors.Is(err, backend.ErrQuestionNotFound):
-		return connect.NewError(connect.CodeNotFound, err)
+		return connect.NewError(connect.CodeNotFound, errors.New("question not found"))
 	case errors.Is(err, backend.ErrConcurrentSessionLimit):
-		return connect.NewError(connect.CodeResourceExhausted, err)
+		return connect.NewError(connect.CodeResourceExhausted, errors.New("concurrent session limit reached"))
 	case errors.Is(err, backend.ErrInsufficientBalance):
-		return connect.NewError(connect.CodeResourceExhausted, err)
+		return connect.NewError(connect.CodeResourceExhausted, errors.New("insufficient minute balance"))
 	default:
 		return connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}

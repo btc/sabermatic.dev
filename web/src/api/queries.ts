@@ -19,7 +19,7 @@ export function useCreateQuestion() {
   });
 }
 
-// --- Session mutations (REST-based, not yet migrated to ConnectRPC) ---
+// --- Evaluation ---
 
 export function useRetryEvaluation(sessionId: string) {
   const qc = useQueryClient();
