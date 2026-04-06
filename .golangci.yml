@@ -25,6 +25,10 @@ linters:
         - name: exported
           disabled: true
   exclusions:
+    rules:
+      - path: internal/backend/oauth.go
+        linters: [errcheck]
+        text: "tx.Rollback"
     paths:
       - internal/pb
       - ".*\\.sql\\.go$"
