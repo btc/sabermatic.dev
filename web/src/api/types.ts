@@ -31,33 +31,8 @@ export interface Question {
   best_score?: number | null;
 }
 
-// --- Evaluation ---
-// NB: Matches EvaluationResponse from internal/backend/evaluation.go
-export interface EvaluationResponse {
-  status: string;
-  scores?: EvaluationScores;
-  strengths?: string[];
-  gaps?: string[];
-  advice?: string;
-  annotations?: AnnotationResponse[];
-}
-
-export interface EvaluationScores {
-  requirements: number;
-  architecture: number;
-  deep_dive: number;
-  scalability: number;
-  communication: number;
-  overall: number;
-}
-
-export type AnnotationType = "strength" | "gap" | "missed_opportunity" | "note";
-
-export interface AnnotationResponse {
-  message_seq: number;
-  type: AnnotationType;
-  content: string;
-}
+// (Evaluation types migrated to proto-generated code)
+// (Session/Message types migrated to proto-generated code)
 
 // --- Educator ---
 export type EducatorStatus = "generating" | "completed" | "failed";

@@ -1,0 +1,55 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+enum AnnotationType {
+  ANNOTATION_TYPE_UNSPECIFIED = 0;
+  ANNOTATION_TYPE_STRENGTH = 1;
+  ANNOTATION_TYPE_GAP = 2;
+  ANNOTATION_TYPE_MISSED_OPPORTUNITY = 3;
+  ANNOTATION_TYPE_NOTE = 4;
+}
+
+service EvaluationService {
+  rpc GetEvaluation(GetEvaluationRequest) returns (GetEvaluationResponse);
+  rpc RetryEvaluation(RetryEvaluationRequest) returns (RetryEvaluationResponse);
+}
+
+message GetEvaluationRequest {
+  string session_id = 1;
+}
+
+message GetEvaluationResponse {
+  EvaluationResult evaluation = 1;
+}
+
+message EvaluationResult {
+  string status = 1;
+  EvaluationScores scores = 2;
+  repeated string strengths = 3;
+  repeated string gaps = 4;
+  string advice = 5;
+  repeated Annotation annotations = 6;
+}
+
+message EvaluationScores {
+  int32 requirements = 1;
+  int32 architecture = 2;
+  int32 deep_dive = 3;
+  int32 scalability = 4;
+  int32 communication = 5;
+  int32 overall = 6;
+}
+
+message Annotation {
+  int32 message_seq = 1;
+  AnnotationType type = 2;
+  string content = 3;
+}
+
+message RetryEvaluationRequest {
+  string session_id = 1;
+}
+
+message RetryEvaluationResponse {}

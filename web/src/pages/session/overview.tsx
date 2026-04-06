@@ -1,12 +1,14 @@
 import { useParams, Link, Navigate } from "react-router-dom";
-import { useQuery } from "@connectrpc/connect-query";
-import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
+import { getSession, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getEvaluation, retryEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import { useEvaluation, useRetryEvaluation } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { EvaluationScores } from "@/api/types";
+import type { EvaluationScores } from "@/pb/drill/v1/evaluation_pb";
 
 // ---------------------------------------------------------------------------
 // Score bar
@@ -58,10 +60,10 @@ function ScoreBar({ label, score, large = false }: ScoreBarProps) {
 // Scores section
 // ---------------------------------------------------------------------------
 
-const DIMENSION_LABELS: Record<keyof Omit<EvaluationScores, "overall">, string> = {
+const DIMENSION_LABELS: Record<keyof Omit<EvaluationScores, "overall" | "$typeName" | "$unknown">, string> = {
   requirements: "Requirements",
   architecture: "Architecture",
-  deep_dive: "Deep Dive",
+  deepDive: "Deep Dive",
   scalability: "Scalability",
   communication: "Communication",
 };
@@ -131,8 +133,15 @@ export default function Overview() {
 function OverviewInner({ sessionId }: { sessionId: string }) {
   const { data: sessionResp } = useQuery(getSession, { id: sessionId });
   const session = sessionResp?.session;
-  const { data: evaluation } = useEvaluation(sessionId);
-  const retryEvaluation = useRetryEvaluation(sessionId);
+  const { data: evalResp } = useQuery(getEvaluation, { sessionId });
+  const evaluation = evalResp?.evaluation;
+  const qc = useQueryClient();
+  const retryMutation = useMutation(retryEvaluation, {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getSession, input: { id: sessionId }, cardinality: undefined }) });
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
+    },
+  });
 
   if (!session || !evaluation) {
     return (
@@ -156,10 +165,10 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
         <p className="text-sm text-muted-foreground">Evaluation could not be completed.</p>
         <Button
           variant="outline"
-          onClick={() => retryEvaluation.mutate()}
-          disabled={retryEvaluation.isPending}
+          onClick={() => retryMutation.mutate({ sessionId })}
+          disabled={retryMutation.isPending}
         >
-          {retryEvaluation.isPending ? "Retrying..." : "Retry evaluation"}
+          {retryMutation.isPending ? "Retrying..." : "Retry evaluation"}
         </Button>
       </div>
     );
