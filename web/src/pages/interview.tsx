@@ -110,8 +110,7 @@ function ReadyGate({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.code === "Enter") {
-        e.preventDefault();
+      if (e.key === "Enter") {
         onReadyRef.current();
       }
     };
@@ -289,9 +288,10 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     // If the user starts recording before the prompt resolves,
     // AudioRecorder.start() calls getUserMedia again — browsers
     // queue concurrent permission requests safely.
-    navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {
-      toast.error("Microphone access denied — you can still use text input");
-    });
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(
+      (stream) => stream.getTracks().forEach((t) => t.stop()),
+      () => toast.error("Microphone access denied — you can still use text input"),
+    );
     setReady(true);
   }, [audioPlayer, ready]);
 
