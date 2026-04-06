@@ -96,7 +96,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
         pathNewUser        = "new_user"
     )
 
-    p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+    p.Email = normalizeEmail(p.Email)
 
     // Read Committed: FOR UPDATE blocks concurrent access to existing rows,
     // and ON CONFLICT DO NOTHING handles concurrent inserts. Higher isolation
@@ -199,9 +199,21 @@ Each check runs only if the previous one didn't match (`path == ""`):
 
 `LinkOAuthAccount` uses `ON CONFLICT DO NOTHING` — safe if the link already exists.
 
+### Email normalization
+
+Extract a `normalizeEmail` helper in the `backend` package and replace all raw `strings.ToLower(strings.TrimSpace(...))` usages:
+
+```go
+func normalizeEmail(email string) string {
+    return strings.ToLower(strings.TrimSpace(email))
+}
+```
+
+Replace in: `OAuthLogin`, `Login`, `Signup`, `ForgotPassword`.
+
 ### Login changes
 
-Replace inline session creation with shared helper:
+Replace inline session creation with shared helper and use `normalizeEmail`:
 
 ```go
 // In Login, after password verification:
