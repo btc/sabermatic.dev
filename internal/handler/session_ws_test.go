@@ -2193,6 +2193,196 @@ func TestWS_ReconnectRetriggersInterviewerResponse(t *testing.T) {
 // Test: STT retry on transient failure
 // ---------------------------------------------------------------------------
 
+func TestWS_CancelSessionDuringTTS(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Let's ", "discuss ", "the ", "requirements. ", "First, ", "we ", "need."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := pg.NewBackend(t)
+	b.ApplyTestOverrides(backend.TestOverrides{
+		LLM: ai.NewTestClient(anthropicSrv.URL, b.Pool()),
+		STT: &fakeTranscriber{text: "My answer."},
+		TTS: &fakeSynthesizer{},
+	})
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Drain opening.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send a candidate turn, wait for interviewer to start streaming.
+	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "My answer", "input_method": "text"})
+	drainUntilType(t, ws, "state_change") // processing_input
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+
+	// Cancel session while interviewer is streaming.
+	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
+
+	// Should eventually get session_ended with reason "cancelled".
+	// Use readMsgTimeout loop since WS may close after session_ended.
+	var gotCancelled bool
+	for i := 0; i < 50; i++ {
+		m := readMsgTimeout(t, ws, 10*time.Second)
+		if m == nil {
+			break
+		}
+		if m["type"] == "session_ended" {
+			gotCancelled = m["reason"] == "cancelled"
+			break
+		}
+	}
+	assert.True(t, gotCancelled, "session should end with reason 'cancelled'")
+
+	// Verify session status.
+	ctx := context.Background()
+	updatedSession, err := db.New(pool).GetSessionByID(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "cancelled", updatedSession.Status)
+}
+
+func TestWS_AutoEndDuringPipeline(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Response."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	// Backdate started_at so auto-end fires quickly.
+	// Session duration is 45min, auto-end fires at duration+2min = 47min.
+	ctx := context.Background()
+	_, err := pool.Exec(ctx,
+		`UPDATE interview_sessions SET started_at = NOW() - interval '48 minutes' WHERE id = $1`,
+		session.ID)
+	require.NoError(t, err)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Drain opening.
+	drainUntilType(t, ws, "session_loaded")
+
+	// Auto-end should fire during or soon after the opening.
+	// Use readMsgTimeout loop since WS may close after session_ended.
+	var gotSessionEnded bool
+	for i := 0; i < 50; i++ {
+		m := readMsgTimeout(t, ws, 10*time.Second)
+		if m == nil {
+			break
+		}
+		if m["type"] == "session_ended" {
+			gotSessionEnded = true
+			break
+		}
+	}
+	assert.True(t, gotSessionEnded, "auto-end should fire and end the session")
+
+	// Verify session is completed.
+	updatedSession, err := db.New(pool).GetSession(ctx, session.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", updatedSession.Status)
+}
+
+func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
+	t.Parallel()
+
+	// Anthropic server that returns an error mid-stream (abrupt close).
+	errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		fmt.Fprintf(w, "event: message_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+		fmt.Fprintf(w, "event: content_block_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Partial\"}}\n\n")
+		// Close abruptly — simulates mid-stream error.
+	}))
+	t.Cleanup(errSrv.Close)
+
+	b := pg.NewBackend(t)
+	b.ApplyTestOverrides(backend.TestOverrides{
+		LLM: ai.NewTestClient(errSrv.URL, b.Pool()),
+		STT: &fakeTranscriber{text: "My answer."},
+		TTS: &fakeSynthesizer{},
+	})
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Opening will error. Wait for it to settle.
+	drainUntilType(t, ws, "session_loaded")
+	// The opening pipeline will error. The conductor should ForceState(WaitingForInput)
+	// and send a turn_failed error, then the event loop continues.
+	// Drain until we get either a turn_failed error or state_change to waiting_for_input.
+	for i := 0; i < 50; i++ {
+		m := readMsgTimeout(t, ws, 5*time.Second)
+		if m == nil {
+			break
+		}
+		if m["type"] == "error" || (m["type"] == "state_change" && m["state"] == "waiting_for_input") {
+			break
+		}
+	}
+
+	// Now send end_session — should succeed regardless of pipeline state.
+	sendMsg(t, ws, wsMsg{"type": "end_session"})
+
+	// Use readMsgTimeout loop since WS may close after session_ended.
+	var gotEnded bool
+	for i := 0; i < 20; i++ {
+		m := readMsgTimeout(t, ws, 5*time.Second)
+		if m == nil {
+			break
+		}
+		if m["type"] == "session_ended" {
+			gotEnded = true
+			break
+		}
+	}
+	assert.True(t, gotEnded, "end_session should succeed after pipeline error")
+}
+
+// ---------------------------------------------------------------------------
+// Test: STT retry on transient failure
+// ---------------------------------------------------------------------------
+
 func TestWS_STTRetry(t *testing.T) {
 	t.Parallel()
 
