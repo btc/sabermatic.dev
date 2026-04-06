@@ -46,6 +46,20 @@ func (f *fakeSynthesizer) Synthesize(_ context.Context, _ string) (io.ReadCloser
 	return io.NopCloser(strings.NewReader("fake-audio")), nil
 }
 
+// failOnceTranscriber fails on the first call, succeeds on subsequent calls.
+type failOnceTranscriber struct {
+	text  string
+	calls int
+}
+
+func (f *failOnceTranscriber) Transcribe(_ context.Context, _ []byte, _ string) (string, error) {
+	f.calls++
+	if f.calls == 1 {
+		return "", fmt.Errorf("transient OpenAI error")
+	}
+	return f.text, nil
+}
+
 // ---------------------------------------------------------------------------
 // Fake Anthropic SSE server
 // ---------------------------------------------------------------------------
@@ -2173,4 +2187,61 @@ func TestWS_ReconnectRetriggersInterviewerResponse(t *testing.T) {
 	assert.Equal(t, "interviewer", msgs[0].Role)
 	assert.Equal(t, "candidate", msgs[1].Role)
 	assert.Equal(t, "interviewer", msgs[2].Role)
+}
+
+// ---------------------------------------------------------------------------
+// Test: STT retry on transient failure
+// ---------------------------------------------------------------------------
+
+func TestWS_STTRetry(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Good ", "answer."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := pg.NewBackend(t)
+	stt := &failOnceTranscriber{text: "I would use a hash-based approach."}
+	b.ApplyTestOverrides(backend.TestOverrides{
+		LLM: ai.NewTestClient(anthropicSrv.URL, b.Pool()),
+		STT: stt,
+		TTS: &fakeSynthesizer{},
+	})
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Drain opening.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send voice turn.
+	fakeAudio := base64.StdEncoding.EncodeToString([]byte("fake-webm-audio"))
+	sendMsg(t, ws, wsMsg{
+		"type":         "end_turn",
+		"audio":        fakeAudio,
+		"input_method": "voice",
+	})
+
+	// Should succeed on retry — expect transcribing state, then transcription_result.
+	stateTranscribing := readMsg(t, ws)
+	assert.Equal(t, "state_change", stateTranscribing["type"])
+	assert.Equal(t, "transcribing", stateTranscribing["state"])
+
+	transcription := readMsg(t, ws)
+	assert.Equal(t, "transcription_result", transcription["type"])
+	assert.Equal(t, "I would use a hash-based approach.", transcription["text"])
+
+	// Verify transcriber was called twice (first failed, second succeeded).
+	assert.Equal(t, 2, stt.calls, "transcriber should be called twice (retry)")
 }
