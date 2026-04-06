@@ -1356,6 +1356,48 @@ func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Se
 	return srv
 }
 
+// newSlowAnthropicServer creates a server that streams tokens with a delay
+// between each, allowing time for cancel/disconnect during streaming.
+func newSlowAnthropicServer(t *testing.T, tokens []string, delayPerToken time.Duration) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		fmt.Fprintf(w, "event: message_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+
+		fmt.Fprintf(w, "event: content_block_start\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
+		for _, token := range tokens {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(delayPerToken):
+			}
+			fmt.Fprintf(w, "event: content_block_delta\n")
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+
+		fmt.Fprintf(w, "event: content_block_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprintf(w, "event: message_delta\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens))
+		fmt.Fprintf(w, "event: message_stop\n")
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestWS_LLMStreamError(t *testing.T) {
 	t.Parallel()
 
@@ -1793,4 +1835,154 @@ func TestWS_PageRefreshReconnect(t *testing.T) {
 	stateMsg := readMsg(t, ws2)
 	assert.Equal(t, "state_change", stateMsg["type"])
 	assert.Equal(t, "waiting_for_input", stateMsg["state"])
+}
+
+// ---------------------------------------------------------------------------
+// Async pipeline tests
+// ---------------------------------------------------------------------------
+
+func TestWS_EndSessionDuringStreaming(t *testing.T) {
+	t.Parallel()
+
+	// Slow server: 10 tokens, 200ms each = 2s total streaming time.
+	tokens := []string{"One ", "two ", "three ", "four ", "five ", "six ", "seven ", "eight ", "nine ", "ten."}
+	anthropicSrv := newSlowAnthropicServer(t, tokens, 200*time.Millisecond)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Wait for the opening question to start streaming.
+	drainUntilType(t, ws, "session_loaded")
+	// Read a few tokens to confirm streaming started.
+	m := readMsg(t, ws)
+	assert.Equal(t, "state_change", m["type"])
+	m = readMsg(t, ws)
+	assert.Equal(t, "interviewer_token", m["type"])
+
+	// Send end_session while streaming is in progress.
+	sendMsg(t, ws, wsMsg{"type": "end_session"})
+
+	// The session should end promptly (not after all 10 tokens).
+	start := time.Now()
+	for {
+		m = readMsgTimeout(t, ws, 10*time.Second)
+		if m == nil {
+			break
+		}
+		if m["type"] == "session_ended" {
+			break
+		}
+	}
+	elapsed := time.Since(start)
+	assert.Less(t, elapsed, 5*time.Second, "end_session should be processed promptly, not after full stream")
+
+	// Verify session was completed (status transitions: active -> completed -> evaluating).
+	// The evaluate_session River job may run before we poll, so accept either.
+	ctx := context.Background()
+	require.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 5*time.Second, 100*time.Millisecond, "session should no longer be active")
+}
+
+func TestWS_DisconnectDuringPipeline(t *testing.T) {
+	t.Parallel()
+
+	// Slow server so we can disconnect mid-stream.
+	tokens := []string{"Slow ", "response ", "here."}
+	anthropicSrv := newSlowAnthropicServer(t, tokens, 500*time.Millisecond)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+
+	// Wait for streaming to start.
+	drainUntilType(t, ws, "session_loaded")
+	m := readMsg(t, ws) // state_change
+	assert.Equal(t, "state_change", m["type"])
+
+	// Close WS abruptly during streaming.
+	ws.CloseNow()
+
+	// Wait a moment for cleanup.
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify: advisory lock is released — a new connection should succeed.
+	ws2 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws2.CloseNow()
+	m = readMsg(t, ws2)
+	// Should get session_loaded (lock was released, reconnection works).
+	assert.Equal(t, "session_loaded", m["type"])
+}
+
+func TestWS_ConcurrentTurnRejected(t *testing.T) {
+	t.Parallel()
+
+	// Slow server so the first turn is still in progress when we send the second.
+	tokens := []string{"Still ", "thinking..."}
+	anthropicSrv := newSlowAnthropicServer(t, tokens, 500*time.Millisecond)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Wait for opening question to finish so we can send a turn.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send first turn (will stream slowly).
+	sendMsg(t, ws, wsMsg{
+		"type":         "end_turn",
+		"content":      "My answer",
+		"input_method": "text",
+	})
+
+	// Wait for processing to start.
+	m, _ := drainUntilType(t, ws, "state_change")
+	assert.Equal(t, "processing_input", m["state"])
+
+	// Send second turn while first is still processing.
+	sendMsg(t, ws, wsMsg{
+		"type":         "end_turn",
+		"content":      "Another answer",
+		"input_method": "text",
+	})
+
+	// Should get an error rejecting the concurrent turn.
+	m, _ = drainUntilType(t, ws, "error")
+	assert.Equal(t, "turn_in_progress", m["code"])
 }
