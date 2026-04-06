@@ -9,9 +9,6 @@ SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_ration
 FROM questions
 WHERE id = $1;
 
--- name: CountSeedQuestions :one
-SELECT COUNT(*) FROM questions WHERE source = 'seed' AND user_id IS NULL;
-
 -- name: ListQuestionsForUser :many
 SELECT id, user_id, title, prompt, difficulty, tags, hints, source, created_at
 FROM questions
