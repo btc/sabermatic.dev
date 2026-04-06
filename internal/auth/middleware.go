@@ -90,5 +90,5 @@ func RequireAdmin() func(http.Handler) http.Handler {
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	json.NewEncoder(w).Encode(map[string]string{"error": message}) //nolint:errcheck // HTTP response write
 }
