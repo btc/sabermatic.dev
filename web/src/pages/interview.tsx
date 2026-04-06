@@ -314,6 +314,13 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Stable refs from audioRecorder ------
   const { start: recStart, stop: recStop } = audioRecorder;
 
+  // ------ Auto-stop recording on disconnect ------
+  useEffect(() => {
+    if (connectionState === ConnectionState.Reconnecting && audioRecorder.isRecording) {
+      recStop();
+    }
+  }, [connectionState, audioRecorder.isRecording, recStop]);
+
   // ------ Send handlers ------
   const handleSendText = useCallback(() => {
     const trimmed = textInput.trim();
