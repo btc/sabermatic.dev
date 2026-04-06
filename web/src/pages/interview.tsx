@@ -490,6 +490,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
               variant="ghost"
               onClick={() => {
                 setCancelDialogOpen(false);
+                audioPlayer.cancel();
                 cancelSession();
               }}
             >
@@ -515,6 +516,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
             <Button
               onClick={() => {
                 setEndDialogOpen(false);
+                audioPlayer.cancel();
                 endSession();
               }}
             >
