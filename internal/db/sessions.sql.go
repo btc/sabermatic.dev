@@ -13,6 +13,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveSessionsBulk = `-- name: ArchiveSessionsBulk :execrows
+UPDATE interview_sessions
+SET archived_at = CASE WHEN $1::bool THEN NOW() ELSE NULL END,
+    updated_at = NOW()
+WHERE id = ANY($2::uuid[])
+  AND user_id = $3
+`
+
+type ArchiveSessionsBulkParams struct {
+	Archive    bool        `json:"archive"`
+	SessionIds []uuid.UUID `json:"session_ids"`
+	UserID     uuid.UUID   `json:"user_id"`
+}
+
+func (q *Queries) ArchiveSessionsBulk(ctx context.Context, arg ArchiveSessionsBulkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveSessionsBulk, arg.Archive, arg.SessionIds, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelAbandonedEmptySessions = `-- name: CancelAbandonedEmptySessions :many
 UPDATE interview_sessions
 SET status = 'cancelled', ended_at = NOW(), archived_at = NOW(), updated_at = NOW()

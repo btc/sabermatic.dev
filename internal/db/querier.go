@@ -12,6 +12,7 @@ import (
 )
 
 type Querier interface {
+	ArchiveSessionsBulk(ctx context.Context, arg ArchiveSessionsBulkParams) (int64, error)
 	// Batch-cancels abandoned sessions that have zero candidate messages.
 	// These are empty sessions where no interview happened.
 	CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error)
@@ -33,6 +34,9 @@ type Querier interface {
 	// grants_created=0 for duplicate event.
 	CreateSubscriptionGrant(ctx context.Context, arg CreateSubscriptionGrantParams) (CreateSubscriptionGrantRow, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// Soft-deletes the user and wipes all auth sessions in one round-trip.
+	// Idempotent: re-calling on a deleted user is a no-op on the user row.
+	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	// Creates the one-time free trial grant + ledger entry atomically. Called
@@ -105,6 +109,7 @@ type Querier interface {
 	// Used for status transitions after session completion (evaluating → reviewed,
 	// → evaluation_failed) where end time and turn count should not change.
 	UpdateSessionStatusOnly(ctx context.Context, arg UpdateSessionStatusOnlyParams) error
+	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserStripeCustomerID(ctx context.Context, arg UpdateUserStripeCustomerIDParams) error
 	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
