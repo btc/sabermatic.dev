@@ -24,7 +24,6 @@ import (
 	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
-	"github.com/btc/drill/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -259,7 +258,7 @@ func drainUntilDone(t *testing.T, ws *websocket.Conn) (string, []wsMsg) {
 // newWSTestBackend creates a Backend with real Postgres + River but fake AI deps.
 func newWSTestBackend(t *testing.T, anthropicURL string) *backend.Backend {
 	t.Helper()
-	b := testutil.NewTestBackend(t) // from testutil_test.go -- starts Postgres, runs migrations
+	b := pg.NewBackend(t)
 	b.ApplyTestOverrides(backend.TestOverrides{
 		LLM: ai.NewTestClient(anthropicURL, b.Pool()),
 		STT: &fakeTranscriber{text: "I would use a hash-based approach."},
@@ -273,9 +272,7 @@ func newWSTestBackend(t *testing.T, anthropicURL string) *backend.Backend {
 // ---------------------------------------------------------------------------
 
 func TestWS_HappyPath_Text(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Let's ", "design ", "a URL ", "shortener."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -383,9 +380,7 @@ func TestWS_HappyPath_Text(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_VoiceInput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Good ", "choice."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -464,9 +459,7 @@ func TestWS_VoiceInput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_CancelTTS(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"This ", "is ", "a ", "test."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -515,9 +508,7 @@ func TestWS_CancelTTS(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_Reconnection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Welcome."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -564,9 +555,7 @@ func TestWS_Reconnection(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_InvalidTransition(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	// Use tokens with slight delay effect (streaming takes some time).
 	tokens := []string{"Hello ", "there."}
@@ -630,9 +619,7 @@ func TestWS_InvalidTransition(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_MalformedMessages(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hi."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -685,9 +672,7 @@ func TestWS_MalformedMessages(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_SessionOwnership(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hi."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -730,9 +715,7 @@ func TestWS_SessionOwnership(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_InactiveSession(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hi."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -777,9 +760,7 @@ func TestWS_InactiveSession(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_GracefulShutdown(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	// Use a slow Anthropic server that streams with delays.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -853,9 +834,7 @@ func TestWS_GracefulShutdown(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_TransactionalEnqueue(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Done."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -905,11 +884,9 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_AbandonedCleanup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	pool := b.Pool()
 
 	userID := backendtest.SeedUser(t, b)
@@ -953,9 +930,7 @@ func TestWS_AbandonedCleanup(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_UnknownMessageType(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Ok."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -997,9 +972,7 @@ func TestWS_UnknownMessageType(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hi."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1034,9 +1007,7 @@ func TestWS_Unauthenticated(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_NonexistentSession(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hi."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1075,9 +1046,7 @@ func TestWS_NonexistentSession(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_AdvisoryLockContention(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hello."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1148,9 +1117,7 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_MultiTurn(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	// Each LLM call returns the same tokens (fake server is stateless).
 	tokens := []string{"Sure, ", "let's ", "continue."}
@@ -1240,9 +1207,7 @@ func TestWS_MultiTurn(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_EmptyTextInput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hello."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1296,9 +1261,7 @@ func TestWS_EmptyTextInput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_EmptyVoiceInput(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hello."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1394,9 +1357,7 @@ func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Se
 }
 
 func TestWS_LLMStreamError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	// Opening will fail mid-stream, then the candidate can still send a turn
 	// and get a successful response.
@@ -1456,9 +1417,7 @@ func TestWS_LLMStreamError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_TTSEnabled(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Great ", "question!"}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1520,9 +1479,7 @@ func TestWS_TTSEnabled(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_TimerAutoEnd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	// Use a slow server so the opening takes enough time for timers to fire.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1632,9 +1589,7 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Response."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1705,9 +1660,7 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_PingPong(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Hi."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)
@@ -1743,9 +1696,7 @@ func TestWS_PingPong(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWS_CancelSession(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	tokens := []string{"Let's ", "discuss ", "this."}
 	anthropicSrv := newFakeAnthropicServer(t, tokens)

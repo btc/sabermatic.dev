@@ -51,11 +51,7 @@ func setupGothForTest(t *testing.T, user goth.User) {
 // ---------------------------------------------------------------------------
 
 func TestOAuthStart_UnknownProvider(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
@@ -75,12 +71,10 @@ func TestOAuthStart_UnknownProvider(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestOAuthCallback_NewUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	t.Setenv("BASE_URL", "http://localhost:3000")
-	b := testutil.NewTestBackend(t)
+	cfg := pg.ConfigWithOverrides(t, map[string]string{
+		"BASE_URL": "http://localhost:3000",
+	})
+	b := testutil.NewBackend(t, cfg)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -115,12 +109,10 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 }
 
 func TestOAuthCallback_ExistingUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	t.Setenv("BASE_URL", "http://localhost:3000")
-	b := testutil.NewTestBackend(t)
+	cfg := pg.ConfigWithOverrides(t, map[string]string{
+		"BASE_URL": "http://localhost:3000",
+	})
+	b := testutil.NewBackend(t, cfg)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -160,12 +152,10 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 }
 
 func TestOAuthCallback_NickNameFallback(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	t.Setenv("BASE_URL", "http://localhost:3000")
-	b := testutil.NewTestBackend(t)
+	cfg := pg.ConfigWithOverrides(t, map[string]string{
+		"BASE_URL": "http://localhost:3000",
+	})
+	b := testutil.NewBackend(t, cfg)
 
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
@@ -193,11 +183,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 }
 
 func TestOAuthCallback_UnknownProvider(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
