@@ -566,3 +566,63 @@ func TestLogin_OAuthUserNoPassword(t *testing.T) {
 	})
 	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
 }
+
+// ---------------------------------------------------------------------------
+// DeleteAccount
+// ---------------------------------------------------------------------------
+
+func TestDeleteAccount_Success(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	// Sign up and log in to create a session.
+	signupRes := signupUser(t, b, "delete@example.com", "strongpass1", "Delete")
+	loginRes, err := b.Login(ctx, backend.LoginParams{
+		Email:    "delete@example.com",
+		Password: "strongpass1",
+		IP:       "127.0.0.1:1234",
+	})
+	require.NoError(t, err)
+
+	// Delete the account.
+	err = b.DeleteAccount(ctx, signupRes.UserID)
+	require.NoError(t, err)
+
+	queries := db.New(b.Pool())
+
+	// GetUserByID (excludes deleted) should now fail.
+	_, err = queries.GetUserByID(ctx, signupRes.UserID)
+	require.Error(t, err, "GetUserByID should fail for a deleted user")
+
+	// GetUserByIDIncludingDeleted should return the user with deleted_at set.
+	user, err := queries.GetUserByIDIncludingDeleted(ctx, signupRes.UserID)
+	require.NoError(t, err)
+	require.True(t, user.DeletedAt.Valid, "deleted_at should be set")
+
+	// Login should fail — auth sessions were wiped.
+	tokenHash := auth.HashSessionToken(loginRes.Token)
+	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
+	require.Error(t, err, "auth session should have been deleted")
+
+	_, err = b.Login(ctx, backend.LoginParams{
+		Email:    "delete@example.com",
+		Password: "strongpass1",
+	})
+	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
+}
+
+func TestDeleteAccount_Idempotent(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupRes := signupUser(t, b, "delete-idem@example.com", "strongpass1", "DeleteIdem")
+
+	err := b.DeleteAccount(ctx, signupRes.UserID)
+	require.NoError(t, err)
+
+	// Calling again should not return an error.
+	err = b.DeleteAccount(ctx, signupRes.UserID)
+	require.NoError(t, err)
+}
