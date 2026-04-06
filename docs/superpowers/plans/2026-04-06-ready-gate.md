@@ -12,6 +12,8 @@
 
 ## File Map
 
+- **Create:** `web/src/components/ui/kbd.tsx` — extract shared `Kbd` component (used by both `recording-input.tsx` and `ReadyGate`)
+- **Modify:** `web/src/components/recording-input.tsx` — import `Kbd` from shared location, remove local definition
 - **Modify:** `web/src/ws/hooks.ts` — expose `wasReconnected` boolean, set in `reconnect_state` handler
 - **Modify:** `web/src/audio/player.ts` — make `initContext()` async, await `ctx.resume()` before flushing queue
 - **Modify:** `web/src/audio/hooks.ts` — update `initContext` wrapper to return Promise
@@ -19,7 +21,58 @@
 
 ---
 
-### Task 1: Expose `wasReconnected` from `useInterview`
+### Task 1: Extract shared `Kbd` component
+
+**Files:**
+- Create: `web/src/components/ui/kbd.tsx`
+- Modify: `web/src/components/recording-input.tsx:258-264`
+
+- [ ] **Step 1: Create the shared `Kbd` component**
+
+Create `web/src/components/ui/kbd.tsx`:
+
+```tsx
+export function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">
+      {children}
+    </kbd>
+  );
+}
+```
+
+- [ ] **Step 2: Update `recording-input.tsx` to use the shared component**
+
+In `recording-input.tsx`, add to the imports:
+
+```tsx
+import { Kbd } from "@/components/ui/kbd";
+```
+
+Remove the local `Kbd` definition at the bottom of the file (lines 258-264):
+
+```tsx
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">
+      {children}
+    </kbd>
+  );
+}
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add web/src/components/ui/kbd.tsx web/src/components/recording-input.tsx
+git commit -m "refactor(ui): extract Kbd to shared component
+
+Used by both recording-input and the upcoming ReadyGate."
+```
+
+---
+
+### Task 2: Expose `wasReconnected` from `useInterview`
 
 **Files:**
 - Modify: `web/src/ws/hooks.ts:24-208`
@@ -122,14 +175,20 @@ the context is fully active before queued chunks are played."
 
 ---
 
-### Task 3: Add ReadyGate to interview page
+### Task 4: Add ReadyGate to interview page
 
 **Files:**
 - Modify: `web/src/pages/interview.tsx`
 
 - [ ] **Step 1: Add the `ReadyGate` sub-component**
 
-Add this after the existing sub-components (after `ProcessingIndicator`, before the `WaitingView` section around line 96):
+Add `Kbd` to the imports at the top of the file:
+
+```tsx
+import { Kbd } from "@/components/ui/kbd";
+```
+
+Add the component after the existing sub-components (after `ProcessingIndicator`, before the `WaitingView` section around line 96):
 
 ```tsx
 function ReadyGate({
@@ -170,7 +229,7 @@ function ReadyGate({
         Ready
       </Button>
       <p className="text-xs text-muted-foreground">
-        Press <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">Enter</kbd> to start
+        Press <Kbd>Enter</Kbd> to start
       </p>
     </div>
   );
