@@ -1,12 +1,15 @@
 import { useState, useRef, KeyboardEvent } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
+import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { getMe, getUsage, updateProfile, exportData } from "@/pb/drill/v1/user-UserService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
 import {
-  useMe, useUsage, useLogout,
-  useUpdateProfile, useExportData, useDeleteAccount,
+  useLogout, useDeleteAccount,
   useCheckout, usePortal, type CheckoutRequest,
 } from "@/api/queries";
 import { ApiError } from "@/api/client";
+import { ConnectError } from "@connectrpc/connect";
 import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,33 +132,34 @@ function ThemeToggle() {
 // ---------------------------------------------------------------------------
 
 function ProfileSection() {
-  const { data: user } = useMe();
+  const { data: meData } = useQuery(getMe, {});
+  const user = meData?.user;
   // M-8: Track local edits separately. When localEdit is null, display the server value.
   const [localEdit, setLocalEdit] = useState<string | null>(null);
-  const displayName = localEdit ?? user?.display_name ?? "";
+  const displayName = localEdit ?? user?.displayName ?? "";
   const [saveError, setSaveError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const updateProfile = useUpdateProfile();
+  const updateProfileMut = useMutation(updateProfile);
 
   function handleChange(value: string) {
     setLocalEdit(value);
   }
 
   function saveName() {
-    if (!displayName.trim() || displayName === user?.display_name) {
+    if (!displayName.trim() || displayName === user?.displayName) {
       setLocalEdit(null);
       return;
     }
     setSaveError(null);
-    updateProfile.mutate(
-      { display_name: displayName.trim() },
+    updateProfileMut.mutate(
+      { user: { displayName: displayName.trim() }, updateMask: { paths: ["display_name"] } },
       {
         onSuccess: () => {
           setLocalEdit(null);
           toast.success("Profile saved");
         },
         onError: (err) => {
-          const msg = err instanceof ApiError ? `Save failed (${err.status})` : "Save failed";
+          const msg = err instanceof ConnectError ? `Save failed (${err.code})` : "Save failed";
           setSaveError(msg);
           toast.error("Save failed");
           setLocalEdit(null);
@@ -164,7 +168,7 @@ function ProfileSection() {
     );
   }
 
-  const saving = updateProfile.isPending;
+  const saving = updateProfileMut.isPending;
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
@@ -202,7 +206,7 @@ function ProfileSection() {
           </label>
           <div className="flex items-center gap-2">
             <span className="text-sm text-foreground">{user?.email}</span>
-            {user?.email_verified ? (
+            {user?.emailVerified ? (
               <Badge variant="secondary" className="text-xs">Verified</Badge>
             ) : (
               <Badge variant="outline" className="text-xs text-muted-foreground">Unverified</Badge>
@@ -282,16 +286,16 @@ function PreferencesSection() {
 // ---------------------------------------------------------------------------
 
 function DataExportSection() {
-  const exportData = useExportData();
-  const status = exportData.isIdle ? "idle" : exportData.isPending ? "loading" : exportData.isSuccess ? "done" : "error";
-  const errorMsg = exportData.error instanceof ApiError
-    ? `Export request failed (${exportData.error.status})`
-    : exportData.isError
+  const exportDataMut = useMutation(exportData);
+  const status = exportDataMut.isIdle ? "idle" : exportDataMut.isPending ? "loading" : exportDataMut.isSuccess ? "done" : "error";
+  const errorMsg = exportDataMut.error instanceof ConnectError
+    ? `Export request failed (${exportDataMut.error.code})`
+    : exportDataMut.isError
       ? "Export request failed. Please try again."
       : null;
 
   function handleExport() {
-    exportData.mutate(undefined, {
+    exportDataMut.mutate({}, {
       onSuccess: () => toast.success("Export requested — check your email"),
     });
   }
@@ -517,12 +521,13 @@ const MINUTE_PACKS: { minutes: number; label: string }[] = [
 // ---------------------------------------------------------------------------
 
 function BillingSettings() {
-  const { data: user } = useMe();
-  const { data: usage } = useUsage();
+  const { data: meData } = useQuery(getMe, {});
+  const user = meData?.user;
+  const { data: usage } = useQuery(getUsage, {});
   const checkout = useCheckout();
   const portal = usePortal();
 
-  const isPro = user?.plan === "pro";
+  const isPro = user?.plan === UserPlan.PRO;
 
   // Track which pack (if any) is being purchased, so we can show per-button loading.
   const [pendingPack, setPendingPack] = useState<number | null>(null);
@@ -574,7 +579,7 @@ function BillingSettings() {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium capitalize">
-                {user?.plan ?? "Free"} plan
+                {isPro ? "Pro" : "Free"} plan
               </span>
               {isPro && (
                 <Badge variant="default" className="text-xs">Pro</Badge>
@@ -583,9 +588,9 @@ function BillingSettings() {
 
             {usage != null && (
               <MinuteBalance
-                total={usage.total_balance}
-                free={usage.free_balance}
-                paid={usage.paid_balance}
+                total={usage.totalBalance}
+                free={usage.freeBalance}
+                paid={usage.paidBalance}
               />
             )}
           </CardContent>

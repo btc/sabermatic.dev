@@ -1,27 +1,12 @@
 import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
+import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
 import { apiClient } from "./client";
 import type {
   User, Question, Session, CreateSessionRequest,
-  EvaluationResponse, EducatorAnalysis, CoachAnalysis, Usage,
+  EvaluationResponse, EducatorAnalysis, CoachAnalysis,
   Message,
 } from "./types";
-
-// --- Auth ---
-
-export function useMe() {
-  return useQuery({
-    queryKey: ["me"],
-    queryFn: () => apiClient.get<User>("/api/me"),
-    retry: false,
-  });
-}
-
-export function useUsage() {
-  return useQuery({
-    queryKey: ["usage"],
-    queryFn: () => apiClient.get<Usage>("/api/me/usage"),
-  });
-}
 
 // --- Questions ---
 
@@ -69,7 +54,7 @@ export function useCreateSession() {
       apiClient.post<Session>("/api/sessions", data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
-      qc.invalidateQueries({ queryKey: ["usage"] });
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getUsage, input: {}, cardinality: undefined }) });
     },
   });
 }
@@ -157,7 +142,7 @@ export function useLogin() {
   return useMutation({
     mutationFn: (data: { email: string; password: string }) =>
       apiClient.post<User>("/api/auth/login", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getMe, input: {}, cardinality: undefined }) }),
   });
 }
 
@@ -196,26 +181,6 @@ export function useVerifyEmail() {
   return useMutation({
     mutationFn: (data: { token: string }) =>
       apiClient.post("/api/auth/verify-email", data),
-  });
-}
-
-// --- Profile ---
-
-export function useUpdateProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { display_name: string }) =>
-      apiClient.patch("/api/me", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
-  });
-}
-
-// --- Data export ---
-
-export function useExportData() {
-  // POST because the backend queues an async export job (side effect, not idempotent read)
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/me/export"),
   });
 }
 
