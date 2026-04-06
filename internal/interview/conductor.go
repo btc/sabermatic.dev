@@ -2,6 +2,7 @@ package interview
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -81,6 +82,41 @@ type Conductor struct {
 
 	// The client's session_init message (contains LastSeq for reconnect detection).
 	initMsg WSMessage
+}
+
+// ttsSink is created per turn, so seq and messageID are scoped to one
+// interviewer response. HandleTTSError may be called concurrently from
+// the conductor goroutine (OnToken buffer-full) and the TTS goroutine;
+// SendJSON is thread-safe, so no additional synchronization is needed.
+// seq is only incremented by HandleAudio (TTS goroutine), never by
+// HandleTTSError, so there is no data race on the counter.
+type ttsSink struct {
+	ws        observer.WSConn
+	messageID uuid.UUID
+	seq       int
+}
+
+func (s *ttsSink) HandleAudio(data []byte) {
+	_ = s.ws.SendJSON(context.Background(), map[string]any{
+		"type":       "tts_chunk",
+		"data":       base64.StdEncoding.EncodeToString(data),
+		"message_id": s.messageID.String(),
+		"seq":        s.seq,
+	})
+	s.seq++
+}
+
+func (s *ttsSink) HandleTTSDone() {
+	_ = s.ws.SendJSON(context.Background(), map[string]any{
+		"type":       "tts_done",
+		"message_id": s.messageID.String(),
+	})
+}
+
+func (s *ttsSink) HandleTTSError() {
+	_ = s.ws.SendJSON(context.Background(), map[string]any{
+		"type": "tts_error",
+	})
 }
 
 // NewConductor constructs a Conductor from the given params.
@@ -447,7 +483,12 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	if c.ttsEnabled {
 		synth, err := c.backend.Synthesizer()
 		if err == nil && synth != nil {
-			observers = append(observers, observer.NewTTSAccumulator(ctx, c.ws, synth, messageID))
+			sink := &ttsSink{ws: c.ws, messageID: messageID}
+			observers = append(observers, observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+				Sink:            sink,
+				Synth:           synth,
+				SentenceTimeout: c.backend.Config().Speech.TTSSentenceTimeout,
+			}))
 		}
 	}
 	fanOut := observer.NewTokenFanOut(observers...)
