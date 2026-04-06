@@ -110,7 +110,7 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 	}
 
 	// 5. Build prompt.
-	system, promptMsgs := educator.BuildPrompt(question, messages, eval)
+	system, promptMsgs := educator.BuildPrompt(&question, messages, &eval)
 
 	// 6. Begin transaction.
 	tx, err := w.Pool.Begin(ctx)

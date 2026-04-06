@@ -16,7 +16,7 @@ func TestBuildPrompt_SystemContainsRubric(t *testing.T) {
 		{Seq: 2, Role: "candidate", Content: "Let me start by gathering requirements."},
 	}
 
-	system, userMsgs := BuildPrompt(q, msgs)
+	system, userMsgs := BuildPrompt(&q, msgs)
 
 	assert.Contains(t, system, "Requirements Gathering & Scoping")
 	assert.Contains(t, system, "High-Level Architecture")
@@ -37,13 +37,13 @@ func TestBuildPrompt_TranscriptFormatsCorrectly(t *testing.T) {
 		{Seq: 3, Role: "interviewer", Content: "Go ahead."},
 	}
 
-	_, userMsgs := BuildPrompt(q, msgs)
+	_, userMsgs := BuildPrompt(&q, msgs)
 	require.Len(t, userMsgs, 1)
 }
 
 func TestBuildPrompt_EmptyMessages(t *testing.T) {
 	q := db.Question{Title: "Design X", Prompt: "Design X."}
-	system, userMsgs := BuildPrompt(q, nil)
+	system, userMsgs := BuildPrompt(&q, nil)
 
 	assert.Contains(t, system, "Requirements Gathering")
 	require.Len(t, userMsgs, 1)

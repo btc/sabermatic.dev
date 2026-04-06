@@ -80,7 +80,7 @@ You MUST use the submit_evaluation tool to submit your structured evaluation. Do
 
 // BuildPrompt returns the evaluator system prompt and a single user message
 // containing the formatted interview transcript.
-func BuildPrompt(question db.Question, messages []db.Message) (string, []anthropic.MessageParam) {
+func BuildPrompt(question *db.Question, messages []db.Message) (string, []anthropic.MessageParam) {
 	transcript := buildTranscript(question, messages)
 	userMsg := anthropic.NewUserMessage(anthropic.NewTextBlock(transcript))
 	return systemPrompt, []anthropic.MessageParam{userMsg}
@@ -88,14 +88,15 @@ func BuildPrompt(question db.Question, messages []db.Message) (string, []anthrop
 
 // buildTranscript formats the question and messages into a structured markdown
 // transcript for the evaluator.
-func buildTranscript(question db.Question, messages []db.Message) string {
+func buildTranscript(question *db.Question, messages []db.Message) string {
 	var sb strings.Builder
 
 	fmt.Fprintf(&sb, "# Interview Transcript: %s\n", question.Title)
 	fmt.Fprintf(&sb, "\n## Question\n\n%s\n", question.Prompt)
 	sb.WriteString("\n## Transcript\n")
 
-	for _, m := range messages {
+	for i := range messages {
+		m := &messages[i]
 		role := roleLabel(m.Role)
 		fmt.Fprintf(&sb, "\n[%d] %s: %s\n", m.Seq, role, m.Content)
 	}

@@ -313,7 +313,7 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 		c.send(ctx, msgReconnectState(afterSeq, c.messages))
 		return nil
 	}
-	c.send(ctx, msgSessionLoaded(c.sessionID, c.question, int(c.duration.Minutes()), c.ttsEnabled))
+	c.send(ctx, msgSessionLoaded(c.sessionID, &c.question, int(c.duration.Minutes()), c.ttsEnabled))
 	return c.streamInterviewerResponse(ctx)
 }
 
@@ -427,7 +427,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 
 	system, promptMsgs := NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(c.question).
+		WithQuestion(&c.question).
 		WithCoachBriefing(c.coachBriefing).
 		WithTimeContext(elapsed, remaining).
 		WithTranscript(c.messages).

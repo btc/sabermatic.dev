@@ -74,19 +74,22 @@ func buildHistorySummary(sessions []db.InterviewSession, evaluations []db.Evalua
 
 	// Index questions by ID for lookup.
 	questionByID := make(map[uuid.UUID]db.Question, len(questions))
-	for _, q := range questions {
-		questionByID[q.ID] = q
+	for i := range questions {
+		q := &questions[i]
+		questionByID[q.ID] = *q
 	}
 
 	// Index evaluations by session ID for lookup.
 	evalBySessionID := make(map[uuid.UUID]db.Evaluation, len(evaluations))
-	for _, e := range evaluations {
-		evalBySessionID[e.SessionID] = e
+	for i := range evaluations {
+		e := &evaluations[i]
+		evalBySessionID[e.SessionID] = *e
 	}
 
 	// Collect attempted tags across all sessions.
 	attemptedTags := make(map[string]bool)
-	for _, s := range sessions {
+	for i := range sessions {
+		s := &sessions[i]
 		if q, ok := questionByID[s.QuestionID]; ok {
 			for _, tag := range q.Tags {
 				attemptedTags[tag] = true
@@ -96,7 +99,8 @@ func buildHistorySummary(sessions []db.InterviewSession, evaluations []db.Evalua
 
 	// Collect all available tags from the question pool.
 	allTags := make(map[string]bool)
-	for _, q := range questions {
+	for i := range questions {
+		q := &questions[i]
 		for _, tag := range q.Tags {
 			allTags[tag] = true
 		}
@@ -108,7 +112,8 @@ func buildHistorySummary(sessions []db.InterviewSession, evaluations []db.Evalua
 
 	// Per-session details.
 	fmt.Fprintf(&sb, "\n## Sessions (%d total)\n", len(sessions))
-	for i, s := range sessions {
+	for i := range sessions {
+		s := &sessions[i]
 		q, hasQ := questionByID[s.QuestionID]
 		title := "(unknown question)"
 		difficulty := ""
@@ -162,7 +167,8 @@ func buildHistorySummary(sessions []db.InterviewSession, evaluations []db.Evalua
 		var (
 			sumReq, sumArch, sumDive, sumScale, sumComm, sumOverall float64
 		)
-		for _, e := range evaluations {
+		for i := range evaluations {
+			e := &evaluations[i]
 			sumReq += float64(e.ScoreRequirements)
 			sumArch += float64(e.ScoreArchitecture)
 			sumDive += float64(e.ScoreDeepDive)

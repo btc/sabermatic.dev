@@ -18,7 +18,7 @@ var (
 )
 
 // msgSessionLoaded builds the session_loaded event sent on first connect.
-func msgSessionLoaded(sessionID uuid.UUID, question db.Question, durationMin int, ttsEnabled bool) map[string]any {
+func msgSessionLoaded(sessionID uuid.UUID, question *db.Question, durationMin int, ttsEnabled bool) map[string]any {
 	return map[string]any{
 		"type":       "session_loaded",
 		"session_id": sessionID.String(),
