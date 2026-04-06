@@ -126,28 +126,18 @@ func (a *TTSAccumulator) ttsLoop() {
 			if err != nil {
 				continue
 			}
-
-			buf := make([]byte, 4096)
-			for {
-				n, readErr := rc.Read(buf)
-				if n > 0 {
-					chunk := base64.StdEncoding.EncodeToString(buf[:n])
-					_ = a.ws.SendJSON(a.ctx, map[string]any{
-						"type":       "tts_chunk",
-						"data":       chunk,
-						"message_id": a.messageID.String(),
-						"seq":        a.seq,
-					})
-					a.seq++
-				}
-				if readErr == io.EOF {
-					break
-				}
-				if readErr != nil {
-					break
-				}
-			}
+			data, err := io.ReadAll(rc)
 			rc.Close()
+			if err != nil || len(data) == 0 {
+				continue
+			}
+			_ = a.ws.SendJSON(a.ctx, map[string]any{
+				"type":       "tts_chunk",
+				"data":       base64.StdEncoding.EncodeToString(data),
+				"message_id": a.messageID.String(),
+				"seq":        a.seq,
+			})
+			a.seq++
 
 		case <-a.ctx.Done():
 			return
