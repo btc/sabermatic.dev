@@ -107,7 +107,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
 
     // --- Resolve user ---
 
-    // (A) Known OAuth account: provider+provider_id already linked to a user.
+    // (A) Returning user: they've logged in with this provider before.
     oauthAcct, err := q.GetOAuthAccount(ctx, ...)
     if err == nil {
         user, err = q.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
@@ -119,8 +119,9 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
         }
     }
 
-    // (B) No OAuth link. Existing user with this email? FOR UPDATE prevents
-    //     concurrent logins for the same email from racing.
+    // (B) First time with this provider, but we already have an account
+    //     for their email (e.g. they signed up with password, now adding
+    //     Google). Lock the row so a concurrent login can't race us.
     if path == "" {
         user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
         if err == nil {
@@ -132,17 +133,19 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
         }
     }
 
-    // (C) No OAuth link, no existing user. Create one.
-    //     ON CONFLICT DO NOTHING handles the rare case where another tx
-    //     inserted the same email between (B) and here.
+    // (C) Brand new user — no account exists for this email.
+    //     In rare cases, another request for the same email may have
+    //     created the account between (B) and now (e.g. the user
+    //     double-clicked the OAuth button). CreateOAuthUserOrNoop
+    //     safely no-ops in that case, and we re-select their row.
     if path == "" {
         user, err = q.CreateOAuthUserOrNoop(ctx, ...)
         if err == nil {
             path = pathNewUser
         } else if errors.Is(err, pgx.ErrNoRows) {
-            // Lost insert race — re-select the row the other tx created.
+            // Another request just created this account. Use theirs.
             user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
-            // ... if ErrNoRows (other tx rolled back), return error.
+            // ... if ErrNoRows (other request failed), return error.
             if user.DeletedAt.Valid {
                 path = pathReactivated
             } else {
@@ -175,9 +178,9 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
 
 Each check runs only if the previous one didn't match (`path == ""`):
 
-- **(A) Known OAuth account** — `GetOAuthAccount(provider, provider_id)`. If found, load user by ID. If soft-deleted, `pathReactivated`. Otherwise `pathExistingOAuth`.
-- **(B) No OAuth link, existing email** — `GetUserByEmailForUpdate(email)`. If found and soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents concurrent logins for the same email from racing.
-- **(C) No OAuth link, no existing user** — `CreateOAuthUserOrNoop(email, display_name)`. If row returned, `pathNewUser`. If no row (lost insert race), `GetUserByEmailForUpdate` again to pick up the row the other tx created. If `ErrNoRows` (other tx rolled back), return error — caller can retry at HTTP level.
+- **(A) Returning user** — They've logged in with this provider before. Look up by provider+provider_id. If soft-deleted, reactivate.
+- **(B) Existing account, new provider** — First OAuth login, but they already have an account for this email (e.g. signed up with password, now adding Google). Lock the row to prevent concurrent races. If soft-deleted, reactivate.
+- **(C) Brand new user** — No account exists for this email. Create one. If another request for the same email snuck in between (B) and now (e.g. user double-clicked the OAuth button), the insert safely no-ops and we use the account they created.
 
 #### Side effects per path
 
