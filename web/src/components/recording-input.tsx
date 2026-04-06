@@ -52,6 +52,16 @@ export function RecordingInput({
   dialogOpen,
 }: RecordingInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const spaceHeldRef = useRef(false);
+  const startedViaSpaceRef = useRef(false);
+
+  // Auto-stop recording if Space was released during async start (e.g., mic permission prompt).
+  // Only applies to Space-initiated recording — mic button clicks are toggle-based.
+  useEffect(() => {
+    if (isRecording && startedViaSpaceRef.current && !spaceHeldRef.current) {
+      onStopRecording();
+    }
+  }, [isRecording, onStopRecording]);
 
   // -- Waveform animation state --
   const [waveformData, setWaveformData] = useState<Uint8Array>(new Uint8Array(24).fill(128));
@@ -86,6 +96,7 @@ export function RecordingInput({
   useEffect(() => {
     if (prevRecording.current && !isRecording) {
       setFrozenWaveform(new Uint8Array(latestWaveformRef.current));
+      startedViaSpaceRef.current = false;
     }
     prevRecording.current = isRecording;
   }, [isRecording]);
@@ -98,8 +109,10 @@ export function RecordingInput({
         return;
       }
       if (disabled) return;
-      if (e.code === "Space" && !e.repeat && !isRecording) {
+      if (e.code === "Space" && !e.repeat && !isRecording && !dialogOpen) {
         e.preventDefault();
+        spaceHeldRef.current = true;
+        startedViaSpaceRef.current = true;
         onStartRecording();
       } else if (e.code === "Enter" && !dialogOpen) {
         e.preventDefault();
@@ -110,9 +123,12 @@ export function RecordingInput({
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !inputFocused && isRecording) {
-        e.preventDefault();
-        onStopRecording();
+      if (e.code === "Space") {
+        spaceHeldRef.current = false;
+        if (!inputFocused && isRecording) {
+          e.preventDefault();
+          onStopRecording();
+        }
       }
     };
     document.addEventListener("keydown", handleKeyDown);
