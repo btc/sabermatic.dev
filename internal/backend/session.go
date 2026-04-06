@@ -221,6 +221,23 @@ func (b *Backend) GetTranscript(ctx context.Context, sessionID, userID uuid.UUID
 	return msgs, nil
 }
 
+// ArchiveSessions archives or unarchives sessions in bulk, filtered by userID
+// to prevent cross-user modification. Returns the number of rows affected.
+func (b *Backend) ArchiveSessions(ctx context.Context, userID uuid.UUID, sessionIDs []uuid.UUID, archive bool) (_ int64, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ArchiveSessions")
+	defer func() { drilotel.End(span, err) }()
+
+	count, err := db.New(b.pool).ArchiveSessionsBulk(ctx, db.ArchiveSessionsBulkParams{
+		Archive:    archive,
+		SessionIds: sessionIDs,
+		UserID:     userID,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("archive sessions: %w", err)
+	}
+	return count, nil
+}
+
 // PersistMessageParams holds the data for persisting a message.
 type PersistMessageParams struct {
 	MessageID   uuid.UUID
