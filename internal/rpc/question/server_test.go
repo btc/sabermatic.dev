@@ -41,6 +41,16 @@ func authedClient(t *testing.T, srvURL string, rawToken string) drillv1connect.Q
 	)
 }
 
+// countQuestions returns the current number of questions in the database
+// (including any inserted by migrations).
+func countQuestions(t *testing.T, b *backend.Backend) int {
+	t.Helper()
+	var n int
+	err := b.Pool().QueryRow(context.Background(), "SELECT count(*) FROM questions").Scan(&n)
+	require.NoError(t, err)
+	return n
+}
+
 // seedQuestions inserts n seed questions (source='seed', user_id=NULL) into the
 // database so ListQuestions has data to return.
 func seedQuestions(t *testing.T, b *backend.Backend, n int) {
@@ -95,6 +105,7 @@ func TestListQuestions_Authenticated(t *testing.T) {
 	t.Parallel()
 
 	b := pg.NewBackend(t)
+	baseline := countQuestions(t, b)
 	seedQuestions(t, b, 3)
 
 	srvURL := startQuestionServer(t, b)
@@ -104,7 +115,7 @@ func TestListQuestions_Authenticated(t *testing.T) {
 	resp, err := client.ListQuestions(context.Background(), connect.NewRequest(&drillv1.ListQuestionsRequest{}))
 	require.NoError(t, err)
 	require.NotNil(t, resp.Msg.Questions)
-	require.Len(t, resp.Msg.Questions, 3)
+	require.Len(t, resp.Msg.Questions, baseline+3)
 }
 
 func TestListQuestions_Pagination(t *testing.T) {
@@ -160,6 +171,7 @@ func TestListQuestions_EnumMapping(t *testing.T) {
 	t.Parallel()
 
 	b := pg.NewBackend(t)
+	baseline := countQuestions(t, b)
 	seedQuestions(t, b, 4)
 
 	srvURL := startQuestionServer(t, b)
@@ -168,7 +180,7 @@ func TestListQuestions_EnumMapping(t *testing.T) {
 
 	resp, err := client.ListQuestions(context.Background(), connect.NewRequest(&drillv1.ListQuestionsRequest{}))
 	require.NoError(t, err)
-	require.Len(t, resp.Msg.Questions, 4)
+	require.Len(t, resp.Msg.Questions, baseline+4)
 
 	for _, q := range resp.Msg.Questions {
 		require.NotEqual(t, drillv1.Difficulty_DIFFICULTY_UNSPECIFIED, q.Difficulty,
