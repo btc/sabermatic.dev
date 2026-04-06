@@ -11,7 +11,6 @@ import (
 )
 
 func TestSecurityHeaders_AlwaysPresent(t *testing.T) {
-	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /test", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -31,7 +30,6 @@ func TestSecurityHeaders_AlwaysPresent(t *testing.T) {
 }
 
 func TestSecurityHeaders_HSTSWhenSecure(t *testing.T) {
-	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /test", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

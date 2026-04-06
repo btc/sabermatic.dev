@@ -25,7 +25,6 @@ import (
 )
 
 func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
-	t.Parallel()
 	cfg := testutil.Config(t)
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
@@ -49,7 +48,6 @@ func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
 }
 
 func TestCSRF_AllowsGetRequests(t *testing.T) {
-	t.Parallel()
 	cfg := testutil.Config(t)
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
@@ -73,7 +71,6 @@ func TestCSRF_AllowsGetRequests(t *testing.T) {
 }
 
 func TestCSRF_PostWithValidToken(t *testing.T) {
-	t.Parallel()
 	cfg := testutil.Config(t)
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
