@@ -5,7 +5,7 @@ import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery"
 import { apiClient } from "./client";
 import type {
   User, Question,
-  EvaluationResponse, EducatorAnalysis, CoachAnalysis,
+  EducatorAnalysis, CoachAnalysis,
 } from "./types";
 
 // --- Questions ---
@@ -19,27 +19,7 @@ export function useCreateQuestion() {
   });
 }
 
-// --- Evaluation ---
-
-export function useRetryEvaluation(sessionId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post(`/api/sessions/${sessionId}/evaluate`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
-    },
-  });
-}
-
-// --- Evaluation ---
-
-export function useEvaluation(sessionId: string, enabled = true) {
-  return useQuery({
-    queryKey: ["evaluation", sessionId],
-    queryFn: () => apiClient.get<EvaluationResponse>(`/api/sessions/${sessionId}/evaluation`),
-    enabled,
-  });
-}
+// (Evaluation hooks migrated to ConnectRPC EvaluationService)
 
 // --- Educator ---
 
