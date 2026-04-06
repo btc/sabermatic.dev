@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -124,6 +125,7 @@ func (a *TTSAccumulator) ttsLoop() {
 
 			rc, err := a.synth.Synthesize(a.ctx, sentence)
 			if err != nil {
+				slog.Warn("TTS synthesis failed", "error", err)
 				continue
 			}
 			data, err := io.ReadAll(rc)
