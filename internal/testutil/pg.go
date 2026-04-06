@@ -96,6 +96,9 @@ func dbName(t *testing.T) string {
 // on test cleanup.
 func (pg PG) NewDatabase(t *testing.T) string {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
 	ctx := context.Background()
 	name := dbName(t)
 
