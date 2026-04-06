@@ -24,6 +24,7 @@ export type ServerMessage =
   | { type: "interviewer_done"; message_id: string }
   | { type: "tts_chunk"; data: string; message_id: string; seq: number }
   | { type: "tts_done"; message_id: string }
+  | { type: "tts_error" }
   | { type: "transcription_result"; text: string }
   | { type: "timer_warning"; minutes_remaining: number }
   | { type: "timer_overtime" }
