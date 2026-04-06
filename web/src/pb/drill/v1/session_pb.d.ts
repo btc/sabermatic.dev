@@ -355,6 +355,11 @@ export declare type SessionSummary = Message$1<"drill.v1.SessionSummary"> & {
    * @generated from field: string question_title = 12;
    */
   questionTitle: string;
+
+  /**
+   * @generated from field: optional int32 score_overall = 13;
+   */
+  scoreOverall?: number;
 };
 
 /**
