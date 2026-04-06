@@ -511,16 +511,18 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 	if msg.InputMethod == "voice" {
 		// Validate audio.
 		if len(msg.Audio) == 0 {
-			c.send(ctx, msgError("audio_validation_failed", "no audio data provided"))
+			c.send(context.Background(), msgError("audio_validation_failed", "no audio data provided"))
 			return nil
 		}
 
 		// Transition to Transcribing.
+		// WS sends use context.Background() so that turn-context cancellation does
+		// not close the underlying WebSocket connection.
 		if err := c.sm.Transition(StateTranscribing); err != nil {
-			c.send(ctx, msgError("invalid_state_transition", err.Error()))
+			c.send(context.Background(), msgError("invalid_state_transition", err.Error()))
 			return nil
 		}
-		c.send(ctx, msgStateChange(StateTranscribing))
+		c.send(context.Background(), msgStateChange(StateTranscribing))
 
 		// Fire upload goroutine — does not block transcription.
 		go func() {
@@ -565,12 +567,12 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 			return fmt.Errorf("transcription returned empty text")
 		}
 
-		c.send(ctx, msgTranscriptionResult(text))
+		c.send(context.Background(), msgTranscriptionResult(text))
 		candidateContent = text
 	} else {
 		// Text input -- reject empty content.
 		if strings.TrimSpace(msg.Content) == "" {
-			c.send(ctx, msgError("empty_content", "text content cannot be empty"))
+			c.send(context.Background(), msgError("empty_content", "text content cannot be empty"))
 			return nil
 		}
 		candidateContent = msg.Content
@@ -578,10 +580,10 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 
 	// Transition to ProcessingInput.
 	if err := c.sm.Transition(StateProcessingInput); err != nil {
-		c.send(ctx, msgError("invalid_state_transition", err.Error()))
+		c.send(context.Background(), msgError("invalid_state_transition", err.Error()))
 		return nil
 	}
-	c.send(ctx, msgStateChange(StateProcessingInput))
+	c.send(context.Background(), msgStateChange(StateProcessingInput))
 
 	// Persist candidate message.
 	candidateMsg, err := c.persistMessage(context.WithoutCancel(ctx), messageID, "candidate", candidateContent, msg.InputMethod)
@@ -604,11 +606,14 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	c.obs.Load().Interrupt()
 
 	// Transition to InterviewerSpeaking.
+	// WS sends use context.Background() so that turn-context cancellation does
+	// not close the underlying WebSocket connection (coder/websocket registers
+	// context.AfterFunc to close the conn when the write ctx is cancelled).
 	if err := c.sm.Transition(StateInterviewerSpeaking); err != nil {
-		c.send(ctx, msgError("invalid_state_transition", err.Error()))
+		c.send(context.Background(), msgError("invalid_state_transition", err.Error()))
 		return nil
 	}
-	c.send(ctx, msgStateChange(StateInterviewerSpeaking))
+	c.send(context.Background(), msgStateChange(StateInterviewerSpeaking))
 
 	messageID := uuid.New()
 
@@ -633,7 +638,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	if c.ttsEnabled {
 		synth, err := c.backend.Synthesizer()
 		if err == nil && synth != nil {
-			sink := &ttsSink{ws: c.ws, ctx: ctx, messageID: messageID}
+			sink := &ttsSink{ws: c.ws, ctx: context.Background(), messageID: messageID}
 			observers = append(observers, observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
 				Sink:            sink,
 				Synth:           synth,
@@ -706,7 +711,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	if err := c.sm.Transition(StateWaitingForInput); err != nil {
 		return fmt.Errorf("transition to waiting: %w", err)
 	}
-	c.send(ctx, msgStateChange(StateWaitingForInput))
+	c.send(context.Background(), msgStateChange(StateWaitingForInput))
 
 	return nil
 }
