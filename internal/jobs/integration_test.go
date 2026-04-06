@@ -5,61 +5,34 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btc/drill/internal/config"
-	"github.com/btc/drill/internal/email"
-	"github.com/btc/drill/internal/jobs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/btc/drill/internal/email"
+	"github.com/btc/drill/internal/jobs"
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestSendEmail_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
+
+	connStr := pg.NewDatabase(t)
 
 	ctx := context.Background()
-
-	// Start Postgres
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("drill_test"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { pgContainer.Terminate(ctx) })
-
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
 	pool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	// Run River migrations (River needs its own tables)
+	// Run River migrations.
 	migrator, err := rivermigrate.New(riverpgxv5.New(pool), nil)
 	require.NoError(t, err)
 	_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 	require.NoError(t, err)
 
-	// Load config with defaults (required env vars set for test)
-	t.Setenv("DATABASE_URL", connStr)
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	t.Setenv("OPENAI_API_KEY", "sk-test")
-	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
-	cfg, err := config.Load()
-	require.NoError(t, err)
+	cfg := testutil.ConfigWithOverrides(t, connStr, nil)
 
 	// Set up workers with log sender
 	logSender := email.NewLogSender()
