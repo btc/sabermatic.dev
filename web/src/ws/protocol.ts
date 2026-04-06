@@ -25,6 +25,7 @@ export type ServerMessage =
   | { type: "tts_chunk"; data: string; message_id: string; seq: number }
   | { type: "tts_done"; message_id: string }
   | { type: "tts_error" }
+  | { type: "audio_upload_failed" }
   | { type: "transcription_result"; text: string }
   | { type: "timer_warning"; minutes_remaining: number }
   | { type: "timer_overtime" }

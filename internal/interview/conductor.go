@@ -536,6 +536,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 					"error", uploadErr,
 					"session_id", c.sessionID,
 					"message_id", messageID)
+				c.send(uploadCtx, map[string]string{"type": "audio_upload_failed"})
 				return
 			}
 			if setErr := c.backend.SetAudioURL(uploadCtx, messageID, url); setErr != nil {
