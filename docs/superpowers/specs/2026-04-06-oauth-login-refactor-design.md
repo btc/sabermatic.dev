@@ -78,23 +78,82 @@ Existing queries (`GetOAuthAccount`, `ReactivateUser`, `VerifyUserEmail`, `GetUs
 
 ### Restructured OAuthLogin
 
-The method becomes three phases: **resolve user**, **apply side effects**, **create session**. One transaction, no retry loop.
+One function, one transaction, no retry loop. Three sections: **resolve user**, **apply side effects**, **create session**. A local `path` variable connects resolution to side effects.
 
 ```go
 func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLoginResult, error) {
+    const (
+        pathExistingOAuth  = "existing_oauth"
+        pathLinkedExisting = "linked_existing"
+        pathReactivated    = "reactivated"
+        pathNewUser        = "new_user"
+    )
+
     p.Email = strings.ToLower(strings.TrimSpace(p.Email))
 
     tx, err := b.pool.Begin(ctx)
     // ...
     q := db.New(tx)
 
-    // Phase 1: Resolve user.
-    user, path, err := b.resolveOAuthUser(ctx, q, p)
+    var user db.User
+    var path string
 
-    // Phase 2: Side effects based on resolution path.
-    err = b.applyOAuthSideEffects(ctx, tx, q, user, p, path)
+    // --- Resolve user ---
 
-    // Phase 3: Create session (shared with Login).
+    // Step 1: Known OAuth account?
+    oauthAcct, err := q.GetOAuthAccount(ctx, ...)
+    if err == nil {
+        user, err = q.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
+        // ...
+        if user.DeletedAt.Valid {
+            path = pathReactivated
+        } else {
+            path = pathExistingOAuth
+        }
+    }
+
+    // Step 2: Known email? Lock the row.
+    if path == "" {
+        user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
+        if err == nil {
+            if user.DeletedAt.Valid {
+                path = pathReactivated
+            } else {
+                path = pathLinkedExisting
+            }
+        }
+    }
+
+    // Step 3: New user.
+    if path == "" {
+        user, err = q.CreateOAuthUserOrNoop(ctx, ...)
+        if err == nil {
+            path = pathNewUser
+        } else if errors.Is(err, pgx.ErrNoRows) {
+            // Lost insert race — other tx created this email.
+            user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
+            // ... if ErrNoRows, return error (other tx rolled back)
+            if user.DeletedAt.Valid {
+                path = pathReactivated
+            } else {
+                path = pathLinkedExisting
+            }
+        }
+    }
+
+    // --- Side effects ---
+    switch path {
+    case pathNewUser:
+        // Provision free grant, link OAuth account.
+    case pathReactivated:
+        // Reactivate user, link OAuth account.
+    case pathLinkedExisting:
+        // Verify email if needed, link OAuth account.
+    case pathExistingOAuth:
+        // Nothing — user and link already exist.
+    }
+
+    // --- Session (shared with Login) ---
     sess, err := b.createSession(ctx, tx, CreateSessionParams{...})
 
     tx.Commit(ctx)
@@ -102,31 +161,13 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 }
 ```
 
-#### Resolution paths
+#### Resolution steps
 
-```go
-const (
-    pathExistingOAuth  = "existing_oauth"
-    pathLinkedExisting = "linked_existing"
-    pathReactivated    = "reactivated"
-    pathNewUser        = "new_user"
-)
-```
+1. `GetOAuthAccount(provider, provider_id)` — if found, load user by ID. If soft-deleted, `pathReactivated`. Otherwise `pathExistingOAuth`.
+2. `GetUserByEmailForUpdate(email)` — if found and soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents races with concurrent logins for the same email.
+3. `CreateOAuthUserOrNoop(email, display_name)` — if row returned, `pathNewUser`. If no row (lost race), `GetUserByEmailForUpdate` again. If `ErrNoRows` (other tx rolled back), return error — caller can retry at HTTP level.
 
-#### `resolveOAuthUser`
-
-Determines who this user is without mutating state (except the new-user insert):
-
-1. `GetOAuthAccount(provider, provider_id)` — if found, load user by ID. If soft-deleted, return `pathReactivated`. Otherwise `pathExistingOAuth`.
-2. `GetUserByEmailForUpdate(email)` — if found and soft-deleted, return `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents races with concurrent logins for the same email.
-3. `CreateOAuthUserOrNoop(email, display_name)` — if row returned, `pathNewUser`. If no row (lost race), fall through.
-4. `GetUserByEmailForUpdate(email)` — the conflicting transaction committed, so the row exists. If soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. If `ErrNoRows` (other tx rolled back), return an error — the caller can retry at the HTTP level.
-
-No retry loop. Step 4 is a deterministic fallback, not a recursive retry.
-
-#### `applyOAuthSideEffects`
-
-Explicit switch on the resolution path:
+#### Side effects per path
 
 | Path | Side effects |
 |---|---|
@@ -152,7 +193,7 @@ sess, err := b.createSession(ctx, b.pool, CreateSessionParams{
 
 ## What gets deleted
 
-1. `oauthLoginWithRetry` — replaced by linear `resolveOAuthUser` + `FOR UPDATE`.
+1. `oauthLoginWithRetry` — replaced by inline `FOR UPDATE` + `ON CONFLICT DO NOTHING` flow.
 2. `createSessionInTx` — replaced by shared `createSession`.
 3. Inline session creation in `Login` — replaced by `b.createSession(ctx, b.pool, ...)`.
 4. `isDuplicateKeyError` calls in `oauth.go` — no longer needed there. Stays in `auth.go` for `Signup`.
@@ -184,5 +225,5 @@ After this refactor, the following hold structurally:
 
 - **Session creation is one path.** `createSession` is the only way to create an auth session. Both `Login` and `OAuthLogin` use it.
 - **No retry loops.** `FOR UPDATE` serializes concurrent access to existing users. `ON CONFLICT DO NOTHING` + re-select handles new-user races without recursion.
-- **Resolution and mutation are separated.** `resolveOAuthUser` determines the path; `applyOAuthSideEffects` applies the right mutations. Each can be reasoned about independently.
+- **Resolution and mutation are separated by structure, not by function.** The top half of `OAuthLogin` sets `path` and `user`; the bottom half switches on `path` to apply side effects. One function, clearly sectioned.
 - **Every path's side effects are explicit.** A switch statement with four cases, each listing exactly what it does.
