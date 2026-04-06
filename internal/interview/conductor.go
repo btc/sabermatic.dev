@@ -119,6 +119,27 @@ func (s *ttsSink) HandleTTSError() {
 	})
 }
 
+// turnResult carries the outcome of a pipeline run.
+type turnResult struct {
+	err error
+}
+
+// drainPipeline waits for the pipeline goroutine to finish, with a timeout
+// to prevent shutdown hangs if the pipeline ignores context cancellation.
+func drainPipeline(ch <-chan turnResult) {
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		slog.Error("conductor: pipeline did not exit after cancel")
+	}
+}
+
+// Pending action constants for deferred lifecycle operations.
+const (
+	actionEnd    = "end"
+	actionCancel = "cancel"
+)
+
 // NewConductor constructs a Conductor from the given params.
 func NewConductor(p ConductorParams) *Conductor {
 	c := &Conductor{
@@ -230,44 +251,121 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		return
 	}
 
-	// Main loop -- all control flow visible here.
+	// Pipeline state — at most one pipeline goroutine runs at a time.
+	var (
+		turnResultCh  <-chan turnResult  // nil when no pipeline running
+		cancelTurn    context.CancelFunc // non-nil when pipeline running
+		pendingAction string             // "", actionEnd, or actionCancel
+	)
+
+	// Dispatch opening question as a pipeline goroutine for new sessions.
+	if !c.isReconnect() && len(c.messages) == 0 {
+		ch := make(chan turnResult, 1)
+		turnResultCh = ch
+		turnCtx, cancel := context.WithCancel(workCtx)
+		cancelTurn = cancel
+		go func() {
+			ch <- turnResult{err: c.streamInterviewerResponse(turnCtx)}
+		}()
+	}
+
+	// Main loop -- event loop is never blocked by pipeline I/O.
 	reconnectPending := false
 	for {
 		select {
 		case msg, ok := <-msgCh:
 			if !ok {
-				return // client disconnected
+				// Client disconnected.
+				if cancelTurn != nil {
+					cancelTurn()
+					drainPipeline(turnResultCh)
+				}
+				if pendingAction == actionEnd {
+					_ = c.endSession(workCtx)
+				}
+				return
 			}
 			if serverCtx.Err() != nil {
 				c.send(workCtx, msgReconnectPlease)
+				if cancelTurn != nil {
+					cancelTurn()
+					drainPipeline(turnResultCh)
+				}
 				return
 			}
 			switch msg.Type {
 			case "end_turn":
-				if err := c.endTurn(workCtx, msg); err != nil {
-					slog.Error("conductor: end_turn", "error", err, "session_id", c.sessionID)
-					c.sm.ForceState(StateWaitingForInput)
-					c.send(workCtx, msgError("turn_failed", "failed to process turn, please try again"))
+				if turnResultCh != nil {
+					c.send(workCtx, msgError("turn_in_progress", "a turn is already being processed"))
 					continue
 				}
-				if reconnectPending {
-					c.send(workCtx, msgReconnectPlease)
-					return
-				}
+				ch := make(chan turnResult, 1)
+				turnResultCh = ch
+				turnCtx, cancel := context.WithCancel(workCtx)
+				cancelTurn = cancel
+				capturedMsg := msg
+				go func() {
+					ch <- turnResult{err: c.endTurn(turnCtx, capturedMsg)}
+				}()
+
 			case "end_session":
+				if turnResultCh != nil {
+					pendingAction = actionEnd
+					cancelTurn()
+					continue
+				}
 				if err := c.endSession(workCtx); err != nil {
 					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
 				}
 				return
+
 			case "cancel_session":
+				if turnResultCh != nil {
+					pendingAction = actionCancel
+					cancelTurn()
+					continue
+				}
 				if err := c.cancelSession(serverCtx); err != nil {
 					slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
 				}
 				return
+
 			case "ping":
 				c.send(workCtx, msgPong)
 			default:
 				c.send(workCtx, msgError("unknown_message_type", "unknown message type: "+msg.Type))
+			}
+
+		case res := <-turnResultCh:
+			// Pipeline completed. Reclaim ownership of shared state.
+			turnResultCh = nil
+			cancelTurn = nil
+
+			if res.err != nil {
+				slog.Error("conductor: end_turn", "error", res.err, "session_id", c.sessionID)
+				c.sm.ForceState(StateWaitingForInput)
+				c.send(workCtx, msgError("turn_failed", "failed to process turn, please try again"))
+			}
+
+			// Handle deferred lifecycle action.
+			switch pendingAction {
+			case actionEnd:
+				pendingAction = ""
+				if err := c.endSession(workCtx); err != nil {
+					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
+				}
+				return
+			case actionCancel:
+				pendingAction = ""
+				if err := c.cancelSession(serverCtx); err != nil {
+					slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
+				}
+				return
+			}
+
+			if reconnectPending {
+				c.send(workCtx, msgReconnectPlease)
+				return
 			}
 
 		case <-warningTimer:
@@ -278,6 +376,11 @@ func (c *Conductor) Run(serverCtx context.Context) {
 
 		case <-autoEndTimer:
 			slog.Info("conductor: auto-ending session", "session_id", c.sessionID)
+			if turnResultCh != nil {
+				pendingAction = actionEnd
+				cancelTurn()
+				continue
+			}
 			if err := c.endSession(workCtx); err != nil {
 				slog.Error("conductor: auto-end", "error", err, "session_id", c.sessionID)
 			}
@@ -288,6 +391,13 @@ func (c *Conductor) Run(serverCtx context.Context) {
 
 		case <-serverCtx.Done():
 			c.send(workCtx, msgReconnectPlease)
+			if cancelTurn != nil {
+				cancelTurn()
+				drainPipeline(turnResultCh)
+			}
+			if pendingAction == actionEnd {
+				_ = c.endSession(workCtx)
+			}
 			return
 		}
 	}
@@ -356,7 +466,9 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 		c.send(ctx, msgStateChange(StateWaitingForInput))
 		return nil
 	}
-	return c.streamInterviewerResponse(ctx)
+	// New session: opening question is dispatched by the caller as a
+	// pipeline goroutine so the event loop is responsive during streaming.
+	return nil
 }
 
 // endTurn processes a candidate's turn (text or voice).
