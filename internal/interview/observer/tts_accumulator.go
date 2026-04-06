@@ -2,43 +2,52 @@ package observer
 
 import (
 	"context"
-	"encoding/base64"
 	"io"
 	"log/slog"
 	"strings"
-
-	"github.com/google/uuid"
+	"sync"
+	"time"
 
 	"github.com/btc/drill/internal/ai"
 )
 
+// TTSAccumulatorParams contains everything needed to construct a TTSAccumulator.
+type TTSAccumulatorParams struct {
+	Sink            TTSSink
+	Synth           ai.Synthesizer
+	SentenceTimeout time.Duration
+}
+
 // TTSAccumulator buffers tokens, detects sentence boundaries, and fires TTS
 // synthesis for each sentence in a dedicated goroutine.
 type TTSAccumulator struct {
-	ws        WSConn
-	synth     ai.Synthesizer
-	messageID uuid.UUID
-	ctx       context.Context
-	cancel    context.CancelFunc
-	sentCh    chan string   // sentences to synthesize
-	done      chan struct{} // closed when TTS goroutine exits
-	buf       strings.Builder
-	seq       int
+	sink            TTSSink
+	synth           ai.Synthesizer
+	sentenceTimeout time.Duration
+	ctx             context.Context
+	cancel          context.CancelFunc
+	sentCh          chan string
+	wg              sync.WaitGroup
+	closeOnce       sync.Once
+	buf             strings.Builder
 }
 
 // NewTTSAccumulator constructs a TTSAccumulator and starts the TTS goroutine.
-func NewTTSAccumulator(ctx context.Context, ws WSConn, synth ai.Synthesizer, messageID uuid.UUID) *TTSAccumulator {
-	ctx, cancel := context.WithCancel(ctx)
+// The accumulator owns its internal context — no parent context accepted.
+// The lifecycle is managed entirely by Close() (graceful) and Interrupt()
+// (forced). Per-sentence timeouts bound each operation, so the goroutine
+// always terminates in finite time without external cancellation.
+func NewTTSAccumulator(p TTSAccumulatorParams) *TTSAccumulator {
+	ctx, cancel := context.WithCancel(context.Background())
 	acc := &TTSAccumulator{
-		ws:        ws,
-		synth:     synth,
-		messageID: messageID,
-		ctx:       ctx,
-		cancel:    cancel,
-		sentCh:    make(chan string, 32),
-		done:      make(chan struct{}),
+		sink:            p.Sink,
+		synth:           p.Synth,
+		sentenceTimeout: p.SentenceTimeout,
+		ctx:             ctx,
+		cancel:          cancel,
+		sentCh:          make(chan string, 32),
 	}
-	go acc.ttsLoop()
+	acc.wg.Go(acc.ttsLoop)
 	return acc
 }
 
@@ -46,6 +55,8 @@ func NewTTSAccumulator(ctx context.Context, ws WSConn, synth ai.Synthesizer, mes
 var sentenceBoundaries = []string{". ", "? ", "! ", ".\n", "?\n", "!\n"}
 
 // OnToken appends the token to the buffer and flushes any complete sentences.
+// The send to sentCh is non-blocking — if the buffer is full, the sentence
+// is dropped and HandleTTSError is called to notify the user.
 func (a *TTSAccumulator) OnToken(token string) {
 	a.buf.WriteString(token)
 	for {
@@ -71,6 +82,11 @@ func (a *TTSAccumulator) OnToken(token string) {
 		case a.sentCh <- sentence:
 		case <-a.ctx.Done():
 			return
+		default:
+			slog.Warn("tts: sentence dropped, buffer full",
+				"buffer_cap", cap(a.sentCh),
+				"sentence_len", len(sentence))
+			a.sink.HandleTTSError()
 		}
 	}
 }
@@ -81,9 +97,13 @@ func (a *TTSAccumulator) OnDone(_ string) {
 		select {
 		case a.sentCh <- remaining:
 		case <-a.ctx.Done():
+		default:
+			slog.Warn("tts: final sentence dropped, buffer full",
+				"sentence_len", len(remaining))
+			a.sink.HandleTTSError()
 		}
 	}
-	close(a.sentCh)
+	a.closeOnce.Do(func() { close(a.sentCh) })
 }
 
 // OnError cancels the context to abort in-flight TTS.
@@ -96,50 +116,66 @@ func (a *TTSAccumulator) Interrupt() {
 	a.cancel()
 }
 
-// Close waits for the TTS goroutine to finish. Implements the Closeable interface.
+// Close waits for the TTS goroutine to finish, then cancels the context
+// as cleanup. Safe to call multiple times — both Wait() and cancel() are
+// idempotent.
+//
+// Wait() before cancel() is critical: it lets in-flight synthesis complete
+// naturally in the happy path. Per-sentence timeouts guarantee Wait() is
+// bounded. Calling cancel() first would truncate the last sentence's audio.
 func (a *TTSAccumulator) Close() {
-	<-a.done
+	a.wg.Wait()
+	a.cancel()
 }
 
 // ttsLoop reads sentences from sentCh, synthesizes each one, and sends
-// the resulting audio to the WebSocket client.
+// the resulting audio to the sink.
 func (a *TTSAccumulator) ttsLoop() {
-	defer close(a.done)
-
 	for {
 		select {
 		case sentence, ok := <-a.sentCh:
 			if !ok {
-				// Channel closed (OnDone was called). Send tts_done if context still live.
+				// sentCh closed by OnDone. Send HandleTTSDone only if we
+				// weren't interrupted — on interrupt/error the client
+				// won't receive tts_done (existing behavior, not a regression).
 				if a.ctx.Err() == nil {
-					_ = a.ws.SendJSON(a.ctx, map[string]any{
-						"type":       "tts_done",
-						"message_id": a.messageID.String(),
-					})
+					a.sink.HandleTTSDone()
 				}
 				return
 			}
 			if a.ctx.Err() != nil {
-				continue // drain channel but skip synthesis
+				continue
 			}
 
-			rc, err := a.synth.Synthesize(a.ctx, sentence)
+			synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
+			rc, err := a.synth.Synthesize(synthCtx, sentence)
 			if err != nil {
-				slog.Warn("TTS synthesis failed", "error", err)
+				if synthCtx.Err() == context.DeadlineExceeded {
+					slog.Warn("tts: sentence synthesis timed out",
+						"timeout", a.sentenceTimeout,
+						"sentence_len", len(sentence))
+				} else {
+					slog.Debug("tts: sentence synthesis failed",
+						"error", err,
+						"sentence_len", len(sentence))
+				}
+				a.sink.HandleTTSError()
+				synthCancel()
 				continue
 			}
 			data, err := io.ReadAll(rc)
 			rc.Close()
+			synthCancel()
 			if err != nil || len(data) == 0 {
+				if err != nil {
+					slog.Debug("tts: audio read failed",
+						"error", err,
+						"sentence_len", len(sentence))
+				}
+				a.sink.HandleTTSError()
 				continue
 			}
-			_ = a.ws.SendJSON(a.ctx, map[string]any{
-				"type":       "tts_chunk",
-				"data":       base64.StdEncoding.EncodeToString(data),
-				"message_id": a.messageID.String(),
-				"seq":        a.seq,
-			})
-			a.seq++
+			a.sink.HandleAudio(data)
 
 		case <-a.ctx.Done():
 			return
