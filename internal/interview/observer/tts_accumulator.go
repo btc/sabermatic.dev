@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -147,7 +148,9 @@ func (a *TTSAccumulator) ttsLoop() {
 					break
 				}
 			}
-			rc.Close() //nolint:errcheck // best-effort cleanup
+			if err := rc.Close(); err != nil {
+				slog.ErrorContext(a.ctx, "closing TTS response body", "error", err)
+			}
 
 		case <-a.ctx.Done():
 			return

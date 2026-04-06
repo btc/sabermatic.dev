@@ -27,7 +27,7 @@ func setupGlobalTracer(t *testing.T) *tracetest.InMemoryExporter {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() {
-		tp.Shutdown(context.Background()) //nolint:errcheck // test cleanup
+		require.NoError(t, tp.Shutdown(context.Background()))
 		otel.SetTracerProvider(noop.NewTracerProvider())
 	})
 	return exp

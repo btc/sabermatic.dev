@@ -334,7 +334,7 @@ func TestRefundSessionMinutes_WallClock(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	//nolint:gocritic // not commented-out code: Balance: 60 - 30 = 30.
+	// Expected balance is 30 (started with 60, reserved 30).
 	bs, err := db.New(b.Pool()).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
 	assert.Equal(t, int32(30), bs.TotalBalance)
@@ -362,7 +362,7 @@ func TestFullRefundSessionMinutes_FailSession(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	//nolint:gocritic // not commented-out code: Balance: 60 - 30 = 30.
+	// Expected balance is 30 (started with 60, reserved 30).
 	bs, err := db.New(b.Pool()).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
 	assert.Equal(t, int32(30), bs.TotalBalance)
@@ -460,7 +460,7 @@ func TestFullRefundSessionMinutes_Idempotent(t *testing.T) {
 		`UPDATE grants SET remaining_minutes = remaining_minutes - 30 WHERE user_id = $1`, userID)
 	require.NoError(t, err)
 
-	//nolint:gocritic // not commented-out code: Balance: 60 - 30 = 30.
+	// Expected balance is 30 (started with 60, reserved 30).
 	bs, err = db.New(b.Pool()).GetBillingSnapshot(ctx, userID)
 	require.NoError(t, err)
 	assert.Equal(t, int32(30), bs.TotalBalance)

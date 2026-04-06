@@ -53,7 +53,7 @@ func TestSendEmail_Integration(t *testing.T) {
 	t.Cleanup(func() {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		riverClient.Stop(stopCtx) //nolint:errcheck // test cleanup
+		require.NoError(t, riverClient.Stop(stopCtx))
 	})
 
 	// Enqueue a SendEmail job

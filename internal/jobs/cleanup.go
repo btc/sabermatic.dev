@@ -32,7 +32,7 @@ func (w *CleanupAbandonedSessionsWorker) Work(ctx context.Context, job *river.Jo
 	if err != nil {
 		return fmt.Errorf("begin cleanup tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is no-op
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	q := db.New(tx)
 
