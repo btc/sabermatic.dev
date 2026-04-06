@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createConnectQueryKey } from "@connectrpc/connect-query";
-import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
-import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 import { apiClient } from "./client";
 import type {
   User, Question,
@@ -17,8 +16,6 @@ export function useCreateQuestion() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["questions"] }),
   });
 }
-
-// (Evaluation hooks migrated to ConnectRPC EvaluationService)
 
 // --- Auth mutations ---
 

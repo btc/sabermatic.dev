@@ -102,6 +102,18 @@ func mapRetryError(err error) error {
 	}
 }
 
+// evaluationStatusToProto converts a backend evaluation status string to the proto enum.
+func evaluationStatusToProto(s string) drillv1.EvaluationStatus {
+	switch s {
+	case "reviewed":
+		return drillv1.EvaluationStatus_EVALUATION_STATUS_REVIEWED
+	case "evaluation_failed":
+		return drillv1.EvaluationStatus_EVALUATION_STATUS_EVALUATION_FAILED
+	default:
+		return drillv1.EvaluationStatus_EVALUATION_STATUS_UNSPECIFIED
+	}
+}
+
 // evaluationToProto converts a backend EvaluationResponse to the proto EvaluationResult.
 func evaluationToProto(e *backend.EvaluationResponse) *drillv1.EvaluationResult {
 	annotations := make([]*drillv1.Annotation, len(e.Annotations))
@@ -114,7 +126,7 @@ func evaluationToProto(e *backend.EvaluationResponse) *drillv1.EvaluationResult 
 	}
 
 	result := &drillv1.EvaluationResult{
-		Status:      e.Status,
+		Status:      evaluationStatusToProto(e.Status),
 		Strengths:   e.Strengths,
 		Gaps:        e.Gaps,
 		Advice:      e.Advice,

@@ -47,9 +47,9 @@ export declare const GetEvaluationResponseSchema: GenMessage<GetEvaluationRespon
  */
 export declare type EvaluationResult = Message<"drill.v1.EvaluationResult"> & {
   /**
-   * @generated from field: string status = 1;
+   * @generated from field: drill.v1.EvaluationStatus status = 1;
    */
-  status: string;
+  status: EvaluationStatus;
 
   /**
    * @generated from field: drill.v1.EvaluationScores scores = 2;
@@ -212,6 +212,31 @@ export enum AnnotationType {
  * Describes the enum drill.v1.AnnotationType.
  */
 export declare const AnnotationTypeSchema: GenEnum<AnnotationType>;
+
+/**
+ * @generated from enum drill.v1.EvaluationStatus
+ */
+export enum EvaluationStatus {
+  /**
+   * @generated from enum value: EVALUATION_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: EVALUATION_STATUS_REVIEWED = 1;
+   */
+  REVIEWED = 1,
+
+  /**
+   * @generated from enum value: EVALUATION_STATUS_EVALUATION_FAILED = 2;
+   */
+  EVALUATION_FAILED = 2,
+}
+
+/**
+ * Describes the enum drill.v1.EvaluationStatus.
+ */
+export declare const EvaluationStatusSchema: GenEnum<EvaluationStatus>;
 
 /**
  * @generated from service drill.v1.EvaluationService

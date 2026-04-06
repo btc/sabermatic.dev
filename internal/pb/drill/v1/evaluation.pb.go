@@ -76,6 +76,55 @@ func (AnnotationType) EnumDescriptor() ([]byte, []int) {
 	return file_drill_v1_evaluation_proto_rawDescGZIP(), []int{0}
 }
 
+type EvaluationStatus int32
+
+const (
+	EvaluationStatus_EVALUATION_STATUS_UNSPECIFIED       EvaluationStatus = 0
+	EvaluationStatus_EVALUATION_STATUS_REVIEWED          EvaluationStatus = 1
+	EvaluationStatus_EVALUATION_STATUS_EVALUATION_FAILED EvaluationStatus = 2
+)
+
+// Enum value maps for EvaluationStatus.
+var (
+	EvaluationStatus_name = map[int32]string{
+		0: "EVALUATION_STATUS_UNSPECIFIED",
+		1: "EVALUATION_STATUS_REVIEWED",
+		2: "EVALUATION_STATUS_EVALUATION_FAILED",
+	}
+	EvaluationStatus_value = map[string]int32{
+		"EVALUATION_STATUS_UNSPECIFIED":       0,
+		"EVALUATION_STATUS_REVIEWED":          1,
+		"EVALUATION_STATUS_EVALUATION_FAILED": 2,
+	}
+)
+
+func (x EvaluationStatus) Enum() *EvaluationStatus {
+	p := new(EvaluationStatus)
+	*p = x
+	return p
+}
+
+func (x EvaluationStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EvaluationStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_drill_v1_evaluation_proto_enumTypes[1].Descriptor()
+}
+
+func (EvaluationStatus) Type() protoreflect.EnumType {
+	return &file_drill_v1_evaluation_proto_enumTypes[1]
+}
+
+func (x EvaluationStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EvaluationStatus.Descriptor instead.
+func (EvaluationStatus) EnumDescriptor() ([]byte, []int) {
+	return file_drill_v1_evaluation_proto_rawDescGZIP(), []int{1}
+}
+
 type GetEvaluationRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -166,7 +215,7 @@ func (x *GetEvaluationResponse) GetEvaluation() *EvaluationResult {
 
 type EvaluationResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Status        EvaluationStatus       `protobuf:"varint,1,opt,name=status,proto3,enum=drill.v1.EvaluationStatus" json:"status,omitempty"`
 	Scores        *EvaluationScores      `protobuf:"bytes,2,opt,name=scores,proto3" json:"scores,omitempty"`
 	Strengths     []string               `protobuf:"bytes,3,rep,name=strengths,proto3" json:"strengths,omitempty"`
 	Gaps          []string               `protobuf:"bytes,4,rep,name=gaps,proto3" json:"gaps,omitempty"`
@@ -206,11 +255,11 @@ func (*EvaluationResult) Descriptor() ([]byte, []int) {
 	return file_drill_v1_evaluation_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *EvaluationResult) GetStatus() string {
+func (x *EvaluationResult) GetStatus() EvaluationStatus {
 	if x != nil {
 		return x.Status
 	}
-	return ""
+	return EvaluationStatus_EVALUATION_STATUS_UNSPECIFIED
 }
 
 func (x *EvaluationResult) GetScores() *EvaluationScores {
@@ -483,9 +532,9 @@ const file_drill_v1_evaluation_proto_rawDesc = "" +
 	"\x15GetEvaluationResponse\x12:\n" +
 	"\n" +
 	"evaluation\x18\x01 \x01(\v2\x1a.drill.v1.EvaluationResultR\n" +
-	"evaluation\"\xe0\x01\n" +
-	"\x10EvaluationResult\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status\x122\n" +
+	"evaluation\"\xfc\x01\n" +
+	"\x10EvaluationResult\x122\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1a.drill.v1.EvaluationStatusR\x06status\x122\n" +
 	"\x06scores\x18\x02 \x01(\v2\x1a.drill.v1.EvaluationScoresR\x06scores\x12\x1c\n" +
 	"\tstrengths\x18\x03 \x03(\tR\tstrengths\x12\x12\n" +
 	"\x04gaps\x18\x04 \x03(\tR\x04gaps\x12\x16\n" +
@@ -513,7 +562,11 @@ const file_drill_v1_evaluation_proto_rawDesc = "" +
 	"\x18ANNOTATION_TYPE_STRENGTH\x10\x01\x12\x17\n" +
 	"\x13ANNOTATION_TYPE_GAP\x10\x02\x12&\n" +
 	"\"ANNOTATION_TYPE_MISSED_OPPORTUNITY\x10\x03\x12\x18\n" +
-	"\x14ANNOTATION_TYPE_NOTE\x10\x042\xbd\x01\n" +
+	"\x14ANNOTATION_TYPE_NOTE\x10\x04*~\n" +
+	"\x10EvaluationStatus\x12!\n" +
+	"\x1dEVALUATION_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aEVALUATION_STATUS_REVIEWED\x10\x01\x12'\n" +
+	"#EVALUATION_STATUS_EVALUATION_FAILED\x10\x022\xbd\x01\n" +
 	"\x11EvaluationService\x12P\n" +
 	"\rGetEvaluation\x12\x1e.drill.v1.GetEvaluationRequest\x1a\x1f.drill.v1.GetEvaluationResponse\x12V\n" +
 	"\x0fRetryEvaluation\x12 .drill.v1.RetryEvaluationRequest\x1a!.drill.v1.RetryEvaluationResponseB3Z1github.com/btc/drill/internal/pb/drill/v1;drillv1b\x06proto3"
@@ -530,32 +583,34 @@ func file_drill_v1_evaluation_proto_rawDescGZIP() []byte {
 	return file_drill_v1_evaluation_proto_rawDescData
 }
 
-var file_drill_v1_evaluation_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_drill_v1_evaluation_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_drill_v1_evaluation_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_drill_v1_evaluation_proto_goTypes = []any{
 	(AnnotationType)(0),             // 0: drill.v1.AnnotationType
-	(*GetEvaluationRequest)(nil),    // 1: drill.v1.GetEvaluationRequest
-	(*GetEvaluationResponse)(nil),   // 2: drill.v1.GetEvaluationResponse
-	(*EvaluationResult)(nil),        // 3: drill.v1.EvaluationResult
-	(*EvaluationScores)(nil),        // 4: drill.v1.EvaluationScores
-	(*Annotation)(nil),              // 5: drill.v1.Annotation
-	(*RetryEvaluationRequest)(nil),  // 6: drill.v1.RetryEvaluationRequest
-	(*RetryEvaluationResponse)(nil), // 7: drill.v1.RetryEvaluationResponse
+	(EvaluationStatus)(0),           // 1: drill.v1.EvaluationStatus
+	(*GetEvaluationRequest)(nil),    // 2: drill.v1.GetEvaluationRequest
+	(*GetEvaluationResponse)(nil),   // 3: drill.v1.GetEvaluationResponse
+	(*EvaluationResult)(nil),        // 4: drill.v1.EvaluationResult
+	(*EvaluationScores)(nil),        // 5: drill.v1.EvaluationScores
+	(*Annotation)(nil),              // 6: drill.v1.Annotation
+	(*RetryEvaluationRequest)(nil),  // 7: drill.v1.RetryEvaluationRequest
+	(*RetryEvaluationResponse)(nil), // 8: drill.v1.RetryEvaluationResponse
 }
 var file_drill_v1_evaluation_proto_depIdxs = []int32{
-	3, // 0: drill.v1.GetEvaluationResponse.evaluation:type_name -> drill.v1.EvaluationResult
-	4, // 1: drill.v1.EvaluationResult.scores:type_name -> drill.v1.EvaluationScores
-	5, // 2: drill.v1.EvaluationResult.annotations:type_name -> drill.v1.Annotation
-	0, // 3: drill.v1.Annotation.type:type_name -> drill.v1.AnnotationType
-	1, // 4: drill.v1.EvaluationService.GetEvaluation:input_type -> drill.v1.GetEvaluationRequest
-	6, // 5: drill.v1.EvaluationService.RetryEvaluation:input_type -> drill.v1.RetryEvaluationRequest
-	2, // 6: drill.v1.EvaluationService.GetEvaluation:output_type -> drill.v1.GetEvaluationResponse
-	7, // 7: drill.v1.EvaluationService.RetryEvaluation:output_type -> drill.v1.RetryEvaluationResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: drill.v1.GetEvaluationResponse.evaluation:type_name -> drill.v1.EvaluationResult
+	1, // 1: drill.v1.EvaluationResult.status:type_name -> drill.v1.EvaluationStatus
+	5, // 2: drill.v1.EvaluationResult.scores:type_name -> drill.v1.EvaluationScores
+	6, // 3: drill.v1.EvaluationResult.annotations:type_name -> drill.v1.Annotation
+	0, // 4: drill.v1.Annotation.type:type_name -> drill.v1.AnnotationType
+	2, // 5: drill.v1.EvaluationService.GetEvaluation:input_type -> drill.v1.GetEvaluationRequest
+	7, // 6: drill.v1.EvaluationService.RetryEvaluation:input_type -> drill.v1.RetryEvaluationRequest
+	3, // 7: drill.v1.EvaluationService.GetEvaluation:output_type -> drill.v1.GetEvaluationResponse
+	8, // 8: drill.v1.EvaluationService.RetryEvaluation:output_type -> drill.v1.RetryEvaluationResponse
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_drill_v1_evaluation_proto_init() }
@@ -568,7 +623,7 @@ func file_drill_v1_evaluation_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_drill_v1_evaluation_proto_rawDesc), len(file_drill_v1_evaluation_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,

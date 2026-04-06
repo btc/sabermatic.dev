@@ -24,8 +24,14 @@ message GetEvaluationResponse {
   EvaluationResult evaluation = 1;
 }
 
+enum EvaluationStatus {
+  EVALUATION_STATUS_UNSPECIFIED = 0;
+  EVALUATION_STATUS_REVIEWED = 1;
+  EVALUATION_STATUS_EVALUATION_FAILED = 2;
+}
+
 message EvaluationResult {
-  string status = 1;
+  EvaluationStatus status = 1;
   EvaluationScores scores = 2;
   repeated string strengths = 3;
   repeated string gaps = 4;
