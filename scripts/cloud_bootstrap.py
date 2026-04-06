@@ -409,6 +409,16 @@ def phase_terraform(state: dict) -> None:
     tfvars_path.write_text(tfvars_content)
     info(f"Wrote {tfvars_path}")
 
+    # Ensure ADC quota project matches this project (Terraform GCS backend
+    # sends the quota project for billing; a stale value causes 403 errors).
+    adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+    if adc_path.exists():
+        adc = json.loads(adc_path.read_text())
+        if adc.get("quota_project_id") != project_id:
+            warn(f"ADC quota project is '{adc.get('quota_project_id')}', updating to '{project_id}'...")
+            prompt_continue("Press Enter to re-authenticate ADC with correct project...")
+            run(["gcloud", "auth", "application-default", "login", f"--project={project_id}"])
+
     # Init — billing propagation can take a few minutes after project setup
     state_bucket = f"{project_id}-tfstate"
     print("\nRunning terraform init...")
