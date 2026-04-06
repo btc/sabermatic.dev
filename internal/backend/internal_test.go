@@ -16,7 +16,6 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestParseClientIP(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name   string
 		input  string
@@ -68,7 +67,6 @@ func TestParseClientIP(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsDuplicateKeyError(t *testing.T) {
-	t.Parallel()
 	t.Run("PgError with code 23505", func(t *testing.T) {
 		err := &pgconn.PgError{Code: "23505"}
 		require.True(t, isDuplicateKeyError(err))
@@ -102,7 +100,6 @@ func TestIsDuplicateKeyError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestUUIDSlicesEqual(t *testing.T) {
-	t.Parallel()
 	a := uuid.New()
 	b := uuid.New()
 
@@ -146,7 +143,6 @@ func TestUUIDSlicesEqual(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTruncateRunes(t *testing.T) {
-	t.Parallel()
 	cases := []struct {
 		name string
 		s    string
