@@ -95,7 +95,7 @@ def save_state(state: dict) -> None:
 def phase_done(state: dict, phase: str) -> bool:
     val = state["phases"].get(phase)
     if isinstance(val, dict):
-        return all(val.values())
+        return bool(val) and all(val.values())
     return val is True
 
 
@@ -395,12 +395,15 @@ def phase_terraform(state: dict) -> None:
     github_repo = state["github_repo"]
     tf_dir = str(Path(__file__).resolve().parent.parent / "terraform")
 
-    # Write terraform.tfvars
+    # Write terraform.tfvars — sanitize values to prevent HCL injection
+    def hcl_escape(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
     tfvars_content = textwrap.dedent(f"""\
-        project_id  = "{project_id}"
-        region      = "{region}"
+        project_id  = "{hcl_escape(project_id)}"
+        region      = "{hcl_escape(region)}"
         environment = "prod"
-        github_repo = "{github_repo}"
+        github_repo = "{hcl_escape(github_repo)}"
     """)
     tfvars_path = Path(tf_dir) / "terraform.tfvars"
     tfvars_path.write_text(tfvars_content)
@@ -617,7 +620,7 @@ def phase_stripe(state: dict) -> None:
             },
         ]
 
-        price_ids = state.get("stripe_price_ids", {})
+        price_ids = state["outputs"].get("stripe_price_ids", {})
 
         for i, prod in enumerate(products, 1):
             print(f"\n{BOLD}[{i}/4] {prod['name']}{RESET}")
@@ -648,7 +651,7 @@ def phase_stripe(state: dict) -> None:
             dollars = cents / 100
             info(f"{prod['name']}: ${dollars:.2f} → {price_id}")
 
-        state["stripe_price_ids"] = price_ids
+        state["outputs"]["stripe_price_ids"] = price_ids
         stripe_state["products"] = True
         state["phases"]["stripe"] = stripe_state
         save_state(state)
@@ -689,7 +692,7 @@ def phase_stripe(state: dict) -> None:
     # ── 7c: Set price ID env vars on Cloud Run ──
 
     if not stripe_state.get("env_vars"):
-        price_ids = state.get("stripe_price_ids", {})
+        price_ids = state["outputs"].get("stripe_price_ids", {})
         if not price_ids:
             error("No price IDs found in state. Run step 7a first.")
             sys.exit(1)
@@ -776,7 +779,7 @@ def phase_deploy(state: dict) -> None:
     state["outputs"]["cloud_run_url"] = live_url
 
     # Print summary
-    price_ids = state.get("stripe_price_ids", {})
+    price_ids = state["outputs"].get("stripe_price_ids", {})
     print(textwrap.dedent(f"""
     {GREEN}{BOLD}Deploy complete!{RESET}
 

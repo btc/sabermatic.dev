@@ -230,6 +230,8 @@ resource "google_cloud_run_v2_service" "drill" {
     ignore_changes = [
       # CI updates the image via gcloud run deploy — don't fight it.
       template[0].containers[0].image,
+      # Bootstrap script sets Stripe price IDs via gcloud run services update.
+      template[0].containers[0].env,
     ]
   }
 
