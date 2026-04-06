@@ -58,3 +58,7 @@ tmp/
 
 # Cloud bootstrap state (resume file)
 .cloud_bootstrap_state
+
+# Terraform local files
+terraform/terraform.tfvars
+terraform/tfplan
