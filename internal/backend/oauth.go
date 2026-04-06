@@ -5,14 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
 )
@@ -36,182 +32,174 @@ type OAuthLoginResult struct {
 }
 
 // OAuthLogin finds or creates a user from an OAuth provider callback.
-// All database operations are performed within a single transaction.
-// On unique-violation race conditions, the method retries once.
-func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLoginResult, error) {
-	return b.oauthLoginWithRetry(ctx, p, false)
-}
-
-func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, isRetry bool) (_ *OAuthLoginResult, err error) {
-	ctx, span := tracer.Start(ctx, "Backend.oauthLoginWithRetry")
+// One transaction, no retry loop. See design spec for details.
+func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthLoginResult, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.OAuthLogin")
 	defer func() { drilotel.End(span, err) }()
 
-	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+	const (
+		pathExistingOAuth  = "existing_oauth"
+		pathLinkedExisting = "linked_existing"
+		pathReactivated    = "reactivated"
+		pathNewUser        = "new_user"
+	)
 
-	tx, err := b.pool.Begin(ctx)
+	p.Email = normalizeEmail(p.Email)
+
+	// Read Committed: FOR UPDATE blocks concurrent access to existing rows,
+	// and ON CONFLICT DO NOTHING handles concurrent inserts. Higher isolation
+	// levels would convert these into serialization failures requiring
+	// full-transaction retries.
+	tx, err := b.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel: pgx.ReadCommitted,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("oauth login: begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	queries := db.New(tx)
+	q := db.New(tx)
 
-	// Step 1: Look up by (provider, provider_id).
-	oauthAcct, err := queries.GetOAuthAccount(ctx, db.GetOAuthAccountParams{
+	var user db.User
+	var path string
+
+	// --- Resolve user ---
+
+	// (A) Returning user: they've logged in with this provider before.
+	oauthAcct, err := q.GetOAuthAccount(ctx, db.GetOAuthAccountParams{
 		Provider:   p.Provider,
 		ProviderID: p.ProviderID,
 	})
 	if err == nil {
-		// Found existing OAuth account — load user (including soft-deleted).
-		user, err := queries.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
+		user, err = q.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("oauth login: get user by id: %w", err)
 		}
-		path := "existing_oauth"
 		if user.DeletedAt.Valid {
-			if err := queries.ReactivateUser(ctx, user.ID); err != nil {
-				return nil, fmt.Errorf("oauth login: reactivate user: %w", err)
-			}
-			path = "reactivated"
+			path = pathReactivated
+		} else {
+			path = pathExistingOAuth
 		}
-		result, err := b.createSessionInTx(ctx, tx, queries, user, p)
-		if err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("oauth login: commit: %w", err)
-		}
-		slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", path, "user_id", user.ID)
-		return result, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("oauth login: get oauth account: %w", err)
 	}
 
-	// Step 2: Look up user by email (including soft-deleted).
-	user, err := queries.GetUserByEmailIncludingDeleted(ctx, p.Email)
-	if err == nil {
-		path := "linked_existing"
-
-		// Reactivate if soft-deleted.
-		if user.DeletedAt.Valid {
-			if err := queries.ReactivateUser(ctx, user.ID); err != nil {
-				return nil, fmt.Errorf("oauth login: reactivate user: %w", err)
+	// (B) First time with this provider, but we already have an account
+	//     for their email (e.g. they signed up with password, now adding
+	//     Google). Lock the row so a concurrent login can't race us.
+	if path == "" {
+		user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
+		if err == nil {
+			if user.DeletedAt.Valid {
+				path = pathReactivated
+			} else {
+				path = pathLinkedExisting
 			}
-			path = "reactivated"
-		} else if !user.EmailVerified {
-			// Verify email if not already verified.
-			if err := queries.VerifyUserEmail(ctx, user.ID); err != nil {
-				return nil, fmt.Errorf("oauth login: verify email: %w", err)
-			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("oauth login: get user by email: %w", err)
 		}
+	}
 
+	// (C) Brand new user — no account exists for this email.
+	//     In rare cases, another request for the same email may have
+	//     created the account between (B) and now (e.g. the user
+	//     double-clicked the OAuth button). CreateOAuthUserOrNoop
+	//     safely no-ops in that case, and we re-select their row.
+	if path == "" {
+		user, err = q.CreateOAuthUserOrNoop(ctx, db.CreateOAuthUserOrNoopParams{
+			Email:       p.Email,
+			DisplayName: p.DisplayName,
+		})
+		if err == nil {
+			path = pathNewUser
+		} else if errors.Is(err, pgx.ErrNoRows) {
+			// Another request just created this account. Use theirs.
+			user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
+			if err != nil {
+				return nil, fmt.Errorf("oauth login: get user after race: %w", err)
+			}
+			if user.DeletedAt.Valid {
+				path = pathReactivated
+			} else {
+				path = pathLinkedExisting
+			}
+		} else {
+			return nil, fmt.Errorf("oauth login: create user: %w", err)
+		}
+	}
+
+	// --- Side effects ---
+
+	switch path {
+	case pathNewUser:
+		// Provision free grant.
+		if err := b.provisionNewUser(ctx, tx, user.ID); err != nil {
+			return nil, fmt.Errorf("oauth login: provision: %w", err)
+		}
 		// Link OAuth account.
-		_, err := queries.CreateOAuthAccount(ctx, db.CreateOAuthAccountParams{
+		if _, err := q.LinkOAuthAccount(ctx, db.LinkOAuthAccountParams{
 			UserID:     user.ID,
 			Provider:   p.Provider,
 			ProviderID: p.ProviderID,
-		})
-		if err != nil {
-			if isDuplicateKeyError(err) {
-				// Race condition: another request linked this provider_id first.
-				// Rollback and retry — will hit step 1 on retry.
-				tx.Rollback(ctx) //nolint:errcheck
-				if isRetry {
-					return nil, fmt.Errorf("oauth login: duplicate key after retry")
-				}
-				return b.oauthLoginWithRetry(ctx, p, true)
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("oauth login: link account: %w", err)
+		}
+
+	case pathReactivated:
+		// Clear deleted_at.
+		if err := q.ReactivateUser(ctx, user.ID); err != nil {
+			return nil, fmt.Errorf("oauth login: reactivate: %w", err)
+		}
+		// Link OAuth account.
+		if _, err := q.LinkOAuthAccount(ctx, db.LinkOAuthAccountParams{
+			UserID:     user.ID,
+			Provider:   p.Provider,
+			ProviderID: p.ProviderID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("oauth login: link account: %w", err)
+		}
+
+	case pathLinkedExisting:
+		// Verify email if unverified.
+		if !user.EmailVerified {
+			if err := q.VerifyUserEmail(ctx, user.ID); err != nil {
+				return nil, fmt.Errorf("oauth login: verify email: %w", err)
 			}
-			return nil, fmt.Errorf("oauth login: create oauth account: %w", err)
+		}
+		// Link OAuth account.
+		if _, err := q.LinkOAuthAccount(ctx, db.LinkOAuthAccountParams{
+			UserID:     user.ID,
+			Provider:   p.Provider,
+			ProviderID: p.ProviderID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("oauth login: link account: %w", err)
 		}
 
-		result, err := b.createSessionInTx(ctx, tx, queries, user, p)
-		if err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("oauth login: commit: %w", err)
-		}
-		slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", path, "user_id", user.ID)
-		return result, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("oauth login: get user by email: %w", err)
+	case pathExistingOAuth:
+		// Nothing — user and link already exist.
 	}
 
-	// Step 3: Neither found — create new user + OAuth account.
-	user, err = queries.CreateOAuthUser(ctx, db.CreateOAuthUserParams{
-		Email:       p.Email,
-		DisplayName: p.DisplayName,
+	// --- Auth session (shared with Login) ---
+
+	sess, err := b.createAuthSession(ctx, tx, AuthSessionParams{
+		UserID:    user.ID,
+		IP:        p.IP,
+		UserAgent: p.UserAgent,
 	})
-	if err != nil {
-		if isDuplicateKeyError(err) {
-			// Race condition: another request created this email first.
-			// Rollback and retry — will hit step 2 on retry.
-			tx.Rollback(ctx) //nolint:errcheck
-			return b.OAuthLogin(ctx, p)
-		}
-		return nil, fmt.Errorf("oauth login: create oauth user: %w", err)
-	}
-
-	// Provision the new user's account (free trial grant, etc.).
-	if err := b.provisionNewUser(ctx, tx, user.ID); err != nil {
-		return nil, fmt.Errorf("provision new user: %w", err)
-	}
-
-	_, err = queries.CreateOAuthAccount(ctx, db.CreateOAuthAccountParams{
-		UserID:     user.ID,
-		Provider:   p.Provider,
-		ProviderID: p.ProviderID,
-	})
-	if err != nil {
-		if isDuplicateKeyError(err) {
-			// Race condition on provider_id.
-			tx.Rollback(ctx) //nolint:errcheck
-			return b.OAuthLogin(ctx, p)
-		}
-		return nil, fmt.Errorf("oauth login: create oauth account: %w", err)
-	}
-
-	result, err := b.createSessionInTx(ctx, tx, queries, user, p)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("oauth login: commit: %w", err)
 	}
-	slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", "new_user", "user_id", user.ID)
-	return result, nil
-}
 
-// createSessionInTx generates a session token, creates an auth session within
-// the given transaction, and returns the OAuthLoginResult.
-func (b *Backend) createSessionInTx(ctx context.Context, tx pgx.Tx, queries *db.Queries, user db.User, p OAuthLoginParams) (_ *OAuthLoginResult, err error) {
-	ctx, span := tracer.Start(ctx, "Backend.createSessionInTx")
-	defer func() { drilotel.End(span, err) }()
-
-	rawToken, tokenHash, err := auth.GenerateSessionToken()
-	if err != nil {
-		return nil, fmt.Errorf("oauth login: generate session token: %w", err)
-	}
-
-	ipAddr := parseClientIP(p.IP)
-
-	_, err = queries.CreateAuthSession(ctx, db.CreateAuthSessionParams{
-		UserID:    user.ID,
-		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(b.cfg.Auth.SessionTTL),
-		IpAddress: ipAddr,
-		UserAgent: pgtype.Text{String: p.UserAgent, Valid: p.UserAgent != ""},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("oauth login: create auth session: %w", err)
-	}
+	slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", path, "user_id", user.ID)
 
 	return &OAuthLoginResult{
 		UserID:       user.ID,
 		Email:        user.Email,
-		Token:        rawToken,
+		Token:        sess.Token,
 		NeedsProfile: user.DisplayName == "",
 	}, nil
 }
