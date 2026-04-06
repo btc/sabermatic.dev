@@ -449,7 +449,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	c.obs.Store(fanOut)
 
 	// Stream LLM.
-	stream, err := c.backend.StreamLLM(ctx, ai.StreamParams{
+	stream, err := c.backend.StreamLLM(ctx, &ai.StreamParams{
 		Model:     c.model,
 		System:    system,
 		Messages:  promptMsgs,
@@ -484,7 +484,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 
 	// Persist interviewer message and LLM call atomically.
 	c.sequence++
-	interviewerMsg, err := c.backend.PersistInterviewerTurn(ctx, stream, backend.PersistMessageParams{
+	interviewerMsg, err := c.backend.PersistInterviewerTurn(ctx, stream, &backend.PersistMessageParams{
 		MessageID:   messageID,
 		SessionID:   c.sessionID,
 		Seq:         c.sequence,
@@ -563,7 +563,7 @@ func (c *Conductor) persistMessage(ctx context.Context, id uuid.UUID, role, cont
 
 	c.sequence++
 
-	msg, err := c.backend.PersistMessage(ctx, backend.PersistMessageParams{
+	msg, err := c.backend.PersistMessage(ctx, &backend.PersistMessageParams{
 		MessageID:   id,
 		SessionID:   c.sessionID,
 		Seq:         c.sequence,

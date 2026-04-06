@@ -38,11 +38,11 @@ type OAuthLoginResult struct {
 // OAuthLogin finds or creates a user from an OAuth provider callback.
 // All database operations are performed within a single transaction.
 // On unique-violation race conditions, the method retries once.
-func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLoginResult, error) {
+func (b *Backend) OAuthLogin(ctx context.Context, p *OAuthLoginParams) (*OAuthLoginResult, error) {
 	return b.oauthLoginWithRetry(ctx, p, false)
 }
 
-func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, isRetry bool) (_ *OAuthLoginResult, err error) {
+func (b *Backend) oauthLoginWithRetry(ctx context.Context, p *OAuthLoginParams, isRetry bool) (_ *OAuthLoginResult, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.oauthLoginWithRetry")
 	defer func() { drilotel.End(span, err) }()
 
@@ -74,7 +74,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 			}
 			path = "reactivated"
 		}
-		result, err := b.createSessionInTx(ctx, tx, queries, user, p)
+		result, err := b.createSessionInTx(ctx, tx, queries, &user, p)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +125,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 			return nil, fmt.Errorf("oauth login: create oauth account: %w", err)
 		}
 
-		result, err := b.createSessionInTx(ctx, tx, queries, user, p)
+		result, err := b.createSessionInTx(ctx, tx, queries, &user, p)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +173,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 		return nil, fmt.Errorf("oauth login: create oauth account: %w", err)
 	}
 
-	result, err := b.createSessionInTx(ctx, tx, queries, user, p)
+	result, err := b.createSessionInTx(ctx, tx, queries, &user, p)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p OAuthLoginParams, i
 
 // createSessionInTx generates a session token, creates an auth session within
 // the given transaction, and returns the OAuthLoginResult.
-func (b *Backend) createSessionInTx(ctx context.Context, tx pgx.Tx, queries *db.Queries, user db.User, p OAuthLoginParams) (_ *OAuthLoginResult, err error) {
+func (b *Backend) createSessionInTx(ctx context.Context, tx pgx.Tx, queries *db.Queries, user *db.User, p *OAuthLoginParams) (_ *OAuthLoginResult, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.createSessionInTx")
 	defer func() { drilotel.End(span, err) }()
 

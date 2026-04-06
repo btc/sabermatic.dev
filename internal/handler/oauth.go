@@ -54,7 +54,7 @@ func OAuthCallback(b *backend.Backend) http.HandlerFunc {
 
 		displayName := resolveDisplayName(gothUser)
 
-		result, err := b.OAuthLogin(r.Context(), backend.OAuthLoginParams{
+		result, err := b.OAuthLogin(r.Context(), &backend.OAuthLoginParams{
 			Provider:    provider,
 			ProviderID:  gothUser.UserID,
 			Email:       gothUser.Email,
