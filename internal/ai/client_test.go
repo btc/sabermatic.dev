@@ -24,30 +24,30 @@ func fakeSSEHandler(tokens []string) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 
 		// message_start with usage
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+		fmt.Fprintf(w, "event: message_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n") //nolint:errcheck
 
 		// content_block_start
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n") //nolint:errcheck
 
 		// content_block_delta for each token
 		for _, token := range tokens {
-			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+			fmt.Fprintf(w, "event: content_block_delta\n") //nolint:errcheck
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token) //nolint:errcheck
 		}
 
 		// content_block_stop
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprintf(w, "event: content_block_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n") //nolint:errcheck
 
 		// message_delta with final usage
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens))
+		fmt.Fprintf(w, "event: message_delta\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens)) //nolint:errcheck
 
 		// message_stop
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		fmt.Fprintf(w, "event: message_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
 	}
 }
 
@@ -190,6 +190,7 @@ func TestCallAndLog_NilTx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		//nolint:errcheck
 		fmt.Fprint(w, `{
 			"id": "msg_test",
 			"type": "message",

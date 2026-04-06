@@ -333,7 +333,7 @@ func (ts *TokenStream) FullMessage() string {
 // connection from the pool. If pool is nil (unit tests), persistence is skipped.
 func (ts *TokenStream) Close(ctx context.Context) error {
 	ts.drain()
-	defer ts.stream.Close()
+	defer ts.stream.Close() //nolint:errcheck // best-effort cleanup
 
 	if ts.pool == nil {
 		return nil
@@ -345,7 +345,7 @@ func (ts *TokenStream) Close(ctx context.Context) error {
 // the caller's transaction. If tx is nil, persistence is skipped.
 func (ts *TokenStream) CloseWithTx(ctx context.Context, tx pgx.Tx) error {
 	ts.drain()
-	defer ts.stream.Close()
+	defer ts.stream.Close() //nolint:errcheck // best-effort cleanup
 
 	if tx == nil {
 		return nil

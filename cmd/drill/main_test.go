@@ -28,7 +28,7 @@ func TestFullStartup(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
+	listener.Close() //nolint:errcheck // best-effort cleanup
 
 	// Set env vars — runWithContext calls config.Load which reads from env.
 	t.Setenv("DATABASE_URL", connStr)
@@ -54,14 +54,14 @@ func TestFullStartup(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 		return resp.StatusCode == http.StatusOK
 	}, 15*time.Second, 100*time.Millisecond, "server did not become healthy")
 
 	// Verify health response
 	resp, err := http.Get(healthURL)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // best-effort cleanup
 
 	var body map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))

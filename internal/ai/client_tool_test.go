@@ -18,6 +18,7 @@ func TestCallToolAndLog_NilTx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		//nolint:errcheck
 		fmt.Fprint(w, `{
 			"id": "msg_test",
 			"type": "message",
@@ -27,6 +28,7 @@ func TestCallToolAndLog_NilTx(t *testing.T) {
 			"stop_reason": "tool_use",
 			"usage": {"input_tokens": 100, "output_tokens": 50}
 		}`)
+
 	}))
 	defer srv.Close()
 
@@ -72,6 +74,7 @@ func TestCallToolAndLog_NoToolUseBlock(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		//nolint:errcheck
 		fmt.Fprint(w, `{
 			"id": "msg_test",
 			"type": "message",
