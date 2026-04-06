@@ -1,73 +1,16 @@
 package handler
 
 import (
-	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/stripe/stripe-go/v82/webhook"
 
-	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 )
 
-// PostCheckout returns a handler that creates a Stripe Checkout session and
-// returns the checkout URL. Accepts JSON: {type, plan, minutes}.
-func PostCheckout(b *backend.Backend) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-		var req struct {
-			Type    string `json:"type"`
-			Plan    string `json:"plan"`
-			Minutes int    `json:"minutes"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
-			return
-		}
-
-		url, err := b.CreateCheckoutSession(r.Context(), backend.CheckoutParams{
-			UserID:      user.ID,
-			Email:       user.Email,
-			Type:        req.Type,
-			Plan:        req.Plan,
-			PackMinutes: req.Minutes,
-		})
-		if err != nil {
-			slog.Error("create checkout session", "error", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create checkout session"})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]string{"url": url})
-	}
-}
-
-// PostPortal returns a handler that creates a Stripe billing portal session
-// and returns the portal URL.
-func PostPortal(b *backend.Backend) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-
-		url, err := b.CreatePortalSession(r.Context(), user.ID)
-		if err != nil {
-			if errors.Is(err, backend.ErrNoStripeAccount) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{
-					"error":   "no_billing_account",
-					"message": "No billing account. Subscribe or purchase minutes first.",
-				})
-				return
-			}
-			slog.Error("create portal session", "error", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create portal session"})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]string{"url": url})
-	}
-}
+// (PostCheckout and PostPortal migrated to ConnectRPC BillingService)
 
 // PostStripeWebhook returns a handler that processes incoming Stripe webhook
 // events. The request body is verified against the Stripe-Signature header

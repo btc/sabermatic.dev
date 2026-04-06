@@ -3,10 +3,11 @@ import { useLocation, useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery, useMutation } from "@connectrpc/connect-query";
 import { getMe, getUsage, updateProfile, exportData } from "@/pb/drill/v1/user-UserService_connectquery";
+import { checkout as checkoutMethod, portal as portalMethod } from "@/pb/drill/v1/billing-BillingService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
+import type { CheckoutRequest as CheckoutRequestProto } from "@/pb/drill/v1/billing_pb";
 import {
   useLogout, useDeleteAccount,
-  useCheckout, usePortal, type CheckoutRequest,
 } from "@/api/queries";
 import { ApiError } from "@/api/client";
 import { ConnectError } from "@connectrpc/connect";
@@ -520,12 +521,16 @@ const MINUTE_PACKS: { minutes: number; label: string }[] = [
 // Billing page
 // ---------------------------------------------------------------------------
 
+type CheckoutBody =
+  | { type: "subscription"; plan: "pro" }
+  | { type: "pack"; minutes: number };
+
 function BillingSettings() {
   const { data: meData } = useQuery(getMe, {});
   const user = meData?.user;
   const { data: usage } = useQuery(getUsage, {});
-  const checkout = useCheckout();
-  const portal = usePortal();
+  const checkout = useMutation(checkoutMethod);
+  const portal = useMutation(portalMethod);
 
   const isPro = user?.plan === UserPlan.PRO;
 
@@ -534,23 +539,29 @@ function BillingSettings() {
 
   const checkoutLoading = checkout.isPending;
   const checkoutError = checkout.isError
-    ? checkout.error instanceof ApiError
-      ? `Could not start checkout (${checkout.error.status}). Please try again.`
+    ? checkout.error instanceof ConnectError
+      ? `Could not start checkout (${checkout.error.code}). Please try again.`
       : "Could not start checkout. Please try again."
     : null;
 
   const portalLoading = portal.isPending;
   const portalError = portal.isError
-    ? portal.error instanceof ApiError
-      ? `Could not open billing portal (${portal.error.status}). Please try again.`
+    ? portal.error instanceof ConnectError
+      ? `Could not open billing portal (${portal.error.code}). Please try again.`
       : "Could not open billing portal. Please try again."
     : null;
 
-  function handleCheckout(body: CheckoutRequest) {
+  function handleCheckout(body: CheckoutBody) {
     if (body.type === "pack") {
       setPendingPack(body.minutes);
     }
-    checkout.mutate(body, {
+    const req: Partial<CheckoutRequestProto> = { type: body.type };
+    if (body.type === "subscription") {
+      req.plan = body.plan;
+    } else {
+      req.minutes = body.minutes;
+    }
+    checkout.mutate(req, {
       onSuccess: (res) => {
         setPendingPack(null);
         if (res?.url) {
@@ -562,7 +573,7 @@ function BillingSettings() {
   }
 
   function handlePortal() {
-    portal.mutate(undefined, {
+    portal.mutate({}, {
       onSuccess: (res) => {
         if (res?.url) {
           window.open(res.url, "_blank", "noopener,noreferrer");
