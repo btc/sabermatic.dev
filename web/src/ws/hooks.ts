@@ -131,6 +131,10 @@ export function useInterview(sessionId: string) {
         toast.info("Audio temporarily unavailable");
         break;
 
+      case "audio_upload_failed":
+        toast.info("Audio recording could not be saved. Your response was captured as text.");
+        break;
+
       case "error":
         console.error(`WS error: ${msg.code} — ${msg.message}`);
         setLastError(msg.message);
