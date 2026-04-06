@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Span } from "@opentelemetry/api";
+import { toast } from "sonner";
 import { ConnectionManager, ConnectionState } from "./connection";
 import type { ServerMessage } from "./protocol";
 import { createTurnSpan, closeTurnSpan } from "@/telemetry/trace";
@@ -124,6 +125,10 @@ export function useInterview(sessionId: string) {
           closeTurnSpan(turnSpanRef.current, false);
           turnSpanRef.current = null;
         }
+        break;
+
+      case "tts_error":
+        toast.info("Audio temporarily unavailable");
         break;
 
       case "error":
