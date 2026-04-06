@@ -409,10 +409,24 @@ def phase_terraform(state: dict) -> None:
     tfvars_path.write_text(tfvars_content)
     info(f"Wrote {tfvars_path}")
 
-    # Init
+    # Init — billing propagation can take a few minutes after project setup
     state_bucket = f"{project_id}-tfstate"
     print("\nRunning terraform init...")
-    run(["terraform", "init", f"-backend-config=bucket={state_bucket}"], cwd=tf_dir)
+    max_attempts = 6
+    for attempt in range(1, max_attempts + 1):
+        result = run_quiet(
+            ["terraform", "init", f"-backend-config=bucket={state_bucket}"],
+            cwd=tf_dir,
+        )
+        if result.returncode == 0:
+            break
+        if attempt < max_attempts and "billing" in (result.stderr or "").lower():
+            import time
+            warn(f"Billing not yet propagated. Retrying in 30s... ({attempt}/{max_attempts})")
+            time.sleep(30)
+        else:
+            error(f"terraform init failed:\n{result.stderr}")
+            sys.exit(1)
     info("Terraform initialized")
 
     # Plan
