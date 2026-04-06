@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -159,6 +160,16 @@ func NewConductor(p ConductorParams) *Conductor {
 // sends initial messages, sets timers, and runs the main event loop.
 // Run blocks until the session ends.
 func (c *Conductor) Run(serverCtx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("conductor: panic recovered",
+				"recover", r,
+				"session_id", c.sessionID,
+				"user_id", c.userID,
+				"stack", string(debug.Stack()))
+		}
+	}()
+
 	// Phase 1: Acquire advisory lock.
 	lock, locked, err := c.backend.AcquireSessionLock(serverCtx, c.sessionID)
 	if err != nil {
