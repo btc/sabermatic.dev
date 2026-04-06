@@ -21,7 +21,6 @@ type Querier interface {
 	// These are real interviews that the user forgot to end.
 	CompleteAbandonedActiveSessions(ctx context.Context) ([]uuid.UUID, error)
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
-	CountSeedQuestions(ctx context.Context) (int64, error)
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) (OauthAccount, error)
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)

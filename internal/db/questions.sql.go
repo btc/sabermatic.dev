@@ -13,17 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countSeedQuestions = `-- name: CountSeedQuestions :one
-SELECT COUNT(*) FROM questions WHERE source = 'seed' AND user_id IS NULL
-`
-
-func (q *Queries) CountSeedQuestions(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countSeedQuestions)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getQuestion = `-- name: GetQuestion :one
 SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at
 FROM questions
