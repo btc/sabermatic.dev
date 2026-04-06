@@ -231,12 +231,10 @@ export function RecordingInput({
         </Button>
       </div>
 
-      {/* Contextual keyboard hint */}
-      {hint && (
-        <p className="text-center text-[11px] text-muted-foreground mt-2">
-          {hint}
-        </p>
-      )}
+      {/* Contextual keyboard hint — always rendered to avoid layout shift */}
+      <p className={cn("text-center text-[11px] text-muted-foreground mt-2", !hint && "invisible")}>
+        {hint || "\u00A0"}
+      </p>
     </div>
   );
 }
