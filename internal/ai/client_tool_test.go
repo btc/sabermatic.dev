@@ -34,7 +34,7 @@ func TestCallToolAndLog_NilTx(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	toolInput, err := client.CallToolAndLog(context.Background(), nil, CallToolParams{
+	toolInput, err := client.CallToolAndLog(context.Background(), nil, &CallToolParams{
 		Model:  "claude-opus-4-20250514",
 		System: "You are an evaluator.",
 		Messages: []anthropic.MessageParam{
@@ -89,7 +89,7 @@ func TestCallToolAndLog_NoToolUseBlock(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	_, err := client.CallToolAndLog(context.Background(), nil, CallToolParams{
+	_, err := client.CallToolAndLog(context.Background(), nil, &CallToolParams{
 		Model: "claude-opus-4-20250514",
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock("Evaluate this.")),

@@ -92,7 +92,7 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 
 	// 7. Call LLM.
 	toolSchema := coach.ToolSchema()
-	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, ai.CallToolParams{
+	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, &ai.CallToolParams{
 		Model:      w.Cfg.CoachModel,
 		System:     system,
 		Messages:   promptMsgs,

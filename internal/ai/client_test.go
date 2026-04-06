@@ -58,7 +58,7 @@ func TestStreamAndLog_YieldsTokens(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+	stream, err := client.StreamAndLog(context.Background(), &StreamParams{
 		Model:     "claude-sonnet-4-20250514",
 		System:    "You are a helpful assistant.",
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Hi"))},
@@ -89,7 +89,7 @@ func TestStreamAndLog_FullMessage(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+	stream, err := client.StreamAndLog(context.Background(), &StreamParams{
 		Model:     "claude-sonnet-4-20250514",
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("What is the answer?"))},
 		MaxTokens: 100,
@@ -117,7 +117,7 @@ func TestStreamAndLog_CloseNilPool(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+	stream, err := client.StreamAndLog(context.Background(), &StreamParams{
 		Model:     "claude-sonnet-4-20250514",
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("test"))},
 		MaxTokens: 100,
@@ -141,7 +141,7 @@ func TestStreamAndLog_CloseWithTxNil(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+	stream, err := client.StreamAndLog(context.Background(), &StreamParams{
 		Model:     "claude-sonnet-4-20250514",
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("test"))},
 		MaxTokens: 100,
@@ -206,7 +206,7 @@ func TestCallAndLog_NilTx(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	text, err := client.CallAndLog(context.Background(), nil, CallParams{
+	text, err := client.CallAndLog(context.Background(), nil, &CallParams{
 		Model:     "claude-sonnet-4-20250514",
 		System:    "Be helpful.",
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Hi"))},

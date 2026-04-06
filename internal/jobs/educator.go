@@ -121,7 +121,7 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 
 	// 7. Call LLM.
 	toolSchema := educator.ToolSchema()
-	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, ai.CallToolParams{
+	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, &ai.CallToolParams{
 		Model:      w.Cfg.EducatorModel,
 		System:     system,
 		Messages:   promptMsgs,
