@@ -99,8 +99,8 @@ function SummaryBar({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground py-3 px-1">
-      <span className="font-medium text-foreground">{total} annotation{total !== 1 ? "s" : ""}:</span>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm py-3 px-1">
+      <span className="text-muted-foreground mr-1">{total} annotation{total !== 1 ? "s" : ""}:</span>
       {ANNOTATION_TYPES.map((type) => {
         const count = counts[type];
         if (count === 0) return null;
@@ -110,11 +110,13 @@ function SummaryBar({
             key={type}
             onClick={() => handleTypeClick(type)}
             className={cn(
-              "transition-colors hover:text-foreground",
-              isActive && cn("font-medium", ANNOTATION_TEXT[type]),
-              !isActive && activeFilter !== "all" && "opacity-40",
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer",
+              isActive
+                ? cn("border-current", ANNOTATION_TEXT[type], "bg-current/10")
+                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30",
             )}
           >
+            <span className={cn("size-1.5 rounded-full", ANNOTATION_BG[type])} />
             {count} {ANNOTATION_LABELS[type]}
           </button>
         );
@@ -132,11 +134,11 @@ interface AnnotationCardProps {
   dimmed: boolean;
 }
 
-function AnnotationCard({ annotation, dimmed }: AnnotationCardProps) {
+function AnnotationCard({ annotation, dimmed, showRailDot }: AnnotationCardProps & { showRailDot: boolean }) {
   return (
     <div
       className={cn(
-        "ml-4 mt-1.5 border border-border border-l-4 bg-card rounded-lg px-3 py-2 text-xs leading-relaxed transition-opacity duration-150",
+        "relative ml-4 mt-1.5 border border-border border-l-4 bg-card rounded-lg px-3 py-2 text-xs leading-relaxed transition-opacity duration-150",
         ANNOTATION_BORDER[annotation.type],
         dimmed && "opacity-30",
       )}
@@ -145,6 +147,15 @@ function AnnotationCard({ annotation, dimmed }: AnnotationCardProps) {
         {ANNOTATION_TYPE_DISPLAY[annotation.type] ?? "unknown"}
       </span>
       {annotation.content}
+      {showRailDot && (
+        <span
+          className={cn(
+            "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 left-[calc(100%+18px)] z-10 size-2 rounded-full",
+            ANNOTATION_BG[annotation.type],
+          )}
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 }
@@ -157,14 +168,17 @@ interface MessageRowProps {
   message: ProtoMessage;
   annotations: Annotation[];
   activeFilter: FilterType;
+  showRailDots: boolean;
   msgRef: (el: HTMLDivElement | null) => void;
 }
 
-function MessageRow({ message, annotations, activeFilter, msgRef }: MessageRowProps) {
+function MessageRow({ message, annotations, activeFilter, showRailDots, msgRef }: MessageRowProps) {
   const isInterviewer = message.role === "interviewer";
+  const hasMatchingAnnotation = activeFilter === "all" || annotations.some((a) => a.type === activeFilter);
+  const dimMessage = activeFilter !== "all" && !hasMatchingAnnotation;
 
   return (
-    <div ref={msgRef} className="space-y-0">
+    <div ref={msgRef} className={cn("space-y-0 transition-opacity duration-150", dimMessage && "opacity-20")}>
       {/* Bubble */}
       <div className={cn("flex", isInterviewer ? "justify-start" : "justify-end")}>
         <div
@@ -182,7 +196,7 @@ function MessageRow({ message, annotations, activeFilter, msgRef }: MessageRowPr
       {/* Annotation callout cards */}
       {annotations.map((ann, i) => {
         const dimmed = activeFilter !== "all" && activeFilter !== ann.type;
-        return <AnnotationCard key={i} annotation={ann} dimmed={dimmed} />;
+        return <AnnotationCard key={i} annotation={ann} dimmed={dimmed} showRailDot={showRailDots} />;
       })}
     </div>
   );
@@ -192,59 +206,11 @@ function MessageRow({ message, annotations, activeFilter, msgRef }: MessageRowPr
 // Annotation rail
 // ---------------------------------------------------------------------------
 
-interface RailDotProps {
-  annotation: Annotation;
-  totalMessages: number;
-  msgIndex: number;
-  onClick: () => void;
-}
-
-function RailDot({ annotation, totalMessages, msgIndex, onClick }: RailDotProps) {
-  // Proportional position: map msgIndex to 0%–100%
-  const pct = totalMessages > 1 ? (msgIndex / (totalMessages - 1)) * 100 : 50;
-
-  return (
-    <button
-      onClick={onClick}
-      title={`${ANNOTATION_TYPE_DISPLAY[annotation.type] ?? "unknown"}: ${annotation.content.slice(0, 60)}...`}
-      className={cn(
-        "absolute size-2 rounded-full -translate-x-1/2 -translate-y-1/2 transition-transform hover:scale-150 cursor-pointer",
-        ANNOTATION_BG[annotation.type],
-      )}
-      style={{ top: `${pct}%`, left: "50%" }}
-    />
-  );
-}
-
-interface AnnotationRailProps {
-  annotations: Annotation[];
-  messages: ProtoMessage[];
-  onDotClick: (seq: number) => void;
-}
-
-function AnnotationRail({ annotations, messages, onDotClick }: AnnotationRailProps) {
-  if (annotations.length === 0) return null;
-
-  // Build seq -> index lookup
-  const seqToIndex = new Map(messages.map((m, i) => [m.seq, i]));
-
+function AnnotationRail() {
   return (
     <div className="relative w-5 shrink-0 ml-2" aria-hidden="true">
       {/* Track line */}
       <div className="absolute inset-y-0 left-1/2 w-px bg-border -translate-x-1/2" />
-
-      {annotations.map((ann, i) => {
-        const msgIndex = seqToIndex.get(ann.messageSeq) ?? 0;
-        return (
-          <RailDot
-            key={i}
-            annotation={ann}
-            totalMessages={messages.length}
-            msgIndex={msgIndex}
-            onClick={() => onDotClick(ann.messageSeq)}
-          />
-        );
-      })}
     </div>
   );
 }
@@ -358,6 +324,7 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
                 message={msg}
                 annotations={msgAnnotations}
                 activeFilter={activeFilter}
+                showRailDots={annotations.length > 0}
                 msgRef={setRef(msg.seq)}
               />
             );
@@ -366,13 +333,7 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Annotation rail */}
-      {annotations.length > 0 && (
-        <AnnotationRail
-          annotations={annotations}
-          messages={sorted}
-          onDotClick={scrollToSeq}
-        />
-      )}
+      {annotations.length > 0 && <AnnotationRail />}
     </div>
   );
 }

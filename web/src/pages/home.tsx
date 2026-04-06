@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -184,13 +186,8 @@ function CoachCard({ coach, isActive }: {
     );
   }
 
-  const narrativeExcerpt =
-    coach.narrative.length > 300
-      ? coach.narrative.slice(0, 300) + "…"
-      : coach.narrative;
-
   return (
-    <Card>
+    <Card className="border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>Coach</CardTitle>
@@ -205,9 +202,19 @@ function CoachCard({ coach, isActive }: {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-foreground leading-relaxed">
-          {narrativeExcerpt}
-        </p>
+        <div className="text-sm text-foreground leading-relaxed">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children, ...props }) => <p {...props} className="mb-2 last:mb-0">{children}</p>,
+              ul: ({ children, ...props }) => <ul {...props} className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+              ol: ({ children, ...props }) => <ol {...props} className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+              strong: ({ children, ...props }) => <strong {...props} className="font-semibold">{children}</strong>,
+            }}
+          >
+            {coach.narrative}
+          </ReactMarkdown>
+        </div>
         {coach.weakestDimension && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Focus area:</span>
