@@ -360,6 +360,10 @@ func listSessionRowToProto(row *db.ListSessionsByUserRow) *drillv1.SessionSummar
 	if row.ArchivedAt.Valid {
 		s.ArchiveTime = timestamppb.New(row.ArchivedAt.Time)
 	}
+	if row.ScoreOverall.Valid {
+		v := row.ScoreOverall.Int32
+		s.ScoreOverall = &v
+	}
 
 	return s
 }

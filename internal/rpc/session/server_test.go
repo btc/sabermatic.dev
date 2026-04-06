@@ -423,3 +423,57 @@ func TestStatusEnumMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, drillv1.SessionStatus_SESSION_STATUS_ACTIVE, listResp.Msg.Sessions[0].Status)
 }
+
+func TestListSessions_ScoreOverall(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	questionID := seedQuestion(t, b)
+	srvURL := startSessionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	// Create a session.
+	createResp, err := client.CreateSession(context.Background(), connect.NewRequest(&drillv1.CreateSessionRequest{
+		QuestionId:      questionID.String(),
+		DurationMinutes: 15,
+	}))
+	require.NoError(t, err)
+	sessionID, err := uuid.Parse(createResp.Msg.Session.Id)
+	require.NoError(t, err)
+
+	// Before evaluation: score_overall should be nil.
+	listResp, err := client.ListSessions(context.Background(), connect.NewRequest(&drillv1.ListSessionsRequest{}))
+	require.NoError(t, err)
+	require.Len(t, listResp.Msg.Sessions, 1)
+	require.Nil(t, listResp.Msg.Sessions[0].ScoreOverall, "no evaluation yet — score should be nil")
+
+	// Mark session as reviewed and insert an evaluation.
+	ctx := context.Background()
+	q := db.New(b.Pool())
+	err = q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
+		ID: sessionID, Status: "reviewed",
+	})
+	require.NoError(t, err)
+
+	_, err = q.InsertEvaluation(ctx, db.InsertEvaluationParams{
+		SessionID:          sessionID,
+		ScoreRequirements:  3,
+		ScoreArchitecture:  4,
+		ScoreDeepDive:      3,
+		ScoreScalability:   4,
+		ScoreCommunication: 3,
+		ScoreOverall:       4,
+		Strengths:          []byte(`["good architecture"]`),
+		Gaps:               []byte(`["missed caching"]`),
+		Advice:             "Focus on caching strategies",
+	})
+	require.NoError(t, err)
+
+	// After evaluation: score_overall should be 4.
+	listResp2, err := client.ListSessions(context.Background(), connect.NewRequest(&drillv1.ListSessionsRequest{}))
+	require.NoError(t, err)
+	require.Len(t, listResp2.Msg.Sessions, 1)
+	require.NotNil(t, listResp2.Msg.Sessions[0].ScoreOverall, "evaluation exists — score should be present")
+	require.Equal(t, int32(4), *listResp2.Msg.Sessions[0].ScoreOverall)
+}
