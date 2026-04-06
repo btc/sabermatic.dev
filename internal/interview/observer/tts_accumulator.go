@@ -149,6 +149,7 @@ func (a *TTSAccumulator) ttsLoop() {
 
 			synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
 			rc, err := a.synth.Synthesize(synthCtx, sentence)
+			synthCancel() // timeout covers Synthesize only, not ReadAll
 			if err != nil {
 				if synthCtx.Err() == context.DeadlineExceeded {
 					slog.Warn("tts: sentence synthesis timed out",
@@ -160,12 +161,10 @@ func (a *TTSAccumulator) ttsLoop() {
 						"sentence_len", len(sentence))
 				}
 				a.sink.HandleTTSError()
-				synthCancel()
 				continue
 			}
 			data, err := io.ReadAll(rc)
 			rc.Close()
-			synthCancel()
 			if err != nil || len(data) == 0 {
 				if err != nil {
 					slog.Debug("tts: audio read failed",
