@@ -1,0 +1,135 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE = 1;
+  SESSION_STATUS_COMPLETED = 2;
+  SESSION_STATUS_EVALUATING = 3;
+  SESSION_STATUS_REVIEWED = 4;
+  SESSION_STATUS_EVALUATION_FAILED = 5;
+  SESSION_STATUS_FAILED = 6;
+  SESSION_STATUS_CANCELLED = 7;
+}
+
+service SessionService {
+  // AIP-131: Get a single session by ID.
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  // AIP-132: List sessions for the authenticated user.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  // AIP-133: Create a new interview session.
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  // AIP-136: Custom method — bulk archive/unarchive sessions.
+  rpc ArchiveSessions(ArchiveSessionsRequest) returns (ArchiveSessionsResponse);
+  // AIP-131: Get the transcript (messages) for a session.
+  rpc GetTranscript(GetTranscriptRequest) returns (GetTranscriptResponse);
+}
+
+// --- GetSession ---
+
+message GetSessionRequest {
+  string id = 1;
+}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+// --- ListSessions ---
+
+message ListSessionsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListSessionsResponse {
+  repeated SessionSummary sessions = 1;
+  string next_page_token = 2;
+}
+
+// --- CreateSession ---
+
+message CreateSessionRequest {
+  string question_id = 1;
+  int32 duration_minutes = 2;
+  bool tts_enabled = 3;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+// --- ArchiveSessions ---
+
+message ArchiveSessionsRequest {
+  repeated string session_ids = 1;
+  bool archive = 2;
+}
+
+message ArchiveSessionsResponse {
+  int32 updated_count = 1;
+}
+
+// --- GetTranscript ---
+
+message GetTranscriptRequest {
+  string session_id = 1;
+}
+
+message GetTranscriptResponse {
+  repeated Message messages = 1;
+}
+
+// --- Resource messages ---
+
+// Full session detail (returned by Get/Create).
+message Session {
+  string id = 1;
+  string user_id = 2;
+  string question_id = 3;
+  SessionStatus status = 4;
+  int32 config_duration_minutes = 5;
+  bool config_tts_enabled = 6;
+  bool config_coach_briefing = 7;
+  google.protobuf.Timestamp start_time = 8;
+  optional google.protobuf.Timestamp end_time = 9;
+  int32 turn_count = 10;
+  optional google.protobuf.Timestamp archive_time = 11;
+  google.protobuf.Timestamp create_time = 12;
+  google.protobuf.Timestamp update_time = 13;
+  string question_title = 14;
+  string question_prompt = 15;
+  string question_difficulty = 16;
+  optional string question_hints = 17;
+}
+
+// Summary for list view (lighter than full Session).
+message SessionSummary {
+  string id = 1;
+  string user_id = 2;
+  string question_id = 3;
+  SessionStatus status = 4;
+  int32 config_duration_minutes = 5;
+  bool config_tts_enabled = 6;
+  google.protobuf.Timestamp start_time = 7;
+  optional google.protobuf.Timestamp end_time = 8;
+  int32 turn_count = 9;
+  optional google.protobuf.Timestamp archive_time = 10;
+  google.protobuf.Timestamp create_time = 11;
+  string question_title = 12;
+}
+
+message Message {
+  string id = 1;
+  string session_id = 2;
+  int32 seq = 3;
+  string role = 4;
+  string content = 5;
+  optional string input_method = 6;
+  optional string audio_url = 7;
+  google.protobuf.Timestamp create_time = 8;
+}

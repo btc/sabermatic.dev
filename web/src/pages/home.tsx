@@ -3,15 +3,18 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
+import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { Difficulty, QuestionSource } from "@/pb/drill/v1/question_pb";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import type { Question as ProtoQuestion } from "@/pb/drill/v1/question_pb";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
+import type { SessionSummary } from "@/pb/drill/v1/session_pb";
 import {
-  useSessions, useCoachLatest,
+  useCoachLatest,
   useRequestCoachAnalysis, useCreateQuestion,
 } from "@/api/queries";
-import type { Session, CoachAnalysis } from "@/api/types";
+import type { CoachAnalysis } from "@/api/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -39,12 +42,12 @@ function difficultyLabel(d: Difficulty): string {
 }
 
 // Derived data helpers
-function reviewedSessions(sessions: Session[]): Session[] {
-  return sessions.filter((s) => s.status === "reviewed");
+function reviewedSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return sessions.filter((s) => s.status === SessionStatus.REVIEWED);
 }
 
-function activeSessions(sessions: Session[]): Session[] {
-  return sessions.filter((s) => s.status === "active");
+function activeSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return sessions.filter((s) => s.status === SessionStatus.ACTIVE);
 }
 
 function allTags(questions: ProtoQuestion[]): string[] {
@@ -56,7 +59,7 @@ function allTags(questions: ProtoQuestion[]): string[] {
 }
 
 // SummaryStrip
-function SummaryStrip({ sessions }: { sessions: Session[] }) {
+function SummaryStrip({ sessions }: { sessions: SessionSummary[] }) {
   const reviewed = reviewedSessions(sessions);
   if (reviewed.length === 0) return null;
 
@@ -157,7 +160,7 @@ function ActiveSessionBanner({
   sessions,
   atConcurrentLimit,
 }: {
-  sessions: Session[];
+  sessions: SessionSummary[];
   atConcurrentLimit: boolean;
 }) {
   const active = activeSessions(sessions);
@@ -175,8 +178,8 @@ function ActiveSessionBanner({
           <span className="flex-shrink-0 h-2.5 w-2.5 rounded-full bg-white animate-pulse" />
           <p className="text-sm text-white">
             Session in progress
-            {session.question_title ? (
-              <> &mdash; <span className="font-semibold">{session.question_title}</span></>
+            {session.questionTitle ? (
+              <> &mdash; <span className="font-semibold">{session.questionTitle}</span></>
             ) : null}
           </p>
         </div>
@@ -462,7 +465,8 @@ export default function Home() {
     () => questionsResp?.questions ?? [],
     [questionsResp],
   );
-  const { data: sessions = [] } = useSessions();
+  const { data: sessionsResp } = useQuery(listSessions, {});
+  const sessions = sessionsResp?.sessions ?? [];
   const { data: coach } = useCoachLatest();
 
   const [searchParams, setSearchParams] = useSearchParams();

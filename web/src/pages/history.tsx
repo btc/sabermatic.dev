@@ -9,8 +9,12 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { useSessions, useArchiveSessions } from "@/api/queries";
-import type { Session, SessionStatus } from "@/api/types";
+import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
+import { listSessions, archiveSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import type { SessionSummary } from "@/pb/drill/v1/session_pb";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,46 +33,45 @@ type SortOrder = (typeof VALID_SORTS)[number];
 // Helpers
 // ---------------------------------------------------------------------------
 
-const IN_PROGRESS_STATUSES: SessionStatus[] = ["active", "completed", "evaluating"];
-const REVIEWED_STATUSES: SessionStatus[] = ["reviewed", "evaluation_failed"];
+// Helper to get sortable timestamp from proto Timestamp
+function getCreateTimeMs(s: SessionSummary): number {
+  return s.createTime ? Number(s.createTime.seconds) * 1000 + s.createTime.nanos / 1_000_000 : 0;
+}
 
-function applyFilter(sessions: Session[], tab: FilterTab): Session[] {
+const IN_PROGRESS_STATUSES: SessionStatus[] = [SessionStatus.ACTIVE, SessionStatus.COMPLETED, SessionStatus.EVALUATING];
+const REVIEWED_STATUSES: SessionStatus[] = [SessionStatus.REVIEWED, SessionStatus.EVALUATION_FAILED];
+
+function applyFilter(sessions: SessionSummary[], tab: FilterTab): SessionSummary[] {
   switch (tab) {
     case "all":
-      return sessions.filter((s) => !s.archived_at);
+      return sessions.filter((s) => !s.archiveTime);
     case "in_progress":
       return sessions.filter(
-        (s) => !s.archived_at && IN_PROGRESS_STATUSES.includes(s.status),
+        (s) => !s.archiveTime && IN_PROGRESS_STATUSES.includes(s.status),
       );
     case "reviewed":
       return sessions.filter(
-        (s) => !s.archived_at && REVIEWED_STATUSES.includes(s.status),
+        (s) => !s.archiveTime && REVIEWED_STATUSES.includes(s.status),
       );
     case "archived":
-      return sessions.filter((s) => s.archived_at);
+      return sessions.filter((s) => !!s.archiveTime);
     default:
       return sessions;
   }
 }
 
-function applySort(sessions: Session[], sort: SortOrder): Session[] {
+function applySort(sessions: SessionSummary[], sort: SortOrder): SessionSummary[] {
   const copy = [...sessions];
   switch (sort) {
     case "newest":
-      return copy.sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      );
+      return copy.sort((a, b) => getCreateTimeMs(b) - getCreateTimeMs(a));
     case "oldest":
-      return copy.sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      );
+      return copy.sort((a, b) => getCreateTimeMs(a) - getCreateTimeMs(b));
     // TODO: score_high / score_low require score_overall on Session, not yet
     // returned by the backend ListSessions endpoint. Sort by date as fallback.
     case "score_high":
     case "score_low":
-      return copy.sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      );
+      return copy.sort((a, b) => getCreateTimeMs(b) - getCreateTimeMs(a));
     default:
       return copy;
   }
@@ -76,6 +79,11 @@ function applySort(sessions: Session[], sort: SortOrder): Session[] {
 
 function formatDurationMinutes(minutes: number): string {
   return `${minutes}m`;
+}
+
+function formatTimestamp(ts: { seconds: bigint; nanos: number } | undefined): string {
+  if (!ts) return "";
+  return new Date(Number(ts.seconds) * 1000).toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -108,16 +116,14 @@ function TrendTooltip({ active, payload }: TrendTooltipProps) {
 
 // TODO: score_overall is not yet returned by ListSessions. The trend chart
 // will render once the backend enriches session list rows with evaluation scores.
-function ScoreTrendChart({ sessions }: { sessions: Session[] }) {
+function ScoreTrendChart({ sessions }: { sessions: SessionSummary[] }) {
   const points = useMemo<TrendPoint[]>(() => {
     return sessions
-      .filter((s) => s.status === "reviewed")
-      .sort(
-        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      )
+      .filter((s) => s.status === SessionStatus.REVIEWED)
+      .sort((a, b) => getCreateTimeMs(a) - getCreateTimeMs(b))
       .map((s) => ({
-        date: formatRelativeDate(s.created_at),
-        title: s.question_title ?? "Session",
+        date: formatRelativeDate(formatTimestamp(s.createTime)),
+        title: s.questionTitle || "Session",
         // score_overall not yet on Session type — placeholder
         score: 0,
         sessionId: s.id,
@@ -171,14 +177,14 @@ function ScoreTrendChart({ sessions }: { sessions: Session[] }) {
 // ---------------------------------------------------------------------------
 
 function StatusBadge({ status }: { status: SessionStatus }) {
-  if (status === "completed" || status === "evaluating") {
+  if (status === SessionStatus.COMPLETED || status === SessionStatus.EVALUATING) {
     return (
       <Badge variant="secondary" className="text-xs animate-pulse">
         Evaluating...
       </Badge>
     );
   }
-  if (status === "evaluation_failed") {
+  if (status === SessionStatus.EVALUATION_FAILED) {
     return (
       <Badge variant="destructive" className="text-xs">
         Failed
@@ -193,13 +199,13 @@ function StatusBadge({ status }: { status: SessionStatus }) {
 // ---------------------------------------------------------------------------
 
 interface SessionRowProps {
-  session: Session;
+  session: SessionSummary;
   checked: boolean;
   onToggle: (id: string) => void;
 }
 
 function SessionRow({ session, checked, onToggle }: SessionRowProps) {
-  const isArchived = !!session.archived_at;
+  const isArchived = !!session.archiveTime;
 
   return (
     <div
@@ -214,7 +220,7 @@ function SessionRow({ session, checked, onToggle }: SessionRowProps) {
         checked={checked}
         onChange={() => onToggle(session.id)}
         className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary"
-        aria-label={`Select session: ${session.question_title ?? session.id}`}
+        aria-label={`Select session: ${session.questionTitle || session.id}`}
       />
 
       {/* Main content */}
@@ -224,23 +230,23 @@ function SessionRow({ session, checked, onToggle }: SessionRowProps) {
       >
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium">
-            {session.question_title ?? "Unknown question"}
+            {session.questionTitle || "Unknown question"}
           </span>
           <StatusBadge status={session.status} />
         </div>
 
         <div className="flex items-center gap-3 flex-wrap text-xs text-muted-foreground">
-          <span>{formatRelativeDate(session.created_at)}</span>
-          <span>{formatDurationMinutes(session.config_duration_minutes)}</span>
-          {session.turn_count > 0 && (
-            <span>{session.turn_count} turns</span>
+          <span>{formatRelativeDate(formatTimestamp(session.createTime))}</span>
+          <span>{formatDurationMinutes(session.configDurationMinutes)}</span>
+          {session.turnCount > 0 && (
+            <span>{session.turnCount} turns</span>
           )}
         </div>
       </Link>
 
       {/* Score placeholder — shown only when status is reviewed */}
       {/* TODO: display actual scores once ListSessions returns score_overall */}
-      {session.status === "reviewed" && (
+      {session.status === SessionStatus.REVIEWED && (
         <div className="shrink-0 text-right">
           <span className="text-xs text-muted-foreground">—/5</span>
         </div>
@@ -317,24 +323,29 @@ function SortSelect({ value, onChange }: SortSelectProps) {
 
 interface ActionBarProps {
   selectedIds: Set<string>;
-  sessions: Session[];
+  sessions: SessionSummary[];
   onClear: () => void;
 }
 
 function ActionBar({ selectedIds, sessions, onClear }: ActionBarProps) {
-  const archive = useArchiveSessions();
+  const qc = useQueryClient();
+  const archive = useMutation(archiveSessions, {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
+    },
+  });
 
   if (selectedIds.size === 0) return null;
 
   // Determine if selected sessions are mostly archived or not
   const selectedSessions = sessions.filter((s) => selectedIds.has(s.id));
-  const allArchived = selectedSessions.every((s) => s.archived_at);
+  const allArchived = selectedSessions.every((s) => !!s.archiveTime);
   const shouldArchive = !allArchived;
 
   function handleAction() {
     const count = selectedIds.size;
     archive.mutate(
-      { session_ids: Array.from(selectedIds), archive: shouldArchive },
+      { sessionIds: Array.from(selectedIds), archive: shouldArchive },
       {
         onSuccess: () => {
           if (shouldArchive) {
@@ -409,14 +420,15 @@ export default function History() {
   }
 
   // Fetch all sessions (backend doesn't filter server-side yet)
-  const { data: allSessions = [], isLoading } = useSessions();
+  const { data: sessionsResp, isLoading } = useQuery(listSessions, {});
+  const allSessions = sessionsResp?.sessions ?? [];
 
   const filtered = useMemo(() => applyFilter(allSessions, tab), [allSessions, tab]);
   const sorted = useMemo(() => applySort(filtered, sort), [filtered, sort]);
 
   // Reviewed sessions for trend chart (all, not tab-filtered)
   const reviewedSessions = useMemo(
-    () => allSessions.filter((s) => s.status === "reviewed" && !s.archived_at),
+    () => allSessions.filter((s) => s.status === SessionStatus.REVIEWED && !s.archiveTime),
     [allSessions],
   );
 
