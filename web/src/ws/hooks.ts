@@ -212,5 +212,6 @@ export function useInterview(sessionId: string) {
     cancelSession,
     cancelTts,
     setRawMessageHandler,
+    cmRef,
   };
 }

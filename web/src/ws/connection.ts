@@ -12,6 +12,7 @@ export class ConnectionManager {
   private getLastSeq: () => number | null = () => null;
   private retryCount = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private healthCheckTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private immediateReconnect = false;
 
@@ -39,8 +40,29 @@ export class ConnectionManager {
   destroy() {
     this.destroyed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.healthCheckTimer) clearTimeout(this.healthCheckTimer);
     this.ws?.close(1000);
     this.ws = null;
+  }
+
+  healthCheck() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    let gotPong = false;
+    const prevHandler = this.onMessage;
+    const pongListener = (msg: ServerMessage) => {
+      prevHandler(msg);
+      if (msg.type === "pong") {
+        gotPong = true;
+      }
+    };
+    this.onMessage = pongListener;
+    this.send({ type: "ping" });
+    this.healthCheckTimer = setTimeout(() => {
+      this.onMessage = prevHandler;
+      if (!gotPong && this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.close(4000, "health check timeout");
+      }
+    }, 3000);
   }
 
   private open() {
