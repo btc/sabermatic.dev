@@ -1,0 +1,64 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+// AuthService provides public authentication endpoints.
+// All methods except DeleteAccount are unauthenticated.
+service AuthService {
+  rpc Signup(SignupRequest) returns (SignupResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
+  rpc ForgotPassword(ForgotPasswordRequest) returns (ForgotPasswordResponse);
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+}
+
+message SignupRequest {
+  string email = 1;
+  string password = 2;
+  string display_name = 3;
+}
+
+message SignupResponse {
+  string id = 1;
+  string email = 2;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string id = 1;
+  string email = 2;
+}
+
+message LogoutRequest {}
+
+message LogoutResponse {}
+
+message VerifyEmailRequest {
+  string token = 1;
+}
+
+message VerifyEmailResponse {}
+
+message ForgotPasswordRequest {
+  string email = 1;
+}
+
+message ForgotPasswordResponse {}
+
+message ResetPasswordRequest {
+  string token = 1;
+  string password = 2;
+}
+
+message ResetPasswordResponse {}
+
+message DeleteAccountRequest {}
+
+message DeleteAccountResponse {}

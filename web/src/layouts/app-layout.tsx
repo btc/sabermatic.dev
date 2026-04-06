@@ -24,7 +24,7 @@ export function AppLayout() {
   const initials = user?.displayName?.slice(0, 2).toUpperCase() ?? "?";
 
   const handleLogout = () => {
-    logout.mutate(undefined, { onSuccess: () => navigate("/login") });
+    logout.mutate({}, { onSuccess: () => navigate("/login") });
   };
 
   if (isLoading || !isAuthenticated) {

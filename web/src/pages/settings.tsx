@@ -344,16 +344,16 @@ function AccountDeletionSection() {
 
   function handleDelete() {
     setDeleteError(null);
-    deleteAccount.mutate(undefined, {
+    deleteAccount.mutate({}, {
       onSuccess: () => {
-        logout.mutate(undefined, {
+        logout.mutate({}, {
           onSuccess: () => navigate("/login"),
           onError: () => navigate("/login"),
         });
       },
       onError: (err) => {
-        const msg = err instanceof ApiError
-          ? `Deletion failed (${err.status})`
+        const msg = err instanceof ConnectError
+          ? `Deletion failed (${err.code})`
           : "Deletion failed. Please try again.";
         setDeleteError(msg);
         toast.error(msg);
