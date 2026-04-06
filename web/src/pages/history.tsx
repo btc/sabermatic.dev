@@ -421,7 +421,7 @@ export default function History() {
 
   // Fetch all sessions (backend doesn't filter server-side yet)
   const { data: sessionsResp, isLoading } = useQuery(listSessions, {});
-  const allSessions = sessionsResp?.sessions ?? [];
+  const allSessions = useMemo(() => sessionsResp?.sessions ?? [], [sessionsResp]);
 
   const filtered = useMemo(() => applyFilter(allSessions, tab), [allSessions, tab]);
   const sorted = useMemo(() => applySort(filtered, sort), [filtered, sort]);

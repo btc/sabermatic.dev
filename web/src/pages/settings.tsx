@@ -9,7 +9,6 @@ import type { CheckoutRequest as CheckoutRequestProto } from "@/pb/drill/v1/bill
 import {
   useLogout, useDeleteAccount,
 } from "@/api/queries";
-import { ApiError } from "@/api/client";
 import { ConnectError } from "@connectrpc/connect";
 import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
