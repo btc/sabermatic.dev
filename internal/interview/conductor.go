@@ -14,7 +14,6 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/btc/drill/internal/ai"
@@ -62,7 +61,7 @@ type Conductor struct {
 	backend *backend.Backend
 
 	// Dedicated connection holding the Postgres advisory lock.
-	lockConn *pgxpool.Conn
+	lock *backend.SessionLock
 
 	// Current per-turn observer fan-out. Atomic for cross-goroutine access
 	// (readLoop reads for cancel_tts, conductor goroutine writes).
@@ -113,7 +112,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		c.ws.Close(websocket.StatusPolicyViolation, "session already in use")
 		return
 	}
-	c.lockConn = lockConn
+	c.lock = lockConn
 
 	// Phase 2: Read session_init (10s timeout).
 	initCtx, initCancel := context.WithTimeout(serverCtx, 10*time.Second)
@@ -591,11 +590,10 @@ func (c *Conductor) isReconnect() bool {
 	return c.initMsg.LastSeq != nil
 }
 
-// close closes the WebSocket and releases the advisory lock connection.
+// close closes the WebSocket and releases the advisory lock.
 func (c *Conductor) close() {
 	c.ws.Close(websocket.StatusNormalClosure, "session ended")
-	if c.lockConn != nil {
-		c.lockConn.Release()
-		c.lockConn = nil
+	if err := c.lock.Release(); err != nil {
+		slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
 	}
 }

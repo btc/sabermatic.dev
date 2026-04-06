@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/db"
@@ -161,33 +159,6 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 // ---------------------------------------------------------------------------
 // Conductor-facing methods
 // ---------------------------------------------------------------------------
-
-// AcquireSessionLock acquires a Postgres advisory lock for the given session.
-// Returns the dedicated connection (caller must release it) and whether the
-// lock was acquired. If acquired is false, no lock is held and conn is nil.
-func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (_ *pgxpool.Conn, _ bool, err error) {
-	ctx, span := tracer.Start(ctx, "Backend.AcquireSessionLock")
-	defer func() { drilotel.End(span, err) }()
-
-	lockConn, err := b.pool.Acquire(ctx)
-	if err != nil {
-		return nil, false, fmt.Errorf("acquire lock conn: %w", err)
-	}
-
-	key1 := int32(binary.BigEndian.Uint32(sessionID[:4]))
-	key2 := int32(binary.BigEndian.Uint32(sessionID[4:8]))
-	var locked bool
-	err = lockConn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1, $2)", key1, key2).Scan(&locked)
-	if err != nil {
-		lockConn.Release()
-		return nil, false, fmt.Errorf("advisory lock query: %w", err)
-	}
-	if !locked {
-		lockConn.Release()
-		return nil, false, nil
-	}
-	return lockConn, true, nil
-}
 
 // GetMessagesBySession returns all messages for the given session.
 func (b *Backend) GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) (_ []db.Message, err error) {
