@@ -16,11 +16,14 @@ import (
 
 // CoachResponse is the API response for coach analysis.
 type CoachResponse struct {
+	ID                  string    `json:"id"`
+	UserID              string    `json:"user_id"`
 	Narrative           string    `json:"narrative"`
 	WeakestDimension    string    `json:"weakest_dimension,omitempty"`
 	ImprovingDimensions []string  `json:"improving_dimensions,omitempty"`
 	TopicGaps           []string  `json:"topic_gaps,omitempty"`
 	SuggestedQuestionID *string   `json:"suggested_question_id,omitempty"`
+	SessionsAnalyzed    []string  `json:"sessions_analyzed"`
 	CreatedAt           time.Time `json:"created_at"`
 }
 
@@ -45,11 +48,19 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 		return nil, fmt.Errorf("get latest coach analysis: %w", err)
 	}
 
+	sessionsAnalyzed := make([]string, len(ca.SessionsAnalyzed))
+	for i, sid := range ca.SessionsAnalyzed {
+		sessionsAnalyzed[i] = sid.String()
+	}
+
 	resp := &CoachResponse{
+		ID:                  ca.ID.String(),
+		UserID:              ca.UserID.String(),
 		Narrative:           ca.Narrative,
 		WeakestDimension:    ca.WeakestDimension.String,
 		ImprovingDimensions: ca.ImprovingDimensions,
 		TopicGaps:           ca.TopicGaps,
+		SessionsAnalyzed:    sessionsAnalyzed,
 		CreatedAt:           ca.CreatedAt,
 	}
 	if ca.SuggestedQuestionID.Valid {

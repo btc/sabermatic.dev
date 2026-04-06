@@ -7,10 +7,8 @@ import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
 import { createSession as createSessionMethod, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getCoachAnalysis } from "@/pb/drill/v1/coach-CoachService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
-import {
-  useCoachLatest,
-} from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +63,8 @@ export default function SessionConfig() {
 
   const { data: questionsResp } = useQuery(listQuestions, {});
   const questions = questionsResp?.questions ?? [];
-  const { data: coach } = useCoachLatest();
+  const { data: coachResp } = useQuery(getCoachAnalysis, {});
+  const coach = coachResp?.analysis;
   const { data: meData } = useQuery(getMe, {});
   const me = meData?.user;
   const { data: usage } = useQuery(getUsage, {});
@@ -102,7 +101,7 @@ export default function SessionConfig() {
 
   const entitlementExceeded = usage != null && usage.totalBalance < effectiveDuration;
 
-  const hasCoach = coach != null && coach !== undefined;
+  const hasCoach = coach != null;
 
   async function handleEnableMic() {
     try {

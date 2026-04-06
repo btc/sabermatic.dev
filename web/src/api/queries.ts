@@ -1,11 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createConnectQueryKey } from "@connectrpc/connect-query";
-import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
-import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 import { apiClient } from "./client";
 import type {
   User, Question,
-  CoachAnalysis,
 } from "./types";
 
 // --- Questions ---
@@ -16,25 +14,6 @@ export function useCreateQuestion() {
     mutationFn: (data: { title: string; prompt: string; difficulty: string; tags: string[] }) =>
       apiClient.post<Question>("/api/questions", data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["questions"] }),
-  });
-}
-
-// (Evaluation hooks migrated to ConnectRPC EvaluationService)
-
-// --- Coach ---
-
-export function useCoachLatest() {
-  return useQuery({
-    queryKey: ["coach"],
-    queryFn: () => apiClient.get<CoachAnalysis | null>("/api/coach/latest"),
-  });
-}
-
-export function useRequestCoachAnalysis() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/coach/analyze"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["coach"] }),
   });
 }
 
