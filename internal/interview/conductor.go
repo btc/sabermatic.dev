@@ -94,12 +94,13 @@ type Conductor struct {
 // HandleTTSError, so there is no data race on the counter.
 type ttsSink struct {
 	ws        observer.WSConn
+	ctx       context.Context
 	messageID uuid.UUID
 	seq       int
 }
 
 func (s *ttsSink) HandleAudio(data []byte) {
-	_ = s.ws.SendJSON(context.Background(), map[string]any{
+	_ = s.ws.SendJSON(s.ctx, map[string]any{
 		"type":       "tts_chunk",
 		"data":       base64.StdEncoding.EncodeToString(data),
 		"message_id": s.messageID.String(),
@@ -109,14 +110,14 @@ func (s *ttsSink) HandleAudio(data []byte) {
 }
 
 func (s *ttsSink) HandleTTSDone() {
-	_ = s.ws.SendJSON(context.Background(), map[string]any{
+	_ = s.ws.SendJSON(s.ctx, map[string]any{
 		"type":       "tts_done",
 		"message_id": s.messageID.String(),
 	})
 }
 
 func (s *ttsSink) HandleTTSError() {
-	_ = s.ws.SendJSON(context.Background(), map[string]any{
+	_ = s.ws.SendJSON(s.ctx, map[string]any{
 		"type": "tts_error",
 	})
 }
@@ -631,7 +632,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	if c.ttsEnabled {
 		synth, err := c.backend.Synthesizer()
 		if err == nil && synth != nil {
-			sink := &ttsSink{ws: c.ws, messageID: messageID}
+			sink := &ttsSink{ws: c.ws, ctx: ctx, messageID: messageID}
 			observers = append(observers, observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
 				Sink:            sink,
 				Synth:           synth,
