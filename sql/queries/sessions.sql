@@ -94,3 +94,10 @@ WHERE user_id = $1 AND status = 'active';
 
 -- name: GetSessionByID :one
 SELECT * FROM interview_sessions WHERE id = $1;
+
+-- name: ArchiveSessionsBulk :execrows
+UPDATE interview_sessions
+SET archived_at = CASE WHEN @archive::bool THEN NOW() ELSE NULL END,
+    updated_at = NOW()
+WHERE id = ANY(@session_ids::uuid[])
+  AND user_id = @user_id;

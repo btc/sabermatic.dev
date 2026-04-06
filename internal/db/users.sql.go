@@ -75,6 +75,21 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const deleteAccount = `-- name: DeleteAccount :exec
+WITH soft_delete AS (
+    UPDATE users SET deleted_at = NOW(), updated_at = NOW()
+    WHERE id = $1 AND deleted_at IS NULL
+)
+DELETE FROM auth_sessions WHERE user_id = $1
+`
+
+// Soft-deletes the user and wipes all auth sessions in one round-trip.
+// Idempotent: re-calling on a deleted user is a no-op on the user row.
+func (q *Queries) DeleteAccount(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAccount, id)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
 WHERE email = $1 AND deleted_at IS NULL
@@ -230,6 +245,37 @@ func (q *Queries) UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlan
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
+UPDATE users SET display_name = $1, updated_at = NOW()
+WHERE id = $2 AND deleted_at IS NULL
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
+`
+
+type UpdateUserDisplayNameParams struct {
+	DisplayName string    `json:"display_name"`
+	ID          uuid.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserDisplayName, arg.DisplayName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
+	)
+	return i, err
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec
