@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "./auth-layout";
 import { useLogin } from "@/api/queries";
-import { ApiError } from "@/api/client";
+import { ConnectError, Code } from "@connectrpc/connect";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,7 +28,7 @@ export default function Login() {
       {
         onSuccess: () => navigate(redirect, { replace: true }),
         onError: (err) => {
-          if (err instanceof ApiError && err.status === 401) {
+          if (err instanceof ConnectError && err.code === Code.Unauthenticated) {
             setError("Invalid email or password.");
           } else {
             setError("Something went wrong. Please try again.");

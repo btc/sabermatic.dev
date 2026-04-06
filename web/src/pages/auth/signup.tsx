@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthLayout } from "./auth-layout";
 import { useSignup } from "@/api/queries";
-import { ApiError } from "@/api/client";
+import { ConnectError, Code } from "@connectrpc/connect";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,13 +21,13 @@ export default function Signup() {
     e.preventDefault();
     setError(null);
     signup.mutate(
-      { display_name: displayName, email, password },
+      { displayName, email, password },
       {
         onSuccess: () => navigate("/?verified=pending", { replace: true }),
         onError: (err) => {
-          if (err instanceof ApiError && err.status === 409) {
+          if (err instanceof ConnectError && err.code === Code.AlreadyExists) {
             setError("An account with that email already exists.");
-          } else if (err instanceof ApiError && err.status === 422) {
+          } else if (err instanceof ConnectError && err.code === Code.InvalidArgument) {
             setError("Please check your information and try again.");
           } else {
             setError("Something went wrong. Please try again.");

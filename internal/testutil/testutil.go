@@ -3,14 +3,16 @@
 package testutil
 
 import (
-	"bytes"
 	"context"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -23,6 +25,8 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/handler"
+	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
+	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	migrations "github.com/btc/drill/sql/migrations"
 )
 
@@ -107,28 +111,38 @@ func NewTestBackend(t *testing.T) *backend.Backend {
 	return b
 }
 
-// SignupAndLogin creates a user via HTTP signup+login endpoints and returns
-// the raw session token string.
+// SignupAndLogin creates a user via ConnectRPC AuthService and returns the raw
+// session token string.
 func SignupAndLogin(t *testing.T, b *backend.Backend) string {
 	t.Helper()
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
-	body := `{"email":"testuser@example.com","password":"securepass123","display_name":"Test User"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/signup", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
 
-	loginBody := `{"email":"testuser@example.com","password":"securepass123"}`
-	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(loginBody))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
+	// Signup via ConnectRPC.
+	pubClient := drillv1connect.NewAuthServiceClient(&http.Client{}, srv.URL)
+	_, err := pubClient.Signup(context.Background(), connect.NewRequest(&drillv1.SignupRequest{
+		Email:       "testuser@example.com",
+		Password:    "securepass123",
+		DisplayName: "Test User",
+	}))
+	require.NoError(t, err)
 
-	for _, c := range w.Result().Cookies() {
+	// Login via ConnectRPC with a cookie jar to capture Set-Cookie.
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	cookieClient := drillv1connect.NewAuthServiceClient(&http.Client{Jar: jar}, srv.URL)
+	_, err = cookieClient.Login(context.Background(), connect.NewRequest(&drillv1.LoginRequest{
+		Email:    "testuser@example.com",
+		Password: "securepass123",
+	}))
+	require.NoError(t, err)
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	for _, c := range jar.Cookies(u) {
 		if c.Name == auth.SessionCookieName {
 			return c.Value
 		}

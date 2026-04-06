@@ -1,9 +1,19 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation as useConnectMutation } from "@connectrpc/connect-query";
 import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+import {
+  login as loginMethod,
+  signup as signupMethod,
+  logout as logoutMethod,
+  forgotPassword as forgotPasswordMethod,
+  resetPassword as resetPasswordMethod,
+  verifyEmail as verifyEmailMethod,
+  deleteAccount as deleteAccountMethod,
+} from "@/pb/drill/v1/auth-AuthService_connectquery";
 import { apiClient } from "./client";
 import type {
-  User, Question,
+  Question,
 } from "./types";
 
 // --- Questions ---
@@ -17,61 +27,38 @@ export function useCreateQuestion() {
   });
 }
 
-// --- Auth mutations ---
+// --- Auth ---
 
 export function useLogin() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { email: string; password: string }) =>
-      apiClient.post<User>("/api/auth/login", data),
+  return useConnectMutation(loginMethod, {
     onSuccess: () => qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getMe, input: {}, cardinality: undefined }) }),
   });
 }
 
 export function useSignup() {
-  return useMutation({
-    mutationFn: (data: { email: string; password: string; display_name: string }) =>
-      apiClient.post<User>("/api/auth/signup", data),
-  });
+  return useConnectMutation(signupMethod);
 }
 
 export function useLogout() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/auth/logout"),
+  return useConnectMutation(logoutMethod, {
     onSuccess: () => qc.clear(),
   });
 }
 
-// --- Auth mutations (password, email verification) ---
-
 export function useForgotPassword() {
-  return useMutation({
-    mutationFn: (data: { email: string }) =>
-      apiClient.post("/api/auth/forgot-password", data),
-  });
+  return useConnectMutation(forgotPasswordMethod);
 }
 
 export function useResetPassword() {
-  return useMutation({
-    mutationFn: (data: { token: string; password: string }) =>
-      apiClient.post("/api/auth/reset-password", data),
-  });
+  return useConnectMutation(resetPasswordMethod);
 }
 
 export function useVerifyEmail() {
-  return useMutation({
-    mutationFn: (data: { token: string }) =>
-      apiClient.post("/api/auth/verify-email", data),
-  });
+  return useConnectMutation(verifyEmailMethod);
 }
-
-// --- Account deletion ---
 
 export function useDeleteAccount() {
-  return useMutation({
-    mutationFn: () => apiClient.delete("/api/auth/account"),
-  });
+  return useConnectMutation(deleteAccountMethod);
 }
-
-// (Billing hooks migrated to ConnectRPC BillingService)
