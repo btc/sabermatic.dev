@@ -13,16 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
 	drill "github.com/btc/drill"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
-	"github.com/btc/drill/sql/migrations"
+	"github.com/btc/drill/internal/migrate"
 )
 
 func main() {
@@ -57,7 +54,7 @@ func runWithContext(ctx context.Context) error {
 	logger := slog.New(drilotel.NewTraceHandler(jsonHandler, cfg.Otel.GCPProjectID))
 	slog.SetDefault(logger)
 
-	if err := runMigrations(cfg.Database.URL); err != nil {
+	if err := migrate.Run(cfg.Database.URL); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 
@@ -148,25 +145,3 @@ func buildLogWriter(path string) (io.Writer, func()) {
 	return io.MultiWriter(os.Stderr, f), func() { f.Close() }
 }
 
-func runMigrations(databaseURL string) error {
-	d, err := iofs.New(migrations.FS, ".")
-	if err != nil {
-		return fmt.Errorf("create migration source: %w", err)
-	}
-
-	trimmed := strings.TrimPrefix(databaseURL, "postgresql://")
-	trimmed = strings.TrimPrefix(trimmed, "postgres://")
-	pgxURL := "pgx5://" + trimmed
-	m, err := migrate.NewWithSourceInstance("iofs", d, pgxURL)
-	if err != nil {
-		return fmt.Errorf("create migrate: %w", err)
-	}
-
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("migrate up: %w", err)
-	}
-
-	version, dirty, _ := m.Version()
-	slog.Info("migrations complete", "version", version, "dirty", dirty)
-	return nil
-}
