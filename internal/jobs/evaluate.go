@@ -91,7 +91,8 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 
 	// 4. Build seq -> message_id map.
 	seqMap := make(map[int32]uuid.UUID, len(messages))
-	for _, m := range messages {
+	for i := range messages {
+		m := &messages[i]
 		seqMap[m.Seq] = m.ID
 	}
 
@@ -104,7 +105,7 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	}
 
 	// 6. Build prompt.
-	system, userMsgs := evaluation.BuildPrompt(db.Question{
+	system, userMsgs := evaluation.BuildPrompt(&db.Question{
 		Title:      row.QuestionTitle,
 		Prompt:     row.QuestionPrompt,
 		Difficulty: row.QuestionDifficulty,

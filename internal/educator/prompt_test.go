@@ -45,7 +45,9 @@ func makeEval() db.Evaluation {
 }
 
 func TestBuildPrompt_SystemContainsTeachingInstructions(t *testing.T) {
-	system, msgs := BuildPrompt(makeQuestion(), makeMessages(), makeEval())
+	q := makeQuestion()
+	e := makeEval()
+	system, msgs := BuildPrompt(&q, makeMessages(), &e)
 
 	assert.Contains(t, system, "TEACH, not judge")
 	assert.Contains(t, system, "Model Answer")
@@ -57,7 +59,7 @@ func TestBuildPrompt_SystemContainsTeachingInstructions(t *testing.T) {
 
 func TestBuildPrompt_EvalSummaryIncludesScores(t *testing.T) {
 	eval := makeEval()
-	summary := buildEvaluationSummary(eval)
+	summary := buildEvaluationSummary(&eval)
 
 	assert.Contains(t, summary, "Requirements: 3/4")
 	assert.Contains(t, summary, "Architecture: 2/4")
@@ -70,7 +72,7 @@ func TestBuildPrompt_EvalSummaryIncludesScores(t *testing.T) {
 func TestBuildTranscript_FormatsCorrectly(t *testing.T) {
 	question := makeQuestion()
 	messages := makeMessages()
-	transcript := buildTranscript(question, messages)
+	transcript := buildTranscript(&question, messages)
 
 	assert.Contains(t, transcript, "[1] Interviewer:")
 	assert.Contains(t, transcript, "[2] Candidate:")
@@ -80,7 +82,9 @@ func TestBuildTranscript_FormatsCorrectly(t *testing.T) {
 }
 
 func TestBuildPrompt_EmptyMessages(t *testing.T) {
-	system, msgs := BuildPrompt(makeQuestion(), nil, makeEval())
+	q := makeQuestion()
+	e := makeEval()
+	system, msgs := BuildPrompt(&q, nil, &e)
 
 	require.NotEmpty(t, system)
 	require.Len(t, msgs, 1)

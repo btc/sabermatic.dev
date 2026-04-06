@@ -14,7 +14,7 @@ import (
 func TestPromptBuilder_Basic(t *testing.T) {
 	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "Design a URL shortening service."}).
+		WithQuestion(&db.Question{Title: "URL Shortener", Prompt: "Design a URL shortening service."}).
 		WithTimeContext(5*time.Minute, 25*time.Minute).
 		Build()
 
@@ -31,7 +31,7 @@ func TestPromptBuilder_WithTranscript(t *testing.T) {
 	}
 	_, msgs := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "..."}).
+		WithQuestion(&db.Question{Title: "URL Shortener", Prompt: "..."}).
 		WithTranscript(messages).
 		WithTimeContext(10*time.Minute, 20*time.Minute).
 		Build()
@@ -41,7 +41,7 @@ func TestPromptBuilder_WithTranscript(t *testing.T) {
 func TestPromptBuilder_WithCoachBriefingNil(t *testing.T) {
 	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+		WithQuestion(&db.Question{Title: "Test", Prompt: "Test"}).
 		WithCoachBriefing(nil).
 		WithTimeContext(0, 30*time.Minute).
 		Build()
@@ -57,7 +57,7 @@ func TestPromptBuilder_WithCoachBriefing(t *testing.T) {
 	}
 	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+		WithQuestion(&db.Question{Title: "Test", Prompt: "Test"}).
 		WithCoachBriefing(ca).
 		WithTimeContext(0, 30*time.Minute).
 		Build()
@@ -74,7 +74,7 @@ func TestPromptBuilder_WithCoachBriefingEmptyNarrative(t *testing.T) {
 	}
 	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+		WithQuestion(&db.Question{Title: "Test", Prompt: "Test"}).
 		WithCoachBriefing(ca).
 		WithTimeContext(0, 30*time.Minute).
 		Build()
@@ -85,7 +85,7 @@ func TestPromptBuilder_TimeContextAlerts(t *testing.T) {
 	t.Run("nearly up", func(t *testing.T) {
 		system, _ := interview.NewInterviewerPrompt().
 			WithSystemInstructions().
-			WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+			WithQuestion(&db.Question{Title: "Test", Prompt: "Test"}).
 			WithTimeContext(25*time.Minute, 4*time.Minute).
 			Build()
 		assert.Contains(t, system, "nearly up")
@@ -94,7 +94,7 @@ func TestPromptBuilder_TimeContextAlerts(t *testing.T) {
 	t.Run("final stretch", func(t *testing.T) {
 		system, _ := interview.NewInterviewerPrompt().
 			WithSystemInstructions().
-			WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+			WithQuestion(&db.Question{Title: "Test", Prompt: "Test"}).
 			WithTimeContext(20*time.Minute, 9*time.Minute).
 			Build()
 		assert.Contains(t, system, "final stretch")
@@ -109,7 +109,7 @@ func TestPromptBuilder_TranscriptRoleMapping(t *testing.T) {
 	}
 	_, msgs := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "Test", Prompt: "Test"}).
+		WithQuestion(&db.Question{Title: "Test", Prompt: "Test"}).
 		WithTranscript(messages).
 		WithTimeContext(5*time.Minute, 25*time.Minute).
 		Build()
@@ -125,7 +125,7 @@ func TestPromptBuilder_EmptyTranscriptSeedsUserMessage(t *testing.T) {
 	// messages to begin with a user role, so Build must inject a seed message.
 	_, msgs := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "Design a URL shortening service."}).
+		WithQuestion(&db.Question{Title: "URL Shortener", Prompt: "Design a URL shortening service."}).
 		WithTimeContext(0, 45*time.Minute).
 		Build()
 
@@ -141,7 +141,7 @@ func TestPromptBuilder_NonEmptyTranscriptNoSeed(t *testing.T) {
 	}
 	_, msgs := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "URL Shortener", Prompt: "..."}).
+		WithQuestion(&db.Question{Title: "URL Shortener", Prompt: "..."}).
 		WithTranscript(messages).
 		WithTimeContext(10*time.Minute, 20*time.Minute).
 		Build()
@@ -152,7 +152,7 @@ func TestPromptBuilder_NonEmptyTranscriptNoSeed(t *testing.T) {
 func TestPromptBuilder_SystemInstructionsContent(t *testing.T) {
 	system, _ := interview.NewInterviewerPrompt().
 		WithSystemInstructions().
-		WithQuestion(db.Question{Title: "Cache Design", Prompt: "Design a distributed cache."}).
+		WithQuestion(&db.Question{Title: "Cache Design", Prompt: "Design a distributed cache."}).
 		WithTimeContext(0, 45*time.Minute).
 		Build()
 

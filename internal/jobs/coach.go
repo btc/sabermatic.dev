@@ -64,7 +64,8 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 
 	// 2. Collect session IDs for evaluation batch query.
 	sessionIDs := make([]uuid.UUID, len(sessions))
-	for i, s := range sessions {
+	for i := range sessions {
+		s := &sessions[i]
 		sessionIDs[i] = s.ID
 	}
 
