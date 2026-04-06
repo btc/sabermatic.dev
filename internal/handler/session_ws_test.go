@@ -1650,7 +1650,6 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 
 	reconnectMsg3 := readMsg(t, ws3)
 	assert.Equal(t, "reconnect_state", reconnectMsg3["type"])
-	// When no messages are missed, the field is null (nil slice in Go → null in JSON).
 	missedMsgs3, _ := reconnectMsg3["messages"].([]any)
 	assert.Len(t, missedMsgs3, 0, "should replay nothing when client is caught up")
 }
@@ -1735,4 +1734,63 @@ func TestWS_CancelSession(t *testing.T) {
 	assert.Equal(t, "cancelled", updated.Status, "session status should be 'cancelled'")
 	assert.True(t, updated.ArchivedAt.Valid, "archived_at should be set after cancellation")
 	assert.True(t, updated.EndedAt.Valid, "ended_at should be set after cancellation")
+}
+
+// ---------------------------------------------------------------------------
+// Test: Page refresh (last_seq=nil with existing messages) sends session_loaded + reconnect_state
+// ---------------------------------------------------------------------------
+
+func TestWS_PageRefreshReconnect(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Response."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	// First connection: complete opening + one text turn.
+	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	drainUntilType(t, ws1, "session_loaded")
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	sendMsg(t, ws1, wsMsg{"type": "end_turn", "content": "My answer", "input_method": "text"})
+	drainUntilType(t, ws1, "state_change") // processing_input
+	drainUntilType(t, ws1, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	// Disconnect.
+	ws1.Close(websocket.StatusNormalClosure, "done")
+	time.Sleep(200 * time.Millisecond)
+
+	// Simulate page refresh: reconnect with last_seq=nil (no React state).
+	ws2 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws2.CloseNow()
+
+	// Should receive session_loaded first (provides session metadata).
+	loaded := readMsg(t, ws2)
+	assert.Equal(t, "session_loaded", loaded["type"])
+
+	// Then reconnect_state with all messages.
+	reconnectMsg := readMsg(t, ws2)
+	assert.Equal(t, "reconnect_state", reconnectMsg["type"])
+	messages, ok := reconnectMsg["messages"].([]any)
+	assert.True(t, ok, "messages should be an array")
+	assert.Len(t, messages, 3, "should replay all messages (opening + candidate + response)")
+
+	// Then state_change to waiting_for_input.
+	stateMsg := readMsg(t, ws2)
+	assert.Equal(t, "state_change", stateMsg["type"])
+	assert.Equal(t, "waiting_for_input", stateMsg["state"])
 }

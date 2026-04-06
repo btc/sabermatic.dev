@@ -313,6 +313,12 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 		return nil
 	}
 	c.send(ctx, msgSessionLoaded(c.sessionID, c.question, int(c.duration.Minutes()), c.ttsEnabled))
+	if len(c.messages) > 0 {
+		// Page refresh of existing session — send all messages, skip opening question.
+		c.send(ctx, msgReconnectState(0, c.messages))
+		c.send(ctx, msgStateChange(StateWaitingForInput))
+		return nil
+	}
 	return c.streamInterviewerResponse(ctx)
 }
 

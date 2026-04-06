@@ -14,6 +14,10 @@ export class AudioRecorder {
   private mediaRecorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private _isRecording = false;
+  private audioCtx: AudioContext | null = null;
+  private analyser: AnalyserNode | null = null;
+  private _totalDuration = 0;
+  private recordingStartTime = 0;
 
   static preferredMimeType(): string {
     if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
@@ -33,6 +37,9 @@ export class AudioRecorder {
     return this.segments.length;
   }
 
+  get analyserNode(): AnalyserNode | null { return this.analyser; }
+  get totalDuration(): number { return this._totalDuration; }
+
   async start(): Promise<void> {
     if (this._isRecording) return;
 
@@ -43,6 +50,15 @@ export class AudioRecorder {
     const mimeType = AudioRecorder.preferredMimeType();
     const options = mimeType ? { mimeType } : undefined;
     this.mediaRecorder = new MediaRecorder(this.stream, options);
+
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioContext();
+      const source = this.audioCtx.createMediaStreamSource(this.stream);
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 256;
+      source.connect(this.analyser);
+    }
+    this.recordingStartTime = performance.now();
 
     const chunks: Blob[] = [];
 
@@ -70,6 +86,7 @@ export class AudioRecorder {
       const prev = recorder.onstop;
       recorder.onstop = (e) => {
         if (typeof prev === "function") prev.call(recorder, e);
+        this._totalDuration += (performance.now() - this.recordingStartTime) / 1000;
         resolve();
       };
       recorder.stop();
@@ -85,6 +102,7 @@ export class AudioRecorder {
     const mimeType = this.segments[0]?.type || "audio/webm";
     const combined = new Blob(this.segments, { type: mimeType });
     this.segments = [];
+    this._totalDuration = 0;
 
     const buffer = await blobToArrayBuffer(combined);
     const bytes = new Uint8Array(buffer);
@@ -97,6 +115,7 @@ export class AudioRecorder {
 
   discard(): void {
     this.segments = [];
+    this._totalDuration = 0;
   }
 
   destroy(): void {
@@ -111,5 +130,10 @@ export class AudioRecorder {
     }
     this.mediaRecorder = null;
     this.segments = [];
+    if (this.audioCtx) {
+      this.audioCtx.close().catch(() => {});
+      this.audioCtx = null;
+      this.analyser = null;
+    }
   }
 }
