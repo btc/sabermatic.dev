@@ -48,8 +48,9 @@ web/dist/
 .claude/worktrees/
 .playwright-mcp/
 
-# Go binary
+# Go binaries
 /drill
+/drillctl
 cov.out
 coverage.out
 coverage-cross.out

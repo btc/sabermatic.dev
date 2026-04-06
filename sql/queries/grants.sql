@@ -239,6 +239,17 @@ SELECT (SELECT user_id FROM sess), ac.grant_id, ac.credit, @reason, @session_id
 FROM apply_credits ac
 RETURNING grant_id, amount;
 
+-- name: CreateAdminGrant :exec
+-- Creates an admin grant + ledger entry atomically.
+WITH new_grant AS (
+  INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
+  VALUES (@user_id, 'admin', @minutes, @minutes, NULL)
+  RETURNING id, user_id, initial_minutes
+)
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+SELECT user_id, id, initial_minutes, 'admin_grant'
+FROM new_grant;
+
 -- name: GetBillingSnapshot :one
 -- Single query to fetch all billing state needed for entitlement checks.
 -- Fetch inside the caller's transaction to avoid TOCTOU.

@@ -13,6 +13,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createAdminGrant = `-- name: CreateAdminGrant :exec
+WITH new_grant AS (
+  INSERT INTO grants (user_id, source, initial_minutes, remaining_minutes, expires_at)
+  VALUES ($1, 'admin', $2, $2, NULL)
+  RETURNING id, user_id, initial_minutes
+)
+INSERT INTO ledger_entries (user_id, grant_id, amount, reason)
+SELECT user_id, id, initial_minutes, 'admin_grant'
+FROM new_grant
+`
+
+type CreateAdminGrantParams struct {
+	UserID  uuid.UUID `json:"user_id"`
+	Minutes int32     `json:"minutes"`
+}
+
+// Creates an admin grant + ledger entry atomically.
+func (q *Queries) CreateAdminGrant(ctx context.Context, arg CreateAdminGrantParams) error {
+	_, err := q.db.Exec(ctx, createAdminGrant, arg.UserID, arg.Minutes)
+	return err
+}
+
 const createPurchaseGrant = `-- name: CreatePurchaseGrant :exec
 WITH new_grant AS (
   INSERT INTO grants (user_id, source, stripe_event_id, initial_minutes, remaining_minutes, expires_at)

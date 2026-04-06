@@ -1,4 +1,4 @@
-.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate lint
+.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant
 
 test:
 	@echo "=== buf lint ==="
@@ -59,6 +59,14 @@ dev-air:
 # Create dev user with free trial grant. Does NOT require the server.
 seed:
 	set -a && . ./.env && set +a && go run ./cmd/drillctl seed
+
+# Build drillctl binary to project root.
+drillctl:
+	go build -o drillctl ./cmd/drillctl
+
+# Create admin grant. Usage: make grant MINUTES=100m [EMAIL=dev@drill.dev]
+grant: drillctl
+	set -a && . ./.env && set +a && ./drillctl grant $(if $(EMAIL),--email $(EMAIL)) $(MINUTES)
 
 # Run unit tests only (no Docker needed).
 test-short:
