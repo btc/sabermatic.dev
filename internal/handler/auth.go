@@ -11,10 +11,3 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(body) //nolint:errcheck // HTTP response write
 }
-
-func writePaidBalanceRequired(w http.ResponseWriter) {
-	writeJSON(w, http.StatusForbidden, map[string]string{
-		"error":   "paid_balance_required",
-		"message": "This feature requires a paid plan or minute balance.",
-	})
-}

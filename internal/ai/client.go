@@ -286,7 +286,6 @@ type TokenStream struct {
 	mu       sync.Mutex
 	buf      strings.Builder // accumulated full response
 	message  anthropic.Message
-	pending  string // buffered token from last Next() lookahead
 	done     bool
 }
 
