@@ -76,11 +76,9 @@ func startSessionServer(t *testing.T, b *backend.Backend) string {
 // ---------------------------------------------------------------------------
 
 func TestListSessions_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startSessionServer(t, b)
 
 	client := drillv1connect.NewSessionServiceClient(&http.Client{}, srvURL)
@@ -90,11 +88,9 @@ func TestListSessions_Unauthenticated(t *testing.T) {
 }
 
 func TestListSessions_Empty(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -105,11 +101,9 @@ func TestListSessions_Empty(t *testing.T) {
 }
 
 func TestCreateSession_And_GetSession(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	questionID := seedQuestion(t, b)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
@@ -147,11 +141,9 @@ func TestCreateSession_And_GetSession(t *testing.T) {
 }
 
 func TestCreateSession_InvalidDuration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	questionID := seedQuestion(t, b)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
@@ -166,11 +158,9 @@ func TestCreateSession_InvalidDuration(t *testing.T) {
 }
 
 func TestCreateSession_InvalidQuestionID(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -184,11 +174,9 @@ func TestCreateSession_InvalidQuestionID(t *testing.T) {
 }
 
 func TestGetSession_NotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -201,11 +189,9 @@ func TestGetSession_NotFound(t *testing.T) {
 }
 
 func TestGetSession_InvalidID(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -218,11 +204,9 @@ func TestGetSession_InvalidID(t *testing.T) {
 }
 
 func TestStatusEnumMapping(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	questionID := seedQuestion(t, b)
 	srvURL := startSessionServer(t, b)
 	token := testutil.SignupAndLogin(t, b)

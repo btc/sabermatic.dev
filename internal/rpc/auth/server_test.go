@@ -18,7 +18,6 @@ import (
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	authsvc "github.com/btc/drill/internal/rpc/auth"
-	"github.com/btc/drill/internal/testutil"
 )
 
 // startAuthServer creates the Connect handler WITHOUT auth interceptor
@@ -48,11 +47,9 @@ func clientWithCookies(t *testing.T, srvURL string) (drillv1connect.AuthServiceC
 }
 
 func TestSignup_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 
@@ -67,11 +64,9 @@ func TestSignup_Success(t *testing.T) {
 }
 
 func TestSignup_DuplicateEmail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 
@@ -92,11 +87,9 @@ func TestSignup_DuplicateEmail(t *testing.T) {
 }
 
 func TestSignup_MissingFields(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 
@@ -109,11 +102,9 @@ func TestSignup_MissingFields(t *testing.T) {
 }
 
 func TestLogin_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 
 	// Signup first.
@@ -150,11 +141,9 @@ func TestLogin_Success(t *testing.T) {
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 
@@ -174,11 +163,9 @@ func TestLogin_WrongPassword(t *testing.T) {
 }
 
 func TestLogout_ClearsCookie(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 
@@ -225,11 +212,9 @@ func TestLogout_ClearsCookie(t *testing.T) {
 }
 
 func TestVerifyEmail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	cfg := b.Config()
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
@@ -257,11 +242,9 @@ func TestVerifyEmail(t *testing.T) {
 }
 
 func TestVerifyEmail_InvalidToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 
@@ -273,11 +256,9 @@ func TestVerifyEmail_InvalidToken(t *testing.T) {
 }
 
 func TestForgotAndResetPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	cfg := b.Config()
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
@@ -328,11 +309,9 @@ func TestForgotAndResetPassword(t *testing.T) {
 }
 
 func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL) // No cookies, no auth.
 
@@ -356,11 +335,9 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 }
 
 func TestDeleteAccount_RequiresAuth(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL) // No cookies.
 
@@ -370,11 +347,9 @@ func TestDeleteAccount_RequiresAuth(t *testing.T) {
 }
 
 func TestDeleteAccount_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startAuthServer(t, b)
 	client := publicClient(srvURL)
 

@@ -162,11 +162,9 @@ func seedAnnotation(t *testing.T, b *backend.Backend, evalID, msgID uuid.UUID, a
 // ---------------------------------------------------------------------------
 
 func TestGetEvaluation_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEvaluationServer(t, b)
 
 	// No cookie — plain HTTP client.
@@ -179,11 +177,9 @@ func TestGetEvaluation_Unauthenticated(t *testing.T) {
 }
 
 func TestGetEvaluation_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	token := testutil.SignupAndLogin(t, b)
 	userID := userIDFromToken(t, b, token)
 	questionID := seedQuestion(t, b)
@@ -222,11 +218,9 @@ func TestGetEvaluation_Success(t *testing.T) {
 }
 
 func TestGetEvaluation_NotFound(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	token := testutil.SignupAndLogin(t, b)
 	srvURL := startEvaluationServer(t, b)
 	client := authedClient(t, srvURL, token)
@@ -239,11 +233,9 @@ func TestGetEvaluation_NotFound(t *testing.T) {
 }
 
 func TestRetryEvaluation_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEvaluationServer(t, b)
 
 	// No cookie — plain HTTP client.
@@ -256,11 +248,9 @@ func TestRetryEvaluation_Unauthenticated(t *testing.T) {
 }
 
 func TestRetryEvaluation_FailedPrecondition(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	token := testutil.SignupAndLogin(t, b)
 	userID := userIDFromToken(t, b, token)
 	questionID := seedQuestion(t, b)
@@ -278,11 +268,9 @@ func TestRetryEvaluation_FailedPrecondition(t *testing.T) {
 }
 
 func TestRetryEvaluation_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	token := testutil.SignupAndLogin(t, b)
 	userID := userIDFromToken(t, b, token)
 	questionID := seedQuestion(t, b)
@@ -299,11 +287,9 @@ func TestRetryEvaluation_Success(t *testing.T) {
 }
 
 func TestGetEvaluation_EvaluationNotReady(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	token := testutil.SignupAndLogin(t, b)
 	userID := userIDFromToken(t, b, token)
 	questionID := seedQuestion(t, b)
