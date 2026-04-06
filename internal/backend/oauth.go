@@ -52,7 +52,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p *OAuthLoginParams, 
 	if err != nil {
 		return nil, fmt.Errorf("oauth login: begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer tx.Rollback(ctx)
 
 	queries := db.New(tx)
 
@@ -116,7 +116,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p *OAuthLoginParams, 
 			if isDuplicateKeyError(err) {
 				// Race condition: another request linked this provider_id first.
 				// Rollback and retry — will hit step 1 on retry.
-				tx.Rollback(ctx) //nolint:errcheck
+				tx.Rollback(ctx)
 				if isRetry {
 					return nil, fmt.Errorf("oauth login: duplicate key after retry")
 				}
@@ -148,7 +148,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p *OAuthLoginParams, 
 		if isDuplicateKeyError(err) {
 			// Race condition: another request created this email first.
 			// Rollback and retry — will hit step 2 on retry.
-			tx.Rollback(ctx) //nolint:errcheck
+			tx.Rollback(ctx)
 			return b.OAuthLogin(ctx, p)
 		}
 		return nil, fmt.Errorf("oauth login: create oauth user: %w", err)
@@ -167,7 +167,7 @@ func (b *Backend) oauthLoginWithRetry(ctx context.Context, p *OAuthLoginParams, 
 	if err != nil {
 		if isDuplicateKeyError(err) {
 			// Race condition on provider_id.
-			tx.Rollback(ctx) //nolint:errcheck
+			tx.Rollback(ctx)
 			return b.OAuthLogin(ctx, p)
 		}
 		return nil, fmt.Errorf("oauth login: create oauth account: %w", err)

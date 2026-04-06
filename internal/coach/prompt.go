@@ -75,15 +75,13 @@ func buildHistorySummary(sessions []db.InterviewSession, evaluations []db.Evalua
 	// Index questions by ID for lookup.
 	questionByID := make(map[uuid.UUID]db.Question, len(questions))
 	for i := range questions {
-		q := &questions[i]
-		questionByID[q.ID] = *q
+		questionByID[questions[i].ID] = questions[i]
 	}
 
 	// Index evaluations by session ID for lookup.
 	evalBySessionID := make(map[uuid.UUID]db.Evaluation, len(evaluations))
 	for i := range evaluations {
-		e := &evaluations[i]
-		evalBySessionID[e.SessionID] = *e
+		evalBySessionID[evaluations[i].SessionID] = evaluations[i]
 	}
 
 	// Collect attempted tags across all sessions.
