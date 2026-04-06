@@ -62,9 +62,19 @@ func New(cfg *config.Config) (*Backend, error) {
 	}
 
 	// Pool uses background context -- must outlive any request or signal context.
-	pool, err := cfg.Database.NewPool(context.Background(), otelpgx.NewTracer())
+	poolCfg, err := pgxpool.ParseConfig(cfg.Database.URL)
 	if err != nil {
-		return nil, fmt.Errorf("database: %w", err)
+		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	poolCfg.MaxConns = cfg.Database.MaxPoolConns
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("create pool: %w", err)
+	}
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
 	}
 	slog.Info("database connected")
 
