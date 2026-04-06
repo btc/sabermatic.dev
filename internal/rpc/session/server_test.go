@@ -203,6 +203,208 @@ func TestGetSession_InvalidID(t *testing.T) {
 	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 }
 
+// ---------------------------------------------------------------------------
+// GetTranscript tests
+// ---------------------------------------------------------------------------
+
+func TestGetTranscript_Success(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	questionID := seedQuestion(t, b)
+	srvURL := startSessionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	// Create a session.
+	createResp, err := client.CreateSession(context.Background(), connect.NewRequest(&drillv1.CreateSessionRequest{
+		QuestionId:      questionID.String(),
+		DurationMinutes: 15,
+	}))
+	require.NoError(t, err)
+	sessionID, err := uuid.Parse(createResp.Msg.Session.Id)
+	require.NoError(t, err)
+
+	// Insert two messages directly.
+	ctx := context.Background()
+	q := db.New(b.Pool())
+	_, err = q.InsertMessage(ctx, db.InsertMessageParams{
+		ID:        uuid.New(),
+		SessionID: sessionID,
+		Seq:       1,
+		Role:      "interviewer",
+		Content:   "Hello candidate",
+	})
+	require.NoError(t, err)
+	_, err = q.InsertMessage(ctx, db.InsertMessageParams{
+		ID:        uuid.New(),
+		SessionID: sessionID,
+		Seq:       2,
+		Role:      "candidate",
+		Content:   "Hello interviewer",
+	})
+	require.NoError(t, err)
+
+	resp, err := client.GetTranscript(context.Background(), connect.NewRequest(&drillv1.GetTranscriptRequest{
+		SessionId: sessionID.String(),
+	}))
+	require.NoError(t, err)
+	require.Len(t, resp.Msg.Messages, 2)
+	require.Equal(t, int32(1), resp.Msg.Messages[0].Seq)
+	require.Equal(t, "interviewer", resp.Msg.Messages[0].Role)
+	require.Equal(t, "Hello candidate", resp.Msg.Messages[0].Content)
+	require.Equal(t, int32(2), resp.Msg.Messages[1].Seq)
+	require.Equal(t, "candidate", resp.Msg.Messages[1].Role)
+	require.NotNil(t, resp.Msg.Messages[0].CreateTime)
+}
+
+func TestGetTranscript_Unauthenticated(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startSessionServer(t, b)
+	client := drillv1connect.NewSessionServiceClient(&http.Client{}, srvURL)
+
+	_, err := client.GetTranscript(context.Background(), connect.NewRequest(&drillv1.GetTranscriptRequest{
+		SessionId: uuid.New().String(),
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
+}
+
+func TestGetTranscript_InvalidID(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startSessionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.GetTranscript(context.Background(), connect.NewRequest(&drillv1.GetTranscriptRequest{
+		SessionId: "not-a-uuid",
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestGetTranscript_NotOwned(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	questionID := seedQuestion(t, b)
+	srvURL := startSessionServer(t, b)
+
+	// Create session as user1.
+	token1 := testutil.SignupAndLogin(t, b)
+	client1 := authedClient(t, srvURL, token1)
+	createResp, err := client1.CreateSession(context.Background(), connect.NewRequest(&drillv1.CreateSessionRequest{
+		QuestionId:      questionID.String(),
+		DurationMinutes: 15,
+	}))
+	require.NoError(t, err)
+	sessionID := createResp.Msg.Session.Id
+
+	// Fetch transcript as user2 — should get not found (ownership enforced).
+	// SignupAndLogin uses a fixed email, so we need a second backend or second user.
+	// Instead, verify via a fresh user that doesn't own the session.
+	// We can reuse the existing authedClient pattern but we need a second token.
+	// Use the testutil.SignupAndLogin approach won't work (same email) — use backendtest.
+	// Since we're in rpc/session package, we use the db directly to get a second token.
+	// Simplest approach: use a second user's login token via the public backend SignupAndLogin
+	// path through the rpc server itself.
+
+	// Sign up + login as user2 via the auth service on the same backend.
+	// We do this by calling Signup+Login on the backend directly.
+	ctx := context.Background()
+	result2, err := b.Signup(ctx, backend.SignupParams{
+		Email:       "user2-notowned@example.com",
+		Password:    "testpassword123",
+		DisplayName: "User 2",
+	})
+	require.NoError(t, err)
+	loginResult2, err := b.Login(ctx, backend.LoginParams{
+		Email:    "user2-notowned@example.com",
+		Password: "testpassword123",
+	})
+	require.NoError(t, err)
+	_ = result2
+
+	client2 := authedClient(t, srvURL, loginResult2.Token)
+	_, err = client2.GetTranscript(context.Background(), connect.NewRequest(&drillv1.GetTranscriptRequest{
+		SessionId: sessionID,
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
+
+// ---------------------------------------------------------------------------
+// ArchiveSessions tests
+// ---------------------------------------------------------------------------
+
+func TestArchiveSessions_Success(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	questionID := seedQuestion(t, b)
+	srvURL := startSessionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	// Create a session.
+	createResp, err := client.CreateSession(context.Background(), connect.NewRequest(&drillv1.CreateSessionRequest{
+		QuestionId:      questionID.String(),
+		DurationMinutes: 15,
+	}))
+	require.NoError(t, err)
+	sessionID := createResp.Msg.Session.Id
+
+	// Archive it.
+	archiveResp, err := client.ArchiveSessions(context.Background(), connect.NewRequest(&drillv1.ArchiveSessionsRequest{
+		SessionIds: []string{sessionID},
+		Archive:    true,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, int32(1), archiveResp.Msg.UpdatedCount)
+
+	// GetSession should now show ArchiveTime set.
+	getResp, err := client.GetSession(context.Background(), connect.NewRequest(&drillv1.GetSessionRequest{
+		Id: sessionID,
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, getResp.Msg.Session.ArchiveTime, "expected archive_time to be set")
+}
+
+func TestArchiveSessions_InvalidUUID(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startSessionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.ArchiveSessions(context.Background(), connect.NewRequest(&drillv1.ArchiveSessionsRequest{
+		SessionIds: []string{"not-a-uuid"},
+		Archive:    true,
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestArchiveSessions_Unauthenticated(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startSessionServer(t, b)
+	client := drillv1connect.NewSessionServiceClient(&http.Client{}, srvURL)
+
+	_, err := client.ArchiveSessions(context.Background(), connect.NewRequest(&drillv1.ArchiveSessionsRequest{
+		SessionIds: []string{uuid.New().String()},
+		Archive:    true,
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
+}
+
 func TestStatusEnumMapping(t *testing.T) {
 	t.Parallel()
 

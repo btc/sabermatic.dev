@@ -163,10 +163,28 @@ func (s *Server) ArchiveSessions(
 	ctx context.Context,
 	req *connect.Request[drillv1.ArchiveSessionsRequest],
 ) (*connect.Response[drillv1.ArchiveSessionsResponse], error) {
-	if auth.UserFromContext(ctx) == nil {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ArchiveSessions not yet implemented"))
+
+	ids := make([]uuid.UUID, len(req.Msg.SessionIds))
+	for i, rawID := range req.Msg.SessionIds {
+		id, err := uuid.Parse(rawID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid session_id"))
+		}
+		ids[i] = id
+	}
+
+	count, err := s.b.ArchiveSessions(ctx, user.ID, ids, req.Msg.Archive)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("archive sessions failed"))
+	}
+
+	return connect.NewResponse(&drillv1.ArchiveSessionsResponse{
+		UpdatedCount: int32(count),
+	}), nil
 }
 
 // GetTranscript returns messages for a session.
@@ -174,10 +192,29 @@ func (s *Server) GetTranscript(
 	ctx context.Context,
 	req *connect.Request[drillv1.GetTranscriptRequest],
 ) (*connect.Response[drillv1.GetTranscriptResponse], error) {
-	if auth.UserFromContext(ctx) == nil {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("GetTranscript not yet implemented"))
+
+	sessionID, err := uuid.Parse(req.Msg.SessionId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid session_id"))
+	}
+
+	msgs, err := s.b.GetTranscript(ctx, sessionID, user.ID)
+	if err != nil {
+		return nil, backendToConnectError(err)
+	}
+
+	messages := make([]*drillv1.Message, len(msgs))
+	for i := range msgs {
+		messages[i] = messageToProto(&msgs[i])
+	}
+
+	return connect.NewResponse(&drillv1.GetTranscriptResponse{
+		Messages: messages,
+	}), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +320,26 @@ func interviewSessionToProto(row *db.InterviewSession) *drillv1.Session {
 	}
 
 	return s
+}
+
+// messageToProto converts a db.Message to its proto representation.
+// nullable InputMethod and AudioUrl are mapped to optional *string fields.
+func messageToProto(m *db.Message) *drillv1.Message {
+	msg := &drillv1.Message{
+		Id:         m.ID.String(),
+		SessionId:  m.SessionID.String(),
+		Seq:        m.Seq,
+		Role:       m.Role,
+		Content:    m.Content,
+		CreateTime: timestamppb.New(m.CreatedAt),
+	}
+	if m.InputMethod.Valid {
+		msg.InputMethod = &m.InputMethod.String
+	}
+	if m.AudioUrl.Valid {
+		msg.AudioUrl = &m.AudioUrl.String
+	}
+	return msg
 }
 
 // listSessionRowToProto converts the list summary row to proto.
