@@ -472,6 +472,16 @@ def phase_secrets(state: dict) -> None:
             info(f"{secret_id}: already set")
             continue
 
+        # Check if secret already has a non-placeholder value in GCP
+        result = run_quiet([
+            "gcloud", "secrets", "versions", "access", "latest",
+            f"--secret={secret_id}",
+        ])
+        if result.returncode == 0 and result.stdout.strip() not in ("", "REPLACE_ME"):
+            info(f"{secret_id}: already set in Secret Manager")
+            secrets_state[secret_id] = True
+            continue
+
         if method == "auto":
             value = secrets.token_hex(32)
             info(f"{secret_id}: auto-generating")
