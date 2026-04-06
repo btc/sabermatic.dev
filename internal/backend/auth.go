@@ -152,7 +152,7 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (_ *LoginResult, err
 	user, err := queries.GetUserByEmail(ctx, p.Email)
 	if err != nil {
 		// Constant-time: run dummy bcrypt to prevent timing oracle.
-		auth.CheckPassword(dummyBcryptHash, "x")
+		auth.CheckPassword(dummyBcryptHash, "x") //nolint:errcheck // constant-time dummy check
 		if !errors.Is(err, pgx.ErrNoRows) {
 			slog.Error("login: get user by email", "error", err)
 		}
@@ -161,7 +161,7 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (_ *LoginResult, err
 
 	// Check that user has a password (not OAuth-only).
 	if !user.PasswordHash.Valid {
-		auth.CheckPassword(dummyBcryptHash, "x")
+		auth.CheckPassword(dummyBcryptHash, "x") //nolint:errcheck // constant-time dummy check
 		return nil, ErrInvalidCredentials
 	}
 
