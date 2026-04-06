@@ -89,6 +89,8 @@ type Querier interface {
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
+	PGAdvisoryUnlock(ctx context.Context, key int64) (bool, error)
+	PGTryAdvisoryLock(ctx context.Context, key int64) (bool, error)
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	// Refunds unused minutes for a completed session based on wall-clock duration.
 	// Derives user_id from the session — caller only needs session_id.
