@@ -25,7 +25,8 @@ import (
 )
 
 func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
-	cfg := testutil.LoadTestConfig(t, "postgres://unused")
+	t.Parallel()
+	cfg := testutil.Config(t)
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
@@ -48,7 +49,8 @@ func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
 }
 
 func TestCSRF_AllowsGetRequests(t *testing.T) {
-	cfg := testutil.LoadTestConfig(t, "postgres://unused")
+	t.Parallel()
+	cfg := testutil.Config(t)
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
@@ -71,7 +73,8 @@ func TestCSRF_AllowsGetRequests(t *testing.T) {
 }
 
 func TestCSRF_PostWithValidToken(t *testing.T) {
-	cfg := testutil.LoadTestConfig(t, "postgres://unused")
+	t.Parallel()
+	cfg := testutil.Config(t)
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	csrfMiddleware := csrf.Protect(
 		csrfKey,
