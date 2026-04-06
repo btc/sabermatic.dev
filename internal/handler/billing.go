@@ -43,7 +43,7 @@ func PostStripeWebhook(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		if err := b.HandleStripeWebhook(r.Context(), event); err != nil {
+		if err := b.HandleStripeWebhook(r.Context(), &event); err != nil {
 			// Return 500 so Stripe retries on transient errors (DB down, etc.).
 			// HandleStripeWebhook returns nil for permanent non-errors (unknown
 			// customer, duplicate event) so those get 200.

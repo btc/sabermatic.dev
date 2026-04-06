@@ -526,7 +526,7 @@ func TestHandleCheckoutCompleted_CreatesPurchaseGrant(t *testing.T) {
 		},
 	})
 
-	err := b.HandleStripeWebhook(ctx, event)
+	err := b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	grants, err := db.New(b.Pool()).ListActiveGrants(ctx, userID)
@@ -559,7 +559,7 @@ func TestHandleCheckoutCompleted_IgnoresSubscriptionMode(t *testing.T) {
 		},
 	})
 
-	err := b.HandleStripeWebhook(ctx, event)
+	err := b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	// No additional grants should be created for subscription-mode checkouts.
@@ -587,8 +587,8 @@ func TestHandleCheckoutCompleted_IdempotentOnDuplicateEventID(t *testing.T) {
 	})
 
 	// Call twice with the same event ID — should be idempotent.
-	require.NoError(t, b.HandleStripeWebhook(ctx, event))
-	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+	require.NoError(t, b.HandleStripeWebhook(ctx, &event))
+	require.NoError(t, b.HandleStripeWebhook(ctx, &event))
 
 	grants, err := db.New(b.Pool()).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
@@ -608,7 +608,7 @@ func TestHandleInvoicePaid_CreatesSubscriptionGrantAndSetsPlan(t *testing.T) {
 		"customer": custID,
 	})
 
-	err := b.HandleStripeWebhook(ctx, event)
+	err := b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	// Free trial (from SeedUser) + subscription grant = 2.
@@ -642,7 +642,7 @@ func TestHandleInvoicePaid_UnknownCustomerIsNoOp(t *testing.T) {
 	})
 
 	// Should return nil (not an error) for an unknown customer.
-	err := b.HandleStripeWebhook(ctx, event)
+	err := b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 }
 
@@ -658,8 +658,8 @@ func TestHandleInvoicePaid_IdempotentOnDuplicateEventID(t *testing.T) {
 		"customer": custID,
 	})
 
-	require.NoError(t, b.HandleStripeWebhook(ctx, event))
-	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+	require.NoError(t, b.HandleStripeWebhook(ctx, &event))
+	require.NoError(t, b.HandleStripeWebhook(ctx, &event))
 
 	grants, err := db.New(b.Pool()).ListActiveGrants(ctx, userID)
 	require.NoError(t, err)
@@ -689,7 +689,7 @@ func TestHandleSubscriptionDeleted_SetsPlanToFree(t *testing.T) {
 		"customer": custID,
 	})
 
-	err = b.HandleStripeWebhook(ctx, event)
+	err = b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	// Plan should now be "free".
@@ -708,7 +708,7 @@ func TestHandleSubscriptionDeleted_UnknownCustomerIsNoOp(t *testing.T) {
 		"customer": "cus_doesnotexist",
 	})
 
-	err := b.HandleStripeWebhook(ctx, event)
+	err := b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 }
 
@@ -730,7 +730,7 @@ func TestHandleSubscriptionUpdated_ActiveStatusKeepsPro(t *testing.T) {
 		"status":   "active",
 	})
 
-	err = b.HandleStripeWebhook(ctx, event)
+	err = b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	// "active" status → plan should be "pro".
@@ -756,7 +756,7 @@ func TestHandleSubscriptionUpdated_CanceledStatusDowngradesToFree(t *testing.T) 
 		"status":   "canceled",
 	})
 
-	err = b.HandleStripeWebhook(ctx, event)
+	err = b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	user, err := db.New(b.Pool()).GetUserByID(ctx, userID)
@@ -780,7 +780,7 @@ func TestHandleSubscriptionUpdated_UnpaidStatusDowngradesToFree(t *testing.T) {
 		"status":   "unpaid",
 	})
 
-	err = b.HandleStripeWebhook(ctx, event)
+	err = b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	user, err := db.New(b.Pool()).GetUserByID(ctx, userID)
@@ -804,7 +804,7 @@ func TestHandleSubscriptionUpdated_PastDueStatusDowngradesToFree(t *testing.T) {
 		"status":   "past_due",
 	})
 
-	err = b.HandleStripeWebhook(ctx, event)
+	err = b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 
 	user, err := db.New(b.Pool()).GetUserByID(ctx, userID)
@@ -823,7 +823,7 @@ func TestHandleSubscriptionUpdated_UnknownCustomerIsNoOp(t *testing.T) {
 		"status":   "active",
 	})
 
-	err := b.HandleStripeWebhook(ctx, event)
+	err := b.HandleStripeWebhook(ctx, &event)
 	require.NoError(t, err)
 }
 

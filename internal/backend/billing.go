@@ -235,7 +235,7 @@ func (b *Backend) CreatePortalSession(ctx context.Context, userID uuid.UUID) (_ 
 }
 
 // HandleStripeWebhook dispatches a Stripe webhook event.
-func (b *Backend) HandleStripeWebhook(ctx context.Context, event stripe.Event) (err error) {
+func (b *Backend) HandleStripeWebhook(ctx context.Context, event *stripe.Event) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.HandleStripeWebhook")
 	defer func() { drilotel.End(span, err) }()
 
@@ -302,7 +302,7 @@ func (b *Backend) reserveMinutesTx(ctx context.Context, dbtx db.DBTX, userID uui
 	return nil
 }
 
-func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Event) (err error) {
+func (b *Backend) handleCheckoutCompleted(ctx context.Context, event *stripe.Event) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.handleCheckoutCompleted")
 	defer func() { drilotel.End(span, err) }()
 
@@ -345,7 +345,7 @@ func (b *Backend) handleCheckoutCompleted(ctx context.Context, event stripe.Even
 	return nil
 }
 
-func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) (err error) {
+func (b *Backend) handleInvoicePaid(ctx context.Context, event *stripe.Event) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.handleInvoicePaid")
 	defer func() { drilotel.End(span, err) }()
 
@@ -381,7 +381,7 @@ func (b *Backend) handleInvoicePaid(ctx context.Context, event stripe.Event) (er
 	return nil
 }
 
-func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Event) (err error) {
+func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event *stripe.Event) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.handleSubscriptionDeleted")
 	defer func() { drilotel.End(span, err) }()
 
@@ -407,7 +407,7 @@ func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Ev
 	return nil
 }
 
-func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Event) (err error) {
+func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event *stripe.Event) (err error) {
 	ctx, span := tracer.Start(ctx, "Backend.handleSubscriptionUpdated")
 	defer func() { drilotel.End(span, err) }()
 
