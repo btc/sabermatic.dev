@@ -220,7 +220,7 @@ type PersistMessageParams struct {
 }
 
 // persistMessage is the internal helper that inserts a message using any DBTX (pool or tx).
-func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMessageParams) (_ db.Message, err error) {
+func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p *PersistMessageParams) (_ db.Message, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.persistMessage")
 	defer func() { drilotel.End(span, err) }()
 
@@ -244,14 +244,14 @@ func (b *Backend) persistMessage(ctx context.Context, dbtx db.DBTX, p PersistMes
 }
 
 // PersistMessage inserts a message using the pool.
-func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (db.Message, error) {
+func (b *Backend) PersistMessage(ctx context.Context, p *PersistMessageParams) (db.Message, error) {
 	return b.persistMessage(ctx, b.pool, p)
 }
 
 // PersistInterviewerTurn atomically persists the interviewer message AND the
 // LLM call record. The TokenStream's CloseWithTx is called within the
 // transaction.
-func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p PersistMessageParams) (_ db.Message, err error) {
+func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenStream, p *PersistMessageParams) (_ db.Message, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.PersistInterviewerTurn")
 	defer func() { drilotel.End(span, err) }()
 
@@ -410,10 +410,10 @@ func (b *Backend) Synthesize(ctx context.Context, text string) (_ io.ReadCloser,
 }
 
 // StreamLLM creates a streaming LLM call via the Anthropic SDK.
-func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (_ *ai.TokenStream, err error) {
+func (b *Backend) StreamLLM(ctx context.Context, p *ai.StreamParams) (_ *ai.TokenStream, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.StreamLLM")
 	defer func() { drilotel.End(span, err) }()
-	return b.llm.StreamAndLog(ctx, &p)
+	return b.llm.StreamAndLog(ctx, p)
 }
 
 // StoreAudio uploads audio bytes to object storage and returns the URL.

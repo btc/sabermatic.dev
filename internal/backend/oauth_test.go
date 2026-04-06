@@ -19,7 +19,7 @@ func TestOAuthLogin_NewUser(t *testing.T) {
 	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	res, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-123",
 		Email:       "newuser@example.com",
@@ -55,7 +55,7 @@ func TestOAuthLogin_NewUserNeedsProfile(t *testing.T) {
 	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	res, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "github",
 		ProviderID:  "gh-456",
 		Email:       "noprofile@example.com",
@@ -79,7 +79,7 @@ func TestOAuthLogin_ExistingUserByEmail(t *testing.T) {
 	signupRes := signupUser(t, b, "existing@example.com", "strongpass1", "Existing")
 
 	// Now OAuthLogin with the same email.
-	res, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-existing-789",
 		Email:       "existing@example.com",
@@ -123,12 +123,12 @@ func TestOAuthLogin_ExistingOAuthAccount(t *testing.T) {
 	}
 
 	// First call: creates user + OAuth account (Step 3).
-	res1, err := b.OAuthLogin(ctx, params)
+	res1, err := b.OAuthLogin(ctx, &params)
 	require.NoError(t, err)
 	require.NotEmpty(t, res1.UserID)
 
 	// Second call: should hit Step 1 (existing OAuth account).
-	res2, err := b.OAuthLogin(ctx, params)
+	res2, err := b.OAuthLogin(ctx, &params)
 	require.NoError(t, err)
 	require.Equal(t, res1.UserID, res2.UserID)
 	require.NotEmpty(t, res2.Token)
@@ -141,7 +141,7 @@ func TestOAuthLogin_SecondProvider(t *testing.T) {
 	ctx := context.Background()
 
 	// First login via Google.
-	res1, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res1, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-multi",
 		Email:       "multi@example.com",
@@ -152,7 +152,7 @@ func TestOAuthLogin_SecondProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second login via GitHub with the same email.
-	res2, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res2, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "github",
 		ProviderID:  "gh-multi",
 		Email:       "multi@example.com",
@@ -184,7 +184,7 @@ func TestOAuthLogin_SoftDeletedUser_ReactivatedViaOAuth(t *testing.T) {
 	queries := db.New(b.Pool())
 
 	// Create user via OAuthLogin.
-	res1, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res1, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-delete-222",
 		Email:       "deleted@example.com",
@@ -204,7 +204,7 @@ func TestOAuthLogin_SoftDeletedUser_ReactivatedViaOAuth(t *testing.T) {
 	require.True(t, user.DeletedAt.Valid)
 
 	// OAuthLogin again with same provider+providerID — should reactivate.
-	res2, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res2, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-delete-222",
 		Email:       "deleted@example.com",
@@ -243,7 +243,7 @@ func TestOAuthLogin_ExistingUserByEmail_VerifiesEmail(t *testing.T) {
 	require.False(t, user.EmailVerified)
 
 	// OAuthLogin with the same email — should verify the email.
-	res, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-verify-333",
 		Email:       "unverified@example.com",
@@ -265,7 +265,7 @@ func TestOAuthLogin_EmailNormalization(t *testing.T) {
 	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	res, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+	res, err := b.OAuthLogin(ctx, &backend.OAuthLoginParams{
 		Provider:    "google",
 		ProviderID:  "google-norm-444",
 		Email:       " USER@EXAMPLE.COM ",
