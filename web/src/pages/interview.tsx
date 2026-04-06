@@ -231,6 +231,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     cancelSession,
     cancelTts,
     setRawMessageHandler,
+    cmRef,
   } = useInterview(sessionId);
 
   const navigate = useNavigate();
@@ -320,6 +321,17 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       recStop();
     }
   }, [connectionState, audioRecorder.isRecording, recStop]);
+
+  // ------ Visibility change recovery ------
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState !== "visible") return;
+      cmRef.current?.healthCheck();
+      audioPlayer.initContext();
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, [audioPlayer, cmRef]);
 
   // ------ Send handlers ------
   const handleSendText = useCallback(() => {
