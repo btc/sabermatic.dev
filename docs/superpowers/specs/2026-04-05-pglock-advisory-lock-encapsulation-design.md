@@ -41,14 +41,14 @@ func (l *Lock) key2() int32 {
 #### `TryAcquire`
 
 ```go
-func TryAcquire(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*Lock, error)
+func TryAcquire(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*Lock, bool, error)
 ```
 
 1. Acquires a connection from the pool.
 2. Calls `SELECT pg_try_advisory_lock(key1, key2)`.
-3. If acquired: returns `(*Lock, nil)`.
-4. If not acquired: releases connection, returns `(nil, nil)`.
-5. On error: releases connection, returns `(nil, error)`.
+3. If acquired: returns `(*Lock, true, nil)`.
+4. If not acquired: releases connection, returns `(nil, false, nil)`.
+5. On error: releases connection, returns `(nil, false, error)`.
 
 #### `Release`
 
@@ -72,12 +72,12 @@ func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (
 }
 ```
 
-The return signature changes from `(*pgxpool.Conn, bool, error)` to `(*pglock.Lock, error)`. Callers check `lock == nil` for contention instead of a `locked bool`.
+The return signature changes from `(*pgxpool.Conn, bool, error)` to `(*pglock.Lock, bool, error)` — same shape, but the conn is now encapsulated.
 
 ### Changes to `internal/interview/conductor.go`
 
 - Field: `lockConn *pgxpool.Conn` → `lock *pglock.Lock`
-- `Run()`: `lockConn, locked, err := ...` → `lock, err := ...`; nil-check replaces `!locked`
+- `Run()`: `lockConn, locked, err := ...` → `lock, locked, err := ...`
 - `close()`: replaces `c.lockConn.Release()` / `c.lockConn = nil` with `c.lock.Release(context.Background())`
 
 ### Changes to tests
