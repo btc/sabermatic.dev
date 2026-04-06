@@ -68,6 +68,23 @@ func TestAcquireSessionLock_ReleaseAllowsReacquire(t *testing.T) {
 	require.NoError(t, lock2.Release())
 }
 
+func TestAcquireSessionLock_DifferentIDsDoNotContend(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	lock1, acquired1, err := b.AcquireSessionLock(ctx, uuid.New())
+	require.NoError(t, err)
+	require.True(t, acquired1)
+
+	lock2, acquired2, err := b.AcquireSessionLock(ctx, uuid.New())
+	require.NoError(t, err)
+	assert.True(t, acquired2)
+
+	require.NoError(t, lock1.Release())
+	require.NoError(t, lock2.Release())
+}
+
 func TestSessionLock_ReleaseNilSafe(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,7 +33,10 @@ func (l *SessionLock) Release() error {
 	if l == nil || l.conn == nil {
 		return nil
 	}
-	_, err := db.New(l.conn).PGAdvisoryUnlock(context.Background(), l.key())
+	released, err := db.New(l.conn).PGAdvisoryUnlock(context.Background(), l.key())
+	if err == nil && !released {
+		slog.Warn("advisory unlock: connection did not hold lock", "id", l.id)
+	}
 	l.conn.Release()
 	l.conn = nil
 	return err
