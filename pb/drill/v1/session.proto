@@ -70,9 +70,7 @@ message ArchiveSessionsRequest {
   bool archive = 2;
 }
 
-message ArchiveSessionsResponse {
-  int32 updated_count = 1;
-}
+message ArchiveSessionsResponse {}
 
 // --- GetTranscript ---
 

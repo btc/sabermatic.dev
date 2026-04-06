@@ -436,7 +436,6 @@ func (x *ArchiveSessionsRequest) GetArchive() bool {
 
 type ArchiveSessionsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UpdatedCount  int32                  `protobuf:"varint,1,opt,name=updated_count,json=updatedCount,proto3" json:"updated_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -469,13 +468,6 @@ func (x *ArchiveSessionsResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ArchiveSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ArchiveSessionsResponse) Descriptor() ([]byte, []int) {
 	return file_drill_v1_session_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *ArchiveSessionsResponse) GetUpdatedCount() int32 {
-	if x != nil {
-		return x.UpdatedCount
-	}
-	return 0
 }
 
 type GetTranscriptRequest struct {
@@ -999,9 +991,8 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	"\x16ArchiveSessionsRequest\x12\x1f\n" +
 	"\vsession_ids\x18\x01 \x03(\tR\n" +
 	"sessionIds\x12\x18\n" +
-	"\aarchive\x18\x02 \x01(\bR\aarchive\">\n" +
-	"\x17ArchiveSessionsResponse\x12#\n" +
-	"\rupdated_count\x18\x01 \x01(\x05R\fupdatedCount\"5\n" +
+	"\aarchive\x18\x02 \x01(\bR\aarchive\"\x19\n" +
+	"\x17ArchiveSessionsResponse\"5\n" +
 	"\x14GetTranscriptRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"F\n" +

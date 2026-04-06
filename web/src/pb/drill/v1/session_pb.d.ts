@@ -152,10 +152,6 @@ export declare const ArchiveSessionsRequestSchema: GenMessage<ArchiveSessionsReq
  * @generated from message drill.v1.ArchiveSessionsResponse
  */
 export declare type ArchiveSessionsResponse = Message$1<"drill.v1.ArchiveSessionsResponse"> & {
-  /**
-   * @generated from field: int32 updated_count = 1;
-   */
-  updatedCount: number;
 };
 
 /**
