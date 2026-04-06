@@ -20,7 +20,7 @@ func SetTraceMetadata(ctx context.Context, opts *river.InsertOpts) {
 		return
 	}
 
-	traceJSON := []byte(fmt.Sprintf(`{"trace_id":"%s","span_id":"%s"}`, sc.TraceID(), sc.SpanID()))
+	traceJSON := []byte(fmt.Sprintf(`{"trace_id":"%s","span_id":"%s"}`, sc.TraceID(), sc.SpanID())) //nolint:gocritic // %q would break JSON
 
 	if len(opts.Metadata) == 0 || string(opts.Metadata) == "null" {
 		opts.Metadata = traceJSON
@@ -32,8 +32,8 @@ func SetTraceMetadata(ctx context.Context, opts *river.InsertOpts) {
 		opts.Metadata = traceJSON
 		return
 	}
-	existing["trace_id"] = json.RawMessage(fmt.Sprintf(`"%s"`, sc.TraceID()))
-	existing["span_id"] = json.RawMessage(fmt.Sprintf(`"%s"`, sc.SpanID()))
+	existing["trace_id"] = json.RawMessage(fmt.Sprintf(`"%s"`, sc.TraceID()))  //nolint:gocritic // %q would break JSON
+	existing["span_id"] = json.RawMessage(fmt.Sprintf(`"%s"`, sc.SpanID()))   //nolint:gocritic // %q would break JSON
 	merged, _ := json.Marshal(existing)
 	opts.Metadata = merged
 }
