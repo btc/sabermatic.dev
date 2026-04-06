@@ -25,6 +25,7 @@ type Querier interface {
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) (OauthAccount, error)
 	CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams) (User, error)
+	CreateOAuthUserOrNoop(ctx context.Context, arg CreateOAuthUserOrNoopParams) (User, error)
 	// Atomically creates a purchase grant + ledger entry. Idempotent via
 	// stripe_event_id: duplicate events produce zero CTE rows → no-op.
 	CreatePurchaseGrant(ctx context.Context, arg CreatePurchaseGrantParams) error
@@ -71,6 +72,7 @@ type Querier interface {
 	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByEmailForUpdate(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
@@ -84,6 +86,7 @@ type Querier interface {
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
+	LinkOAuthAccount(ctx context.Context, arg LinkOAuthAccountParams) (OauthAccount, error)
 	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
