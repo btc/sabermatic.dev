@@ -1,4 +1,4 @@
-# pglock: Advisory Lock Encapsulation
+# SessionLock: Advisory Lock Encapsulation
 
 **Date:** 2026-04-05
 **Status:** Draft
@@ -11,84 +11,81 @@ The reverted fix (26e67d3) patched this by duplicating `binary.BigEndian` key de
 
 ## Design
 
-### New package: `internal/pglock/`
+### New type: `backend.SessionLock`
 
-A small package that encapsulates the Postgres advisory lock lifecycle.
+Lives in `internal/backend/session_lock.go`.
 
-#### `Lock` struct
+#### Struct
 
 ```go
-type Lock struct {
+type SessionLock struct {
     conn *pgxpool.Conn
     id   uuid.UUID
 }
 ```
 
-Unexported fields. The UUID is the single source of truth — keys are derived on demand via private helper methods.
+Unexported fields. The UUID is the single source of truth — advisory lock keys are derived on demand via private helper methods.
 
 #### Private key derivation
 
 ```go
-func (l *Lock) key1() int32 {
+func (l *SessionLock) key1() int32 {
     return int32(binary.BigEndian.Uint32(l.id[:4]))
 }
 
-func (l *Lock) key2() int32 {
+func (l *SessionLock) key2() int32 {
     return int32(binary.BigEndian.Uint32(l.id[4:8]))
 }
 ```
 
-#### `TryAcquire`
+#### `AcquireSessionLock`
 
 ```go
-func TryAcquire(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) (*Lock, bool, error)
+func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (*SessionLock, bool, error)
 ```
 
 1. Acquires a connection from the pool.
-2. Calls `SELECT pg_try_advisory_lock(key1, key2)`.
-3. If acquired: returns `(*Lock, true, nil)`.
-4. If not acquired: releases connection, returns `(nil, false, nil)`.
-5. On error: releases connection, returns `(nil, false, error)`.
+2. Derives keys from the UUID.
+3. Calls `SELECT pg_try_advisory_lock(key1, key2)`.
+4. If acquired: returns `(*SessionLock, true, nil)`.
+5. If not acquired: releases connection, returns `(nil, false, nil)`.
+6. On error: releases connection, returns `(nil, false, error)`.
+
+Moves from `session.go` to `session_lock.go`.
 
 #### `Release`
 
 ```go
-func (l *Lock) Release(ctx context.Context) error
+func (l *SessionLock) Release()
 ```
 
 1. No-op if receiver is nil or `l.conn` is nil (idempotent).
-2. Calls `SELECT pg_advisory_unlock(key1, key2)`.
+2. Calls `SELECT pg_advisory_unlock(key1, key2)` with `context.Background()`.
 3. Calls `l.conn.Release()`.
 4. Sets `l.conn = nil` to prevent double-release.
-5. Returns the unlock error (if any). The connection is always released regardless.
 
-### Changes to `backend/session.go`
-
-`AcquireSessionLock` simplifies to a one-liner delegating to `pglock.TryAcquire`:
-
-```go
-func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (*pglock.Lock, error) {
-    return pglock.TryAcquire(ctx, b.pool, sessionID)
-}
-```
-
-The return signature changes from `(*pgxpool.Conn, bool, error)` to `(*pglock.Lock, bool, error)` — same shape, but the conn is now encapsulated.
+No context parameter — unlock must always run, never be cancelled. No error return — unlock failure is logged but not actionable by the caller.
 
 ### Changes to `internal/interview/conductor.go`
 
-- Field: `lockConn *pgxpool.Conn` → `lock *pglock.Lock`
-- `Run()`: `lockConn, locked, err := ...` → `lock, locked, err := ...`
-- `close()`: replaces `c.lockConn.Release()` / `c.lockConn = nil` with `c.lock.Release(context.Background())`
+- Field: `lockConn *pgxpool.Conn` → `lock *backend.SessionLock`
+- `Run()`: `lockConn, locked, err := ...` → `lock, locked, err := ...`; `c.lockConn = lockConn` → `c.lock = lock`
+- `close()`: replaces `c.lockConn.Release()` / `c.lockConn = nil` with `c.lock.Release()`
 
 ### Changes to tests
 
-Un-skip `TestWS_Reconnection` and `TestWS_ReconnectAfterMultipleTurns` in `internal/handler/session_ws_test.go`. The advisory lock is now properly released on close, fixing the flaky reconnect behavior.
+- New `internal/backend/session_lock_test.go` with tests against real Postgres:
+  - Acquire succeeds and lock is held
+  - Second acquire on same ID returns `(nil, false, nil)` (contention)
+  - Release frees the lock, allowing re-acquisition
+  - Release is nil-safe and idempotent (double-call)
+- Un-skip `TestWS_Reconnection` and `TestWS_ReconnectAfterMultipleTurns` in `internal/handler/session_ws_test.go`
 
 ## Scope
 
 Five files touched:
-1. `internal/pglock/pglock.go` — new (~40 lines)
-2. `internal/pglock/pglock_test.go` — new (unit test against real Postgres)
-3. `internal/backend/session.go` — simplify `AcquireSessionLock`
-4. `internal/interview/conductor.go` — use `*pglock.Lock`
+1. `internal/backend/session_lock.go` — new (~50 lines)
+2. `internal/backend/session_lock_test.go` — new (tests against real Postgres)
+3. `internal/backend/session.go` — remove `AcquireSessionLock` (moved to session_lock.go)
+4. `internal/interview/conductor.go` — use `*backend.SessionLock`
 5. `internal/handler/session_ws_test.go` — un-skip two tests
