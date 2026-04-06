@@ -1,0 +1,42 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum EducatorStatus {
+  EDUCATOR_STATUS_UNSPECIFIED = 0;
+  EDUCATOR_STATUS_NOT_REQUESTED = 1;
+  EDUCATOR_STATUS_GENERATING = 2;
+  EDUCATOR_STATUS_COMPLETED = 3;
+  EDUCATOR_STATUS_FAILED = 4;
+}
+
+service EducatorService {
+  rpc GetEducatorAnalysis(GetEducatorAnalysisRequest) returns (GetEducatorAnalysisResponse);
+  rpc RequestEducatorAnalysis(RequestEducatorAnalysisRequest) returns (RequestEducatorAnalysisResponse);
+}
+
+message GetEducatorAnalysisRequest {
+  string session_id = 1;
+}
+
+message GetEducatorAnalysisResponse {
+  EducatorAnalysis analysis = 1;
+}
+
+message RequestEducatorAnalysisRequest {
+  string session_id = 1;
+}
+
+message RequestEducatorAnalysisResponse {}
+
+message EducatorAnalysis {
+  string id = 1;
+  string session_id = 2;
+  EducatorStatus status = 3;
+  optional string model_answer = 4;
+  optional string gap_deep_dives = 5;
+  google.protobuf.Timestamp create_time = 6;
+}
