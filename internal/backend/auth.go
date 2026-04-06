@@ -69,7 +69,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, 
 	defer func() { drilotel.End(span, err) }()
 
 	// Normalize.
-	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+	p.Email = normalizeEmail(p.Email)
 	p.DisplayName = strings.TrimSpace(p.DisplayName)
 
 	if p.Email == "" || p.Password == "" || p.DisplayName == "" {
@@ -145,7 +145,7 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (_ *LoginResult, err
 	ctx, span := tracer.Start(ctx, "Backend.Login")
 	defer func() { drilotel.End(span, err) }()
 
-	p.Email = strings.ToLower(strings.TrimSpace(p.Email))
+	p.Email = normalizeEmail(p.Email)
 
 	// Look up user.
 	queries := db.New(b.pool)
@@ -253,7 +253,7 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) (err error) 
 	ctx, span := tracer.Start(ctx, "Backend.ForgotPassword")
 	defer func() { drilotel.End(span, err) }()
 
-	email = strings.TrimSpace(strings.ToLower(email))
+	email = normalizeEmail(email)
 
 	queries := db.New(b.pool)
 	user, err := queries.GetUserByEmail(ctx, email)
@@ -351,4 +351,9 @@ func isDuplicateKeyError(err error) bool {
 		return pgErr.Code == "23505"
 	}
 	return false
+}
+
+// normalizeEmail lowercases and trims whitespace from an email address.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
