@@ -163,10 +163,10 @@ func (a *TTSAccumulator) ttsLoop() {
 				synthCancel()
 				continue
 			}
-			// Cancel the timeout context AFTER reading the body — the
-			// response reader is tied to the request context, so cancelling
-			// before ReadAll kills the reader. ReadAll is bounded by the
-			// HTTP response size, not unbounded I/O.
+			// synthCancel after ReadAll: the timeout covers both the API
+			// call and reading the response body (which streams from the
+			// remote TTS service). Cancelling before ReadAll would kill
+			// the response reader since it's tied to the request context.
 			data, err := io.ReadAll(rc)
 			rc.Close()
 			synthCancel()
