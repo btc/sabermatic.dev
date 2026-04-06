@@ -3,6 +3,7 @@ package observer_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,7 +163,7 @@ func (b *blockingSynth) Synthesize(ctx context.Context, _ string) (io.ReadCloser
 
 func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
 	ws := &mockWSConn{}
-	synth := &fakeSynth{audio: []byte("fake-audio-bytes")}
+	synth := &fakeSynth{audio: bytes.Repeat([]byte("x"), 8192)}
 	ctx := context.Background()
 
 	acc := observer.NewTTSAccumulator(ctx, ws, synth, uuid.New())
@@ -178,7 +179,21 @@ func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
 			chunks++
 		}
 	}
-	assert.GreaterOrEqual(t, chunks, 2)
+	assert.Equal(t, 2, chunks, "expected exactly one tts_chunk per sentence")
+
+	// Verify each chunk's data round-trips to the original audio.
+	for _, msg := range ws.sent {
+		var m map[string]any
+		require.NoError(t, json.Unmarshal(msg, &m))
+		if m["type"] != "tts_chunk" {
+			continue
+		}
+		b64, ok := m["data"].(string)
+		require.True(t, ok)
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		require.NoError(t, err)
+		assert.Equal(t, synth.audio, decoded, "tts_chunk data must match full synthesized audio")
+	}
 
 	// Should have tts_done at the end.
 	require.NotEmpty(t, ws.sent)
