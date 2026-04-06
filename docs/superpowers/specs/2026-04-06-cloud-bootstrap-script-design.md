@@ -156,32 +156,39 @@ Creates products, prices, and webhook endpoint via the Stripe API (`urllib.reque
 
 #### 7a. Create Products & Prices
 
-The script displays cost context before prompting:
+The script displays cost context and a pricing table before prompting:
 
 ```
 Stripe Product Setup
 ────────────────────
-Your estimated cost to serve is ~$0.01-0.025 per minute
-(Claude Sonnet interviewer, Whisper STT, OpenAI TTS, Opus evaluation).
+Cost to serve: ~$0.035/min (Sonnet interviewer, Whisper STT, OpenAI TTS, Opus eval)
+GCP hosting baseline: ~$20-30/month
 
-Comparable platforms charge $30-100/month.
+Suggested pricing (each tier discounts over the last):
+
+  Product              Price      $/min    vs 120 pack
+  ─────────────────────────────────────────────────────
+  120-min pack         $14.99     $0.125   baseline
+  300-min pack         $29.99     $0.100   20% off
+  600-min pack         $49.99     $0.083   33% off
+  Pro monthly (600m)   $39.00/mo  $0.065   48% off
 ```
 
-Then walks through each product:
+Then walks through each product, showing the default and accepting Enter or a custom value:
 
 ```
 [1/4] Pro Monthly Subscription
   600 min/month, coach access, full educator analysis
-  Price in cents (e.g. 3900 for $39/mo): ___
+  Price in cents [3900]: ___
 
 [2/4] 120-Minute Pack
-  Price in cents (e.g. 1499 for $14.99): ___
+  Price in cents [1499]: ___
 
 [3/4] 300-Minute Pack
-  Price in cents (e.g. 2999 for $29.99): ___
+  Price in cents [2999]: ___
 
 [4/4] 600-Minute Pack
-  Price in cents (e.g. 4999 for $49.99): ___
+  Price in cents [4999]: ___
 ```
 
 For each product, the script:
@@ -230,11 +237,11 @@ Each sub-step is tracked individually in state for resume.
    Artifact Reg:   us-central1-docker.pkg.dev/sabermatic-prod/drill
 
    Stripe:
-     Pro subscription: price_xxx ($39.00/mo)
-     120-min pack:     price_yyy ($14.99)
-     300-min pack:     price_zzz ($29.99)
-     600-min pack:     price_www ($49.99)
-     Webhook:          <cloud_run_url>/api/webhooks/stripe
+     Pro monthly:  price_xxx ($39.00/mo → $0.065/min)
+     120-min pack: price_yyy ($14.99 → $0.125/min)
+     300-min pack: price_zzz ($29.99 → $0.100/min)
+     600-min pack: price_www ($49.99 → $0.083/min)
+     Webhook:      <cloud_run_url>/api/webhooks/stripe
 
    Next steps:
      • Point sabermatic.dev DNS to the Cloud Run URL
