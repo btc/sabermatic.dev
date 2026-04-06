@@ -66,3 +66,14 @@ DELETE FROM auth_sessions WHERE user_id = @id;
 UPDATE users SET display_name = @display_name, updated_at = NOW()
 WHERE id = @id AND deleted_at IS NULL
 RETURNING *;
+
+-- name: GetUserByEmailForUpdate :one
+SELECT * FROM users
+WHERE email = @email
+FOR UPDATE;
+
+-- name: CreateOAuthUserOrNoop :one
+INSERT INTO users (email, email_verified, display_name)
+VALUES (@email, TRUE, @display_name)
+ON CONFLICT (email) DO NOTHING
+RETURNING *;

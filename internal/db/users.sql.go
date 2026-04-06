@@ -43,6 +43,38 @@ func (q *Queries) CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams
 	return i, err
 }
 
+const createOAuthUserOrNoop = `-- name: CreateOAuthUserOrNoop :one
+INSERT INTO users (email, email_verified, display_name)
+VALUES ($1, TRUE, $2)
+ON CONFLICT (email) DO NOTHING
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
+`
+
+type CreateOAuthUserOrNoopParams struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+}
+
+func (q *Queries) CreateOAuthUserOrNoop(ctx context.Context, arg CreateOAuthUserOrNoopParams) (User, error) {
+	row := q.db.QueryRow(ctx, createOAuthUserOrNoop, arg.Email, arg.DisplayName)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name)
 VALUES ($1, $2, $3)
@@ -97,6 +129,32 @@ WHERE email = $1 AND deleted_at IS NULL
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
+	)
+	return i, err
+}
+
+const getUserByEmailForUpdate = `-- name: GetUserByEmailForUpdate :one
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+WHERE email = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetUserByEmailForUpdate(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmailForUpdate, email)
 	var i User
 	err := row.Scan(
 		&i.ID,

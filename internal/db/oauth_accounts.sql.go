@@ -89,3 +89,29 @@ func (q *Queries) GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) 
 	}
 	return items, nil
 }
+
+const linkOAuthAccount = `-- name: LinkOAuthAccount :one
+INSERT INTO oauth_accounts (user_id, provider, provider_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (provider, provider_id) DO NOTHING
+RETURNING id, user_id, provider, provider_id, created_at
+`
+
+type LinkOAuthAccountParams struct {
+	UserID     uuid.UUID `json:"user_id"`
+	Provider   string    `json:"provider"`
+	ProviderID string    `json:"provider_id"`
+}
+
+func (q *Queries) LinkOAuthAccount(ctx context.Context, arg LinkOAuthAccountParams) (OauthAccount, error) {
+	row := q.db.QueryRow(ctx, linkOAuthAccount, arg.UserID, arg.Provider, arg.ProviderID)
+	var i OauthAccount
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Provider,
+		&i.ProviderID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
