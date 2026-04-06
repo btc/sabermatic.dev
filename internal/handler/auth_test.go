@@ -300,8 +300,8 @@ func TestLogout(t *testing.T) {
 	}
 	require.NotNil(t, sessionCookie)
 
-	// GET /api/me works with session cookie
-	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	// Authenticated request works with session cookie
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.AddCookie(sessionCookie)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -325,8 +325,8 @@ func TestLogout(t *testing.T) {
 	require.NotNil(t, clearCookie)
 	require.Equal(t, -1, clearCookie.MaxAge)
 
-	// GET /api/me now returns 401
-	req = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	// Authenticated request fails after logout
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.AddCookie(sessionCookie)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)

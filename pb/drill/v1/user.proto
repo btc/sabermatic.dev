@@ -1,0 +1,83 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+// UserService provides authenticated user profile and usage endpoints.
+service UserService {
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+  rpc GetUsage(GetUsageRequest) returns (GetUsageResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  rpc ExportData(ExportDataRequest) returns (ExportDataResponse);
+}
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  User user = 1;
+}
+
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_CANDIDATE = 1;
+  USER_ROLE_ADMIN = 2;
+}
+
+enum UserPlan {
+  USER_PLAN_UNSPECIFIED = 0;
+  USER_PLAN_FREE = 1;
+  USER_PLAN_PRO = 2;
+}
+
+message User {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+  UserRole role = 4;
+  UserPlan plan = 5;
+  bool email_verified = 6;
+  google.protobuf.Timestamp create_time = 7;
+}
+
+message GetUsageRequest {}
+
+message GetUsageResponse {
+  int32 total_balance = 1;
+  int32 free_balance = 2;
+  int32 paid_balance = 3;
+  repeated Grant grants = 4;
+  repeated LedgerEntry recent_activity = 5;
+}
+
+message Grant {
+  string id = 1;
+  string source = 2;
+  int32 initial_minutes = 3;
+  int32 remaining_minutes = 4;
+  optional google.protobuf.Timestamp expire_time = 5;
+  google.protobuf.Timestamp create_time = 6;
+}
+
+message LedgerEntry {
+  int32 amount = 1;
+  string reason = 2;
+  optional string session_id = 3;
+  google.protobuf.Timestamp create_time = 4;
+}
+
+// AIP-134: Update uses field mask for partial updates (PATCH semantics).
+message UpdateProfileRequest {
+  User user = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+message UpdateProfileResponse {
+  User user = 1;
+}
+
+message ExportDataRequest {}
+
+message ExportDataResponse {}

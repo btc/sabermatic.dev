@@ -16,9 +16,9 @@ import (
 // session cookie and injects the authenticated user into the context.
 // Reuses auth.SessionAuthenticator — the same interface the HTTP middleware uses.
 //
-// This covers unary RPCs only. When streaming RPCs are added (batches 4-6),
-// extend to implement connect.StreamingHandlerInterceptorFunc as well
-// (streaming requests access headers via conn.RequestHeader()).
+// This covers unary RPCs only. When streaming RPCs are added, extend to
+// implement connect.StreamingHandlerInterceptorFunc as well (streaming
+// requests access headers via conn.RequestHeader()).
 func AuthInterceptor(sa auth.SessionAuthenticator) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {

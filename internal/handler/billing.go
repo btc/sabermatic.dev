@@ -69,23 +69,6 @@ func PostPortal(b *backend.Backend) http.HandlerFunc {
 	}
 }
 
-// GetUsage returns a handler that returns the user's usage summary
-// (balance breakdown, active grants, recent ledger entries).
-func GetUsage(b *backend.Backend) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		user := auth.UserFromContext(r.Context())
-
-		summary, err := b.GetUsageSummary(r.Context(), user.ID)
-		if err != nil {
-			slog.Error("get usage summary", "error", err, "user_id", user.ID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get usage"})
-			return
-		}
-
-		writeJSON(w, http.StatusOK, summary)
-	}
-}
-
 // PostStripeWebhook returns a handler that processes incoming Stripe webhook
 // events. The request body is verified against the Stripe-Signature header
 // using the configured webhook secret. Always returns 200 to avoid Stripe

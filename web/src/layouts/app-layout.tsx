@@ -1,5 +1,7 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useMe, useLogout, useSessions } from "@/api/queries";
+import { useQuery } from "@connectrpc/connect-query";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+import { useLogout, useSessions } from "@/api/queries";
 import { useRequireAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import {
@@ -9,7 +11,8 @@ import {
 
 export function AppLayout() {
   const { isLoading, isAuthenticated } = useRequireAuth();
-  const { data: user } = useMe();
+  const { data: meData } = useQuery(getMe, {});
+  const user = meData?.user;
   const { data: sessions } = useSessions();
   const logout = useLogout();
   const navigate = useNavigate();
@@ -17,7 +20,7 @@ export function AppLayout() {
   const { theme, setTheme } = useTheme();
 
   const hasAnySessions = (sessions?.length ?? 0) > 0;
-  const initials = user?.display_name?.slice(0, 2).toUpperCase() ?? "?";
+  const initials = user?.displayName?.slice(0, 2).toUpperCase() ?? "?";
 
   const handleLogout = () => {
     logout.mutate(undefined, { onSuccess: () => navigate("/login") });

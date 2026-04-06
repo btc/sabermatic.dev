@@ -5,8 +5,10 @@ import { useQuery } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { Difficulty, QuestionSource } from "@/pb/drill/v1/question_pb";
 import type { Question as ProtoQuestion } from "@/pb/drill/v1/question_pb";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
 import {
-  useMe, useSessions, useCoachLatest,
+  useSessions, useCoachLatest,
   useRequestCoachAnalysis, useCreateQuestion,
 } from "@/api/queries";
 import type { Session, CoachAnalysis } from "@/api/types";
@@ -453,7 +455,8 @@ function CreateQuestionDialog() {
 
 // Home
 export default function Home() {
-  const { data: user } = useMe();
+  const { data: meData } = useQuery(getMe, {});
+  const user = meData?.user;
   const { data: questionsResp } = useQuery(listQuestions, {});
   const questions = useMemo(
     () => questionsResp?.questions ?? [],
@@ -476,7 +479,7 @@ export default function Home() {
   const reviewedCount = reviewed.length;
   // TODO: concurrent limit should come from the backend (plan capabilities endpoint).
   // Hardcoded until the backend exposes per-plan limits via the /api/me or /api/usage response.
-  const concurrentLimit = user?.plan === "pro" ? 2 : 1;
+  const concurrentLimit = user?.plan === UserPlan.PRO ? 2 : 1;
   const atConcurrentLimit = active.length >= concurrentLimit;
   const tagList = useMemo(() => allTags(questions), [questions]);
 

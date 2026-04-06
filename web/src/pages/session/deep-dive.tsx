@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEducator, useRequestEducator, useMe } from "@/api/queries";
+import { useQuery } from "@connectrpc/connect-query";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
+import { useEducator, useRequestEducator } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { GENERATING_MESSAGES } from "@/lib/constants";
 
@@ -160,9 +163,10 @@ export default function DeepDive() {
 function DeepDiveInner({ sessionId }: { sessionId: string }) {
   const { data: educator, isError } = useEducator(sessionId);
   const requestEducator = useRequestEducator(sessionId);
-  const { data: me } = useMe();
+  const { data: meData } = useQuery(getMe, {});
+  const me = meData?.user;
 
-  const isPro = me?.plan === "pro";
+  const isPro = me?.plan === UserPlan.PRO;
 
   // Error state — separate from "not requested"
   if (isError) {

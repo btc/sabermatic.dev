@@ -3,11 +3,11 @@ import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
+import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
 import {
   useCoachLatest,
   useCreateSession,
-  useMe,
-  useUsage,
 } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -64,11 +64,12 @@ export default function SessionConfig() {
   const { data: questionsResp } = useQuery(listQuestions, {});
   const questions = questionsResp?.questions ?? [];
   const { data: coach } = useCoachLatest();
-  const { data: me } = useMe();
-  const { data: usage } = useUsage();
+  const { data: meData } = useQuery(getMe, {});
+  const me = meData?.user;
+  const { data: usage } = useQuery(getUsage, {});
   const createSession = useCreateSession();
 
-  const planMax = me?.plan === "pro" ? PRO_PLAN_MAX : FREE_PLAN_MAX;
+  const planMax = me?.plan === UserPlan.PRO ? PRO_PLAN_MAX : FREE_PLAN_MAX;
 
   const [durationMode, setDurationMode] = useState<"preset" | "custom">("preset");
   const [durationPreset, setDurationPreset] = useState<number>(30);
@@ -91,7 +92,7 @@ export default function SessionConfig() {
     ? durationPreset
     : Math.min(Math.max(1, parseInt(customDuration, 10) || 1), planMax);
 
-  const entitlementExceeded = usage != null && usage.total_balance < effectiveDuration;
+  const entitlementExceeded = usage != null && usage.totalBalance < effectiveDuration;
 
   const hasCoach = coach != null && coach !== undefined;
 
@@ -208,7 +209,7 @@ export default function SessionConfig() {
                 </span>
               </div>
             )}
-            {me?.plan === "free" && (
+            {me?.plan === UserPlan.FREE && (
               <p className="text-xs text-muted-foreground">
                 Free plan: sessions capped at {FREE_PLAN_MAX} minutes.
               </p>

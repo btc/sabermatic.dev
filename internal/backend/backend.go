@@ -203,6 +203,7 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 		Role:          row.Role,
 		Plan:          row.Plan,
 		EmailVerified: row.EmailVerified,
+		CreatedAt:     row.UserCreatedAt,
 	}, nil
 }
 
