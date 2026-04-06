@@ -2,28 +2,27 @@ package backend
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
 )
 
 // SessionLock holds a Postgres advisory lock on a dedicated pooled connection.
-// The lock is identified by a UUID; advisory lock keys are derived on demand.
+// The lock is identified by a UUID; the advisory lock key is an FNV-64 hash.
 type SessionLock struct {
 	conn *pgxpool.Conn
 	id   uuid.UUID
 }
 
-func (l *SessionLock) key1() int32 {
-	return int32(binary.BigEndian.Uint32(l.id[:4]))
-}
-
-func (l *SessionLock) key2() int32 {
-	return int32(binary.BigEndian.Uint32(l.id[4:8]))
+func (l *SessionLock) key() int64 {
+	h := fnv.New64()
+	h.Write(l.id[:]) // fnv.Write never returns an error
+	return int64(h.Sum64())
 }
 
 // Release unlocks the advisory lock and returns the connection to the pool.
@@ -33,7 +32,7 @@ func (l *SessionLock) Release() error {
 	if l == nil || l.conn == nil {
 		return nil
 	}
-	_, err := l.conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1, $2)", l.key1(), l.key2())
+	_, err := db.New(l.conn).PGAdvisoryUnlock(context.Background(), l.key())
 	l.conn.Release()
 	l.conn = nil
 	return err
@@ -52,8 +51,7 @@ func (b *Backend) AcquireSessionLock(ctx context.Context, sessionID uuid.UUID) (
 	}
 
 	l := &SessionLock{conn: conn, id: sessionID}
-	var locked bool
-	err = conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1, $2)", l.key1(), l.key2()).Scan(&locked)
+	locked, err := db.New(conn).PGTryAdvisoryLock(ctx, l.key())
 	if err != nil {
 		conn.Release()
 		return nil, false, fmt.Errorf("advisory lock query: %w", err)
