@@ -23,6 +23,14 @@ export class AudioPlayer {
     if (!this.ctx) {
       this.ctx = new AudioContext();
     }
+    if (this.ctx.state === "suspended") {
+      this.ctx.resume();
+    }
+    // Kick off playback if chunks arrived before context was ready.
+    if (this.queue.length > 0 && !this._isPlaying) {
+      this._isPlaying = true;
+      this.playNext();
+    }
   }
 
   enqueue(data: string, seq: number): void {
