@@ -36,13 +36,15 @@ TTS is a **projection** — supplementary audio rendering of content the client 
 
 Every exit path calls `Interrupt()` → `cancel()`, so the TTS context is always cleaned up. No goroutine or context leak.
 
+**Note on observer coupling:** After TTS self-terminates, `Interrupt()` on the stale fan-out is harmless — `TTSAccumulator.Interrupt()` is an idempotent `cancel()`, and `WSWriter.Interrupt()` / `MessageAccumulator.Interrupt()` are no-ops. If a future observer adds meaningful `Interrupt()` behavior, this implicit coupling would need revisiting.
+
 **Specific changes in `streamInterviewerResponse`:**
 
 Remove `fanOut.Close()` on the happy path (current line 548). The TTS goroutine finishes on its own.
 
 Remove `c.obs.Store(observer.Noop)` on the happy path (current line 529). Keep the fan-out in `c.obs` so `cancel_tts` still reaches TTS. The fan-out is replaced when the next turn creates a new one via `c.obs.Store(fanOut)`.
 
-Change `fanOut.Close()` on the error path (current line 543, persist failure) to `fanOut.Interrupt()` — on error, kill TTS immediately.
+Change `fanOut.Close()` on both error paths (line 508 — `StreamLLM` failure, and line 543 — persist failure) to `fanOut.Interrupt()`. On error, kill TTS immediately.
 
 ### 2. Async pipeline with ownership transfer
 
@@ -58,6 +60,7 @@ Move `endTurn` off the event loop into a goroutine. The event loop stays respons
 **New type:**
 
 ```go
+// turnResult carries the outcome of a pipeline run.
 type turnResult struct {
     err error
 }
@@ -66,12 +69,62 @@ type turnResult struct {
 **New local variables in the select loop:**
 
 ```go
+const (
+    actionEnd    = "end"
+    actionCancel = "cancel"
+)
+
 var (
     turnResultCh  <-chan turnResult  // nil when no pipeline running
     cancelTurn    context.CancelFunc // non-nil when pipeline running
-    pendingAction string             // "", "end", or "cancel"
+    pendingAction string             // "", actionEnd, or actionCancel
 )
 ```
+
+**`sendInitialMessage` also dispatches via the pipeline.** The opening question for new sessions calls `streamInterviewerResponse`, which has the same blocking problem. The event loop must start with `turnResultCh` already set:
+
+```go
+// Initial messages to client.
+if err := c.sendInitialMessage(workCtx); err != nil {
+    // sendInitialMessage only returns error for reconnect/page-refresh failures.
+    // For new sessions, it dispatches the opening question as a pipeline goroutine.
+    slog.Error("conductor: initial message", "error", err, "session_id", c.sessionID)
+    return
+}
+```
+
+Where `sendInitialMessage` is modified to dispatch the opening question:
+
+```go
+func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
+    // ... reconnect and page-refresh paths unchanged ...
+
+    c.send(ctx, msgSessionLoaded(c.sessionID, c.question, int(c.duration.Minutes()), c.ttsEnabled))
+    if len(c.messages) > 0 {
+        c.send(ctx, msgReconnectState(0, c.messages))
+        c.send(ctx, msgStateChange(StateWaitingForInput))
+        return nil
+    }
+    // New session: opening question dispatched by the caller as a pipeline goroutine.
+    return nil
+}
+```
+
+And the caller dispatches the opening question before entering the event loop:
+
+```go
+if !c.isReconnect() && len(c.messages) == 0 {
+    ch := make(chan turnResult, 1)
+    turnResultCh = ch
+    turnCtx, cancel := context.WithCancel(workCtx)
+    cancelTurn = cancel
+    go func() {
+        ch <- turnResult{err: c.streamInterviewerResponse(turnCtx)}
+    }()
+}
+```
+
+The event loop immediately starts with `turnResultCh` set, so disconnect/shutdown during the opening question stream is handled identically to any other turn.
 
 **Event loop changes:**
 
@@ -85,13 +138,14 @@ case "end_turn":
     turnResultCh = ch
     turnCtx, cancel := context.WithCancel(workCtx)
     cancelTurn = cancel
+    capturedMsg := msg
     go func() {
-        ch <- turnResult{err: c.endTurn(turnCtx, msg)}
+        ch <- turnResult{err: c.endTurn(turnCtx, capturedMsg)}
     }()
 
 case "end_session":
     if turnResultCh != nil {
-        pendingAction = "end"
+        pendingAction = actionEnd
         cancelTurn()
         continue
     }
@@ -102,7 +156,7 @@ case "end_session":
 
 case "cancel_session":
     if turnResultCh != nil {
-        pendingAction = "cancel"
+        pendingAction = actionCancel
         cancelTurn()
         continue
     }
@@ -126,13 +180,13 @@ case res := <-turnResultCh:
     }
 
     switch pendingAction {
-    case "end":
+    case actionEnd:
         pendingAction = ""
         if err := c.endSession(workCtx); err != nil {
             slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
         }
         return
-    case "cancel":
+    case actionCancel:
         pendingAction = ""
         if err := c.cancelSession(serverCtx); err != nil {
             slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
@@ -146,14 +200,17 @@ case res := <-turnResultCh:
     }
 ```
 
-**Disconnect / shutdown handling:**
+**Disconnect / shutdown handling — check pendingAction after draining:**
 
 ```go
 case msg, ok := <-msgCh:
     if !ok {
         if cancelTurn != nil {
             cancelTurn()
-            <-turnResultCh
+            drainPipeline(turnResultCh)
+        }
+        if pendingAction == actionEnd {
+            _ = c.endSession(workCtx)
         }
         return
     }
@@ -163,9 +220,24 @@ case <-serverCtx.Done():
     c.send(workCtx, msgReconnectPlease)
     if cancelTurn != nil {
         cancelTurn()
-        <-turnResultCh
+        drainPipeline(turnResultCh)
+    }
+    if pendingAction == actionEnd {
+        _ = c.endSession(workCtx)
     }
     return
+```
+
+**`drainPipeline` helper — with timeout to prevent shutdown hangs:**
+
+```go
+func drainPipeline(ch <-chan turnResult) {
+    select {
+    case <-ch:
+    case <-time.After(5 * time.Second):
+        slog.Error("conductor: pipeline did not exit after cancel")
+    }
+}
 ```
 
 **Auto-end timer:**
@@ -174,7 +246,7 @@ case <-serverCtx.Done():
 case <-autoEndTimer:
     slog.Info("conductor: auto-ending session", "session_id", c.sessionID)
     if turnResultCh != nil {
-        pendingAction = "end"
+        pendingAction = actionEnd
         cancelTurn()
         continue
     }
@@ -191,8 +263,6 @@ Add at the top of `streamInterviewerResponse`, before creating observers:
 ```go
 c.obs.Load().Interrupt()
 ```
-
-This cancels any lingering TTS from the previous turn.
 
 **Interrupt TTS on session end:**
 
@@ -213,6 +283,24 @@ defer func() {
 }()
 ```
 
+### 3. Persist with uncancellable context
+
+When `cancelTurn()` fires (e.g., user ends session mid-turn), `turnCtx` is cancelled. But `PersistInterviewerTurn` uses `turnCtx` for its DB transaction. If cancelled, the persist fails and the interviewer's response is lost.
+
+For `cancel_session` this is acceptable (session is being discarded). For `end_session`, losing the last response could affect evaluation quality.
+
+Fix: use `context.WithoutCancel(ctx)` for the persist step in `streamInterviewerResponse`:
+
+```go
+persistCtx := context.WithoutCancel(ctx)
+c.sequence++
+interviewerMsg, err := c.backend.PersistInterviewerTurn(persistCtx, stream, backend.PersistMessageParams{
+    // ...
+})
+```
+
+This ensures the interviewer message is persisted even when the turn context is cancelled. The persist either succeeds or fails on its own merits (DB error), not because the user clicked End Session.
+
 ## Race Elimination
 
 ### Data race on `sm.state` / `sm.turnCount`
@@ -228,18 +316,22 @@ defer func() {
 **After:** `endSession` cancels pipeline context, waits for completion, then runs. Pipeline's error path does `ForceState(StateWaitingForInput)`, then `endSession` does `Transition(StateEnding)` — a legal transition.
 
 ### WebSocket writes from multiple goroutines
-`c.send()` wraps `coder/websocket.Write()`, which is documented as goroutine-safe. The pipeline goroutine sends state changes and tokens; the event loop sends timer warnings and pongs. This is already the case today (readLoop's `cancel_tts` handling triggers WS writes). No change needed.
+Three concurrent writers: event loop (timers, pong, errors), pipeline goroutine (state changes, tokens, transcription results), TTS goroutine (audio chunks, done, errors). `c.send()` wraps `coder/websocket.Write()`, which is documented as goroutine-safe with internal locking. This is already the case today (readLoop + conductor + TTS goroutine). No change needed.
+
+## Known Limitations
+
+### `ForceState` does not increment `turnCount`
+When the pipeline fails after persisting the candidate message but before persisting the interviewer message, `ForceState(StateWaitingForInput)` is called. Unlike `Transition(StateWaitingForInput)`, `ForceState` does not increment `turnCount`. The turn count passed to `CompleteSession` may be inaccurate. This is an existing bug, not introduced by this spec. Fixing it is out of scope.
 
 ## What Changes
 
 | File | Change |
 |------|--------|
-| `conductor.go` | Add `turnResult` type. Rewrite select loop to dispatch `endTurn` in goroutine, defer end/cancel during pipeline, handle completion. Add `Interrupt()` calls at session end, disconnect, and new turn start. Remove `fanOut.Close()` and `c.obs.Store(Noop)` from happy path in `streamInterviewerResponse`. |
+| `conductor.go` | Add `turnResult` type and `drainPipeline` helper. Rewrite select loop to dispatch `endTurn` and opening question in goroutines, defer end/cancel during pipeline, handle completion with pending action. Add `Interrupt()` calls at session end, disconnect, and new turn start. Remove `fanOut.Close()` and `c.obs.Store(Noop)` from happy path in `streamInterviewerResponse`. Change error-path `fanOut.Close()` to `fanOut.Interrupt()`. Use `context.WithoutCancel` for persist. Modify `sendInitialMessage` to not call `streamInterviewerResponse` directly. |
 
 ## What Doesn't Change
 
 - `endTurn()` — runs exactly as today, just in a goroutine with a cancellable context
-- `streamInterviewerResponse()` — same, minus `fanOut.Close()` and `c.obs.Store(Noop)` on happy path
 - `endSession()` / `cancelSession()` — same, plus `Interrupt()` at top
 - `StateMachine` — no mutex, no changes. Ownership serializes access.
 - `TTSAccumulator` — no changes. Already designed for fire-and-forget with `Interrupt()`.
@@ -253,6 +345,7 @@ defer func() {
 Currently `workCtx := context.Background()` with a comment explaining why it's not derived from `serverCtx`. With the async pipeline:
 
 - The pipeline goroutine receives `turnCtx`, derived from `workCtx` via `context.WithCancel`. This `turnCtx` is cancelled by `cancelTurn()` when the event loop needs the pipeline to stop (end_session, cancel_session, disconnect, shutdown).
+- Persist uses `context.WithoutCancel(turnCtx)` to survive cancellation.
 - `workCtx` remains `context.Background()` for now. A future improvement could derive it from `serverCtx` with a grace period, but that's out of scope.
 
 ## Testing
@@ -261,9 +354,11 @@ Currently `workCtx := context.Background()` with a comment explaining why it's n
 - `session_ws_test.go` — existing WS handler tests should continue to pass. The change is internal to the conductor; the external behavior (WS messages, state transitions, session lifecycle) is identical.
 
 ### New tests
-- **End session during LLM streaming** — start a turn with a slow LLM mock, send `end_session` mid-stream. Verify: pipeline is cancelled, session transitions to Ended, lock is released promptly.
+- **End session during LLM streaming** — start a turn with a slow LLM mock, send `end_session` mid-stream. Verify: pipeline is cancelled, interviewer message is persisted (WithoutCancel), session transitions to Ended, lock is released promptly.
 - **Cancel session during TTS** — start a turn, let LLM complete, send `cancel_session` while TTS is synthesizing. Verify: TTS is interrupted, session is cancelled.
 - **Disconnect during pipeline** — start a turn, close the WS connection mid-stream. Verify: pipeline context is cancelled, lock is released promptly (not after TTS timeout).
 - **Reject concurrent end_turn** — send two `end_turn` messages without waiting. Verify: second one receives `turn_in_progress` error.
 - **Auto-end timer during pipeline** — start a turn with a slow LLM, let the auto-end timer fire. Verify: pipeline is cancelled, session transitions to Ended.
 - **Pipeline error + pending end** — start a turn that will fail (e.g., STT error), send `end_session` before it fails. Verify: pipeline error is handled, then `endSession` runs.
+- **Opening question with disconnect** — start a new session, close WS during opening question LLM stream. Verify: pipeline cancelled, lock released promptly.
+- **Pipeline timeout on drain** — start a turn with a synth that ignores context cancellation, call `cancelTurn()`. Verify: `drainPipeline` times out after 5s and the conductor exits rather than hanging forever.
