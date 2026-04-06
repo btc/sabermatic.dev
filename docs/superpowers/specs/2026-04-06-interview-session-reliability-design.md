@@ -1,7 +1,7 @@
 # Interview Session Reliability: Comprehensive Failure Mode Analysis
 
 **Date:** 2026-04-06
-**Status:** Draft — pending user review
+**Status:** Approved
 **Supersedes:** Issues #99, #100, #101
 
 ## Purpose
@@ -327,35 +327,52 @@ The exponential backoff caps at 30s but never stops retrying. If the server is d
 
 ---
 
+## Key Invariant: Strict Turn Alternation
+
+The state machine enforces strict interviewer/candidate alternation. `end_turn` is rejected unless state is `WaitingForInput`, and the pipeline check (`turnResultCh != nil`) blocks concurrent turns. The DB message sequence is always `I, C, I, C, ...` starting with the interviewer's opening question.
+
+This invariant makes C2/C5 gap detection trivial:
+```
+last message role == "candidate" AND session status == "active"
+→ re-trigger interviewer response
+```
+
+If the session is `completed` or `cancelled`, the gap was intentional (session ended before the interviewer could respond).
+
+---
+
+## Implementation Grouping
+
+Four PRs, grouped by coupling. PRs 1 and 2 can run in parallel (backend vs frontend, no shared files).
+
+### PR 1: Backend data integrity (C1, C2/C5, L1, M2)
+All touch `conductor.go`, tightly related to turn lifecycle. C2/C5 is the meaty one; C1, L1, M2 are small additions while we're in the file.
+
+### PR 2: Client resilience (C3, C4, L3)
+All frontend, all connection/lifecycle. Independent of PR 1.
+
+### PR 3: Observability + polish (M1, M3, M4, M5, M6)
+Small independent fixes across backend and frontend. Batched because each is <10 lines.
+
+### PR 4: Test coverage (L2)
+Tests written against the final state, after PRs 1-3 land.
+
+---
+
 ## Priority Matrix
 
-| ID | Severity | Effort | Value | Recommendation |
-|----|----------|--------|-------|----------------|
-| C1 | Critical | XS | High | Fix immediately (one-liner) |
-| C2 | Critical | S | High | Fix — re-trigger interviewer response on reconnect |
-| C5 | Critical | — | High | Covered by C2 fix |
-| C3 | High | S | High | Buffer recording on disconnect |
-| C4 | High | S | High | Add visibility change handler |
-| M1 | Medium | S | Medium | Notify user on upload failure |
-| M2 | Medium | XS | Medium | Single STT retry |
-| M3 | Medium | XS | Medium | Reduce timeout to 10s |
-| M4 | Medium | XS | Low | Log level change |
-| M5 | Low-Med | XS | Low | Thread context into ttsSink |
-| M6 | Low | XS | Low | Deferred Close() after OnDone |
-| L1 | Low | XS | Medium | Panic recovery |
-| L2 | Low | M | Medium | Implement remaining tests |
-| L3 | Low | XS | Low | Max retry count |
-
-## Implementation Order
-
-**Phase 1 — Data integrity (C1, C2/C5, L1):**
-Fix the bugs that lose data. C1 is trivial. C2 requires the reconnect-gap-detection logic. L1 is cheap insurance.
-
-**Phase 2 — Client resilience (C3, C4, L3):**
-Make the frontend survive real-world conditions: disconnects during recording, tab switches on mobile, bounded retries.
-
-**Phase 3 — Robustness polish (M1-M6):**
-Observability, retry logic, timeout tuning, context propagation. Each is small and independent.
-
-**Phase 4 — Test coverage (L2):**
-Fill in the remaining async pipeline tests. Lower priority since the critical paths are already tested.
+| ID | Severity | Effort | PR | Recommendation |
+|----|----------|--------|----|----------------|
+| C1 | Critical | XS | 1 | `context.WithoutCancel` for candidate persist |
+| C2/C5 | Critical | S | 1 | Re-trigger interviewer response on reconnect gap |
+| L1 | Low | XS | 1 | `defer recover()` with structured logging |
+| M2 | Medium | XS | 1 | Single STT retry with 500ms backoff |
+| C3 | High | S | 2 | Auto-stop MediaRecorder on disconnect, preserve segments |
+| C4 | High | S | 2 | `visibilitychange` handler: health check, resume audio |
+| L3 | Low | XS | 2 | Max retry count (~20), then manual retry UI |
+| M1 | Medium | S | 3 | Track upload result, notify client on failure |
+| M3 | Medium | XS | 3 | Reduce TTSSentenceTimeout to 10s |
+| M4 | Medium | XS | 3 | Log synthesis failures at Warn |
+| M5 | Low-Med | XS | 3 | Thread accumulator context into ttsSink |
+| M6 | Low | XS | 3 | Deferred `fanOut.Close()` after OnDone |
+| L2 | Low | M | 4 | 5 remaining async pipeline tests |
