@@ -1,4 +1,4 @@
-package backend
+package backend_test
 
 import (
 	"context"
@@ -10,14 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 )
 
 // riverJobs returns all river_job rows matching the given kind, newest first.
-func riverJobs(t *testing.T, b *Backend, kind string) []json.RawMessage {
+func riverJobs(t *testing.T, b *backend.Backend, kind string) []json.RawMessage {
 	t.Helper()
-	rows, err := b.pool.Query(context.Background(),
+	rows, err := b.Pool().Query(context.Background(),
 		"SELECT args FROM river_job WHERE kind = $1 ORDER BY created_at DESC", kind)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -37,13 +38,11 @@ func riverJobs(t *testing.T, b *Backend, kind string) []json.RawMessage {
 // ---------------------------------------------------------------------------
 
 func TestSignup_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	res, err := b.Signup(ctx, SignupParams{
+	res, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "alice@example.com",
 		Password:    "strongpass1",
 		DisplayName: "Alice",
@@ -62,92 +61,82 @@ func TestSignup_Success(t *testing.T) {
 }
 
 func TestSignup_MissingFields(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	cases := []struct {
 		name string
-		p    SignupParams
+		p    backend.SignupParams
 	}{
-		{"no email", SignupParams{Email: "", Password: "strongpass1", DisplayName: "A"}},
-		{"no password", SignupParams{Email: "a@b.com", Password: "", DisplayName: "A"}},
-		{"no display name", SignupParams{Email: "a@b.com", Password: "strongpass1", DisplayName: ""}},
+		{"no email", backend.SignupParams{Email: "", Password: "strongpass1", DisplayName: "A"}},
+		{"no password", backend.SignupParams{Email: "a@b.com", Password: "", DisplayName: "A"}},
+		{"no display name", backend.SignupParams{Email: "a@b.com", Password: "strongpass1", DisplayName: ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := b.Signup(ctx, tc.p)
-			require.ErrorIs(t, err, ErrMissingFields)
+			require.ErrorIs(t, err, backend.ErrMissingFields)
 		})
 	}
 }
 
 func TestSignup_ShortPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	_, err := b.Signup(ctx, SignupParams{
+	_, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "short@example.com",
-		Password:    string(make([]byte, MinPasswordLen-1)), // too short
+		Password:    string(make([]byte, backend.MinPasswordLen-1)), // too short
 		DisplayName: "Short",
 	})
-	require.ErrorIs(t, err, ErrPasswordLength)
+	require.ErrorIs(t, err, backend.ErrPasswordLength)
 }
 
 func TestSignup_LongPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	longPass := make([]byte, MaxPasswordLen+1)
+	longPass := make([]byte, backend.MaxPasswordLen+1)
 	for i := range longPass {
 		longPass[i] = 'a'
 	}
-	_, err := b.Signup(ctx, SignupParams{
+	_, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "long@example.com",
 		Password:    string(longPass),
 		DisplayName: "Long",
 	})
-	require.ErrorIs(t, err, ErrPasswordLength)
+	require.ErrorIs(t, err, backend.ErrPasswordLength)
 }
 
 func TestSignup_DuplicateEmail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	_, err := b.Signup(ctx, SignupParams{
+	_, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "dup@example.com",
 		Password:    "strongpass1",
 		DisplayName: "Dup1",
 	})
 	require.NoError(t, err)
 
-	_, err = b.Signup(ctx, SignupParams{
+	_, err = b.Signup(ctx, backend.SignupParams{
 		Email:       "dup@example.com",
 		Password:    "strongpass2",
 		DisplayName: "Dup2",
 	})
-	require.ErrorIs(t, err, ErrDuplicateEmail)
+	require.ErrorIs(t, err, backend.ErrDuplicateEmail)
 }
 
 func TestSignup_EmailNormalization(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	res, err := b.Signup(ctx, SignupParams{
+	res, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "  UPPER@EXAMPLE.COM  ",
 		Password:    "strongpass1",
 		DisplayName: "Upper",
@@ -157,13 +146,11 @@ func TestSignup_EmailNormalization(t *testing.T) {
 }
 
 func TestSignup_DisplayNameTrimming(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	res, err := b.Signup(ctx, SignupParams{
+	res, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "trim@example.com",
 		Password:    "strongpass1",
 		DisplayName: "  Trimmed  ",
@@ -171,7 +158,7 @@ func TestSignup_DisplayNameTrimming(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the display name was trimmed by reading back from DB.
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	user, err := queries.GetUserByEmail(ctx, res.Email)
 	require.NoError(t, err)
 	require.Equal(t, "Trimmed", user.DisplayName)
@@ -182,9 +169,9 @@ func TestSignup_DisplayNameTrimming(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // signupUser is a helper that creates a user via Signup and returns the result.
-func signupUser(t *testing.T, b *Backend, email, password, name string) *SignupResult {
+func signupUser(t *testing.T, b *backend.Backend, email, password, name string) *backend.SignupResult {
 	t.Helper()
-	res, err := b.Signup(context.Background(), SignupParams{
+	res, err := b.Signup(context.Background(), backend.SignupParams{
 		Email:       email,
 		Password:    password,
 		DisplayName: name,
@@ -194,15 +181,13 @@ func signupUser(t *testing.T, b *Backend, email, password, name string) *SignupR
 }
 
 func TestLogin_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "login@example.com", "strongpass1", "Login")
 
-	res, err := b.Login(ctx, LoginParams{
+	res, err := b.Login(ctx, backend.LoginParams{
 		Email:     "login@example.com",
 		Password:  "strongpass1",
 		IP:        "192.168.1.1:12345",
@@ -215,51 +200,45 @@ func TestLogin_Success(t *testing.T) {
 
 	// Verify a session was created by looking it up.
 	tokenHash := auth.HashSessionToken(res.Token)
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	session, err := queries.GetAuthSessionByToken(ctx, tokenHash)
 	require.NoError(t, err)
 	require.Equal(t, res.UserID, session.UserID)
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "wrong@example.com", "strongpass1", "Wrong")
 
-	_, err := b.Login(ctx, LoginParams{
+	_, err := b.Login(ctx, backend.LoginParams{
 		Email:    "wrong@example.com",
 		Password: "wrongpassword",
 	})
-	require.ErrorIs(t, err, ErrInvalidCredentials)
+	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
 }
 
 func TestLogin_NonExistentUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	_, err := b.Login(ctx, LoginParams{
+	_, err := b.Login(ctx, backend.LoginParams{
 		Email:    "nonexist@example.com",
 		Password: "strongpass1",
 	})
-	require.ErrorIs(t, err, ErrInvalidCredentials)
+	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
 }
 
 func TestLogin_OAuthOnlyUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	// Create an OAuth-only user (no password_hash) directly via DB.
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	user, err := queries.CreateOAuthUser(ctx, db.CreateOAuthUserParams{
 		Email:       "oauth@example.com",
 		DisplayName: "OAuth User",
@@ -267,11 +246,11 @@ func TestLogin_OAuthOnlyUser(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, user.PasswordHash.Valid)
 
-	_, err = b.Login(ctx, LoginParams{
+	_, err = b.Login(ctx, backend.LoginParams{
 		Email:    "oauth@example.com",
 		Password: "anypassword1",
 	})
-	require.ErrorIs(t, err, ErrInvalidCredentials)
+	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
 }
 
 // ---------------------------------------------------------------------------
@@ -279,14 +258,12 @@ func TestLogin_OAuthOnlyUser(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLogout_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "logout@example.com", "strongpass1", "Logout")
-	loginRes, err := b.Login(ctx, LoginParams{
+	loginRes, err := b.Login(ctx, backend.LoginParams{
 		Email:    "logout@example.com",
 		Password: "strongpass1",
 		IP:       "127.0.0.1:1234",
@@ -299,16 +276,14 @@ func TestLogout_Success(t *testing.T) {
 
 	// Session should be deleted -- lookup by hash should fail.
 	tokenHash := auth.HashSessionToken(loginRes.Token)
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
 	require.Error(t, err) // pgx.ErrNoRows
 }
 
 func TestLogout_NonExistentToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	// Logging out with a bogus token should not error.
@@ -321,17 +296,15 @@ func TestLogout_NonExistentToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestVerifyEmail_ValidToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
 	res := signupUser(t, b, "verify@example.com", "strongpass1", "Verify")
 
 	// User should not be verified yet.
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	user, err := queries.GetUserByEmail(ctx, "verify@example.com")
 	require.NoError(t, err)
 	require.False(t, user.EmailVerified)
@@ -351,21 +324,17 @@ func TestVerifyEmail_ValidToken(t *testing.T) {
 }
 
 func TestVerifyEmail_InvalidToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	err := b.VerifyEmail(ctx, "invalid-token")
-	require.ErrorIs(t, err, ErrInvalidToken)
+	require.ErrorIs(t, err, backend.ErrInvalidToken)
 }
 
 func TestVerifyEmail_ExpiredToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
@@ -377,7 +346,7 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 	require.NoError(t, err)
 
 	err = b.VerifyEmail(ctx, token)
-	require.ErrorIs(t, err, ErrInvalidToken)
+	require.ErrorIs(t, err, backend.ErrInvalidToken)
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +354,8 @@ func TestVerifyEmail_ExpiredToken(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestForgotPassword_ExistingUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "forgot@example.com", "strongpass1", "Forgot")
@@ -408,14 +375,12 @@ func TestForgotPassword_ExistingUser(t *testing.T) {
 }
 
 func TestForgotPassword_NonExistentUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	err := b.ForgotPassword(ctx, "nobody@example.com")
-	require.ErrorIs(t, err, ErrUserNotFound)
+	require.ErrorIs(t, err, backend.ErrUserNotFound)
 }
 
 // ---------------------------------------------------------------------------
@@ -423,17 +388,15 @@ func TestForgotPassword_NonExistentUser(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestResetPassword_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
 	signupRes := signupUser(t, b, "reset@example.com", "oldpassword1", "Reset")
 
 	// Login to create a session.
-	loginRes, err := b.Login(ctx, LoginParams{
+	loginRes, err := b.Login(ctx, backend.LoginParams{
 		Email:    "reset@example.com",
 		Password: "oldpassword1",
 	})
@@ -445,7 +408,7 @@ func TestResetPassword_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reset password.
-	err = b.ResetPassword(ctx, ResetPasswordParams{
+	err = b.ResetPassword(ctx, backend.ResetPasswordParams{
 		Token:       token,
 		NewPassword: "newpassword1",
 	})
@@ -453,12 +416,12 @@ func TestResetPassword_Success(t *testing.T) {
 
 	// Old session should be deleted.
 	tokenHash := auth.HashSessionToken(loginRes.Token)
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
 	require.Error(t, err) // session deleted
 
 	// Can login with new password.
-	newLoginRes, err := b.Login(ctx, LoginParams{
+	newLoginRes, err := b.Login(ctx, backend.LoginParams{
 		Email:    "reset@example.com",
 		Password: "newpassword1",
 	})
@@ -466,32 +429,28 @@ func TestResetPassword_Success(t *testing.T) {
 	require.NotEmpty(t, newLoginRes.Token)
 
 	// Cannot login with old password.
-	_, err = b.Login(ctx, LoginParams{
+	_, err = b.Login(ctx, backend.LoginParams{
 		Email:    "reset@example.com",
 		Password: "oldpassword1",
 	})
-	require.ErrorIs(t, err, ErrInvalidCredentials)
+	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
 }
 
 func TestResetPassword_InvalidToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	err := b.ResetPassword(ctx, ResetPasswordParams{
+	err := b.ResetPassword(ctx, backend.ResetPasswordParams{
 		Token:       "bogus-token",
 		NewPassword: "newpassword1",
 	})
-	require.ErrorIs(t, err, ErrInvalidToken)
+	require.ErrorIs(t, err, backend.ErrInvalidToken)
 }
 
 func TestResetPassword_ShortPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 	cfg := b.Config()
 
@@ -501,11 +460,11 @@ func TestResetPassword_ShortPassword(t *testing.T) {
 	token, err := signer.Sign(signupRes.UserID, "reset-password", cfg.Auth.ResetTokenTTL)
 	require.NoError(t, err)
 
-	err = b.ResetPassword(ctx, ResetPasswordParams{
+	err = b.ResetPassword(ctx, backend.ResetPasswordParams{
 		Token:       token,
 		NewPassword: "short", // too short
 	})
-	require.ErrorIs(t, err, ErrPasswordLength)
+	require.ErrorIs(t, err, backend.ErrPasswordLength)
 }
 
 // ---------------------------------------------------------------------------
@@ -513,16 +472,14 @@ func TestResetPassword_ShortPassword(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLogin_EmailNormalization(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "norm@example.com", "strongpass1", "Norm")
 
 	// Login with uppercase email.
-	res, err := b.Login(ctx, LoginParams{
+	res, err := b.Login(ctx, backend.LoginParams{
 		Email:    "  NORM@EXAMPLE.COM  ",
 		Password: "strongpass1",
 	})
@@ -535,18 +492,16 @@ func TestLogin_EmailNormalization(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSignup_PasswordBoundary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	// Exactly MinPasswordLen chars: should succeed.
-	minPass := make([]byte, MinPasswordLen)
+	minPass := make([]byte, backend.MinPasswordLen)
 	for i := range minPass {
 		minPass[i] = 'a'
 	}
-	_, err := b.Signup(ctx, SignupParams{
+	_, err := b.Signup(ctx, backend.SignupParams{
 		Email:       "bound-min@example.com",
 		Password:    string(minPass),
 		DisplayName: "BoundMin",
@@ -554,11 +509,11 @@ func TestSignup_PasswordBoundary(t *testing.T) {
 	require.NoError(t, err)
 
 	// Exactly MaxPasswordLen chars (bcrypt max): should succeed.
-	maxPass := make([]byte, MaxPasswordLen)
+	maxPass := make([]byte, backend.MaxPasswordLen)
 	for i := range maxPass {
 		maxPass[i] = 'x'
 	}
-	_, err = b.Signup(ctx, SignupParams{
+	_, err = b.Signup(ctx, backend.SignupParams{
 		Email:       "bound-max@example.com",
 		Password:    string(maxPass),
 		DisplayName: "BoundMax",
@@ -571,10 +526,8 @@ func TestSignup_PasswordBoundary(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestForgotPassword_EmailNormalization(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
 	signupUser(t, b, "fnorm@example.com", "strongpass1", "FNorm")
@@ -595,13 +548,11 @@ func TestForgotPassword_EmailNormalization(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLogin_OAuthUserNoPassword(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	queries := db.New(b.pool)
+	queries := db.New(b.Pool())
 	_, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:        "nopw@example.com",
 		PasswordHash: pgtype.Text{Valid: false},
@@ -609,9 +560,9 @@ func TestLogin_OAuthUserNoPassword(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = b.Login(ctx, LoginParams{
+	_, err = b.Login(ctx, backend.LoginParams{
 		Email:    "nopw@example.com",
 		Password: "anypassword1",
 	})
-	require.ErrorIs(t, err, ErrInvalidCredentials)
+	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
 }

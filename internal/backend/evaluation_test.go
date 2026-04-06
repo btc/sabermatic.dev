@@ -1,4 +1,4 @@
-package backend
+package backend_test
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs/jobtest"
 )
@@ -19,10 +21,10 @@ import (
 // ---------------------------------------------------------------------------
 
 // seedQuestion creates a question directly via raw SQL and returns its ID.
-func seedQuestion(t *testing.T, b *Backend) uuid.UUID {
+func seedQuestion(t *testing.T, b *backend.Backend) uuid.UUID {
 	t.Helper()
 	qID := uuid.New()
-	_, err := b.pool.Exec(context.Background(),
+	_, err := b.Pool().Exec(context.Background(),
 		`INSERT INTO questions (id, title, prompt, difficulty, tags, source)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		qID,
@@ -37,9 +39,9 @@ func seedQuestion(t *testing.T, b *Backend) uuid.UUID {
 }
 
 // seedSession creates an active session and returns its ID.
-func seedSession(t *testing.T, b *Backend, userID, questionID uuid.UUID) uuid.UUID {
+func seedSession(t *testing.T, b *backend.Backend, userID, questionID uuid.UUID) uuid.UUID {
 	t.Helper()
-	q := db.New(b.pool)
+	q := db.New(b.Pool())
 	s, err := q.CreateSession(context.Background(), db.CreateSessionParams{
 		UserID:                userID,
 		QuestionID:            questionID,
@@ -51,9 +53,9 @@ func seedSession(t *testing.T, b *Backend, userID, questionID uuid.UUID) uuid.UU
 }
 
 // setStatus updates a session's status directly.
-func setStatus(t *testing.T, b *Backend, sessionID uuid.UUID, status string) {
+func setStatus(t *testing.T, b *backend.Backend, sessionID uuid.UUID, status string) {
 	t.Helper()
-	err := db.New(b.pool).UpdateSessionStatusOnly(context.Background(), db.UpdateSessionStatusOnlyParams{
+	err := db.New(b.Pool()).UpdateSessionStatusOnly(context.Background(), db.UpdateSessionStatusOnlyParams{
 		ID:     sessionID,
 		Status: status,
 	})
@@ -61,9 +63,9 @@ func setStatus(t *testing.T, b *Backend, sessionID uuid.UUID, status string) {
 }
 
 // seedEval inserts an evaluation row and returns its ID.
-func seedEval(t *testing.T, b *Backend, sessionID uuid.UUID) uuid.UUID {
+func seedEval(t *testing.T, b *backend.Backend, sessionID uuid.UUID) uuid.UUID {
 	t.Helper()
-	evalID, err := db.New(b.pool).InsertEvaluation(context.Background(), db.InsertEvaluationParams{
+	evalID, err := db.New(b.Pool()).InsertEvaluation(context.Background(), db.InsertEvaluationParams{
 		SessionID:          sessionID,
 		ScoreRequirements:  3,
 		ScoreArchitecture:  4,
@@ -80,9 +82,9 @@ func seedEval(t *testing.T, b *Backend, sessionID uuid.UUID) uuid.UUID {
 }
 
 // seedMsg inserts a message and returns its ID.
-func seedMsg(t *testing.T, b *Backend, sessionID uuid.UUID, seq int32, role, content string) uuid.UUID {
+func seedMsg(t *testing.T, b *backend.Backend, sessionID uuid.UUID, seq int32, role, content string) uuid.UUID {
 	t.Helper()
-	msg, err := db.New(b.pool).InsertMessage(context.Background(), db.InsertMessageParams{
+	msg, err := db.New(b.Pool()).InsertMessage(context.Background(), db.InsertMessageParams{
 		ID:          uuid.New(),
 		SessionID:   sessionID,
 		Seq:         seq,
@@ -95,9 +97,9 @@ func seedMsg(t *testing.T, b *Backend, sessionID uuid.UUID, seq int32, role, con
 }
 
 // seedAnnotation inserts an annotation for the given evaluation and message.
-func seedAnnotation(t *testing.T, b *Backend, evalID, msgID uuid.UUID, annType, content string) {
+func seedAnnotation(t *testing.T, b *backend.Backend, evalID, msgID uuid.UUID, annType, content string) {
 	t.Helper()
-	err := db.New(b.pool).InsertAnnotation(context.Background(), db.InsertAnnotationParams{
+	err := db.New(b.Pool()).InsertAnnotation(context.Background(), db.InsertAnnotationParams{
 		EvaluationID:   evalID,
 		MessageID:      msgID,
 		AnnotationType: annType,
@@ -111,13 +113,11 @@ func seedAnnotation(t *testing.T, b *Backend, evalID, msgID uuid.UUID, annType, 
 // ---------------------------------------------------------------------------
 
 func TestGetEvaluation_Reviewed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "reviewed")
@@ -156,13 +156,11 @@ func TestGetEvaluation_Reviewed(t *testing.T) {
 }
 
 func TestGetEvaluation_EvaluationFailed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "evaluation_failed")
@@ -179,52 +177,46 @@ func TestGetEvaluation_EvaluationFailed(t *testing.T) {
 }
 
 func TestGetEvaluation_NotReady(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID) // status=active
 
 	_, err := b.GetEvaluation(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrEvaluationNotReady)
+	require.ErrorIs(t, err, backend.ErrEvaluationNotReady)
 }
 
 func TestGetEvaluation_WrongUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	ownerID := seedUser(t, b)
-	otherID := seedUser(t, b)
+	ownerID := backendtest.SeedUser(t, b)
+	otherID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, ownerID, questionID)
 	setStatus(t, b, sessionID, "reviewed")
 
 	_, err := b.GetEvaluation(ctx, sessionID, otherID)
-	require.ErrorIs(t, err, ErrSessionNotOwned)
+	require.ErrorIs(t, err, backend.ErrSessionNotOwned)
 }
 
 func TestGetEvaluation_ReviewedButMissingEvaluation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "reviewed")
 	// No evaluation row inserted.
 
 	_, err := b.GetEvaluation(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrEvaluationNotReady)
+	require.ErrorIs(t, err, backend.ErrEvaluationNotReady)
 }
 
 // ---------------------------------------------------------------------------
@@ -232,13 +224,11 @@ func TestGetEvaluation_ReviewedButMissingEvaluation(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRetryEvaluation_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "evaluation_failed")
@@ -247,52 +237,48 @@ func TestRetryEvaluation_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify session status updated to "evaluating".
-	session, err := db.New(b.pool).GetSession(ctx, sessionID)
+	session, err := db.New(b.Pool()).GetSession(ctx, sessionID)
 	require.NoError(t, err)
 	assert.Equal(t, "evaluating", session.Status)
 
 	// Verify river job was enqueued.
-	jobtest.AssertJobEnqueued(t, b.pool, "evaluate_session", 1)
+	jobtest.AssertJobEnqueued(t, b.Pool(), "evaluate_session", 1)
 
 	// Verify the job args contain the correct session ID.
-	jobs := riverJobs(t, b, "evaluate_session")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "evaluate_session")
+	require.Len(t, rjobs, 1)
 	var args struct {
 		SessionID uuid.UUID `json:"session_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, sessionID, args.SessionID)
 }
 
 func TestRetryEvaluation_NotFailed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "reviewed")
 
 	err := b.RetryEvaluation(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrNotEvaluationFailed)
+	require.ErrorIs(t, err, backend.ErrNotEvaluationFailed)
 }
 
 func TestRetryEvaluation_WrongUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	ownerID := seedUser(t, b)
-	otherID := seedUser(t, b)
+	ownerID := backendtest.SeedUser(t, b)
+	otherID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, ownerID, questionID)
 	setStatus(t, b, sessionID, "evaluation_failed")
 
 	err := b.RetryEvaluation(ctx, sessionID, otherID)
-	require.ErrorIs(t, err, ErrSessionNotOwned)
+	require.ErrorIs(t, err, backend.ErrSessionNotOwned)
 }

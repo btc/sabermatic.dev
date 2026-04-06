@@ -1,48 +1,22 @@
 package backend
 
 import (
-	"context"
 	"errors"
 	"net/netip"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
-// New + Close (full lifecycle with real Postgres and River)
-// ---------------------------------------------------------------------------
-
-func TestNewAndClose(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	connStr := startPostgres(t)
-	cfg := loadTestConfig(t, connStr)
-
-	b, err := New(cfg)
-	require.NoError(t, err)
-	require.NotNil(t, b.pool)
-	require.NotNil(t, b.jobs)
-	require.Equal(t, cfg, b.Config())
-
-	// Ping checks connectivity.
-	err = b.Ping(context.Background())
-	require.NoError(t, err)
-
-	// Close stops River and closes the pool.
-	err = b.Close()
-	require.NoError(t, err)
-}
-
-// ---------------------------------------------------------------------------
 // parseClientIP
 // ---------------------------------------------------------------------------
 
 func TestParseClientIP(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		input  string
@@ -94,6 +68,7 @@ func TestParseClientIP(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIsDuplicateKeyError(t *testing.T) {
+	t.Parallel()
 	t.Run("PgError with code 23505", func(t *testing.T) {
 		err := &pgconn.PgError{Code: "23505"}
 		require.True(t, isDuplicateKeyError(err))
@@ -123,10 +98,55 @@ func TestIsDuplicateKeyError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// uuidSlicesEqual
+// ---------------------------------------------------------------------------
+
+func TestUUIDSlicesEqual(t *testing.T) {
+	t.Parallel()
+	a := uuid.New()
+	b := uuid.New()
+
+	t.Run("both nil", func(t *testing.T) {
+		assert.True(t, uuidSlicesEqual(nil, nil))
+	})
+
+	t.Run("both empty", func(t *testing.T) {
+		assert.True(t, uuidSlicesEqual([]uuid.UUID{}, []uuid.UUID{}))
+	})
+
+	t.Run("nil vs empty", func(t *testing.T) {
+		// len(nil) == 0 == len([]uuid.UUID{}) → equal
+		assert.True(t, uuidSlicesEqual(nil, []uuid.UUID{}))
+	})
+
+	t.Run("equal single-element", func(t *testing.T) {
+		assert.True(t, uuidSlicesEqual([]uuid.UUID{a}, []uuid.UUID{a}))
+	})
+
+	t.Run("equal multi-element", func(t *testing.T) {
+		assert.True(t, uuidSlicesEqual([]uuid.UUID{a, b}, []uuid.UUID{a, b}))
+	})
+
+	t.Run("different lengths", func(t *testing.T) {
+		assert.False(t, uuidSlicesEqual([]uuid.UUID{a}, []uuid.UUID{a, b}))
+	})
+
+	t.Run("same length different values", func(t *testing.T) {
+		assert.False(t, uuidSlicesEqual([]uuid.UUID{a}, []uuid.UUID{b}))
+	})
+
+	t.Run("order matters", func(t *testing.T) {
+		// The function is order-sensitive; [a,b] != [b,a]
+		assert.False(t, uuidSlicesEqual([]uuid.UUID{a, b}, []uuid.UUID{b, a}))
+	})
+}
+
+// ---------------------------------------------------------------------------
 // truncateRunes
 // ---------------------------------------------------------------------------
 
 func TestTruncateRunes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		s    string
