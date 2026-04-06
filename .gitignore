@@ -55,3 +55,6 @@ cov.out
 coverage.out
 coverage-cross.out
 tmp/
+
+# Cloud bootstrap state (resume file)
+.cloud_bootstrap_state
