@@ -1,6 +1,12 @@
 import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  LineChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+} from "recharts";
 import { useQuery, useMutation, createConnectQueryKey } from "@connectrpc/connect-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
@@ -59,6 +65,67 @@ function allTags(questions: ProtoQuestion[]): string[] {
   return Array.from(set).sort();
 }
 
+function scoreColor(score: number): string {
+  if (score >= 4) return "hsl(142 71% 45%)";
+  if (score >= 3) return "hsl(48 96% 53%)";
+  if (score >= 2) return "hsl(25 95% 53%)";
+  return "hsl(0 84% 60%)";
+}
+
+function ScoreSparkline({ sessions }: { sessions: SessionSummary[] }) {
+  const points = useMemo(() => {
+    return sessions
+      .filter((s) => s.scoreOverall != null)
+      .sort((a, b) => {
+        const ta = a.createTime ? Number(a.createTime.seconds) : 0;
+        const tb = b.createTime ? Number(b.createTime.seconds) : 0;
+        return ta - tb;
+      })
+      .map((s) => ({
+        score: s.scoreOverall!,
+        label: s.questionTitle || "Session",
+      }));
+  }, [sessions]);
+
+  if (points.length < 2) return null;
+
+  const lastScore = points[points.length - 1]!.score;
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="h-8 w-24">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points}>
+            <Line
+              type="monotone"
+              dataKey="score"
+              stroke="hsl(32 95% 44%)"
+              strokeWidth={1.5}
+              dot={{ r: 2, fill: "hsl(32 95% 44%)", strokeWidth: 0 }}
+              isAnimationActive={false}
+            />
+            <RechartsTooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const p = payload[0]!.payload as { score: number; label: string };
+                return (
+                  <div className="rounded border border-border bg-popover px-2 py-1 text-xs shadow">
+                    <p className="font-medium">{p.label}</p>
+                    <p style={{ color: scoreColor(p.score) }}>{p.score}/5</p>
+                  </div>
+                );
+              }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <span className="text-sm font-medium" style={{ color: scoreColor(lastScore) }}>
+        {lastScore}/5
+      </span>
+    </div>
+  );
+}
+
 // SummaryStrip
 function SummaryStrip({ sessions }: { sessions: SessionSummary[] }) {
   const reviewed = reviewedSessions(sessions);
@@ -70,12 +137,10 @@ function SummaryStrip({ sessions }: { sessions: SessionSummary[] }) {
         <span className="text-muted-foreground">Sessions completed</span>{" "}
         <span className="font-medium">{reviewed.length}</span>
       </div>
+      <ScoreSparkline sessions={reviewed} />
     </div>
   );
 }
-
-// TODO: ScoreSparkline — render once real score_overall data is available on the Session type.
-// Removed fake/placeholder data that was previously rendered here.
 
 // CoachCard
 function CoachCard({ coach, isActive }: {
