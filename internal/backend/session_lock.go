@@ -29,11 +29,14 @@ func (l *SessionLock) key() int64 {
 // Release unlocks the advisory lock and returns the connection to the pool.
 // Safe to call on a nil receiver or after a previous Release (idempotent).
 // The connection is always returned to the pool even if the unlock query fails.
-func (l *SessionLock) Release() error {
+func (l *SessionLock) Release() (err error) {
 	if l == nil || l.conn == nil {
 		return nil
 	}
-	released, err := db.New(l.conn).PGAdvisoryUnlock(context.Background(), l.key())
+	ctx, span := tracer.Start(context.Background(), "Backend.ReleaseSessionLock")
+	defer func() { drilotel.End(span, err) }()
+
+	released, err := db.New(l.conn).PGAdvisoryUnlock(ctx, l.key())
 	if err == nil && !released {
 		err = errors.New("advisory unlock: connection did not hold lock")
 	}
