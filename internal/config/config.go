@@ -55,10 +55,11 @@ type LLM struct {
 }
 
 type Speech struct {
-	OpenAIAPIKey string `env:"OPENAI_API_KEY,required"`
-	TTSVoice     string `env:"TTS_VOICE,default=onyx"`
-	TTSModel     string `env:"TTS_MODEL,default=tts-1"`
-	WhisperModel string `env:"WHISPER_MODEL,default=whisper-1"`
+	OpenAIAPIKey       string        `env:"OPENAI_API_KEY,required"`
+	TTSVoice           string        `env:"TTS_VOICE,default=onyx"`
+	TTSModel           string        `env:"TTS_MODEL,default=tts-1"`
+	WhisperModel       string        `env:"WHISPER_MODEL,default=whisper-1"`
+	TTSSentenceTimeout time.Duration `env:"TTS_SENTENCE_TIMEOUT,default=10s"`
 }
 
 type Email struct {
