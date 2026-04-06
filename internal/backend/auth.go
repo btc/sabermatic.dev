@@ -123,7 +123,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, 
 		To:      user.Email,
 		Subject: "Verify your Drill account",
 		Text:    fmt.Sprintf("Click here to verify your email: %s", verifyURL),
-		HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL),
+		HTML:    fmt.Sprintf(`<p>Click <a href="%s">here</a> to verify your email.</p>`, verifyURL), //nolint:gocritic // %q would break HTML href
 	}, emailOpts)
 	if err != nil {
 		return nil, fmt.Errorf("enqueue verification email: %w", err)
