@@ -546,10 +546,17 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 			}
 		}()
 
-		// STT.
+		// STT — single retry on transient failure.
 		text, err := c.backend.Transcribe(ctx, msg.Audio, msg.AudioExt())
 		if err != nil {
-			slog.Error("conductor: transcription failed", "error", err, "session_id", c.sessionID)
+			slog.Warn("conductor: transcription failed, retrying",
+				"error", err, "session_id", c.sessionID)
+			time.Sleep(500 * time.Millisecond)
+			text, err = c.backend.Transcribe(ctx, msg.Audio, msg.AudioExt())
+		}
+		if err != nil {
+			slog.Error("conductor: transcription failed after retry",
+				"error", err, "session_id", c.sessionID)
 			return fmt.Errorf("transcription: %w", err)
 		}
 		if strings.TrimSpace(text) == "" {
