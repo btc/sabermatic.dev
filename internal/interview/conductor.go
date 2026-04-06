@@ -102,7 +102,7 @@ func NewConductor(p ConductorParams) *Conductor {
 // Run blocks until the session ends.
 func (c *Conductor) Run(serverCtx context.Context) {
 	// Phase 1: Acquire advisory lock.
-	lockConn, locked, err := c.backend.AcquireSessionLock(serverCtx, c.sessionID)
+	lock, locked, err := c.backend.AcquireSessionLock(serverCtx, c.sessionID)
 	if err != nil {
 		slog.Error("acquire session lock", "error", err, "session_id", c.sessionID)
 		c.ws.Close(websocket.StatusInternalError, "lock error")
@@ -112,7 +112,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		c.ws.Close(websocket.StatusPolicyViolation, "session already in use")
 		return
 	}
-	c.lock = lockConn
+	c.lock = lock
 
 	// Phase 2: Read session_init (10s timeout).
 	initCtx, initCancel := context.WithTimeout(serverCtx, 10*time.Second)
