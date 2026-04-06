@@ -3,6 +3,7 @@ import { Mic, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Waveform } from "@/components/waveform";
+import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 
 interface RecordingInputProps {
@@ -252,13 +253,5 @@ export function RecordingInput({
         {hint || "\u00A0"}
       </p>
     </div>
-  );
-}
-
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">
-      {children}
-    </kbd>
   );
 }
