@@ -1,11 +1,11 @@
-import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
+import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { apiClient } from "./client";
 import type {
-  User, Question, Session, CreateSessionRequest,
+  User, Question,
   EvaluationResponse, EducatorAnalysis, CoachAnalysis,
-  Message,
 } from "./types";
 
 // --- Questions ---
@@ -19,60 +19,15 @@ export function useCreateQuestion() {
   });
 }
 
-// --- Sessions ---
-
-export function useSessions(params?: { archived?: boolean; status?: string; sort?: string }) {
-  const searchParams = new URLSearchParams();
-  if (params?.archived !== undefined) searchParams.set("archived", String(params.archived));
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.sort) searchParams.set("sort", params.sort);
-  const qs = searchParams.toString();
-  const url = `/api/sessions${qs ? `?${qs}` : ""}`;
-
-  return useQuery({
-    queryKey: ["sessions", params],
-    queryFn: () => apiClient.get<Session[]>(url),
-  });
-}
-
-export function useSession(
-  id: string,
-  options?: Partial<Pick<UseQueryOptions<Session>, "refetchInterval">>,
-) {
-  return useQuery({
-    queryKey: ["sessions", id],
-    queryFn: () => apiClient.get<Session>(`/api/sessions/${id}`),
-    enabled: !!id,
-    ...options,
-  });
-}
-
-export function useCreateSession() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: CreateSessionRequest) =>
-      apiClient.post<Session>("/api/sessions", data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["sessions"] });
-      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getUsage, input: {}, cardinality: undefined }) });
-    },
-  });
-}
-
-export function useArchiveSessions() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { session_ids: string[]; archive: boolean }) =>
-      apiClient.post("/api/sessions/archive-bulk", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
-  });
-}
+// --- Evaluation ---
 
 export function useRetryEvaluation(sessionId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiClient.post(`/api/sessions/${sessionId}/evaluate`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions", sessionId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
+    },
   });
 }
 
@@ -83,15 +38,6 @@ export function useEvaluation(sessionId: string, enabled = true) {
     queryKey: ["evaluation", sessionId],
     queryFn: () => apiClient.get<EvaluationResponse>(`/api/sessions/${sessionId}/evaluation`),
     enabled,
-  });
-}
-
-// --- Transcript ---
-
-export function useTranscript(sessionId: string) {
-  return useQuery({
-    queryKey: ["transcript", sessionId],
-    queryFn: () => apiClient.get<Message[]>(`/api/sessions/${sessionId}/transcript`),
   });
 }
 

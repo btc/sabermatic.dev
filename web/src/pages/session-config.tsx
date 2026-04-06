@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { toast } from "sonner";
-import { useQuery } from "@connectrpc/connect-query";
+import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
 import { getMe, getUsage } from "@/pb/drill/v1/user-UserService_connectquery";
+import { createSession as createSessionMethod, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
 import {
   useCoachLatest,
-  useCreateSession,
 } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,7 +69,13 @@ export default function SessionConfig() {
   const { data: meData } = useQuery(getMe, {});
   const me = meData?.user;
   const { data: usage } = useQuery(getUsage, {});
-  const createSession = useCreateSession();
+  const qc = useQueryClient();
+  const createSession = useMutation(createSessionMethod, {
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
+      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getUsage, input: {}, cardinality: undefined }) });
+    },
+  });
 
   const planMax = me?.plan === UserPlan.PRO ? PRO_PLAN_MAX : FREE_PLAN_MAX;
 
@@ -125,14 +133,13 @@ export default function SessionConfig() {
 
     createSession.mutate(
       {
-        question_id: questionId,
-        duration_minutes: effectiveDuration,
-        tts_enabled: ttsEnabled,
-        ...(hasCoach ? { coach_briefing: coachBriefing } : {}),
+        questionId: questionId,
+        durationMinutes: effectiveDuration,
+        ttsEnabled: ttsEnabled,
       },
       {
-        onSuccess: (session) => {
-          navigate(`/sessions/${session.id}/interview`);
+        onSuccess: (resp) => {
+          navigate(`/sessions/${resp.session?.id}/interview`);
         },
         onError: () => {
           toast.error("Failed to start session");

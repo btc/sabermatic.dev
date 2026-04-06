@@ -1,9 +1,12 @@
 import { useState, useRef, useCallback } from "react";
 import { useParams, Navigate } from "react-router-dom";
-import { useTranscript, useEvaluation } from "@/api/queries";
+import { useQuery } from "@connectrpc/connect-query";
+import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
+import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
+import { useEvaluation } from "@/api/queries";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { AnnotationType, AnnotationResponse, Message } from "@/api/types";
+import type { AnnotationType, AnnotationResponse } from "@/api/types";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -139,7 +142,7 @@ function AnnotationCard({ annotation, dimmed }: AnnotationCardProps) {
 // ---------------------------------------------------------------------------
 
 interface MessageRowProps {
-  message: Message;
+  message: ProtoMessage;
   annotations: AnnotationResponse[];
   activeFilter: FilterType;
   msgRef: (el: HTMLDivElement | null) => void;
@@ -203,7 +206,7 @@ function RailDot({ annotation, totalMessages, msgIndex, onClick }: RailDotProps)
 
 interface AnnotationRailProps {
   annotations: AnnotationResponse[];
-  messages: Message[];
+  messages: ProtoMessage[];
   onDotClick: (seq: number) => void;
 }
 
@@ -257,7 +260,8 @@ export default function TranscriptPage() {
 }
 
 function TranscriptInner({ sessionId }: { sessionId: string }) {
-  const { data: messages } = useTranscript(sessionId);
+  const { data: transcriptResp } = useQuery(getTranscript, { sessionId });
+  const messages = transcriptResp?.messages;
   const { data: evaluation } = useEvaluation(sessionId);
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");

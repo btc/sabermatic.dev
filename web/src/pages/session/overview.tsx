@@ -1,5 +1,8 @@
 import { useParams, Link, Navigate } from "react-router-dom";
-import { useSession, useEvaluation, useRetryEvaluation } from "@/api/queries";
+import { useQuery } from "@connectrpc/connect-query";
+import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import { useEvaluation, useRetryEvaluation } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -126,7 +129,8 @@ export default function Overview() {
 }
 
 function OverviewInner({ sessionId }: { sessionId: string }) {
-  const { data: session } = useSession(sessionId);
+  const { data: sessionResp } = useQuery(getSession, { id: sessionId });
+  const session = sessionResp?.session;
   const { data: evaluation } = useEvaluation(sessionId);
   const retryEvaluation = useRetryEvaluation(sessionId);
 
@@ -146,7 +150,7 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
   }
 
   // Evaluation failed state
-  if (session.status === "evaluation_failed") {
+  if (session.status === SessionStatus.EVALUATION_FAILED) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
         <p className="text-sm text-muted-foreground">Evaluation could not be completed.</p>
@@ -162,7 +166,7 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
   }
 
   // Not yet reviewed — nothing to show in this tab
-  if (session.status !== "reviewed") {
+  if (session.status !== SessionStatus.REVIEWED) {
     return null;
   }
 
