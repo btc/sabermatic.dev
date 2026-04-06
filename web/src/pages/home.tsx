@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import { scoreColor } from "@/lib/score-utils";
 
 // DB constraint enforces difficulty IN ('medium', 'hard'), so UNSPECIFIED
 // should never appear in ListQuestions responses. Defaults are defensive.
@@ -65,12 +66,6 @@ function allTags(questions: ProtoQuestion[]): string[] {
   return Array.from(set).sort();
 }
 
-function scoreColor(score: number): string {
-  if (score >= 4) return "hsl(142 71% 45%)";
-  if (score >= 3) return "hsl(48 96% 53%)";
-  if (score >= 2) return "hsl(25 95% 53%)";
-  return "hsl(0 84% 60%)";
-}
 
 function ScoreSparkline({ sessions }: { sessions: SessionSummary[] }) {
   const points = useMemo(() => {
