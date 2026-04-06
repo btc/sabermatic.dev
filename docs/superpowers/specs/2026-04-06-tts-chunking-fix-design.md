@@ -55,16 +55,20 @@ a.seq++
 - **Client `AudioPlayer`**: No changes. Each chunk is now a valid MP3 file that `decodeAudioData` handles correctly.
 - **`Synthesizer` interface**: Unchanged.
 - **Sentence boundary detection**: Unchanged.
-- **Cancellation**: Context cancellation still works between sentences.
+- **Cancellation**: Context cancellation still works between sentences. Note: mid-sentence cancellation during `io.ReadAll` relies on Go's `http.Transport` propagating context cancellation to the response body, which closes the underlying connection. This is standard Go behavior — the current code has finer-grained cancellation (between 4KB reads via `select` on `a.ctx.Done()`), but in practice the HTTP transport tears down the body promptly.
+- **Sentence boundary detection**: Unchanged. Known limitation: if the LLM produces a long passage without `. `/`? `/`! ` boundaries, the entire passage becomes one sentence. This is pre-existing but slightly more latency-sensitive with buffering since the full MP3 must complete before playback starts.
 
 ### Behavioral Differences
 
 - Fewer, larger `tts_chunk` messages (one per sentence instead of many per sentence).
-- ~0.5-1s added latency on the first sentence (time for full sentence TTS to complete). Pipeline self-hides after that: sentence N plays while sentence N+1 synthesizes.
-- Memory: each sentence's MP3 held briefly (~30-100KB). Negligible.
+- ~200-500ms added latency on the first sentence (time for OpenAI to stream the full sentence response). Pipeline self-hides after that: sentence N plays while sentence N+1 synthesizes.
+- Memory: each sentence's MP3 held briefly (~30-100KB raw, ~40-133KB on the wire after base64 encoding). Well within the 10MB WebSocket read limit.
 
 ## Testing
 
-- Existing `observer_test.go` covers `tts_chunk`/`tts_done` flow.
-- Verify chunk count matches sentence count (not fragment count).
+Use red-green TDD: write failing tests first, then implement the fix.
+
+- **Tighten existing assertion**: Change `assert.GreaterOrEqual(t, chunks, 2)` to `assert.Equal(t, 2, chunks)` — this makes the test a precise regression guard for the one-chunk-per-sentence invariant.
+- **Use realistic payload size**: The current `fakeSynth` returns 16 bytes (`"fake-audio-bytes"`), which fits in a single 4KB read even before the fix. Use a payload larger than 4096 bytes (e.g., `bytes.Repeat([]byte("x"), 8192)`) so the test actually differentiates pre-fix (multiple chunks per sentence) from post-fix (one chunk per sentence) behavior.
+- **Verify round-trip integrity**: Decode the base64 `data` field from each `tts_chunk` message and compare to the `fakeSynth` payload to confirm the complete MP3 is sent.
 - Manual verification: play an interview, confirm smooth continuous audio.
