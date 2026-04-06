@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/btc/drill/internal/drilotel"
 )
@@ -28,7 +28,7 @@ func setupGlobalTracer(t *testing.T) *tracetest.InMemoryExporter {
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() {
 		tp.Shutdown(context.Background()) //nolint:errcheck // test cleanup
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+		otel.SetTracerProvider(noop.NewTracerProvider())
 	})
 	return exp
 }
