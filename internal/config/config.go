@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sethvargo/go-envconfig"
 	stripe "github.com/stripe/stripe-go/v82"
 )
@@ -43,31 +41,6 @@ type Database struct {
 	// Postgres default of 100 max_connections. Each active session holds a
 	// dedicated connection for its advisory lock, so this caps concurrent sessions.
 	MaxPoolConns int32 `env:"DATABASE_MAX_POOL_SIZE,default=80"`
-}
-
-// NewPool creates a pgxpool connected to the configured database.
-// Pass a pgx.QueryTracer to instrument queries (e.g. otelpgx.NewTracer()), or nil for none.
-func (d *Database) NewPool(ctx context.Context, tracer pgx.QueryTracer) (*pgxpool.Pool, error) {
-	poolCfg, err := pgxpool.ParseConfig(d.URL)
-	if err != nil {
-		return nil, fmt.Errorf("parse database url: %w", err)
-	}
-	poolCfg.MaxConns = d.MaxPoolConns
-	if tracer != nil {
-		poolCfg.ConnConfig.Tracer = tracer
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-	if err != nil {
-		return nil, fmt.Errorf("create pool: %w", err)
-	}
-
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
-	}
-
-	return pool, nil
 }
 
 type LLM struct {
