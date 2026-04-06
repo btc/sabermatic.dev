@@ -282,3 +282,50 @@ func TestOAuthLogin_EmailNormalization(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "user@example.com", user.Email)
 }
+
+func TestOAuthLogin_SoftDeletedUser_ReactivatedViaEmailMatch(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	queries := db.New(b.Pool())
+
+	// Create user via Signup (password-based, no OAuth link).
+	signupRes := signupUser(t, b, "reactivate-email@example.com", "strongpass1", "Reactivate")
+
+	// Soft-delete the user.
+	err := queries.SoftDeleteUser(ctx, signupRes.UserID)
+	require.NoError(t, err)
+
+	// Verify user is soft-deleted.
+	user, err := queries.GetUserByIDIncludingDeleted(ctx, signupRes.UserID)
+	require.NoError(t, err)
+	require.True(t, user.DeletedAt.Valid)
+
+	// OAuthLogin with matching email but new provider+provider_id.
+	// This exercises path (B) → pathReactivated: no OAuth link exists,
+	// but the email matches a soft-deleted user.
+	res, err := b.OAuthLogin(ctx, backend.OAuthLoginParams{
+		Provider:    "google",
+		ProviderID:  "google-reactivate-email-555",
+		Email:       "reactivate-email@example.com",
+		DisplayName: "Reactivate",
+		IP:          "10.0.0.1:9999",
+		UserAgent:   "test-agent",
+	})
+	require.NoError(t, err)
+	require.Equal(t, signupRes.UserID, res.UserID, "should reuse the same user")
+	require.NotEmpty(t, res.Token)
+
+	// Verify user is no longer soft-deleted.
+	user, err = queries.GetUserByIDIncludingDeleted(ctx, signupRes.UserID)
+	require.NoError(t, err)
+	require.False(t, user.DeletedAt.Valid)
+	require.True(t, user.EmailVerified)
+
+	// Verify OAuth account was linked.
+	oauthAccts, err := queries.GetOAuthAccountsByUser(ctx, signupRes.UserID)
+	require.NoError(t, err)
+	require.Len(t, oauthAccts, 1)
+	require.Equal(t, "google", oauthAccts[0].Provider)
+	require.Equal(t, "google-reactivate-email-555", oauthAccts[0].ProviderID)
+}
