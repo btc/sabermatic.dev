@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -29,7 +30,12 @@ type PG struct {
 }
 
 // SharedPostgres starts a single Postgres 16 container and returns a PG
-// factory. Call Cleanup in TestMain after m.Run().
+// factory. Call pg.RunTests(m) in TestMain to run tests, clean up, and exit.
+//
+//	func TestMain(m *testing.M) {
+//	    pg = testutil.SharedPostgres()
+//	    pg.RunTests(m)
+//	}
 func SharedPostgres() PG {
 	ctx := context.Background()
 
@@ -57,7 +63,14 @@ func SharedPostgres() PG {
 	return PG{connStr: connStr, container: container}
 }
 
-// Cleanup terminates the shared container. Call in TestMain after m.Run().
+// RunTests runs the test suite, cleans up the container, and exits.
+func (pg PG) RunTests(m *testing.M) {
+	code := m.Run()
+	pg.Cleanup()
+	os.Exit(code)
+}
+
+// Cleanup terminates the shared container.
 func (pg PG) Cleanup() {
 	if pg.container != nil {
 		pg.container.Terminate(context.Background())
