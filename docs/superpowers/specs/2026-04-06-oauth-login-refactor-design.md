@@ -8,26 +8,30 @@
 
 2. **Retry-as-concurrency-control.** Recursive calls to `oauthLoginWithRetry` / `OAuthLogin` on duplicate-key errors. Correct only if the retry lands on an earlier step — nothing enforces that structurally.
 
-3. **Session creation divergence.** `Login` creates an auth session inline without a transaction. `OAuthLogin` creates one via `createSessionInTx` inside a transaction. Same operation, different code paths, subtly different transactional guarantees.
+3. **Session creation divergence.** `Login` creates an auth session inline without a transaction. `OAuthLogin` creates one via `createAuthSessionInTx` inside a transaction. Same operation, different code paths, subtly different transactional guarantees.
 
 ## Design
 
-### Shared session creation
+### Shared auth session creation
 
-Extract a `createSession` method on `Backend` that takes `db.DBTX`:
+Extract a `createAuthSession` method on `Backend` that takes `db.DBTX`. Named `createAuthSession` (not `createAuthSession`) to distinguish from drill interview sessions.
 
 ```go
-type CreateSessionParams struct {
+type AuthSessionParams struct {
     UserID    uuid.UUID
     IP        string
     UserAgent string
 }
 
-type CreateSessionResult struct {
+type AuthSessionResult struct {
     Token string
 }
 
-func (b *Backend) createSession(ctx context.Context, dbtx db.DBTX, p CreateSessionParams) (*CreateSessionResult, error)
+func (b *Backend) createAuthSession(ctx context.Context, dbtx db.DBTX, p AuthSessionParams) (_ *AuthSessionResult, err error) {
+    ctx, span := tracer.Start(ctx, "Backend.createAuthSession")
+    defer func() { drilotel.End(span, err) }()
+    // ...
+}
 ```
 
 - Generates token via `auth.GenerateSessionToken()`
@@ -35,9 +39,9 @@ func (b *Backend) createSession(ctx context.Context, dbtx db.DBTX, p CreateSessi
 - Calls `db.New(dbtx).CreateAuthSession()`
 - Uses `b.cfg.Auth.SessionTTL` for expiry
 
-`Login` calls `b.createSession(ctx, b.pool, ...)`. `OAuthLogin` calls `b.createSession(ctx, tx, ...)`. One path.
+`Login` calls `b.createAuthSession(ctx, b.pool, ...)`. `OAuthLogin` calls `b.createAuthSession(ctx, tx, ...)`. One path.
 
-Delete `createSessionInTx` and the inline session logic in `Login`.
+Delete `createAuthSessionInTx` and the inline session logic in `Login`.
 
 ### New SQL queries
 
@@ -81,7 +85,10 @@ Existing queries (`GetOAuthAccount`, `ReactivateUser`, `VerifyUserEmail`, `GetUs
 One function, one transaction, no retry loop. Three sections: **resolve user**, **apply side effects**, **create session**. A local `path` variable connects resolution to side effects.
 
 ```go
-func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLoginResult, error) {
+func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthLoginResult, err error) {
+    ctx, span := tracer.Start(ctx, "Backend.OAuthLogin")
+    defer func() { drilotel.End(span, err) }()
+
     const (
         pathExistingOAuth  = "existing_oauth"
         pathLinkedExisting = "linked_existing"
@@ -100,7 +107,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 
     // --- Resolve user ---
 
-    // Known OAuth account?
+    // (A) Known OAuth account: provider+provider_id already linked to a user.
     oauthAcct, err := q.GetOAuthAccount(ctx, ...)
     if err == nil {
         user, err = q.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
@@ -112,7 +119,8 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
         }
     }
 
-    // Known email? Lock the row.
+    // (B) No OAuth link. Existing user with this email? FOR UPDATE prevents
+    //     concurrent logins for the same email from racing.
     if path == "" {
         user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
         if err == nil {
@@ -124,15 +132,17 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
         }
     }
 
-    // New user.
+    // (C) No OAuth link, no existing user. Create one.
+    //     ON CONFLICT DO NOTHING handles the rare case where another tx
+    //     inserted the same email between (B) and here.
     if path == "" {
         user, err = q.CreateOAuthUserOrNoop(ctx, ...)
         if err == nil {
             path = pathNewUser
         } else if errors.Is(err, pgx.ErrNoRows) {
-            // Lost insert race — other tx created this email.
+            // Lost insert race — re-select the row the other tx created.
             user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
-            // ... if ErrNoRows, return error (other tx rolled back)
+            // ... if ErrNoRows (other tx rolled back), return error.
             if user.DeletedAt.Valid {
                 path = pathReactivated
             } else {
@@ -146,15 +156,15 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
     case pathNewUser:
         // Provision free grant, link OAuth account.
     case pathReactivated:
-        // Reactivate user, link OAuth account.
+        // Clear deleted_at, link OAuth account.
     case pathLinkedExisting:
-        // Verify email if needed, link OAuth account.
+        // Verify email if unverified, link OAuth account.
     case pathExistingOAuth:
         // Nothing — user and link already exist.
     }
 
-    // --- Session (shared with Login) ---
-    sess, err := b.createSession(ctx, tx, CreateSessionParams{...})
+    // --- Auth session (shared with Login) ---
+    sess, err := b.createAuthSession(ctx, tx, AuthSessionParams{...})
 
     tx.Commit(ctx)
     // return result
@@ -165,9 +175,9 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 
 Each check runs only if the previous one didn't match (`path == ""`):
 
-- **Known OAuth account** — `GetOAuthAccount(provider, provider_id)`. If found, load user by ID. If soft-deleted, `pathReactivated`. Otherwise `pathExistingOAuth`.
-- **Known email** — `GetUserByEmailForUpdate(email)`. If found and soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents races with concurrent logins for the same email.
-- **New user** — `CreateOAuthUserOrNoop(email, display_name)`. If row returned, `pathNewUser`. If no row (lost insert race), `GetUserByEmailForUpdate` again to pick up the row the other tx created. If `ErrNoRows` (other tx rolled back), return error — caller can retry at HTTP level.
+- **(A) Known OAuth account** — `GetOAuthAccount(provider, provider_id)`. If found, load user by ID. If soft-deleted, `pathReactivated`. Otherwise `pathExistingOAuth`.
+- **(B) No OAuth link, existing email** — `GetUserByEmailForUpdate(email)`. If found and soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents concurrent logins for the same email from racing.
+- **(C) No OAuth link, no existing user** — `CreateOAuthUserOrNoop(email, display_name)`. If row returned, `pathNewUser`. If no row (lost insert race), `GetUserByEmailForUpdate` again to pick up the row the other tx created. If `ErrNoRows` (other tx rolled back), return error — caller can retry at HTTP level.
 
 #### Side effects per path
 
@@ -186,8 +196,10 @@ Replace inline session creation with shared helper:
 
 ```go
 // In Login, after password verification:
-sess, err := b.createSession(ctx, b.pool, CreateSessionParams{
-    UserID: user.ID, IP: p.IP, UserAgent: p.UserAgent,
+sess, err := b.createAuthSession(ctx, b.pool, AuthSessionParams{
+    UserID:    user.ID,
+    IP:        p.IP,
+    UserAgent: p.UserAgent,
 })
 ```
 
@@ -196,8 +208,8 @@ sess, err := b.createSession(ctx, b.pool, CreateSessionParams{
 ## What gets deleted
 
 1. `oauthLoginWithRetry` — replaced by inline `FOR UPDATE` + `ON CONFLICT DO NOTHING` flow.
-2. `createSessionInTx` — replaced by shared `createSession`.
-3. Inline session creation in `Login` — replaced by `b.createSession(ctx, b.pool, ...)`.
+2. `createAuthSessionInTx` — replaced by shared `createAuthSession`.
+3. Inline session creation in `Login` — replaced by `b.createAuthSession(ctx, b.pool, ...)`.
 4. `isDuplicateKeyError` calls in `oauth.go` — no longer needed there. Stays in `auth.go` for `Signup`.
 
 ## What doesn't change
@@ -225,7 +237,7 @@ func TestOAuthLogin_SoftDeletedUser_ReactivatedViaEmailMatch(t *testing.T) {
 
 After this refactor, the following hold structurally:
 
-- **Session creation is one path.** `createSession` is the only way to create an auth session. Both `Login` and `OAuthLogin` use it.
+- **Session creation is one path.** `createAuthSession` is the only way to create an auth session. Both `Login` and `OAuthLogin` use it.
 - **No retry loops.** `FOR UPDATE` serializes concurrent access to existing users. `ON CONFLICT DO NOTHING` + re-select handles new-user races without recursion.
 - **Resolution and mutation are separated by structure, not by function.** The top half of `OAuthLogin` sets `path` and `user`; the bottom half switches on `path` to apply side effects. One function, clearly sectioned.
 - **Every path's side effects are explicit.** A switch statement with four cases, each listing exactly what it does.
