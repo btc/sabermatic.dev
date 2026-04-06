@@ -79,7 +79,7 @@ type Conductor struct {
 	ttsEnabled    bool
 	duration      time.Duration
 	model         string
-	status        string // DB session status (active, completed, cancelled, etc.)
+	status        string // DB session status; used to skip recovery for completed/cancelled sessions
 
 	// The client's session_init message (contains LastSeq for reconnect detection).
 	initMsg WSMessage
@@ -771,6 +771,7 @@ func (c *Conductor) isReconnect() bool {
 // needsInterviewerRecovery returns true when the last persisted message is
 // from the candidate and the session is still active — meaning the
 // interviewer's response was lost (crash, disconnect during streaming).
+// Fires for both reconnects (last_seq present) and page refreshes (last_seq nil).
 func (c *Conductor) needsInterviewerRecovery() bool {
 	if len(c.messages) == 0 || c.status != "active" {
 		return false
