@@ -70,8 +70,8 @@ func (s *Server) GetUsage(
 // so proto encoding always emits [] rather than null.
 func usageSummaryToProto(s *backend.UsageSummary) *drillv1.GetUsageResponse {
 	grants := make([]*drillv1.Grant, len(s.Grants))
-	for i, g := range s.Grants {
-		grants[i] = grantToProto(g)
+	for i := range s.Grants {
+		grants[i] = grantToProto(&s.Grants[i])
 	}
 
 	entries := make([]*drillv1.LedgerEntry, len(s.RecentActivity))
@@ -194,7 +194,7 @@ func planToProto(s string) drillv1.UserPlan {
 	}
 }
 
-func grantToProto(g db.ListActiveGrantsRow) *drillv1.Grant {
+func grantToProto(g *db.ListActiveGrantsRow) *drillv1.Grant {
 	grant := &drillv1.Grant{
 		Id:               g.ID.String(),
 		Source:           g.Source,

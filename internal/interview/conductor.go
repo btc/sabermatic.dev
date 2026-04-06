@@ -208,7 +208,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 			switch msg.Type {
 			case "end_turn":
-				if err := c.endTurn(workCtx, msg); err != nil {
+				if err := c.endTurn(workCtx, &msg); err != nil {
 					slog.Error("conductor: end_turn", "error", err, "session_id", c.sessionID)
 					c.sm.ForceState(StateWaitingForInput)
 					c.send(workCtx, msgError("turn_failed", "failed to process turn, please try again"))
@@ -318,7 +318,7 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 }
 
 // endTurn processes a candidate's turn (text or voice).
-func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
+func (c *Conductor) endTurn(ctx context.Context, msg *WSMessage) (err error) {
 	// Extract client trace context so the server span becomes a child of the
 	// browser's turn.submit span, producing one end-to-end flame graph per turn.
 	ctx = drilotel.ExtractTraceparent(ctx, msg.Traceparent())

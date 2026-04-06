@@ -160,12 +160,12 @@ func (b *PromptBuilder) WithCoachBriefing(ca *db.CoachAnalysis) *PromptBuilder {
 // and appends it to the message list. Role "interviewer" maps to "assistant";
 // role "candidate" maps to "user".
 func (b *PromptBuilder) WithTranscript(msgs []db.Message) *PromptBuilder {
-	for _, m := range msgs {
-		switch m.Role {
+	for i := range msgs {
+		switch msgs[i].Role {
 		case "interviewer":
-			b.msgs = append(b.msgs, anthropic.NewAssistantMessage(anthropic.NewTextBlock(m.Content)))
+			b.msgs = append(b.msgs, anthropic.NewAssistantMessage(anthropic.NewTextBlock(msgs[i].Content)))
 		case "candidate":
-			b.msgs = append(b.msgs, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
+			b.msgs = append(b.msgs, anthropic.NewUserMessage(anthropic.NewTextBlock(msgs[i].Content)))
 		}
 	}
 	return b

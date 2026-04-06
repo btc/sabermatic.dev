@@ -31,9 +31,9 @@ func msgSessionLoaded(sessionID uuid.UUID, question *db.Question, durationMin in
 // msgReconnectState builds the reconnect_state event with missed messages.
 func msgReconnectState(lastSeq int, messages []db.Message) map[string]any {
 	var missed []db.Message
-	for _, m := range messages {
-		if int(m.Seq) > lastSeq {
-			missed = append(missed, m)
+	for i := range messages {
+		if int(messages[i].Seq) > lastSeq {
+			missed = append(missed, messages[i])
 		}
 	}
 	return map[string]any{

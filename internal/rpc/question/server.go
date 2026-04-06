@@ -89,8 +89,8 @@ func (s *Server) ListQuestions(
 	page := rows[start:end]
 
 	questions := make([]*drillv1.Question, len(page))
-	for i, row := range page {
-		questions[i] = questionToProto(row)
+	for i := range page {
+		questions[i] = questionToProto(&page[i])
 	}
 
 	var nextPageToken string
@@ -105,7 +105,7 @@ func (s *Server) ListQuestions(
 }
 
 // questionToProto converts a database row to a proto Question message.
-func questionToProto(row db.ListQuestionsForUserRow) *drillv1.Question {
+func questionToProto(row *db.ListQuestionsForUserRow) *drillv1.Question {
 	tags := row.Tags
 	if tags == nil {
 		tags = []string{}

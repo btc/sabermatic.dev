@@ -21,7 +21,7 @@ import (
 // setupGothForTest registers the faux provider and overrides CompleteUserAuth
 // to return the given goth.User. Restores original state on cleanup.
 // Tests using this MUST NOT use t.Parallel() (gothic uses global state).
-func setupGothForTest(t *testing.T, user goth.User) {
+func setupGothForTest(t *testing.T, user *goth.User) {
 	t.Helper()
 
 	// Save originals.
@@ -34,7 +34,7 @@ func setupGothForTest(t *testing.T, user goth.User) {
 
 	// Override CompleteUserAuth to skip the real OAuth dance.
 	gothic.CompleteUserAuth = func(w http.ResponseWriter, r *http.Request) (goth.User, error) {
-		return user, nil
+		return *user, nil
 	}
 
 	t.Cleanup(func() {
@@ -79,7 +79,7 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	mux := http.NewServeMux()
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
-	setupGothForTest(t, goth.User{
+	setupGothForTest(t, &goth.User{
 		Provider: "faux",
 		UserID:   "oauth-user-123",
 		Email:    "oauth-new@example.com",
@@ -123,7 +123,7 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 		Email:    "oauth-existing@example.com",
 		Name:     "Existing OAuth",
 	}
-	setupGothForTest(t, oauthUser)
+	setupGothForTest(t, &oauthUser)
 
 	// First login — creates user.
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
@@ -161,7 +161,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	// GitHub sometimes has empty Name but non-empty NickName.
-	setupGothForTest(t, goth.User{
+	setupGothForTest(t, &goth.User{
 		Provider: "faux",
 		UserID:   "github-nick-789",
 		Email:    "nick@example.com",
