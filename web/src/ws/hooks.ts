@@ -40,6 +40,7 @@ export function useInterview(sessionId: string) {
   const rawMessageHandlerRef = useRef<((msg: ServerMessage) => void) | null>(null);
   // Active turn span — open from send to interviewer_done.
   const turnSpanRef = useRef<Span | null>(null);
+  const wasReconnectedRef = useRef(false);
 
   const handleMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
@@ -69,6 +70,7 @@ export function useInterview(sessionId: string) {
           })),
         );
         setState("waiting");
+        wasReconnectedRef.current = true;
         break;
       }
 
@@ -198,6 +200,7 @@ export function useInterview(sessionId: string) {
     connectionState,
     sessionInfo,
     lastError,
+    wasReconnected: wasReconnectedRef.current,
     sendText,
     sendAudio,
     endSession,
