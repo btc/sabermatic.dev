@@ -16,12 +16,10 @@ import (
 )
 
 func TestErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
@@ -54,12 +52,10 @@ func TestErrorHandler_FinalAttemptSetsEvaluationFailed(t *testing.T) {
 }
 
 func TestErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
@@ -92,12 +88,10 @@ func TestErrorHandler_NonFinalAttemptIsNoOp(t *testing.T) {
 }
 
 func TestErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
@@ -130,12 +124,10 @@ func TestErrorHandler_NonEvaluateSessionKindIsNoOp(t *testing.T) {
 }
 
 func TestErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
@@ -166,12 +158,10 @@ func TestErrorHandler_HandlePanic_FinalAttempt(t *testing.T) {
 }
 
 func TestErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
@@ -202,12 +192,10 @@ func TestErrorHandler_HandlePanic_NonFinalAttempt(t *testing.T) {
 }
 
 func TestErrorHandler_InvalidEncodedArgs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
@@ -237,12 +225,10 @@ func TestErrorHandler_InvalidEncodedArgs(t *testing.T) {
 }
 
 func TestErrorHandler_NonExistentSession(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	// Use a random session ID that doesn't exist in DB.
 	fakeSessionID := uuid.New()

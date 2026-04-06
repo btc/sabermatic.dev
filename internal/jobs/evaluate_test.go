@@ -6,14 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,9 +15,6 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/config"
@@ -33,47 +24,13 @@ import (
 
 // ---------------- test helpers ----------------
 
-// startTestPostgres starts a Postgres 16 container, runs app migrations, and
-// returns a connected pool. Container and pool are cleaned up on test end.
-func startTestPostgres(t *testing.T) *pgxpool.Pool {
+// newTestPool creates a database on the shared container, connects a pool,
+// and runs River migrations. Returns the pool for direct use by job tests.
+func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	connStr := pg.NewDatabase(t) // app migrations already run by NewDatabase
 
 	ctx := context.Background()
-
-	pgContainer, err := postgres.Run(ctx,
-		"postgres:16-alpine",
-		postgres.WithDatabase("drill_test"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { pgContainer.Terminate(ctx) })
-
-	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	// Run app migrations.
-	d, err := iofs.New(os.DirFS("../../sql/migrations"), ".")
-	require.NoError(t, err)
-
-	trimmed := strings.TrimPrefix(connStr, "postgresql://")
-	trimmed = strings.TrimPrefix(trimmed, "postgres://")
-	pgxURL := "pgx5://" + trimmed
-	m, err := migrate.NewWithSourceInstance("iofs", d, pgxURL)
-	require.NoError(t, err)
-	err = m.Up()
-	if err != nil && err != migrate.ErrNoChange {
-		t.Fatalf("migrate up: %v", err)
-	}
-
 	pool, err := pgxpool.New(ctx, connStr)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
@@ -228,12 +185,10 @@ func newEvalWorker(t *testing.T, pool *pgxpool.Pool, srvURL string) *jobs.Evalua
 // ---------------- tests ----------------
 
 func TestEvaluateSessionWorker_HappyPath(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 	srv := newFakeEvalServer(t)
 	t.Cleanup(srv.Close)
 
@@ -298,12 +253,10 @@ func TestEvaluateSessionWorker_HappyPath(t *testing.T) {
 }
 
 func TestEvaluateSessionWorker_Idempotent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 	srv := newFakeEvalServer(t)
 	t.Cleanup(srv.Close)
 
@@ -344,12 +297,10 @@ func TestEvaluateSessionWorker_Idempotent(t *testing.T) {
 }
 
 func TestEvaluateSessionWorker_EmptyTranscript(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 	srv := newFakeEvalServer(t)
 	t.Cleanup(srv.Close)
 

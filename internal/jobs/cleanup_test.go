@@ -17,12 +17,10 @@ import (
 )
 
 func TestCleanupAbandonedSessions_CancelsEmptySessions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	// Seed a session with 0 candidate messages.
 	seed := seedSessionWithMessages(t, ctx, pool, 0)
@@ -97,12 +95,10 @@ func TestCleanupAbandonedSessions_CancelsEmptySessions(t *testing.T) {
 }
 
 func TestCleanupAbandonedSessions_CompletesSessionsWithMessages(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	// Seed a session with candidate messages (seedSessionWithMessages inserts alternating roles).
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
@@ -177,12 +173,10 @@ func TestCleanupAbandonedSessions_CompletesSessionsWithMessages(t *testing.T) {
 }
 
 func TestCleanupAbandonedSessions_RecentSessionNotAffected(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
 	ctx := context.Background()
-	pool := startTestPostgres(t)
+	pool := newTestPool(t)
 
 	seed := seedSessionWithMessages(t, ctx, pool, 2)
 
