@@ -6,6 +6,8 @@ export function useAudioRecorder() {
   const recorderRef = useRef<AudioRecorder | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [segmentCount, setSegmentCount] = useState(0);
+  const [pendingDuration, setPendingDuration] = useState(0);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
   useEffect(() => {
     recorderRef.current = new AudioRecorder();
@@ -15,26 +17,32 @@ export function useAudioRecorder() {
   const start = useCallback(async () => {
     await recorderRef.current?.start();
     setIsRecording(true);
-  }, []);
+    if (!analyserNode && recorderRef.current?.analyserNode) {
+      setAnalyserNode(recorderRef.current.analyserNode);
+    }
+  }, [analyserNode]);
 
   const stop = useCallback(async () => {
     await recorderRef.current?.stop();
     setIsRecording(false);
     setSegmentCount(recorderRef.current?.segmentCount ?? 0);
+    setPendingDuration(recorderRef.current?.totalDuration ?? 0);
   }, []);
 
   const submit = useCallback(async () => {
     const data = await recorderRef.current?.submit();
     setSegmentCount(0);
+    setPendingDuration(0);
     return data ?? "";
   }, []);
 
   const discard = useCallback(() => {
     recorderRef.current?.discard();
     setSegmentCount(0);
+    setPendingDuration(0);
   }, []);
 
-  return { isRecording, segmentCount, start, stop, submit, discard };
+  return { isRecording, segmentCount, pendingDuration, analyserNode, start, stop, submit, discard };
 }
 
 export function useAudioPlayer() {
