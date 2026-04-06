@@ -5,7 +5,8 @@ import { useQuery, useMutation } from "@connectrpc/connect-query";
 import { getMe, getUsage, updateProfile, exportData } from "@/pb/drill/v1/user-UserService_connectquery";
 import { checkout as checkoutMethod, portal as portalMethod } from "@/pb/drill/v1/billing-BillingService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
-import type { CheckoutRequest as CheckoutRequestProto } from "@/pb/drill/v1/billing_pb";
+import { CheckoutRequestSchema } from "@/pb/drill/v1/billing_pb";
+import { create } from "@bufbuild/protobuf";
 import {
   useLogout, useDeleteAccount,
 } from "@/api/queries";
@@ -554,12 +555,10 @@ function BillingSettings() {
     if (body.type === "pack") {
       setPendingPack(body.minutes);
     }
-    const req: Partial<CheckoutRequestProto> = { type: body.type };
-    if (body.type === "subscription") {
-      req.plan = body.plan;
-    } else {
-      req.minutes = body.minutes;
-    }
+    const req = create(CheckoutRequestSchema, {
+      type: body.type,
+      ...(body.type === "subscription" ? { plan: body.plan } : { minutes: body.minutes }),
+    });
     checkout.mutate(req, {
       onSuccess: (res) => {
         setPendingPack(null);
