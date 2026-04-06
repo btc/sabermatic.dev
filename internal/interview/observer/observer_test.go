@@ -3,15 +3,17 @@ package observer_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/interview/observer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -144,6 +146,35 @@ func TestWSWriter_IgnoresWriteErrors(t *testing.T) {
 	// Should not panic -- errors are logged and ignored
 }
 
+// --- TTSSink mock ---
+
+type mockTTSSink struct {
+	mu     sync.Mutex
+	audio  [][]byte
+	done   bool
+	errors int
+}
+
+func (m *mockTTSSink) HandleAudio(data []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.audio = append(m.audio, append([]byte(nil), data...))
+}
+
+func (m *mockTTSSink) HandleTTSDone() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.done = true
+}
+
+func (m *mockTTSSink) HandleTTSError() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.errors++
+}
+
+// --- Synth mocks ---
+
 // fakeSynth returns a fixed audio payload immediately.
 type fakeSynth struct {
 	audio []byte
@@ -161,54 +192,172 @@ func (b *blockingSynth) Synthesize(ctx context.Context, _ string) (io.ReadCloser
 	return nil, ctx.Err()
 }
 
-func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
-	ws := &mockWSConn{}
-	synth := &fakeSynth{audio: bytes.Repeat([]byte("x"), 8192)}
-	ctx := context.Background()
+// errorSynth always returns an error.
+type errorSynth struct{}
 
-	acc := observer.NewTTSAccumulator(ctx, ws, synth, uuid.New())
+func (e *errorSynth) Synthesize(_ context.Context, _ string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("synth unavailable")
+}
+
+// blockingReaderSynth returns a reader that blocks on Read until context is cancelled.
+type blockingReaderSynth struct{}
+
+func (b *blockingReaderSynth) Synthesize(ctx context.Context, _ string) (io.ReadCloser, error) {
+	return io.NopCloser(readerFunc(func(p []byte) (int, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	})), nil
+}
+
+type readerFunc func(p []byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
+
+// --- Helper ---
+
+func newTestAccumulator(sink *mockTTSSink, synth ai.Synthesizer) *observer.TTSAccumulator {
+	return observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+		Sink:            sink,
+		Synth:           synth,
+		SentenceTimeout: 500 * time.Millisecond,
+	})
+}
+
+// --- Tests ---
+
+func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
+	sink := &mockTTSSink{}
+	audio := bytes.Repeat([]byte("x"), 8192)
+	acc := newTestAccumulator(sink, &fakeSynth{audio: audio})
+
 	acc.OnToken("Hello there. ")
 	acc.OnToken("How are you? ")
 	acc.OnDone("Hello there. How are you? ")
-	acc.Close() // wait for TTS goroutine
+	acc.Close()
 
-	// Count tts_chunk messages.
-	var chunks int
-	for _, msg := range ws.sent {
-		if bytes.Contains(msg, []byte(`"tts_chunk"`)) {
-			chunks++
-		}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Len(t, sink.audio, 2, "expected one audio per sentence")
+	for _, data := range sink.audio {
+		assert.Equal(t, audio, data, "audio must be raw bytes, not base64")
 	}
-	assert.Equal(t, 2, chunks, "expected exactly one tts_chunk per sentence")
-
-	// Verify each chunk's data round-trips to the original audio.
-	for _, msg := range ws.sent {
-		var m map[string]any
-		require.NoError(t, json.Unmarshal(msg, &m))
-		if m["type"] != "tts_chunk" {
-			continue
-		}
-		b64, ok := m["data"].(string)
-		require.True(t, ok)
-		decoded, err := base64.StdEncoding.DecodeString(b64)
-		require.NoError(t, err)
-		assert.Equal(t, synth.audio, decoded, "tts_chunk data must match full synthesized audio")
-	}
-
-	// Should have tts_done at the end.
-	require.NotEmpty(t, ws.sent)
-	lastMsg := ws.sent[len(ws.sent)-1]
-	assert.Contains(t, string(lastMsg), `"tts_done"`)
+	assert.True(t, sink.done, "HandleTTSDone must be called")
+	assert.Equal(t, 0, sink.errors, "no errors expected")
 }
 
 func TestTTSAccumulator_Interrupt(t *testing.T) {
-	ws := &mockWSConn{}
-	synth := &blockingSynth{}
-	ctx := context.Background()
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &blockingSynth{})
 
-	acc := observer.NewTTSAccumulator(ctx, ws, synth, uuid.New())
 	acc.OnToken("First sentence. Second sentence. ")
 	acc.Interrupt()
 	acc.OnDone("First sentence. Second sentence. ")
-	acc.Close() // should not hang -- interrupt cancels context
+	acc.Close() // must not hang
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.False(t, sink.done, "HandleTTSDone must not be called after interrupt")
+}
+
+func TestTTSAccumulator_SentenceTimeout(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+		Sink:            sink,
+		Synth:           &blockingSynth{},
+		SentenceTimeout: 50 * time.Millisecond,
+	})
+
+	acc.OnToken("Slow sentence. ")
+	acc.OnDone("Slow sentence. ")
+
+	start := time.Now()
+	acc.Close()
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 500*time.Millisecond, "Close must return within timeout, not hang")
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Equal(t, 1, sink.errors, "HandleTTSError must be called on timeout")
+	assert.True(t, sink.done, "HandleTTSDone must still be called after timeout")
+}
+
+func TestTTSAccumulator_BlockingReadAllTimeout(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+		Sink:            sink,
+		Synth:           &blockingReaderSynth{},
+		SentenceTimeout: 50 * time.Millisecond,
+	})
+
+	acc.OnToken("Stuck read. ")
+	acc.OnDone("Stuck read. ")
+
+	start := time.Now()
+	acc.Close()
+	elapsed := time.Since(start)
+
+	assert.Less(t, elapsed, 500*time.Millisecond, "Close must return within timeout, not hang")
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.GreaterOrEqual(t, sink.errors, 1, "HandleTTSError must be called on read timeout")
+}
+
+func TestTTSAccumulator_HandleTTSDoneCalledOnce(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &fakeSynth{audio: []byte("x")})
+
+	acc.OnToken("One. Two. Three. ")
+	acc.OnDone("One. Two. Three. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.True(t, sink.done)
+	assert.Len(t, sink.audio, 3)
+}
+
+func TestTTSAccumulator_HandleTTSDoneNotCalledOnError(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &fakeSynth{audio: []byte("x")})
+
+	acc.OnError(fmt.Errorf("llm failed"))
+	acc.OnDone("partial text")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.False(t, sink.done, "HandleTTSDone must not be called after OnError")
+}
+
+func TestTTSAccumulator_CloseIdempotent(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &fakeSynth{audio: []byte("x")})
+
+	acc.OnDone("")
+	acc.Close()
+	acc.Close() // must not panic
+}
+
+func TestTTSAccumulator_SynthErrorNotifiesUser(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &errorSynth{})
+
+	acc.OnToken("Will fail. ")
+	acc.OnDone("Will fail. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Equal(t, 1, sink.errors, "HandleTTSError must be called on synth error")
+	assert.Len(t, sink.audio, 0, "no audio when synth fails")
+	assert.True(t, sink.done)
+}
+
+func TestTTSAccumulator_OnDoneAfterOnErrorNoPanic(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &fakeSynth{audio: []byte("x")})
+
+	acc.OnError(fmt.Errorf("boom"))
+	acc.OnDone("text")
+	acc.Close() // must not panic from double close(sentCh)
 }
