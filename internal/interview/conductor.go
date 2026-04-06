@@ -676,6 +676,12 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	fullText := accumulator.Text()
 	fanOut.OnDone(fullText)
 
+	// Clean up the fan-out's TTS context in the background.
+	go func() {
+		fanOut.Close()
+		c.obs.Store(observer.Noop)
+	}()
+
 	// Persist interviewer message and LLM call atomically.
 	persistCtx := context.WithoutCancel(ctx)
 	c.sequence++
