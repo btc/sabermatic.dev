@@ -2,10 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import {
   ArrowLeft,
-  Mic,
-  Send,
   Volume2,
-  X,
 } from "lucide-react";
 import { useInterview } from "@/ws/hooks";
 import { useTimer } from "@/hooks/use-timer";
@@ -16,7 +13,7 @@ import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import { ConnectionState } from "@/ws/connection";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { RecordingInput } from "@/components/recording-input";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -137,7 +135,7 @@ function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: Waitin
     }
   }, [sessionResp?.session?.status, sessionId, navigate]);
 
-  const candidateTurns = Math.ceil(messageCount / 2);
+  const candidateTurns = Math.floor(messageCount / 2);
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8 px-4">
@@ -180,6 +178,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     state,
     connectionState,
     sessionInfo,
+    lastError,
     sendText,
     sendAudio,
     endSession,
@@ -206,6 +205,13 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     }
   }, [state, navigate]);
 
+  // Show server errors as toasts
+  useEffect(() => {
+    if (lastError) {
+      toast.error(lastError);
+    }
+  }, [lastError]);
+
   // Local state
   const [textInput, setTextInput] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
@@ -215,7 +221,6 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   // Refs
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // ------ Audio player wiring ------
   useEffect(() => {
@@ -226,7 +231,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
         audioPlayer.done();
       }
     });
-  }, [setRawMessageHandler, audioPlayer, audioPlayer.enqueue, audioPlayer.done]);
+  }, [setRawMessageHandler, audioPlayer]);
 
   // ------ AudioContext init on first interaction ------
   const ensureAudioContext = useCallback(() => {
@@ -235,6 +240,12 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       setAudioContextInitialized(true);
     }
   }, [audioContextInitialized, audioPlayer]);
+
+  // ------ Derived state (hoisted above effects that reference it) ------
+  const isStreaming = state === "streaming";
+  const isProcessing = state === "transcribing" || state === "processing";
+  const isEnded = state === "ended" || state === "cancelled";
+  const inputDisabled = isStreaming || isEnded || connectionState === ConnectionState.Reconnecting;
 
   // ------ Auto-scroll ------
   useEffect(() => {
@@ -247,41 +258,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     audioPlayer.cancel();
   }, [cancelTts, audioPlayer]);
 
-  // ------ Spacebar push-to-talk ------
-  const { isRecording: recIsRecording, start: recStart, stop: recStop } = audioRecorder;
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !inputFocused && !recIsRecording) {
-        e.preventDefault();
-        stopTts();
-        ensureAudioContext();
-        recStart();
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !inputFocused && recIsRecording) {
-        e.preventDefault();
-        recStop();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("keyup", handleKeyUp);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [inputFocused, recIsRecording, recStart, recStop, ensureAudioContext, stopTts]);
-
-  // ------ Escape to blur input ------
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Escape" && inputFocused) {
-        inputRef.current?.blur();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [inputFocused]);
+  // ------ Stable refs from audioRecorder ------
+  const { start: recStart, stop: recStop } = audioRecorder;
 
   // ------ Send handlers ------
   const handleSendText = useCallback(() => {
@@ -294,12 +272,14 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   }, [textInput, sendText, ensureAudioContext, stopTts]);
 
   const handleSendAudio = useCallback(async () => {
+    if (audioRecorder.segmentCount === 0) return;
+    stopTts();
     ensureAudioContext();
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
       sendAudio(audioBase64);
     }
-  }, [audioRecorder, sendAudio, ensureAudioContext]);
+  }, [audioRecorder, sendAudio, ensureAudioContext, stopTts]);
 
   const handleSend = useCallback(() => {
     if (textInput.trim()) {
@@ -309,19 +289,16 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     }
   }, [textInput, audioRecorder.segmentCount, handleSendText, handleSendAudio]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+  // ------ Recording callbacks ------
+  const handleStartRecording = useCallback(async () => {
+    stopTts();
+    ensureAudioContext();
+    await recStart();
+  }, [stopTts, ensureAudioContext, recStart]);
 
-  // ------ Derived state ------
-  const isStreaming = state === "streaming";
-  const isProcessing = state === "transcribing" || state === "processing";
-  const isEnded = state === "ended" || state === "cancelled";
-  const inputDisabled = isStreaming || isEnded;
-  const canSend = (textInput.trim().length > 0 || audioRecorder.segmentCount > 0) && !inputDisabled;
+  const handleStopRecording = useCallback(async () => {
+    await recStop();
+  }, [recStop]);
 
   // ------ Timer color ------
   const timerColor =
@@ -360,23 +337,26 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
           Cancel
         </Button>
 
-        {/* Timer + TTS indicator */}
+        {/* Question title */}
+        <span className="text-sm font-medium truncate max-w-[40%] text-center">
+          {sessionInfo?.question.title}
+        </span>
+
+        {/* Timer + End Session */}
         <div className="flex items-center gap-2">
           {audioPlayer.isPlaying && <TtsIndicator />}
           <span className={cn("text-sm font-mono tabular-nums", timerColor)}>
             {timerDisplay}
           </span>
+          <Button
+            variant="default"
+            size="sm"
+            disabled={isEnded}
+            onClick={() => setEndDialogOpen(true)}
+          >
+            End Session
+          </Button>
         </div>
-
-        {/* End Session */}
-        <Button
-          variant="default"
-          size="sm"
-          disabled={isEnded}
-          onClick={() => setEndDialogOpen(true)}
-        >
-          End Session
-        </Button>
       </header>
 
       {/* ---- Chat area ---- */}
@@ -384,7 +364,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
         className="flex-1 overflow-y-auto"
         onClick={ensureAudioContext}
       >
-        <div className="flex flex-col justify-end min-h-full px-4 py-6 max-w-2xl mx-auto">
+        <div className="flex flex-col justify-center min-h-full px-4 py-6 max-w-2xl mx-auto">
           <div className="space-y-4">
             {messages.map((msg) =>
               msg.role === "interviewer" ? (
@@ -405,69 +385,22 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* ---- Input area ---- */}
-      <div className="border-t border-border p-4 shrink-0">
-        <div className="max-w-2xl mx-auto flex items-center gap-2">
-          {/* Microphone */}
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={inputDisabled}
-            className={cn(
-              audioRecorder.isRecording && "ring-2 ring-red-500 animate-pulse",
-            )}
-            onClick={() => {
-              ensureAudioContext();
-              if (audioRecorder.isRecording) {
-                audioRecorder.stop();
-              } else {
-                stopTts();
-                audioRecorder.start();
-              }
-            }}
-          >
-            <Mic className={cn("size-4", audioRecorder.isRecording && "text-red-500")} />
-          </Button>
-
-          {/* Segment indicator + discard */}
-          {audioRecorder.segmentCount > 0 && !audioRecorder.isRecording && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {audioRecorder.segmentCount} segment{audioRecorder.segmentCount !== 1 ? "s" : ""}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={audioRecorder.discard}
-              >
-                <X className="size-3" />
-              </Button>
-            </div>
-          )}
-
-          {/* Text input */}
-          <Input
-            ref={inputRef}
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
-            placeholder="Type a response..."
-            disabled={inputDisabled}
-            className="flex-1"
-          />
-
-          {/* Send */}
-          <Button
-            variant="default"
-            size="icon"
-            disabled={!canSend}
-            onClick={handleSend}
-          >
-            <Send className="size-4" />
-          </Button>
-        </div>
-      </div>
+      <RecordingInput
+        isRecording={audioRecorder.isRecording}
+        segmentCount={audioRecorder.segmentCount}
+        pendingDuration={audioRecorder.pendingDuration}
+        analyserNode={audioRecorder.analyserNode}
+        textInput={textInput}
+        onTextChange={setTextInput}
+        inputFocused={inputFocused}
+        onFocusChange={setInputFocused}
+        onSend={handleSend}
+        onStartRecording={handleStartRecording}
+        onStopRecording={handleStopRecording}
+        onDiscard={audioRecorder.discard}
+        disabled={inputDisabled}
+        dialogOpen={cancelDialogOpen || endDialogOpen}
+      />
 
       {/* ---- Cancel dialog ---- */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
