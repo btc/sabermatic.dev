@@ -23,6 +23,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
 import { toast } from "sonner";
@@ -89,6 +90,50 @@ function ProcessingIndicator() {
           <span className="text-xs text-muted-foreground">Processing...</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReadyGate({
+  questionTitle,
+  questionPrompt,
+  onReady,
+}: {
+  questionTitle: string;
+  questionPrompt: string;
+  onReady: () => void;
+}) {
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.code === "Enter") {
+        e.preventDefault();
+        onReadyRef.current();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-8 px-4">
+      <div className="flex flex-col items-center gap-3 text-center max-w-md">
+        <h2 className="text-lg font-semibold">{questionTitle}</h2>
+        <p className="text-sm text-muted-foreground leading-relaxed">{questionPrompt}</p>
+      </div>
+      <Button
+        size="lg"
+        className="h-14 px-12 text-lg font-medium"
+        onClick={onReady}
+        autoFocus
+      >
+        Ready
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Press <Kbd>Enter</Kbd> to start
+      </p>
     </div>
   );
 }
@@ -179,6 +224,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     connectionState,
     sessionInfo,
     lastError,
+    wasReconnected,
     sendText,
     sendAudio,
     endSession,
@@ -217,6 +263,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const [inputFocused, setInputFocused] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [endDialogOpen, setEndDialogOpen] = useState(false);
+  const [ready, setReady] = useState(false);
   // Refs
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -231,10 +278,22 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     });
   }, [setRawMessageHandler, audioPlayer]);
 
-  // ------ Init TTS AudioContext on user gesture (idempotent) ------
-  const initTtsContext = useCallback(() => {
-    audioPlayer.initContext();
-  }, [audioPlayer]);
+  // ------ Ready gate ------
+  const handleReady = useCallback(async () => {
+    if (ready) return;
+    await audioPlayer.initContext();
+    navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {
+      toast.error("Microphone access denied — you can still use text input");
+    });
+    setReady(true);
+  }, [audioPlayer, ready]);
+
+  // Auto-skip ready gate on reconnect (page refresh of existing session).
+  useEffect(() => {
+    if (wasReconnected && !ready) {
+      setReady(true);
+    }
+  }, [wasReconnected, ready]);
 
   // ------ Derived state (hoisted above effects that reference it) ------
   const isStreaming = state === "streaming";
@@ -261,20 +320,18 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     const trimmed = textInput.trim();
     if (!trimmed) return;
     stopTts();
-    initTtsContext();
     sendText(trimmed);
     setTextInput("");
-  }, [textInput, sendText, initTtsContext, stopTts]);
+  }, [textInput, sendText, stopTts]);
 
   const handleSendAudio = useCallback(async () => {
     if (audioRecorder.segmentCount === 0) return;
     stopTts();
-    initTtsContext();
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
       sendAudio(audioBase64);
     }
-  }, [audioRecorder, sendAudio, initTtsContext, stopTts]);
+  }, [audioRecorder, sendAudio, stopTts]);
 
   const handleSend = useCallback(() => {
     if (textInput.trim()) {
@@ -287,9 +344,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Recording callbacks ------
   const handleStartRecording = useCallback(async () => {
     stopTts();
-    initTtsContext();
     await recStart();
-  }, [stopTts, initTtsContext, recStart]);
+  }, [stopTts, recStart]);
 
   const handleStopRecording = useCallback(async () => {
     await recStop();
@@ -312,6 +368,28 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
         messageCount={messages.length}
         elapsed={elapsed}
       />
+    );
+  }
+
+  // Loading — WS hasn't delivered session_loaded yet.
+  if (!ready && !sessionInfo) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="size-3 rounded-full bg-primary animate-pulse" />
+      </div>
+    );
+  }
+
+  // Ready gate — show question and wait for user gesture.
+  if (!ready) {
+    return (
+      <div className="flex flex-col h-full">
+        <ReadyGate
+          questionTitle={sessionInfo!.question.title}
+          questionPrompt={sessionInfo!.question.prompt}
+          onReady={handleReady}
+        />
+      </div>
     );
   }
 
@@ -355,10 +433,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       </header>
 
       {/* ---- Chat area ---- */}
-      <div
-        className="flex-1 overflow-y-auto"
-        onClick={initTtsContext}
-      >
+      <div className="flex-1 overflow-y-auto">
         <div className="flex flex-col justify-center min-h-full px-4 py-6 max-w-2xl mx-auto">
           <div className="space-y-4">
             {messages.map((msg) =>
