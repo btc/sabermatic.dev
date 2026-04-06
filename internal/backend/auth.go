@@ -60,6 +60,44 @@ type LoginResult struct {
 	Token  string
 }
 
+// AuthSessionParams holds the parameters for createAuthSession.
+type AuthSessionParams struct {
+	UserID    uuid.UUID
+	IP        string
+	UserAgent string
+}
+
+// AuthSessionResult is returned by createAuthSession on success.
+type AuthSessionResult struct {
+	Token string
+}
+
+// createAuthSession generates a session token, stores the hashed token in the
+// database, and returns the raw token. Works with any db.DBTX (pool or tx).
+// Shared by Login and OAuthLogin.
+func (b *Backend) createAuthSession(ctx context.Context, dbtx db.DBTX, p AuthSessionParams) (_ *AuthSessionResult, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.createAuthSession")
+	defer func() { drilotel.End(span, err) }()
+
+	rawToken, tokenHash, err := auth.GenerateSessionToken()
+	if err != nil {
+		return nil, fmt.Errorf("create auth session: generate token: %w", err)
+	}
+
+	_, err = db.New(dbtx).CreateAuthSession(ctx, db.CreateAuthSessionParams{
+		UserID:    p.UserID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(b.cfg.Auth.SessionTTL),
+		IpAddress: parseClientIP(p.IP),
+		UserAgent: pgtype.Text{String: p.UserAgent, Valid: p.UserAgent != ""},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create auth session: %w", err)
+	}
+
+	return &AuthSessionResult{Token: rawToken}, nil
+}
+
 // Signup creates a new user account, hashes the password, and enqueues a
 // verification email. User creation and email enqueue are atomic: both
 // succeed or both roll back. Returns ErrPasswordLength or ErrDuplicateEmail
@@ -170,30 +208,19 @@ func (b *Backend) Login(ctx context.Context, p LoginParams) (_ *LoginResult, err
 		return nil, ErrInvalidCredentials
 	}
 
-	// Generate session.
-	rawToken, tokenHash, err := auth.GenerateSessionToken()
-	if err != nil {
-		return nil, fmt.Errorf("generate session token: %w", err)
-	}
-
-	// Parse client IP.
-	ipAddr := parseClientIP(p.IP)
-
-	_, err = queries.CreateAuthSession(ctx, db.CreateAuthSessionParams{
+	sess, err := b.createAuthSession(ctx, b.pool, AuthSessionParams{
 		UserID:    user.ID,
-		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(b.cfg.Auth.SessionTTL),
-		IpAddress: ipAddr,
-		UserAgent: pgtype.Text{String: p.UserAgent, Valid: p.UserAgent != ""},
+		IP:        p.IP,
+		UserAgent: p.UserAgent,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create auth session: %w", err)
+		return nil, err
 	}
 
 	return &LoginResult{
 		UserID: user.ID,
 		Email:  user.Email,
-		Token:  rawToken,
+		Token:  sess.Token,
 	}, nil
 }
 
