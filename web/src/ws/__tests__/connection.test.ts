@@ -31,7 +31,7 @@ describe("ConnectionManager", () => {
     const onMessage = vi.fn();
     const onStateChange = vi.fn();
     const cm = new ConnectionManager("session-123", onMessage, onStateChange);
-    cm.connect(null);
+    cm.connect(() => null);
 
     await vi.advanceTimersByTimeAsync(0);
     expect(onStateChange).toHaveBeenCalledWith(ConnectionState.Connected);
@@ -45,7 +45,7 @@ describe("ConnectionManager", () => {
     const onMessage = vi.fn();
     const onStateChange = vi.fn();
     const cm = new ConnectionManager("session-123", onMessage, onStateChange);
-    cm.connect(null);
+    cm.connect(() => null);
     await vi.advanceTimersByTimeAsync(0);
 
     // Simulate unexpected close (code 1006)
@@ -62,7 +62,7 @@ describe("ConnectionManager", () => {
     const onMessage = vi.fn();
     const onStateChange = vi.fn();
     const cm = new ConnectionManager("session-123", onMessage, onStateChange);
-    cm.connect(5);
+    cm.connect(() => 5);
     await vi.advanceTimersByTimeAsync(0);
 
     // Receive reconnect_please
@@ -81,7 +81,7 @@ describe("ConnectionManager", () => {
     const onMessage = vi.fn();
     const onStateChange = vi.fn();
     const cm = new ConnectionManager("session-123", onMessage, onStateChange);
-    cm.connect(null);
+    cm.connect(() => null);
     await vi.advanceTimersByTimeAsync(0);
 
     cm.ws!.onclose?.({ code: 1000 } as CloseEvent);
@@ -96,7 +96,7 @@ describe("ConnectionManager", () => {
     const onMessage = vi.fn();
     const onStateChange = vi.fn();
     const cm = new ConnectionManager("session-123", onMessage, onStateChange);
-    cm.connect(null);
+    cm.connect(() => null);
     await vi.advanceTimersByTimeAsync(0);
 
     cm.destroy();
