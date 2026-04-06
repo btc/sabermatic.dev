@@ -310,21 +310,6 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) (err
 	return nil
 }
 
-// DeleteAccount soft-deletes the user and invalidates all sessions.
-func (b *Backend) DeleteAccount(ctx context.Context, userID uuid.UUID) (err error) {
-	ctx, span := tracer.Start(ctx, "Backend.DeleteAccount")
-	defer func() { drilotel.End(span, err) }()
-
-	queries := db.New(b.pool)
-	if err := queries.SoftDeleteUser(ctx, userID); err != nil {
-		return fmt.Errorf("soft delete user: %w", err)
-	}
-	if err := queries.DeleteUserAuthSessions(ctx, userID); err != nil {
-		return fmt.Errorf("delete user sessions: %w", err)
-	}
-	return nil
-}
-
 // provisionNewUser sets up a newly created user's account within the
 // registration transaction. Currently provisions the one-time free trial grant.
 func (b *Backend) provisionNewUser(ctx context.Context, tx pgx.Tx, userID uuid.UUID) error {

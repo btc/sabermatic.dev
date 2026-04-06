@@ -162,32 +162,11 @@ func (s *Server) ResetPassword(
 	return connect.NewResponse(&drillv1.ResetPasswordResponse{}), nil
 }
 
-// DeleteAccount soft-deletes the authenticated user's account. This is the
-// only method on AuthService that requires authentication; the auth guard is
-// checked inline rather than via the AuthInterceptor (since the service is
-// registered with public opts).
+// DeleteAccount soft-deletes the authenticated user's account.
+// TODO: implement when backend DeleteAccount method is added.
 func (s *Server) DeleteAccount(
 	ctx context.Context,
 	req *connect.Request[drillv1.DeleteAccountRequest],
 ) (*connect.Response[drillv1.DeleteAccountResponse], error) {
-	user := iauth.UserFromContext(ctx)
-	if user == nil {
-		// The service is public, but DeleteAccount needs a session cookie.
-		// Manually authenticate.
-		cookie, err := (&http.Request{Header: req.Header()}).Cookie(iauth.SessionCookieName)
-		if err != nil || cookie.Value == "" {
-			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
-		}
-		tokenHash := iauth.HashSessionToken(cookie.Value)
-		user, err = s.b.AuthenticateSession(ctx, tokenHash)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid or expired session"))
-		}
-	}
-
-	if err := s.b.DeleteAccount(ctx, user.ID); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
-	}
-
-	return connect.NewResponse(&drillv1.DeleteAccountResponse{}), nil
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("DeleteAccount not yet implemented"))
 }
