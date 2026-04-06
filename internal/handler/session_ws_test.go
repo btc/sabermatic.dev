@@ -2081,3 +2081,96 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 	}
 	assert.True(t, candidateFound, "candidate message must be persisted even when end_session cancels the pipeline")
 }
+
+// ---------------------------------------------------------------------------
+// Test: Reconnect re-triggers interviewer response when last message is candidate
+// ---------------------------------------------------------------------------
+
+func TestWS_ReconnectRetriggersInterviewerResponse(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Let's ", "discuss."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	// First connection: complete opening question.
+	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	drainUntilType(t, ws1, "session_loaded")
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	// Send candidate turn and wait for the full pipeline to complete.
+	sendMsg(t, ws1, wsMsg{
+		"type":         "end_turn",
+		"content":      "My approach would be to use consistent hashing.",
+		"input_method": "text",
+	})
+	drainUntilType(t, ws1, "state_change") // processing_input
+	drainUntilType(t, ws1, "state_change") // interviewer_speaking
+	drainUntilDone(t, ws1)
+	drainUntilType(t, ws1, "state_change") // waiting_for_input
+
+	// Disconnect cleanly.
+	ws1.Close(websocket.StatusNormalClosure, "done")
+	time.Sleep(200 * time.Millisecond)
+
+	// Simulate the gap: delete the last interviewer response from DB.
+	// This models a server crash that lost the in-flight interviewer response
+	// (the process died after persisting the candidate message but before
+	// persisting the interviewer response).
+	ctx := context.Background()
+	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	assert.Equal(t, "interviewer", msgs[2].Role)
+	_, err = pool.Exec(ctx, `DELETE FROM messages WHERE id = $1`, msgs[2].ID)
+	require.NoError(t, err)
+
+	// Verify DB: now 2 messages (opening + candidate).
+	msgs, err = db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 2, "should have opening + candidate after simulated crash")
+	assert.Equal(t, "interviewer", msgs[0].Role)
+	assert.Equal(t, "candidate", msgs[1].Role)
+
+	lastSeq := int(msgs[len(msgs)-1].Seq)
+
+	// Reconnect as ws2 with lastSeq set to the last persisted seq.
+	ws2 := wsConnect(t, srv.URL, session.ID, cookie, &lastSeq)
+	defer ws2.CloseNow()
+
+	// Expect reconnect_state first.
+	reconnectMsg := readMsg(t, ws2)
+	assert.Equal(t, "reconnect_state", reconnectMsg["type"])
+
+	// Then expect state_change to interviewer_speaking (the re-triggered response).
+	retriggerIS, _ := drainUntilType(t, ws2, "state_change")
+	assert.Equal(t, "interviewer_speaking", retriggerIS["state"])
+
+	// Drain the full response.
+	responseText, _ := drainUntilDone(t, ws2)
+	assert.Equal(t, "Let's discuss.", responseText)
+
+	// Expect state_change to waiting_for_input.
+	stateWait, _ := drainUntilType(t, ws2, "state_change")
+	assert.Equal(t, "waiting_for_input", stateWait["state"])
+
+	// Verify DB: now 3 messages (opening + candidate + re-triggered response).
+	msgs, err = db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3, "should have opening + candidate + re-triggered interviewer response")
+	assert.Equal(t, "interviewer", msgs[0].Role)
+	assert.Equal(t, "candidate", msgs[1].Role)
+	assert.Equal(t, "interviewer", msgs[2].Role)
+}
