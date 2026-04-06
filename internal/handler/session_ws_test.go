@@ -291,7 +291,7 @@ func TestWS_HappyPath_Text(t *testing.T) {
 
 	// Connect and receive session_loaded.
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	loaded := readMsg(t, ws)
 	assert.Equal(t, "session_loaded", loaded["type"])
@@ -398,7 +398,7 @@ func TestWS_VoiceInput(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Drain opening: session_loaded, state_change interviewer_speaking, tokens, interviewer_done, state_change waiting.
 	drainUntilType(t, ws, "session_loaded")
@@ -477,7 +477,7 @@ func TestWS_CancelTTS(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Drain session_loaded.
 	drainUntilType(t, ws, "session_loaded")
@@ -575,7 +575,7 @@ func TestWS_InvalidTransition(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// After session_loaded, opening starts. The conductor is in InterviewerSpeaking.
 	drainUntilType(t, ws, "session_loaded")
@@ -638,7 +638,7 @@ func TestWS_MalformedMessages(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Let opening finish.
 	drainUntilType(t, ws, "session_loaded")
@@ -807,7 +807,7 @@ func TestWS_GracefulShutdown(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, httpSrv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Wait for session_loaded.
 	drainUntilType(t, ws, "session_loaded")
@@ -853,7 +853,7 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
@@ -949,7 +949,7 @@ func TestWS_UnknownMessageType(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
@@ -1137,7 +1137,7 @@ func TestWS_MultiTurn(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Opening: session_loaded + interviewer stream + waiting_for_input.
 	drainUntilType(t, ws, "session_loaded")
@@ -1226,7 +1226,7 @@ func TestWS_EmptyTextInput(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
@@ -1280,7 +1280,7 @@ func TestWS_EmptyVoiceInput(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
@@ -1336,7 +1336,7 @@ func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Se
 			// Abruptly close the connection to simulate a stream error.
 			if hijacker, ok := w.(http.Hijacker); ok {
 				conn, _, _ := hijacker.Hijack()
-				conn.Close()
+				conn.Close() //nolint:errcheck // test cleanup
 			}
 			return
 		}
@@ -1378,7 +1378,7 @@ func TestWS_LLMStreamError(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// The opening stream will fail. The conductor should:
 	// 1. Stream some tokens
@@ -1446,7 +1446,7 @@ func TestWS_TTSEnabled(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Verify session_loaded shows tts_enabled = true.
 	loaded := readMsg(t, ws)
@@ -1542,7 +1542,7 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, httpSrv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Collect all messages until the session ends. We expect:
 	// - session_loaded
@@ -1680,7 +1680,7 @@ func TestWS_PingPong(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Finish opening.
 	drainUntilType(t, ws, "session_loaded")
@@ -1716,7 +1716,7 @@ func TestWS_CancelSession(t *testing.T) {
 	cookie := createAuthCookie(t, pool, userID)
 
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
+	defer ws.CloseNow() //nolint:errcheck // test cleanup
 
 	// Wait for the opening sequence to finish before cancelling.
 	drainUntilType(t, ws, "session_loaded")

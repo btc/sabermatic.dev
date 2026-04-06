@@ -288,7 +288,7 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 	if err != nil {
 		return db.Message{}, fmt.Errorf("begin tx for interviewer msg: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is no-op
 
 	msg, err := b.persistMessage(ctx, tx, p)
 	if err != nil {
@@ -317,7 +317,7 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 	if err != nil {
 		return fmt.Errorf("begin end-session tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is no-op
 
 	q := db.New(tx)
 

@@ -126,7 +126,7 @@ func (b *Backend) RetryEvaluation(ctx context.Context, sessionID, userID uuid.UU
 	if err != nil {
 		return fmt.Errorf("begin retry tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is no-op
 
 	err = db.New(tx).UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
 		ID:     sessionID,
