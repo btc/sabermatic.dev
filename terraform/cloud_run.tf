@@ -187,6 +187,42 @@ resource "google_cloud_run_v2_service" "drill" {
           }
         }
       }
+      env {
+        name = "STRIPE_SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["stripe-secret-key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "STRIPE_WEBHOOK_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secrets["stripe-webhook-secret"].secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      # ---- Stripe price IDs (non-secret) ----
+      env {
+        name  = "STRIPE_PRO_PRICE_ID"
+        value = ""
+      }
+      env {
+        name  = "STRIPE_PACK_120_PRICE_ID"
+        value = ""
+      }
+      env {
+        name  = "STRIPE_PACK_300_PRICE_ID"
+        value = ""
+      }
+      env {
+        name  = "STRIPE_PACK_600_PRICE_ID"
+        value = ""
+      }
     }
   }
 

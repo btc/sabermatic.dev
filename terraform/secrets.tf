@@ -10,6 +10,8 @@ locals {
     "oauth-google-client-secret",
     "oauth-github-client-id",
     "oauth-github-client-secret",
+    "stripe-secret-key",
+    "stripe-webhook-secret",
   ]
 }
 
