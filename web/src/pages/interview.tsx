@@ -320,18 +320,20 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     const trimmed = textInput.trim();
     if (!trimmed) return;
     stopTts();
+    audioPlayer.initContext(); // Fallback for reconnect path (Ready gate skipped)
     sendText(trimmed);
     setTextInput("");
-  }, [textInput, sendText, stopTts]);
+  }, [textInput, sendText, stopTts, audioPlayer]);
 
   const handleSendAudio = useCallback(async () => {
     if (audioRecorder.segmentCount === 0) return;
     stopTts();
+    audioPlayer.initContext(); // Fallback for reconnect path (Ready gate skipped)
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
       sendAudio(audioBase64);
     }
-  }, [audioRecorder, sendAudio, stopTts]);
+  }, [audioRecorder, sendAudio, stopTts, audioPlayer]);
 
   const handleSend = useCallback(() => {
     if (textInput.trim()) {
@@ -344,8 +346,9 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Recording callbacks ------
   const handleStartRecording = useCallback(async () => {
     stopTts();
+    audioPlayer.initContext(); // Fallback for reconnect path (Ready gate skipped)
     await recStart();
-  }, [stopTts, recStart]);
+  }, [stopTts, recStart, audioPlayer]);
 
   const handleStopRecording = useCallback(async () => {
     await recStop();
