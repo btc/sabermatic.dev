@@ -29,7 +29,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	require.Equal(t, 8080, cfg.Server.Port)
 	require.Equal(t, 720*time.Hour, cfg.Auth.SessionTTL)
 	require.Equal(t, 12, cfg.Auth.BcryptCost)
-	require.Equal(t, 10*time.Second, cfg.Speech.TTSSentenceTimeout)
+	require.Equal(t, 30*time.Second, cfg.Speech.TTSSentenceTimeout)
 }
 
 func TestLoadConfig_MissingRequired(t *testing.T) {

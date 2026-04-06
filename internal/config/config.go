@@ -59,7 +59,7 @@ type Speech struct {
 	TTSVoice           string        `env:"TTS_VOICE,default=onyx"`
 	TTSModel           string        `env:"TTS_MODEL,default=tts-1"`
 	WhisperModel       string        `env:"WHISPER_MODEL,default=whisper-1"`
-	TTSSentenceTimeout time.Duration `env:"TTS_SENTENCE_TIMEOUT,default=10s"`
+	TTSSentenceTimeout time.Duration `env:"TTS_SENTENCE_TIMEOUT,default=30s"`
 }
 
 type Email struct {
