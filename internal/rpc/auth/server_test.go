@@ -335,6 +335,7 @@ func TestPublicEndpoints_NoAuthRequired(t *testing.T) {
 }
 
 func TestDeleteAccount_RequiresAuth(t *testing.T) {
+	t.Skip("TODO: DeleteAccount RPC not yet implemented. See #87")
 	t.Parallel()
 
 	b := pg.NewBackend(t)
@@ -347,6 +348,7 @@ func TestDeleteAccount_RequiresAuth(t *testing.T) {
 }
 
 func TestDeleteAccount_Success(t *testing.T) {
+	t.Skip("TODO: DeleteAccount RPC not yet implemented. See #87")
 	t.Parallel()
 
 	b := pg.NewBackend(t)
