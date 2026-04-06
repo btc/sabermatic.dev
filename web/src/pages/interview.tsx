@@ -217,8 +217,6 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const [inputFocused, setInputFocused] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [endDialogOpen, setEndDialogOpen] = useState(false);
-  const [audioContextInitialized, setAudioContextInitialized] = useState(false);
-
   // Refs
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -233,13 +231,10 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     });
   }, [setRawMessageHandler, audioPlayer]);
 
-  // ------ AudioContext init on first interaction ------
-  const ensureAudioContext = useCallback(() => {
-    if (!audioContextInitialized) {
-      audioPlayer.initContext();
-      setAudioContextInitialized(true);
-    }
-  }, [audioContextInitialized, audioPlayer]);
+  // ------ Init TTS AudioContext on user gesture (idempotent) ------
+  const initTtsContext = useCallback(() => {
+    audioPlayer.initContext();
+  }, [audioPlayer]);
 
   // ------ Derived state (hoisted above effects that reference it) ------
   const isStreaming = state === "streaming";
@@ -266,20 +261,20 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     const trimmed = textInput.trim();
     if (!trimmed) return;
     stopTts();
-    ensureAudioContext();
+    initTtsContext();
     sendText(trimmed);
     setTextInput("");
-  }, [textInput, sendText, ensureAudioContext, stopTts]);
+  }, [textInput, sendText, initTtsContext, stopTts]);
 
   const handleSendAudio = useCallback(async () => {
     if (audioRecorder.segmentCount === 0) return;
     stopTts();
-    ensureAudioContext();
+    initTtsContext();
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
       sendAudio(audioBase64);
     }
-  }, [audioRecorder, sendAudio, ensureAudioContext, stopTts]);
+  }, [audioRecorder, sendAudio, initTtsContext, stopTts]);
 
   const handleSend = useCallback(() => {
     if (textInput.trim()) {
@@ -292,9 +287,9 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Recording callbacks ------
   const handleStartRecording = useCallback(async () => {
     stopTts();
-    ensureAudioContext();
+    initTtsContext();
     await recStart();
-  }, [stopTts, ensureAudioContext, recStart]);
+  }, [stopTts, initTtsContext, recStart]);
 
   const handleStopRecording = useCallback(async () => {
     await recStop();
@@ -362,7 +357,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
       {/* ---- Chat area ---- */}
       <div
         className="flex-1 overflow-y-auto"
-        onClick={ensureAudioContext}
+        onClick={initTtsContext}
       >
         <div className="flex flex-col justify-center min-h-full px-4 py-6 max-w-2xl mx-auto">
           <div className="space-y-4">
