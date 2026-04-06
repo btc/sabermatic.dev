@@ -3,9 +3,11 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/btc/drill/internal/auth"
@@ -86,17 +88,50 @@ func usageSummaryToProto(s *backend.UsageSummary) *drillv1.GetUsageResponse {
 	}
 }
 
+// implementedUserFields is the allow-list of User proto fields that UpdateProfile
+// supports. Fields not in this map are valid proto fields but not yet updatable.
+var implementedUserFields = map[string]bool{
+	"display_name": true,
+}
+
 // UpdateProfile updates the authenticated user's profile fields.
 // AIP-134: PATCH semantics via update_mask. Only fields in the mask are modified.
-// TODO: implement when backend UpdateUser method is added.
 func (s *Server) UpdateProfile(
 	ctx context.Context,
 	req *connect.Request[drillv1.UpdateProfileRequest],
 ) (*connect.Response[drillv1.UpdateProfileResponse], error) {
-	if auth.UserFromContext(ctx) == nil {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("UpdateProfile not yet implemented"))
+
+	mask := req.Msg.GetUpdateMask()
+	if mask == nil || len(mask.Paths) == 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("update_mask must not be empty"))
+	}
+
+	// Validate each path against the proto descriptor and the allow-list.
+	userDesc := (*drillv1.User)(nil).ProtoReflect().Descriptor()
+	for _, path := range mask.Paths {
+		fd := userDesc.Fields().ByName(protoreflect.Name(path))
+		if fd == nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("unknown field in update_mask: %q", path))
+		}
+		if !implementedUserFields[path] {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("field not supported for update: %q", path))
+		}
+	}
+
+	updated, err := s.b.UpdateDisplayName(ctx, user.ID, req.Msg.GetUser().GetDisplayName())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("update profile failed"))
+	}
+
+	return connect.NewResponse(&drillv1.UpdateProfileResponse{
+		User: dbUserToProto(&updated),
+	}), nil
 }
 
 // ExportData triggers an export of the authenticated user's data.
@@ -109,6 +144,20 @@ func (s *Server) ExportData(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ExportData not yet implemented"))
+}
+
+// dbUserToProto converts a db.User (sqlc model) to its proto representation.
+// Used by UpdateProfile which returns the updated record from the database.
+func dbUserToProto(u *db.User) *drillv1.User {
+	return &drillv1.User{
+		Id:            u.ID.String(),
+		Email:         u.Email,
+		DisplayName:   u.DisplayName,
+		Role:          roleToProto(u.Role),
+		Plan:          planToProto(u.Plan),
+		EmailVerified: u.EmailVerified,
+		CreateTime:    timestamppb.New(u.CreatedAt),
+	}
 }
 
 func userToProto(u *auth.AuthUser) *drillv1.User {
