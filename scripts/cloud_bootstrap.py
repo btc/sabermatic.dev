@@ -412,18 +412,20 @@ def phase_terraform(state: dict) -> None:
     # Init — billing propagation can take a few minutes after project setup
     state_bucket = f"{project_id}-tfstate"
     print("\nRunning terraform init...")
-    max_attempts = 6
-    for attempt in range(1, max_attempts + 1):
+    import time
+    attempt = 0
+    while True:
         result = run_quiet(
             ["terraform", "init", f"-backend-config=bucket={state_bucket}"],
             cwd=tf_dir,
         )
         if result.returncode == 0:
             break
-        if attempt < max_attempts and "billing" in (result.stderr or "").lower():
-            import time
-            warn(f"Billing not yet propagated. Retrying in 30s... ({attempt}/{max_attempts})")
-            time.sleep(30)
+        if "billing" in (result.stderr or "").lower():
+            attempt += 1
+            delay = min(30 * (2 ** (attempt - 1)), 300)  # 30s, 60s, 120s, 240s, 300s cap
+            warn(f"Billing not yet propagated. Retrying in {delay}s... (attempt {attempt})")
+            time.sleep(delay)
         else:
             error(f"terraform init failed:\n{result.stderr}")
             sys.exit(1)
