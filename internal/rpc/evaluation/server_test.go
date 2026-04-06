@@ -204,7 +204,7 @@ func TestGetEvaluation_Success(t *testing.T) {
 	require.NotNil(t, resp.Msg.Evaluation)
 
 	eval := resp.Msg.Evaluation
-	assert.Equal(t, "reviewed", eval.Status)
+	assert.Equal(t, drillv1.EvaluationStatus_EVALUATION_STATUS_REVIEWED, eval.Status)
 	assert.NotNil(t, eval.Scores)
 	assert.Equal(t, int32(3), eval.Scores.Requirements)
 	assert.Equal(t, int32(4), eval.Scores.Architecture)
