@@ -215,6 +215,18 @@ func (b *Backend) Logout(ctx context.Context, sessionToken string) (err error) {
 	return nil
 }
 
+// DeleteAccount soft-deletes the user and wipes all auth sessions atomically.
+// Idempotent: calling on an already-deleted user is a no-op.
+func (b *Backend) DeleteAccount(ctx context.Context, userID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.DeleteAccount")
+	defer func() { drilotel.End(span, err) }()
+
+	if err := db.New(b.pool).DeleteAccount(ctx, userID); err != nil {
+		return fmt.Errorf("delete account: %w", err)
+	}
+	return nil
+}
+
 // VerifyEmail marks a user's email as verified using the signed token.
 // Returns ErrInvalidToken if the token is invalid or expired.
 func (b *Backend) VerifyEmail(ctx context.Context, token string) (err error) {
