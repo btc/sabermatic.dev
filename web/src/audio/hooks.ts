@@ -60,7 +60,7 @@ export function useAudioPlayer() {
   }, []);
 
   const initContext = useCallback(() => {
-    playerRef.current?.initContext();
+    return playerRef.current?.initContext();
   }, []);
 
   const enqueue = useCallback((data: string, seq: number) => {

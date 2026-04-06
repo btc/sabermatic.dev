@@ -19,12 +19,12 @@ export class AudioPlayer {
     return this._isPlaying;
   }
 
-  initContext(): void {
+  async initContext(): Promise<void> {
     if (!this.ctx) {
       this.ctx = new AudioContext();
     }
     if (this.ctx.state === "suspended") {
-      this.ctx.resume();
+      await this.ctx.resume();
     }
     // Kick off playback if chunks arrived before context was ready.
     if (this.queue.length > 0 && !this._isPlaying) {
