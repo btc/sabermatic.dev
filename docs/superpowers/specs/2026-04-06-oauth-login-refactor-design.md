@@ -100,7 +100,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 
     // --- Resolve user ---
 
-    // Step 1: Known OAuth account?
+    // Known OAuth account?
     oauthAcct, err := q.GetOAuthAccount(ctx, ...)
     if err == nil {
         user, err = q.GetUserByIDIncludingDeleted(ctx, oauthAcct.UserID)
@@ -112,7 +112,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
         }
     }
 
-    // Step 2: Known email? Lock the row.
+    // Known email? Lock the row.
     if path == "" {
         user, err = q.GetUserByEmailForUpdate(ctx, p.Email)
         if err == nil {
@@ -124,7 +124,7 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
         }
     }
 
-    // Step 3: New user.
+    // New user.
     if path == "" {
         user, err = q.CreateOAuthUserOrNoop(ctx, ...)
         if err == nil {
@@ -161,11 +161,13 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (*OAuthLog
 }
 ```
 
-#### Resolution steps
+#### Resolution (priority order)
 
-1. `GetOAuthAccount(provider, provider_id)` — if found, load user by ID. If soft-deleted, `pathReactivated`. Otherwise `pathExistingOAuth`.
-2. `GetUserByEmailForUpdate(email)` — if found and soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents races with concurrent logins for the same email.
-3. `CreateOAuthUserOrNoop(email, display_name)` — if row returned, `pathNewUser`. If no row (lost race), `GetUserByEmailForUpdate` again. If `ErrNoRows` (other tx rolled back), return error — caller can retry at HTTP level.
+Each check runs only if the previous one didn't match (`path == ""`):
+
+- **Known OAuth account** — `GetOAuthAccount(provider, provider_id)`. If found, load user by ID. If soft-deleted, `pathReactivated`. Otherwise `pathExistingOAuth`.
+- **Known email** — `GetUserByEmailForUpdate(email)`. If found and soft-deleted, `pathReactivated`. Otherwise `pathLinkedExisting`. The `FOR UPDATE` lock prevents races with concurrent logins for the same email.
+- **New user** — `CreateOAuthUserOrNoop(email, display_name)`. If row returned, `pathNewUser`. If no row (lost insert race), `GetUserByEmailForUpdate` again to pick up the row the other tx created. If `ErrNoRows` (other tx rolled back), return error — caller can retry at HTTP level.
 
 #### Side effects per path
 
@@ -207,7 +209,7 @@ sess, err := b.createSession(ctx, b.pool, CreateSessionParams{
 
 ## New test
 
-**Reactivation via email match (no prior OAuth link).** User signs up with password, gets soft-deleted, then logs in via OAuth with the same email. This exercises the step 2 `pathReactivated` flow where no `oauth_accounts` row exists yet — the user must be reactivated AND the OAuth account linked.
+**Reactivation via email match (no prior OAuth link).** User signs up with password, gets soft-deleted, then logs in via OAuth with the same email. This exercises the "known email" `pathReactivated` flow where no `oauth_accounts` row exists yet — the user must be reactivated AND the OAuth account linked.
 
 ```go
 func TestOAuthLogin_SoftDeletedUser_ReactivatedViaEmailMatch(t *testing.T) {
