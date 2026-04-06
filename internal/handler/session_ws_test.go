@@ -1986,3 +1986,77 @@ func TestWS_ConcurrentTurnRejected(t *testing.T) {
 	m, _ = drainUntilType(t, ws, "error")
 	assert.Equal(t, "turn_in_progress", m["code"])
 }
+
+// ---------------------------------------------------------------------------
+// Test: end_session during candidate persist — candidate message must survive
+// ---------------------------------------------------------------------------
+
+// TestWS_EndSessionDuringCandidatePersist verifies that a candidate message is
+// persisted even when end_session arrives while the pipeline is processing the
+// candidate turn. The conductor calls cancelTurn() on end_session, which cancels
+// the pipeline context. If persistMessage uses the raw (cancellable) ctx, the
+// DB write may be aborted and the candidate answer silently lost.
+func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
+	t.Parallel()
+
+	// Use a slow LLM server so the pipeline is still running (mid-LLM-stream)
+	// long after the candidate message is persisted. This gives end_session a
+	// wide window to arrive while the turn goroutine is active and its context
+	// has been cancelled.
+	tokens := []string{"Slow ", "response ", "here ", "for ", "timing."}
+	anthropicSrv := newSlowAnthropicServer(t, tokens, 300*time.Millisecond)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	// Drain opening: session_loaded, interviewer stream, waiting_for_input.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilDone(t, ws)
+	drainUntilType(t, ws, "state_change") // waiting_for_input
+
+	// Send end_turn with text content, then immediately send end_session.
+	// The conductor will enqueue end_turn first, then receive end_session.
+	// When end_session is processed, turnResultCh is non-nil so cancelTurn()
+	// is called immediately. If persistMessage uses the cancelled ctx, the
+	// candidate answer is lost.
+	sendMsg(t, ws, wsMsg{
+		"type":         "end_turn",
+		"content":      "My candidate answer for persist test.",
+		"input_method": "text",
+	})
+	sendMsg(t, ws, wsMsg{"type": "end_session"})
+
+	// Drain until session_ended. The conductor must end the session cleanly
+	// after the cancelled pipeline goroutine exits.
+	drainUntilType(t, ws, "session_ended")
+
+	// Verify the candidate message was persisted in the DB despite context
+	// cancellation. Without the fix, this assertion will fail intermittently
+	// (or consistently, depending on scheduling) because the DB persist is
+	// aborted by the cancelled context.
+	ctx := context.Background()
+	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
+	require.NoError(t, err)
+
+	candidateFound := false
+	for _, msg := range msgs {
+		if msg.Role == "candidate" {
+			candidateFound = true
+			assert.Equal(t, "My candidate answer for persist test.", msg.Content)
+			break
+		}
+	}
+	assert.True(t, candidateFound, "candidate message must be persisted even when end_session cancels the pipeline")
+}
