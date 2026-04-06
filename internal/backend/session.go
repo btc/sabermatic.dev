@@ -201,6 +201,26 @@ func (b *Backend) GetMessagesBySession(ctx context.Context, sessionID uuid.UUID)
 	return msgs, nil
 }
 
+// GetTranscript returns all messages for the given session, verifying that the
+// session belongs to userID. Returns ErrSessionNotFound if the session does not
+// exist, ErrSessionNotOwned if it belongs to a different user.
+func (b *Backend) GetTranscript(ctx context.Context, sessionID, userID uuid.UUID) (_ []db.Message, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetTranscript")
+	defer func() { drilotel.End(span, err) }()
+
+	if _, err := b.GetSessionForUser(ctx, sessionID, userID); err != nil {
+		return nil, err
+	}
+	msgs, err := b.GetMessagesBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if msgs == nil {
+		msgs = []db.Message{}
+	}
+	return msgs, nil
+}
+
 // PersistMessageParams holds the data for persisting a message.
 type PersistMessageParams struct {
 	MessageID   uuid.UUID
