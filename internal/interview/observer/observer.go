@@ -24,3 +24,13 @@ type TokenObserver interface {
 type Closeable interface {
 	Close()
 }
+
+// TTSSink receives synthesized audio from the TTS accumulator.
+// Implementations must be safe for concurrent calls — HandleTTSError
+// may be called from the conductor goroutine (via OnToken buffer-full)
+// while HandleAudio is called from the TTS goroutine.
+type TTSSink interface {
+	HandleAudio(data []byte)
+	HandleTTSDone()
+	HandleTTSError()
+}
