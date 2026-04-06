@@ -104,7 +104,9 @@ function ReadyGate({
   onReady: () => void;
 }) {
   const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  });
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -282,18 +284,16 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const handleReady = useCallback(async () => {
     if (ready) return;
     await audioPlayer.initContext();
+    // Fire-and-forget: don't block UI on the permission dialog.
+    // If denied, toast tells the user they can still use text input.
+    // If the user starts recording before the prompt resolves,
+    // AudioRecorder.start() calls getUserMedia again — browsers
+    // queue concurrent permission requests safely.
     navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {
       toast.error("Microphone access denied — you can still use text input");
     });
     setReady(true);
   }, [audioPlayer, ready]);
-
-  // Auto-skip ready gate on reconnect (page refresh of existing session).
-  useEffect(() => {
-    if (wasReconnected && !ready) {
-      setReady(true);
-    }
-  }, [wasReconnected, ready]);
 
   // ------ Derived state (hoisted above effects that reference it) ------
   const isStreaming = state === "streaming";
@@ -371,8 +371,10 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     );
   }
 
+  const showGate = !ready && !wasReconnected;
+
   // Loading — WS hasn't delivered session_loaded yet.
-  if (!ready && !sessionInfo) {
+  if (showGate && !sessionInfo) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="size-3 rounded-full bg-primary animate-pulse" />
@@ -381,7 +383,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   }
 
   // Ready gate — show question and wait for user gesture.
-  if (!ready) {
+  if (showGate) {
     return (
       <div className="flex flex-col h-full">
         <ReadyGate
