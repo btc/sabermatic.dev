@@ -746,6 +746,7 @@ type SessionSummary struct {
 	ArchiveTime           *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=archive_time,json=archiveTime,proto3,oneof" json:"archive_time,omitempty"`
 	CreateTime            *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	QuestionTitle         string                 `protobuf:"bytes,12,opt,name=question_title,json=questionTitle,proto3" json:"question_title,omitempty"`
+	ScoreOverall          *int32                 `protobuf:"varint,13,opt,name=score_overall,json=scoreOverall,proto3,oneof" json:"score_overall,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -862,6 +863,13 @@ func (x *SessionSummary) GetQuestionTitle() string {
 		return x.QuestionTitle
 	}
 	return ""
+}
+
+func (x *SessionSummary) GetScoreOverall() int32 {
+	if x != nil && x.ScoreOverall != nil {
+		return *x.ScoreOverall
+	}
+	return 0
 }
 
 type Message struct {
@@ -1024,7 +1032,7 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	"\x0equestion_hints\x18\x11 \x01(\tH\x02R\rquestionHints\x88\x01\x01B\v\n" +
 	"\t_end_timeB\x0f\n" +
 	"\r_archive_timeB\x11\n" +
-	"\x0f_question_hints\"\xcd\x04\n" +
+	"\x0f_question_hints\"\x89\x05\n" +
 	"\x0eSessionSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
@@ -1042,9 +1050,11 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampH\x01R\varchiveTime\x88\x01\x01\x12;\n" +
 	"\vcreate_time\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x12%\n" +
-	"\x0equestion_title\x18\f \x01(\tR\rquestionTitleB\v\n" +
+	"\x0equestion_title\x18\f \x01(\tR\rquestionTitle\x12(\n" +
+	"\rscore_overall\x18\r \x01(\x05H\x02R\fscoreOverall\x88\x01\x01B\v\n" +
 	"\t_end_timeB\x0f\n" +
-	"\r_archive_time\"\x9e\x02\n" +
+	"\r_archive_timeB\x10\n" +
+	"\x0e_score_overall\"\x9e\x02\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +

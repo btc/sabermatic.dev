@@ -119,6 +119,7 @@ message SessionSummary {
   optional google.protobuf.Timestamp archive_time = 10;
   google.protobuf.Timestamp create_time = 11;
   string question_title = 12;
+  optional int32 score_overall = 13;
 }
 
 message Message {
