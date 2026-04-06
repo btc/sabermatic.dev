@@ -100,8 +100,8 @@ func (a *TTSAccumulator) Close() {
 	<-a.done
 }
 
-// ttsLoop reads sentences from sentCh, synthesizes each one, and streams
-// the resulting audio chunks to the WebSocket client.
+// ttsLoop reads sentences from sentCh, synthesizes each one, and sends
+// the resulting audio to the WebSocket client.
 func (a *TTSAccumulator) ttsLoop() {
 	defer close(a.done)
 
