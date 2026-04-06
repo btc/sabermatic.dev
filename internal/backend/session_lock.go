@@ -2,9 +2,9 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
-	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,7 +35,7 @@ func (l *SessionLock) Release() error {
 	}
 	released, err := db.New(l.conn).PGAdvisoryUnlock(context.Background(), l.key())
 	if err == nil && !released {
-		slog.Warn("advisory unlock: connection did not hold lock", "id", l.id)
+		err = errors.New("advisory unlock: connection did not hold lock")
 	}
 	l.conn.Release()
 	l.conn = nil
