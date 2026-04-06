@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
 import { getEducatorAnalysis, requestEducatorAnalysis } from "@/pb/drill/v1/educator-EducatorService_connectquery";
-import { EducatorStatus } from "@/pb/drill/v1/educator_pb";
+import { EducatorService, EducatorStatus } from "@/pb/drill/v1/educator_pb";
 import { Button } from "@/components/ui/button";
 import { GENERATING_MESSAGES } from "@/lib/constants";
 
@@ -173,7 +173,7 @@ function DeepDiveInner({ sessionId }: { sessionId: string }) {
   });
   const educator = resp?.analysis;
   const requestEducatorMutation = useMutation(requestEducatorAnalysis, {
-    onSuccess: () => qc.invalidateQueries({ queryKey: [getEducatorAnalysis.service.typeName] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [EducatorService.typeName] }),
   });
   const { data: meData } = useQuery(getMe, {});
   const me = meData?.user;
