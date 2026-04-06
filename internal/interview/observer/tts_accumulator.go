@@ -155,7 +155,7 @@ func (a *TTSAccumulator) ttsLoop() {
 						"timeout", a.sentenceTimeout,
 						"sentence_len", len(sentence))
 				} else {
-					slog.Debug("tts: sentence synthesis failed",
+					slog.Warn("tts: sentence synthesis failed",
 						"error", err,
 						"sentence_len", len(sentence))
 				}
@@ -172,7 +172,7 @@ func (a *TTSAccumulator) ttsLoop() {
 			synthCancel()
 			if err != nil || len(data) == 0 {
 				if err != nil {
-					slog.Debug("tts: audio read failed",
+					slog.Warn("tts: audio read failed",
 						"error", err,
 						"sentence_len", len(sentence))
 				}
