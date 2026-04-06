@@ -149,7 +149,6 @@ func (a *TTSAccumulator) ttsLoop() {
 
 			synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
 			rc, err := a.synth.Synthesize(synthCtx, sentence)
-			synthCancel() // timeout covers Synthesize only, not ReadAll
 			if err != nil {
 				if synthCtx.Err() == context.DeadlineExceeded {
 					slog.Warn("tts: sentence synthesis timed out",
@@ -161,10 +160,16 @@ func (a *TTSAccumulator) ttsLoop() {
 						"sentence_len", len(sentence))
 				}
 				a.sink.HandleTTSError()
+				synthCancel()
 				continue
 			}
+			// Cancel the timeout context AFTER reading the body — the
+			// response reader is tied to the request context, so cancelling
+			// before ReadAll kills the reader. ReadAll is bounded by the
+			// HTTP response size, not unbounded I/O.
 			data, err := io.ReadAll(rc)
 			rc.Close()
+			synthCancel()
 			if err != nil || len(data) == 0 {
 				if err != nil {
 					slog.Debug("tts: audio read failed",
