@@ -67,14 +67,28 @@ function applySort(sessions: SessionSummary[], sort: SortOrder): SessionSummary[
       return copy.sort((a, b) => getCreateTimeMs(b) - getCreateTimeMs(a));
     case "oldest":
       return copy.sort((a, b) => getCreateTimeMs(a) - getCreateTimeMs(b));
-    // TODO: score_high / score_low require score_overall on Session, not yet
-    // returned by the backend ListSessions endpoint. Sort by date as fallback.
     case "score_high":
+      return copy.sort((a, b) => {
+        const sa = a.scoreOverall ?? -1;
+        const sb = b.scoreOverall ?? -1;
+        return sb - sa;
+      });
     case "score_low":
-      return copy.sort((a, b) => getCreateTimeMs(b) - getCreateTimeMs(a));
+      return copy.sort((a, b) => {
+        const sa = a.scoreOverall ?? Infinity;
+        const sb = b.scoreOverall ?? Infinity;
+        return sa - sb;
+      });
     default:
       return copy;
   }
+}
+
+function scoreColor(score: number): string {
+  if (score >= 4) return "hsl(142 71% 45%)";  // green
+  if (score >= 3) return "hsl(48 96% 53%)";   // yellow/amber
+  if (score >= 2) return "hsl(25 95% 53%)";   // orange
+  return "hsl(0 84% 60%)";                     // red
 }
 
 function formatDurationMinutes(minutes: number): string {
@@ -114,25 +128,20 @@ function TrendTooltip({ active, payload }: TrendTooltipProps) {
   );
 }
 
-// TODO: score_overall is not yet returned by ListSessions. The trend chart
-// will render once the backend enriches session list rows with evaluation scores.
 function ScoreTrendChart({ sessions }: { sessions: SessionSummary[] }) {
   const points = useMemo<TrendPoint[]>(() => {
     return sessions
-      .filter((s) => s.status === SessionStatus.REVIEWED)
+      .filter((s) => s.status === SessionStatus.REVIEWED && s.scoreOverall != null)
       .sort((a, b) => getCreateTimeMs(a) - getCreateTimeMs(b))
       .map((s) => ({
         date: formatRelativeDate(formatTimestamp(s.createTime)),
         title: s.questionTitle || "Session",
-        // score_overall not yet on Session type — placeholder
-        score: 0,
+        score: s.scoreOverall ?? 0,
         sessionId: s.id,
       }));
   }, [sessions]);
 
-  // Only render when scores are real (non-zero). Deferred until backend provides scores.
-  const hasScores = points.some((p) => p.score > 0);
-  if (!hasScores) return null;
+  if (points.length === 0) return null;
 
   return (
     <div className="rounded-lg border border-border bg-card px-4 py-5">
@@ -244,11 +253,11 @@ function SessionRow({ session, checked, onToggle }: SessionRowProps) {
         </div>
       </Link>
 
-      {/* Score placeholder — shown only when status is reviewed */}
-      {/* TODO: display actual scores once ListSessions returns score_overall */}
-      {session.status === SessionStatus.REVIEWED && (
+      {session.status === SessionStatus.REVIEWED && session.scoreOverall != null && (
         <div className="shrink-0 text-right">
-          <span className="text-xs text-muted-foreground">—/5</span>
+          <span className="text-xs font-medium" style={{ color: scoreColor(session.scoreOverall) }}>
+            {session.scoreOverall}/5
+          </span>
         </div>
       )}
     </div>
