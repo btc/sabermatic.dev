@@ -120,7 +120,7 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 
 	// 8. Call LLM.
 	toolSchema := evaluation.ToolSchema()
-	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, ai.CallToolParams{
+	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, &ai.CallToolParams{
 		Model:      w.Cfg.EvaluatorModel,
 		System:     system,
 		Messages:   userMsgs,

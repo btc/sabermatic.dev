@@ -442,7 +442,7 @@ func (b *Backend) Synthesize(ctx context.Context, text string) (_ io.ReadCloser,
 func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (_ *ai.TokenStream, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.StreamLLM")
 	defer func() { drilotel.End(span, err) }()
-	return b.llm.StreamAndLog(ctx, p)
+	return b.llm.StreamAndLog(ctx, &p)
 }
 
 // StoreAudio uploads audio bytes to object storage and returns the URL.

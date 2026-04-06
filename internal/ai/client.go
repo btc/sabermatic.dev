@@ -83,7 +83,7 @@ type CallParams struct {
 
 // StreamAndLog creates a streaming Anthropic request and returns a TokenStream.
 // When the stream is closed, the call is persisted to llm_calls + llm_call_content.
-func (c *Client) StreamAndLog(ctx context.Context, p StreamParams) (_ *TokenStream, err error) {
+func (c *Client) StreamAndLog(ctx context.Context, p *StreamParams) (_ *TokenStream, err error) {
 	ctx, span := tracer.Start(ctx, "Client.StreamAndLog")
 	defer func() { drilotel.End(span, err) }()
 
@@ -131,7 +131,7 @@ type CallToolParams struct {
 
 // CallToolAndLog makes a blocking Anthropic request with forced tool_choice and
 // returns the raw tool input JSON. Persists the call within the caller's transaction.
-func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams) (_ json.RawMessage, err error) {
+func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p *CallToolParams) (_ json.RawMessage, err error) {
 	ctx, span := tracer.Start(ctx, "Client.CallToolAndLog")
 	defer func() { drilotel.End(span, err) }()
 
@@ -160,7 +160,8 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 
 	// Find the tool_use content block.
 	var toolInput json.RawMessage
-	for _, block := range resp.Content {
+	for i := range resp.Content {
+		block := &resp.Content[i]
 		if block.Type == "tool_use" {
 			toolInput = block.Input
 			break
@@ -217,7 +218,7 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 
 // CallAndLog makes a blocking Anthropic request and persists the call within
 // the caller's transaction. Returns the concatenated text response.
-func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (_ string, err error) {
+func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p *CallParams) (_ string, err error) {
 	ctx, span := tracer.Start(ctx, "Client.CallAndLog")
 	defer func() { drilotel.End(span, err) }()
 
@@ -244,7 +245,8 @@ func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (_ str
 
 	// Extract text from content blocks.
 	var b strings.Builder
-	for _, block := range resp.Content {
+	for i := range resp.Content {
+		block := &resp.Content[i]
 		if block.Type == "text" {
 			b.WriteString(block.Text)
 		}
@@ -253,7 +255,7 @@ func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (_ str
 
 	// Persist if we have a transaction.
 	if tx != nil {
-		err = persistCall(ctx, db.New(tx), persistParams{
+		err = persistCall(ctx, db.New(tx), &persistParams{
 			model:        p.Model,
 			userID:       p.UserID,
 			role:         p.Role,
@@ -337,7 +339,8 @@ func (ts *TokenStream) Close(ctx context.Context) error {
 	if ts.pool == nil {
 		return nil
 	}
-	return persistCall(ctx, db.New(ts.pool), ts.persistParams())
+	p := ts.persistParams()
+	return persistCall(ctx, db.New(ts.pool), &p)
 }
 
 // CloseWithTx drains the stream if needed, then persists the LLM call within
@@ -349,7 +352,8 @@ func (ts *TokenStream) CloseWithTx(ctx context.Context, tx pgx.Tx) error {
 	if tx == nil {
 		return nil
 	}
-	return persistCall(ctx, db.New(tx), ts.persistParams())
+	p := ts.persistParams()
+	return persistCall(ctx, db.New(tx), &p)
 }
 
 // drain reads remaining events from the stream to populate usage stats.
@@ -398,7 +402,7 @@ type persistParams struct {
 }
 
 // persistCall inserts into llm_calls and llm_call_content.
-func persistCall(ctx context.Context, q *db.Queries, p persistParams) error {
+func persistCall(ctx context.Context, q *db.Queries, p *persistParams) error {
 	cost := estimateCost(p.model, p.inputTokens, p.outputTokens)
 
 	sessionID := pgtype.UUID{}
