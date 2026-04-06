@@ -166,12 +166,15 @@ GCP hosting baseline: ~$20-30/month
 
 Suggested pricing (each tier discounts over the last):
 
-  Product              Price      $/min    vs 120 pack
-  ─────────────────────────────────────────────────────
-  120-min pack         $14.99     $0.125   baseline
-  300-min pack         $29.99     $0.100   20% off
-  600-min pack         $49.99     $0.083   33% off
-  Pro monthly (600m)   $39.00/mo  $0.065   48% off
+  Product              Price      $/min    vs 120 pack   Margin
+  ────────────────────────────────────────────────────────────────
+  120-min pack         $14.99     $0.125   baseline      72% ($10.79)
+  300-min pack         $29.99     $0.100   20% off       65% ($19.49)
+  600-min pack         $49.99     $0.083   33% off       58% ($28.99)
+  Pro monthly (600m)   $39.00/mo  $0.065   48% off       73% ($28.50)*
+
+  * Pro margin assumes 50% utilization (300 of 600 min used).
+    At 100% utilization: 46% ($18.00). Still profitable.
 ```
 
 Then walks through each product, showing the default and accepting Enter or a custom value:
