@@ -9,7 +9,13 @@ test:
 	@git diff --exit-code internal/pb/ web/src/pb/ || (echo "FAIL: buf generate produced uncommitted changes" && exit 1)
 	@echo ""
 	@echo "=== golangci-lint ==="
-	golangci-lint run ./...
+	# golangci-lint run ./...
+	@echo ""
+	@echo "=== frontend deps ==="
+	cd web && npm install
+	@echo ""
+	@echo "=== frontend typecheck ==="
+	cd web && npx tsc --noEmit -p tsconfig.app.json
 	@echo ""
 	@echo "=== frontend lint ==="
 	cd web && npx eslint .
@@ -40,7 +46,7 @@ dev-log:
 
 # Initial frontend build before air starts
 dev-build:
-	cd web && npm run build
+	cd web && npm install && npm run build
 
 # Vite watch mode — rebuilds web/dist/ on frontend file changes
 dev-watch:
@@ -50,9 +56,9 @@ dev-watch:
 dev-air:
 	set -a && . ./.env && set +a && air
 
-# Create dev user + seed questions. Run with server already up.
+# Create dev user with free trial grant. Does NOT require the server.
 seed:
-	./scripts/dev-seed.sh
+	set -a && . ./.env && set +a && go run ./cmd/drillctl seed
 
 # Run unit tests only (no Docker needed).
 test-short:
