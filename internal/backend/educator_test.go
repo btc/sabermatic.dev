@@ -1,4 +1,4 @@
-package backend
+package backend_test
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 )
 
@@ -20,7 +22,7 @@ import (
 // seedReviewedSession creates a session, seeds an evaluation (required for
 // the session to be genuinely "reviewed"), and sets status to "reviewed".
 // Returns the session ID.
-func seedReviewedSession(t *testing.T, b *Backend, userID, questionID uuid.UUID) uuid.UUID {
+func seedReviewedSession(t *testing.T, b *backend.Backend, userID, questionID uuid.UUID) uuid.UUID {
 	t.Helper()
 	sessionID := seedSession(t, b, userID, questionID)
 	seedEval(t, b, sessionID)
@@ -30,9 +32,9 @@ func seedReviewedSession(t *testing.T, b *Backend, userID, questionID uuid.UUID)
 
 // seedEducatorAnalysis inserts an educator_analyses row with the given status
 // and optional model/gap content. Returns the analysis ID.
-func seedEducatorAnalysis(t *testing.T, b *Backend, sessionID uuid.UUID, status, modelAnswer, gapDeepDives string) uuid.UUID {
+func seedEducatorAnalysis(t *testing.T, b *backend.Backend, sessionID uuid.UUID, status, modelAnswer, gapDeepDives string) uuid.UUID {
 	t.Helper()
-	q := db.New(b.pool)
+	q := db.New(b.Pool())
 	// InsertEducatorAnalysis defaults to status='generating'. We may need to
 	// override the status afterwards.
 	analysisID, err := q.InsertEducatorAnalysis(context.Background(), sessionID)
@@ -62,44 +64,38 @@ func seedEducatorAnalysis(t *testing.T, b *Backend, sessionID uuid.UUID, status,
 // ---------------------------------------------------------------------------
 
 func TestGetEducatorAnalysis_SessionNotReviewed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID) // status=active
 
 	_, err := b.GetEducatorAnalysis(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrEvaluationNotReady)
+	require.ErrorIs(t, err, backend.ErrEvaluationNotReady)
 }
 
 func TestGetEducatorAnalysis_WrongUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	ownerID := seedUser(t, b)
-	otherID := seedUser(t, b)
+	ownerID := backendtest.SeedUser(t, b)
+	otherID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedReviewedSession(t, b, ownerID, questionID)
 
 	_, err := b.GetEducatorAnalysis(ctx, sessionID, otherID)
-	require.ErrorIs(t, err, ErrSessionNotOwned)
+	require.ErrorIs(t, err, backend.ErrSessionNotOwned)
 }
 
 func TestGetEducatorAnalysis_NotRequested(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	// FreeTaste user (free plan, 0 used) can GET; no educator_analyses row yet.
 	sessionID := seedReviewedSession(t, b, userID, questionID)
@@ -111,13 +107,11 @@ func TestGetEducatorAnalysis_NotRequested(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_Generating(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedReviewedSession(t, b, userID, questionID)
 	seedEducatorAnalysis(t, b, sessionID, "generating", "", "")
@@ -129,13 +123,11 @@ func TestGetEducatorAnalysis_Generating(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_Failed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedReviewedSession(t, b, userID, questionID)
 	seedEducatorAnalysis(t, b, sessionID, "failed", "", "")
@@ -147,13 +139,11 @@ func TestGetEducatorAnalysis_Failed(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_Completed_PaidUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	// Paid user: purchase grant gives paidBalance > 0 → Full access level.
 	seedPurchaseGrant(t, b, userID, 120)
@@ -169,17 +159,15 @@ func TestGetEducatorAnalysis_Completed_PaidUser(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_Completed_PreviewUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	// Preview user: free plan, already used 1 free educator → freeEducatorUsed >= limit(1)
 	// Exhaust the free taste by incrementing used count.
-	_, err := b.pool.Exec(context.Background(),
+	_, err := b.Pool().Exec(context.Background(),
 		`UPDATE users SET free_full_educators_used = 1 WHERE id = $1`, userID)
 	require.NoError(t, err)
 
@@ -191,19 +179,17 @@ func TestGetEducatorAnalysis_Completed_PreviewUser(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, "completed", resp.Status)
-	// Preview users see at most previewModelAnswerLen runes; no gap deep dives.
-	assert.LessOrEqual(t, len([]rune(resp.ModelAnswer)), previewModelAnswerLen)
+	// Preview users see at most 200 runes; no gap deep dives.
+	assert.LessOrEqual(t, len([]rune(resp.ModelAnswer)), 200)
 	assert.Empty(t, resp.GapDeepDives)
 }
 
 func TestGetEducatorAnalysis_Completed_FreeTasteUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	// FreeTaste: free plan with 0 educators used (default for new users).
 	// free plan FreeEducatorLimit = 1, so freeEducatorUsed(0) < 1 → FreeTaste.
@@ -224,64 +210,56 @@ func TestGetEducatorAnalysis_Completed_FreeTasteUser(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRequestEducatorAnalysis_SessionNotReviewed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedSession(t, b, userID, questionID) // status=active
 
 	err := b.RequestEducatorAnalysis(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrEvaluationNotReady)
+	require.ErrorIs(t, err, backend.ErrEvaluationNotReady)
 }
 
 func TestRequestEducatorAnalysis_WrongUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	ownerID := seedUser(t, b)
-	otherID := seedUser(t, b)
+	ownerID := backendtest.SeedUser(t, b)
+	otherID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	sessionID := seedReviewedSession(t, b, ownerID, questionID)
 
 	err := b.RequestEducatorAnalysis(ctx, sessionID, otherID)
-	require.ErrorIs(t, err, ErrSessionNotOwned)
+	require.ErrorIs(t, err, backend.ErrSessionNotOwned)
 }
 
 func TestRequestEducatorAnalysis_PreviewUserRejected(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	// Exhaust free taste → Preview access level.
-	_, err := b.pool.Exec(context.Background(),
+	_, err := b.Pool().Exec(context.Background(),
 		`UPDATE users SET free_full_educators_used = 1 WHERE id = $1`, userID)
 	require.NoError(t, err)
 
 	sessionID := seedReviewedSession(t, b, userID, questionID)
 
 	err = b.RequestEducatorAnalysis(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrNoPaidBalance)
+	require.ErrorIs(t, err, backend.ErrNoPaidBalance)
 }
 
 func TestRequestEducatorAnalysis_FreeTasteEnqueuesJob(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	// Fresh free-plan user has 0 educators used → FreeTaste access.
 	sessionID := seedReviewedSession(t, b, userID, questionID)
@@ -289,31 +267,29 @@ func TestRequestEducatorAnalysis_FreeTasteEnqueuesJob(t *testing.T) {
 	err := b.RequestEducatorAnalysis(ctx, sessionID, userID)
 	require.NoError(t, err)
 
-	jobs := riverJobs(t, b, "generate_educator_content")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "generate_educator_content")
+	require.Len(t, rjobs, 1)
 
 	var args struct {
 		SessionID uuid.UUID `json:"session_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, sessionID, args.SessionID)
 
 	// The free-taste count must have been incremented.
 	var used int32
-	err = b.pool.QueryRow(ctx,
+	err = b.Pool().QueryRow(ctx,
 		"SELECT free_full_educators_used FROM users WHERE id = $1", userID).Scan(&used)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), used)
 }
 
 func TestRequestEducatorAnalysis_PaidUserEnqueuesJob(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120) // Full access.
 	sessionID := seedReviewedSession(t, b, userID, questionID)
@@ -321,41 +297,37 @@ func TestRequestEducatorAnalysis_PaidUserEnqueuesJob(t *testing.T) {
 	err := b.RequestEducatorAnalysis(ctx, sessionID, userID)
 	require.NoError(t, err)
 
-	jobs := riverJobs(t, b, "generate_educator_content")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "generate_educator_content")
+	require.Len(t, rjobs, 1)
 
 	var args struct {
 		SessionID uuid.UUID `json:"session_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, sessionID, args.SessionID)
 }
 
 func TestRequestEducatorAnalysis_AlreadyCompleted(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 	sessionID := seedReviewedSession(t, b, userID, questionID)
 	seedEducatorAnalysis(t, b, sessionID, "completed", "answer", "gaps")
 
 	err := b.RequestEducatorAnalysis(ctx, sessionID, userID)
-	require.ErrorIs(t, err, ErrAlreadyExists)
+	require.ErrorIs(t, err, backend.ErrAlreadyExists)
 }
 
 func TestRequestEducatorAnalysis_AlreadyGenerating_Idempotent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 	sessionID := seedReviewedSession(t, b, userID, questionID)
@@ -367,13 +339,11 @@ func TestRequestEducatorAnalysis_AlreadyGenerating_Idempotent(t *testing.T) {
 }
 
 func TestRequestEducatorAnalysis_FailedRetry(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 	sessionID := seedReviewedSession(t, b, userID, questionID)
@@ -383,18 +353,18 @@ func TestRequestEducatorAnalysis_FailedRetry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Status must be reset to "generating".
-	ea, err := db.New(b.pool).GetEducatorAnalysisBySession(context.Background(), sessionID)
+	ea, err := db.New(b.Pool()).GetEducatorAnalysisBySession(context.Background(), sessionID)
 	require.NoError(t, err)
 	assert.Equal(t, "generating", ea.Status)
 	assert.Equal(t, analysisID, ea.ID)
 
 	// A job must have been enqueued.
-	jobs := riverJobs(t, b, "generate_educator_content")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "generate_educator_content")
+	require.Len(t, rjobs, 1)
 
 	var args struct {
 		SessionID uuid.UUID `json:"session_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, sessionID, args.SessionID)
 }

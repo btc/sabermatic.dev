@@ -1,4 +1,4 @@
-package backend
+package backend_test
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 )
 
@@ -18,9 +20,9 @@ import (
 // CanAccessCoach requires paidBalance > 0, which only purchase grants provide.
 // ---------------------------------------------------------------------------
 
-func seedPurchaseGrant(t *testing.T, b *Backend, userID uuid.UUID, minutes int32) {
+func seedPurchaseGrant(t *testing.T, b *backend.Backend, userID uuid.UUID, minutes int32) {
 	t.Helper()
-	err := db.New(b.pool).CreatePurchaseGrant(context.Background(), db.CreatePurchaseGrantParams{
+	err := db.New(b.Pool()).CreatePurchaseGrant(context.Background(), db.CreatePurchaseGrantParams{
 		UserID:        userID,
 		StripeEventID: pgtype.Text{String: "evt_test_coach_" + uuid.New().String(), Valid: true},
 		Minutes:       minutes,
@@ -29,74 +31,27 @@ func seedPurchaseGrant(t *testing.T, b *Backend, userID uuid.UUID, minutes int32
 }
 
 // ---------------------------------------------------------------------------
-// uuidSlicesEqual — unit tests (no DB needed)
-// ---------------------------------------------------------------------------
-
-func TestUUIDSlicesEqual(t *testing.T) {
-	a := uuid.New()
-	b := uuid.New()
-
-	t.Run("both nil", func(t *testing.T) {
-		assert.True(t, uuidSlicesEqual(nil, nil))
-	})
-
-	t.Run("both empty", func(t *testing.T) {
-		assert.True(t, uuidSlicesEqual([]uuid.UUID{}, []uuid.UUID{}))
-	})
-
-	t.Run("nil vs empty", func(t *testing.T) {
-		// len(nil) == 0 == len([]uuid.UUID{}) → equal
-		assert.True(t, uuidSlicesEqual(nil, []uuid.UUID{}))
-	})
-
-	t.Run("equal single-element", func(t *testing.T) {
-		assert.True(t, uuidSlicesEqual([]uuid.UUID{a}, []uuid.UUID{a}))
-	})
-
-	t.Run("equal multi-element", func(t *testing.T) {
-		assert.True(t, uuidSlicesEqual([]uuid.UUID{a, b}, []uuid.UUID{a, b}))
-	})
-
-	t.Run("different lengths", func(t *testing.T) {
-		assert.False(t, uuidSlicesEqual([]uuid.UUID{a}, []uuid.UUID{a, b}))
-	})
-
-	t.Run("same length different values", func(t *testing.T) {
-		assert.False(t, uuidSlicesEqual([]uuid.UUID{a}, []uuid.UUID{b}))
-	})
-
-	t.Run("order matters", func(t *testing.T) {
-		// The function is order-sensitive; [a,b] != [b,a]
-		assert.False(t, uuidSlicesEqual([]uuid.UUID{a, b}, []uuid.UUID{b, a}))
-	})
-}
-
-// ---------------------------------------------------------------------------
 // GetLatestCoachAnalysis
 // ---------------------------------------------------------------------------
 
 func TestGetLatestCoachAnalysis_NoPaidBalance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	// No purchase grant → paidBalance == 0 → ErrNoPaidBalance.
 
 	_, err := b.GetLatestCoachAnalysis(ctx, userID)
-	require.ErrorIs(t, err, ErrNoPaidBalance)
+	require.ErrorIs(t, err, backend.ErrNoPaidBalance)
 }
 
 func TestGetLatestCoachAnalysis_NoAnalysisExists(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 
 	resp, err := b.GetLatestCoachAnalysis(ctx, userID)
@@ -105,17 +60,15 @@ func TestGetLatestCoachAnalysis_NoAnalysisExists(t *testing.T) {
 }
 
 func TestGetLatestCoachAnalysis_ReturnsLatest(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 
-	q := db.New(b.pool)
+	q := db.New(b.Pool())
 
 	// Insert two analyses; the second is newer.
 	_, err := q.InsertCoachAnalysis(ctx, db.InsertCoachAnalysisParams{
@@ -154,16 +107,14 @@ func TestGetLatestCoachAnalysis_ReturnsLatest(t *testing.T) {
 }
 
 func TestGetLatestCoachAnalysis_NilSlicesNormalized(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 
-	q := db.New(b.pool)
+	q := db.New(b.Pool())
 	_, err := q.InsertCoachAnalysis(ctx, db.InsertCoachAnalysisParams{
 		UserID:              userID,
 		Narrative:           "sparse analysis",
@@ -192,26 +143,22 @@ func TestGetLatestCoachAnalysis_NilSlicesNormalized(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRequestCoachAnalysis_NoPaidBalance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 
 	err := b.RequestCoachAnalysis(ctx, userID, false)
-	require.ErrorIs(t, err, ErrNoPaidBalance)
+	require.ErrorIs(t, err, backend.ErrNoPaidBalance)
 }
 
 func TestRequestCoachAnalysis_NoPriorAnalysisEnqueuesJob(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 	// No prior coach analysis → GetLatestCoachAnalysis returns pgx.ErrNoRows.
 	// The `err == nil && uuidSlicesEqual(...)` guard is false, so the job is
@@ -220,24 +167,22 @@ func TestRequestCoachAnalysis_NoPriorAnalysisEnqueuesJob(t *testing.T) {
 	err := b.RequestCoachAnalysis(ctx, userID, false)
 	require.NoError(t, err)
 
-	jobs := riverJobs(t, b, "run_coach_analysis")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "run_coach_analysis")
+	require.Len(t, rjobs, 1)
 
 	var args struct {
 		UserID uuid.UUID `json:"user_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, userID, args.UserID)
 }
 
 func TestRequestCoachAnalysis_ReviewedSessionsEnqueuesJob(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 
@@ -248,24 +193,22 @@ func TestRequestCoachAnalysis_ReviewedSessionsEnqueuesJob(t *testing.T) {
 	err := b.RequestCoachAnalysis(ctx, userID, false)
 	require.NoError(t, err)
 
-	jobs := riverJobs(t, b, "run_coach_analysis")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "run_coach_analysis")
+	require.Len(t, rjobs, 1)
 
 	var args struct {
 		UserID uuid.UUID `json:"user_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, userID, args.UserID)
 }
 
 func TestRequestCoachAnalysis_NoNewSessionsReturnsError(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 
@@ -273,7 +216,7 @@ func TestRequestCoachAnalysis_NoNewSessionsReturnsError(t *testing.T) {
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "reviewed")
 
-	q := db.New(b.pool)
+	q := db.New(b.Pool())
 
 	// Insert a coach analysis that already covers this session.
 	_, err := q.InsertCoachAnalysis(ctx, db.InsertCoachAnalysisParams{
@@ -289,17 +232,15 @@ func TestRequestCoachAnalysis_NoNewSessionsReturnsError(t *testing.T) {
 
 	// Now the set of reviewed sessions matches the last analysis → ErrNoNewSessions.
 	err = b.RequestCoachAnalysis(ctx, userID, false)
-	require.ErrorIs(t, err, ErrNoNewSessions)
+	require.ErrorIs(t, err, backend.ErrNoNewSessions)
 }
 
 func TestRequestCoachAnalysis_ForceBypassesSessionCheck(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	b := newTestBackend(t)
+	t.Parallel()
+	b := pg.NewBackend(t)
 	ctx := context.Background()
 
-	userID := seedUser(t, b)
+	userID := backendtest.SeedUser(t, b)
 	questionID := seedQuestion(t, b)
 	seedPurchaseGrant(t, b, userID, 120)
 
@@ -307,7 +248,7 @@ func TestRequestCoachAnalysis_ForceBypassesSessionCheck(t *testing.T) {
 	sessionID := seedSession(t, b, userID, questionID)
 	setStatus(t, b, sessionID, "reviewed")
 
-	q := db.New(b.pool)
+	q := db.New(b.Pool())
 	_, err := q.InsertCoachAnalysis(ctx, db.InsertCoachAnalysisParams{
 		UserID:              userID,
 		Narrative:           "already done",
@@ -323,12 +264,12 @@ func TestRequestCoachAnalysis_ForceBypassesSessionCheck(t *testing.T) {
 	err = b.RequestCoachAnalysis(ctx, userID, true)
 	require.NoError(t, err)
 
-	jobs := riverJobs(t, b, "run_coach_analysis")
-	require.Len(t, jobs, 1)
+	rjobs := riverJobs(t, b, "run_coach_analysis")
+	require.Len(t, rjobs, 1)
 
 	var args struct {
 		UserID uuid.UUID `json:"user_id"`
 	}
-	require.NoError(t, json.Unmarshal(jobs[0], &args))
+	require.NoError(t, json.Unmarshal(rjobs[0], &args))
 	assert.Equal(t, userID, args.UserID)
 }
