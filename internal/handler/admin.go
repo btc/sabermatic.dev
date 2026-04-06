@@ -9,7 +9,7 @@ import (
 func AdminJobsPlaceholder() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck // HTTP response write
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":  "placeholder",
 			"message": "River UI will be available here after deployment setup",
 		})

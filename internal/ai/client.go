@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -332,9 +333,9 @@ func (ts *TokenStream) FullMessage() string {
 
 // Close drains the stream if needed, then persists the LLM call using a
 // connection from the pool. If pool is nil (unit tests), persistence is skipped.
-func (ts *TokenStream) Close(ctx context.Context) error {
+func (ts *TokenStream) Close(ctx context.Context) (err error) {
 	ts.drain()
-	defer ts.stream.Close() //nolint:errcheck // best-effort cleanup
+	defer func() { err = errors.Join(err, ts.stream.Close()) }()
 
 	if ts.pool == nil {
 		return nil
@@ -345,9 +346,9 @@ func (ts *TokenStream) Close(ctx context.Context) error {
 
 // CloseWithTx drains the stream if needed, then persists the LLM call within
 // the caller's transaction. If tx is nil, persistence is skipped.
-func (ts *TokenStream) CloseWithTx(ctx context.Context, tx pgx.Tx) error {
+func (ts *TokenStream) CloseWithTx(ctx context.Context, tx pgx.Tx) (err error) {
 	ts.drain()
-	defer ts.stream.Close() //nolint:errcheck // best-effort cleanup
+	defer func() { err = errors.Join(err, ts.stream.Close()) }()
 
 	if tx == nil {
 		return nil

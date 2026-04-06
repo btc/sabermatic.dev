@@ -56,7 +56,7 @@ func SharedPostgres() PG {
 
 	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		container.Terminate(ctx) //nolint:errcheck // test cleanup
+		_ = container.Terminate(ctx)
 		panic(fmt.Sprintf("testutil.SharedPostgres: connection string: %v", err))
 	}
 
@@ -73,7 +73,7 @@ func (pg PG) RunTests(m *testing.M) {
 // Cleanup terminates the shared container.
 func (pg PG) Cleanup() {
 	if pg.container != nil {
-		pg.container.Terminate(context.Background()) //nolint:errcheck // test cleanup
+		_ = pg.container.Terminate(context.Background())
 	}
 }
 
@@ -87,7 +87,7 @@ func dbName(t *testing.T) string {
 		name = name[:50]
 	}
 	b := make([]byte, 4)
-	rand.Read(b) //nolint:errcheck // crypto/rand.Read never errors
+	_, _ = rand.Read(b)
 	return fmt.Sprintf("test_%s_%x", name, b)
 }
 
@@ -106,7 +106,7 @@ func (pg PG) NewDatabase(t *testing.T) string {
 	require.NoError(t, err)
 	_, err = conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s", name))
 	require.NoError(t, err)
-	conn.Close(ctx) //nolint:errcheck // test cleanup
+	require.NoError(t, conn.Close(ctx))
 
 	testConnStr := replaceDBName(pg.connStr, name)
 
@@ -130,10 +130,10 @@ func (pg PG) NewDatabase(t *testing.T) string {
 		if err != nil {
 			return
 		}
-		conn.Exec(context.Background(), fmt.Sprintf( //nolint:errcheck // best-effort test DB cleanup
+		_, _ = conn.Exec(context.Background(), fmt.Sprintf(
 			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s'", name))
-		conn.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %s", name)) //nolint:errcheck // best-effort test DB cleanup
-		conn.Close(context.Background())                                                  //nolint:errcheck // test cleanup
+		_, _ = conn.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %s", name))
+		require.NoError(t, conn.Close(context.Background()))
 	})
 
 	return testConnStr

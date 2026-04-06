@@ -203,7 +203,9 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 	go func() {
 		touchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		queries.TouchAuthSession(touchCtx, row.ID) //nolint:errcheck // fire-and-forget
+		if err := queries.TouchAuthSession(touchCtx, row.ID); err != nil {
+			slog.ErrorContext(touchCtx, "touch auth session", "error", err, "session_id", row.ID)
+		}
 	}()
 
 	return &auth.AuthUser{

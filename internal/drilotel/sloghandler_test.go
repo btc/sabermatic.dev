@@ -19,7 +19,7 @@ func newTestTracer(t *testing.T) (*tracetest.InMemoryExporter, *sdktrace.TracerP
 	t.Helper()
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
-	t.Cleanup(func() { tp.Shutdown(context.Background()) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { require.NoError(t, tp.Shutdown(context.Background())) })
 	return exp, tp
 }
 

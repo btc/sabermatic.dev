@@ -78,7 +78,11 @@ func runWithContext(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create backend: %w", err)
 	}
-	defer b.Close() //nolint:errcheck // best-effort cleanup
+	defer func() {
+		if err := b.Close(); err != nil {
+			slog.Error("closing backend", "error", err)
+		}
+	}()
 
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
@@ -145,7 +149,11 @@ func buildLogWriter(path string) (io.Writer, func()) {
 		fmt.Fprintf(os.Stderr, "warn: cannot open log file: %v\n", err)
 		return os.Stderr, func() {}
 	}
-	return io.MultiWriter(os.Stderr, f), func() { f.Close() } //nolint:errcheck // best-effort cleanup
+	return io.MultiWriter(os.Stderr, f), func() {
+		if err := f.Close(); err != nil {
+			slog.Error("closing log file", "error", err)
+		}
+	}
 }
 
 func runMigrations(databaseURL string) error {
