@@ -2,7 +2,6 @@ package interview
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -596,9 +595,6 @@ func (c *Conductor) isReconnect() bool {
 func (c *Conductor) close() {
 	c.ws.Close(websocket.StatusNormalClosure, "session ended")
 	if c.lockConn != nil {
-		key1 := int32(binary.BigEndian.Uint32(c.sessionID[:4]))
-		key2 := int32(binary.BigEndian.Uint32(c.sessionID[4:8]))
-		c.lockConn.Exec(context.Background(), "SELECT pg_advisory_unlock($1, $2)", key1, key2)
 		c.lockConn.Release()
 		c.lockConn = nil
 	}
