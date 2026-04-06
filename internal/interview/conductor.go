@@ -203,6 +203,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 
 	// Cleanup in correct order: cancel readLoop -> wait for exit -> close resources.
 	defer func() {
+		c.obs.Load().Interrupt()
 		readCancel()
 		wg.Wait()
 		c.close()
@@ -453,6 +454,9 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	ctx, span := tracer.Start(ctx, "Conductor.streamInterviewerResponse")
 	defer func() { drilotel.End(span, err) }()
 
+	// Cancel any lingering TTS from the previous turn.
+	c.obs.Load().Interrupt()
+
 	// Transition to InterviewerSpeaking.
 	if err := c.sm.Transition(StateInterviewerSpeaking); err != nil {
 		c.send(ctx, msgError("invalid_state_transition", err.Error()))
@@ -505,7 +509,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	})
 	if err != nil {
 		fanOut.OnError(err)
-		fanOut.Close()
+		fanOut.Interrupt()
 		c.obs.Store(observer.Noop)
 		return fmt.Errorf("start llm stream: %w", err)
 	}
@@ -526,11 +530,11 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 
 	fullText := accumulator.Text()
 	fanOut.OnDone(fullText)
-	c.obs.Store(observer.Noop)
 
 	// Persist interviewer message and LLM call atomically.
+	persistCtx := context.WithoutCancel(ctx)
 	c.sequence++
-	interviewerMsg, err := c.backend.PersistInterviewerTurn(ctx, stream, backend.PersistMessageParams{
+	interviewerMsg, err := c.backend.PersistInterviewerTurn(persistCtx, stream, backend.PersistMessageParams{
 		MessageID:   messageID,
 		SessionID:   c.sessionID,
 		Seq:         c.sequence,
@@ -540,12 +544,9 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	})
 	if err != nil {
 		c.sequence-- // rollback sequence on insert failure
-		fanOut.Close()
+		fanOut.Interrupt()
 		return fmt.Errorf("persist interviewer turn: %w", err)
 	}
-
-	// Close fan-out after persistence: waits for TTS goroutine to finish.
-	fanOut.Close()
 
 	c.messages = append(c.messages, interviewerMsg)
 
@@ -562,6 +563,8 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 func (c *Conductor) endSession(ctx context.Context) (err error) {
 	ctx, span := tracer.Start(ctx, "Conductor.endSession")
 	defer func() { drilotel.End(span, err) }()
+
+	c.obs.Load().Interrupt()
 
 	if err := c.sm.Transition(StateEnding); err != nil {
 		c.send(ctx, msgError("invalid_state_transition", err.Error()))
@@ -584,6 +587,8 @@ func (c *Conductor) endSession(ctx context.Context) (err error) {
 func (c *Conductor) cancelSession(ctx context.Context) (err error) {
 	ctx, span := tracer.Start(ctx, "Conductor.cancelSession")
 	defer func() { drilotel.End(span, err) }()
+
+	c.obs.Load().Interrupt()
 
 	if err := c.sm.Transition(StateEnding); err != nil {
 		c.send(ctx, msgError("invalid_state_transition", err.Error()))
