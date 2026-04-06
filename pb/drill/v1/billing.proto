@@ -1,0 +1,26 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+// BillingService provides Stripe checkout and billing portal RPCs.
+service BillingService {
+  rpc Checkout(CheckoutRequest) returns (CheckoutResponse);
+  rpc Portal(PortalRequest) returns (PortalResponse);
+}
+
+message CheckoutRequest {
+  string type = 1;    // "subscription" or "pack"
+  string plan = 2;    // e.g. "pro" (for subscription)
+  int32 minutes = 3;  // minute pack size (for pack)
+}
+
+message CheckoutResponse {
+  string url = 1; // Stripe checkout URL
+}
+
+message PortalRequest {}
+
+message PortalResponse {
+  string url = 1; // Stripe billing portal URL
+}
