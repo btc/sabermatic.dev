@@ -79,6 +79,7 @@ type Conductor struct {
 	ttsEnabled    bool
 	duration      time.Duration
 	model         string
+	status        string // DB session status (active, completed, cancelled, etc.)
 
 	// The client's session_init message (contains LastSeq for reconnect detection).
 	initMsg WSMessage
@@ -269,6 +270,18 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		}()
 	}
 
+	// Re-trigger interviewer response if the last persisted message is from
+	// the candidate (gap from crash or disconnect during streaming).
+	if c.needsInterviewerRecovery() {
+		ch := make(chan turnResult, 1)
+		turnResultCh = ch
+		turnCtx, cancel := context.WithCancel(workCtx)
+		cancelTurn = cancel
+		go func() {
+			ch <- turnResult{err: c.streamInterviewerResponse(turnCtx)}
+		}()
+	}
+
 	// Main loop -- event loop is never blocked by pipeline I/O.
 	reconnectPending := false
 	for {
@@ -426,6 +439,7 @@ func (c *Conductor) loadSession(ctx context.Context) (err error) {
 	c.ttsEnabled = row.ConfigTtsEnabled
 	c.duration = time.Duration(row.ConfigDurationMinutes) * time.Minute
 	c.model = c.backend.Config().LLM.InterviewerModel
+	c.status = row.Status
 	c.sm = NewStateMachine(StateWaitingForInput)
 	c.sm.SetStartedAt(row.StartedAt)
 
@@ -752,6 +766,16 @@ func (c *Conductor) send(ctx context.Context, v any) {
 // isReconnect returns true if the client sent a last_seq in session_init.
 func (c *Conductor) isReconnect() bool {
 	return c.initMsg.LastSeq != nil
+}
+
+// needsInterviewerRecovery returns true when the last persisted message is
+// from the candidate and the session is still active — meaning the
+// interviewer's response was lost (crash, disconnect during streaming).
+func (c *Conductor) needsInterviewerRecovery() bool {
+	if len(c.messages) == 0 || c.status != "active" {
+		return false
+	}
+	return c.messages[len(c.messages)-1].Role == "candidate"
 }
 
 // close closes the WebSocket and releases the advisory lock.
