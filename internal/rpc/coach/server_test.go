@@ -52,11 +52,9 @@ func startCoachServer(t *testing.T, b *backend.Backend) string {
 }
 
 func TestGetCoachAnalysis_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startCoachServer(t, b)
 
 	// No cookie — plain HTTP client.
@@ -67,11 +65,9 @@ func TestGetCoachAnalysis_Unauthenticated(t *testing.T) {
 }
 
 func TestGetCoachAnalysis_NoAnalysisExists(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startCoachServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -91,11 +87,9 @@ func TestGetCoachAnalysis_NoAnalysisExists(t *testing.T) {
 }
 
 func TestRequestCoachAnalysis_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startCoachServer(t, b)
 
 	// No cookie — plain HTTP client.
@@ -106,11 +100,9 @@ func TestRequestCoachAnalysis_Unauthenticated(t *testing.T) {
 }
 
 func TestRequestCoachAnalysis_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startCoachServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)

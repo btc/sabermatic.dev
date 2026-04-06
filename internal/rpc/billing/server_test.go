@@ -56,11 +56,9 @@ func startBillingServer(t *testing.T, b *backend.Backend) string {
 // ---------------------------------------------------------------------------
 
 func TestCheckout_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startBillingServer(t, b)
 
 	client := drillv1connect.NewBillingServiceClient(&http.Client{}, srvURL)
@@ -73,11 +71,9 @@ func TestCheckout_Unauthenticated(t *testing.T) {
 }
 
 func TestPortal_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startBillingServer(t, b)
 
 	client := drillv1connect.NewBillingServiceClient(&http.Client{}, srvURL)
@@ -91,11 +87,9 @@ func TestPortal_Unauthenticated(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCheckout_Authenticated_StripeNotConfigured(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startBillingServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -111,11 +105,9 @@ func TestCheckout_Authenticated_StripeNotConfigured(t *testing.T) {
 }
 
 func TestPortal_Authenticated_StripeNotConfigured(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startBillingServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)

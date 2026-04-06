@@ -49,11 +49,9 @@ func startUserServer(t *testing.T, b *backend.Backend) string {
 }
 
 func TestGetMe_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startUserServer(t, b)
 
 	client := drillv1connect.NewUserServiceClient(&http.Client{}, srvURL)
@@ -63,11 +61,9 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 }
 
 func TestGetMe_Authenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startUserServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -86,11 +82,9 @@ func TestGetMe_Authenticated(t *testing.T) {
 }
 
 func TestGetUsage_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startUserServer(t, b)
 
 	client := drillv1connect.NewUserServiceClient(&http.Client{}, srvURL)
@@ -100,11 +94,9 @@ func TestGetUsage_Unauthenticated(t *testing.T) {
 }
 
 func TestGetUsage_Authenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startUserServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)

@@ -147,11 +147,9 @@ func seedEducatorAnalysis(t *testing.T, b *backend.Backend, sessionID uuid.UUID,
 // ---------------------------------------------------------------------------
 
 func TestGetEducatorAnalysis_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEducatorServer(t, b)
 
 	// No cookie -- plain HTTP client.
@@ -164,11 +162,9 @@ func TestGetEducatorAnalysis_Unauthenticated(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_NotRequested(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEducatorServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -186,11 +182,9 @@ func TestGetEducatorAnalysis_NotRequested(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_Completed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEducatorServer(t, b)
 	token := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, token)
@@ -233,11 +227,9 @@ func signupAndLoginAs(t *testing.T, b *backend.Backend, email, password string) 
 }
 
 func TestRequestEducatorAnalysis_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEducatorServer(t, b)
 	token := signupAndLoginAs(t, b, "educator-req@example.com", "securepass123")
 	client := authedClient(t, srvURL, token)
@@ -253,11 +245,9 @@ func TestRequestEducatorAnalysis_Success(t *testing.T) {
 }
 
 func TestGetEducatorAnalysis_WrongUser(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEducatorServer(t, b)
 
 	// User A creates a session.
@@ -278,11 +268,9 @@ func TestGetEducatorAnalysis_WrongUser(t *testing.T) {
 }
 
 func TestRequestEducatorAnalysis_Unauthenticated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
+	t.Parallel()
 
-	b := testutil.NewTestBackend(t)
+	b := pg.NewBackend(t)
 	srvURL := startEducatorServer(t, b)
 
 	client := drillv1connect.NewEducatorServiceClient(&http.Client{}, srvURL)
