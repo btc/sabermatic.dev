@@ -154,6 +154,7 @@ func newFakeEvalServer(t *testing.T) *httptest.Server {
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		//nolint:errcheck
 		fmt.Fprintf(w, `{
 			"id": "msg_eval", "type": "message", "role": "assistant",
 			"content": [{"type": "tool_use", "id": "toolu_eval", "name": "submit_evaluation", "input": %s}],

@@ -57,25 +57,25 @@ func newFakeAnthropicServer(t *testing.T, tokens []string) *httptest.Server {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+		fmt.Fprintf(w, "event: message_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n") //nolint:errcheck
 
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n") //nolint:errcheck
 
 		for _, token := range tokens {
-			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+			fmt.Fprintf(w, "event: content_block_delta\n") //nolint:errcheck
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token) //nolint:errcheck
 		}
 
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprintf(w, "event: content_block_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n") //nolint:errcheck
 
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens))
+		fmt.Fprintf(w, "event: message_delta\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens)) //nolint:errcheck
 
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		fmt.Fprintf(w, "event: message_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -533,13 +533,13 @@ func TestWS_Reconnection(t *testing.T) {
 	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	// Disconnect.
-	ws1.Close(websocket.StatusNormalClosure, "done")
+	ws1.Close(websocket.StatusNormalClosure, "done") //nolint:errcheck // test cleanup
 	time.Sleep(200 * time.Millisecond) // let conductor process disconnect
 
 	// Reconnect with last_seq = 0 (want all messages).
 	lastSeq := 0
 	ws2 := wsConnect(t, srv.URL, session.ID, cookie, &lastSeq)
-	defer ws2.CloseNow()
+	defer ws2.CloseNow() //nolint:errcheck // test cleanup
 
 	// Should receive reconnect_state.
 	reconnectMsg := readMsg(t, ws2)
@@ -768,28 +768,28 @@ func TestWS_GracefulShutdown(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+		fmt.Fprintf(w, "event: message_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n") //nolint:errcheck
 
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n") //nolint:errcheck
 
 		tokens := []string{"Slow ", "stream ", "response."}
 		for _, token := range tokens {
 			time.Sleep(100 * time.Millisecond)
-			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+			fmt.Fprintf(w, "event: content_block_delta\n") //nolint:errcheck
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token) //nolint:errcheck
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
 		}
 
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":3}}\n\n")
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		fmt.Fprintf(w, "event: content_block_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: message_delta\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":3}}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: message_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
 
@@ -1066,7 +1066,7 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 
 	// First connection: dial, send session_init, receive session_loaded.
 	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws1.CloseNow()
+	defer ws1.CloseNow() //nolint:errcheck // test cleanup
 
 	loaded := readMsg(t, ws1)
 	require.Equal(t, "session_loaded", loaded["type"])
@@ -1084,7 +1084,7 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 		HTTPHeader: http.Header{"Cookie": {cookie.String()}},
 	})
 	require.NoError(t, err, "dial should succeed; rejection happens at conductor level")
-	defer ws2.CloseNow()
+	defer ws2.CloseNow() //nolint:errcheck // test cleanup
 
 	// Send session_init on ws2. Write may or may not fail depending on timing,
 	// so ignore the write error — the important thing is the subsequent Read.
@@ -1313,11 +1313,11 @@ func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Se
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+		fmt.Fprintf(w, "event: message_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n") //nolint:errcheck
 
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprintf(w, "event: content_block_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n") //nolint:errcheck
 
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -1327,8 +1327,8 @@ func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Se
 		// Second call onward: succeed normally.
 		if callCount == 1 {
 			for _, token := range goodTokens {
-				fmt.Fprintf(w, "event: content_block_delta\n")
-				fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+				fmt.Fprintf(w, "event: content_block_delta\n") //nolint:errcheck
+				fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token) //nolint:errcheck
 				if f, ok := w.(http.Flusher); ok {
 					f.Flush()
 				}
@@ -1343,15 +1343,15 @@ func newFakeAnthropicErrorServer(t *testing.T, goodTokens []string) *httptest.Se
 
 		// Normal response for subsequent calls.
 		for _, token := range goodTokens {
-			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+			fmt.Fprintf(w, "event: content_block_delta\n") //nolint:errcheck
+			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token) //nolint:errcheck
 		}
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(goodTokens))
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		fmt.Fprintf(w, "event: content_block_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: message_delta\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(goodTokens)) //nolint:errcheck
+		fmt.Fprintf(w, "event: message_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -1487,18 +1487,18 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-		fmt.Fprintf(w, "event: content_block_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi.\"}}\n\n")
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n")
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		fmt.Fprintf(w, "event: message_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: content_block_start\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: content_block_delta\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi.\"}}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: content_block_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: message_delta\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":1}}\n\n") //nolint:errcheck
+		fmt.Fprintf(w, "event: message_stop\n") //nolint:errcheck
+		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n") //nolint:errcheck
 	}))
 	t.Cleanup(srv.Close)
 
@@ -1628,14 +1628,14 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 	lastSeq := int(msgs[len(msgs)-1].Seq) // seq 3
 
 	// Disconnect.
-	ws1.Close(websocket.StatusNormalClosure, "done")
+	ws1.Close(websocket.StatusNormalClosure, "done") //nolint:errcheck // test cleanup
 	time.Sleep(200 * time.Millisecond)
 
 	// Reconnect with last_seq = 1 (only saw the opening).
 	// Should receive messages with seq > 1.
 	reconnectSeq := 1
 	ws2 := wsConnect(t, srv.URL, session.ID, cookie, &reconnectSeq)
-	defer ws2.CloseNow()
+	defer ws2.CloseNow() //nolint:errcheck // test cleanup
 
 	reconnectMsg := readMsg(t, ws2)
 	assert.Equal(t, "reconnect_state", reconnectMsg["type"])
@@ -1643,12 +1643,12 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 	assert.True(t, ok)
 	assert.Len(t, missedMsgs, 2, "should replay messages with seq > 1 (candidate + response)")
 
-	ws2.Close(websocket.StatusNormalClosure, "done")
+	ws2.Close(websocket.StatusNormalClosure, "done") //nolint:errcheck // test cleanup
 	time.Sleep(200 * time.Millisecond)
 
 	// Reconnect with last_seq = lastSeq (saw everything). Should get empty replay.
 	ws3 := wsConnect(t, srv.URL, session.ID, cookie, &lastSeq)
-	defer ws3.CloseNow()
+	defer ws3.CloseNow() //nolint:errcheck // test cleanup
 
 	reconnectMsg3 := readMsg(t, ws3)
 	assert.Equal(t, "reconnect_state", reconnectMsg3["type"])
