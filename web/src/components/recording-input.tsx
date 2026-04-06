@@ -55,11 +55,13 @@ export function RecordingInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const spaceHeldRef = useRef(false);
   const startedViaSpaceRef = useRef(false);
+  const autoStoppedRef = useRef(false);
 
   // Auto-stop recording if Space was released during async start (e.g., mic permission prompt).
   // Only applies to Space-initiated recording — mic button clicks are toggle-based.
   useEffect(() => {
     if (isRecording && startedViaSpaceRef.current && !spaceHeldRef.current) {
+      autoStoppedRef.current = true;
       onStopRecording();
     }
   }, [isRecording, onStopRecording]);
@@ -92,15 +94,21 @@ export function RecordingInput({
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [isRecording, analyserNode, pendingDuration]);
 
-  // Freeze waveform snapshot when recording stops (use ref to avoid stale data)
+  // Freeze waveform snapshot when recording stops (use ref to avoid stale data).
+  // If auto-stopped (permission dialog case), discard the phantom segment.
   const prevRecording = useRef(false);
   useEffect(() => {
     if (prevRecording.current && !isRecording) {
-      setFrozenWaveform(new Uint8Array(latestWaveformRef.current));
+      if (autoStoppedRef.current) {
+        autoStoppedRef.current = false;
+        onDiscard();
+      } else {
+        setFrozenWaveform(new Uint8Array(latestWaveformRef.current));
+      }
       startedViaSpaceRef.current = false;
     }
     prevRecording.current = isRecording;
-  }, [isRecording]);
+  }, [isRecording, onDiscard]);
 
   // -- Consolidated keyboard handlers --
   useEffect(() => {
