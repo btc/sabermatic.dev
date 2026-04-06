@@ -109,17 +109,16 @@ export class AudioPlayer {
     this._isPlaying = false;
     this.isDone = false;
     this.nextExpectedSeq = 0;
-
-    if (this.ctx) {
-      // Close and recreate to interrupt any active source nodes
-      const old = this.ctx;
-      this.ctx = null;
-      old.close().catch(() => {});
-    }
+    // Keep this.ctx alive — AudioContexts are expensive to create and
+    // browsers limit the number of active instances. Generation increment
+    // + source.stop() is sufficient to cancel playback.
   }
 
   destroy(): void {
     this.cancel();
-    // ctx already closed by cancel()
+    if (this.ctx) {
+      this.ctx.close().catch(() => {});
+      this.ctx = null;
+    }
   }
 }

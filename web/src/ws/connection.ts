@@ -9,7 +9,7 @@ export enum ConnectionState {
 
 export class ConnectionManager {
   ws: WebSocket | null = null;
-  private lastSeq: number | null = null;
+  private getLastSeq: () => number | null = () => null;
   private retryCount = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
@@ -21,8 +21,8 @@ export class ConnectionManager {
     private onStateChange: (state: ConnectionState) => void,
   ) {}
 
-  connect(lastSeq: number | null) {
-    this.lastSeq = lastSeq;
+  connect(getLastSeq: () => number | null) {
+    this.getLastSeq = getLastSeq;
     this.open();
   }
 
@@ -53,7 +53,7 @@ export class ConnectionManager {
     this.ws.onopen = () => {
       this.retryCount = 0;
       this.onStateChange(ConnectionState.Connected);
-      this.send({ type: "session_init", last_seq: this.lastSeq });
+      this.send({ type: "session_init", last_seq: this.getLastSeq() });
     };
 
     this.ws.onmessage = (event) => {
