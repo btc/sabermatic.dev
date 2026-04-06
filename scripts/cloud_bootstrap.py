@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import getpass
 import json
+import logging
 import secrets
 import shutil
 import subprocess
@@ -21,6 +22,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+
+LOG_FILE = Path("cloud_bootstrap.log")
+logging.basicConfig(
+    filename=str(LOG_FILE),
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("bootstrap")
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 
@@ -116,6 +128,8 @@ def run(
     cwd: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a subprocess, streaming output unless capture=True."""
+    cmd_str = " ".join(cmd)
+    log.debug("$ %s", cmd_str)
     kwargs: dict = {
         "check": check,
         "cwd": cwd,
@@ -128,7 +142,20 @@ def run(
             kwargs["input"] = input_data
         else:
             kwargs["input"] = input_data.encode()
-    return subprocess.run(cmd, **kwargs)
+    try:
+        result = subprocess.run(cmd, **kwargs)
+    except subprocess.CalledProcessError as e:
+        log.error("Command failed (exit %d): %s", e.returncode, cmd_str)
+        if hasattr(e, "stdout") and e.stdout:
+            log.error("stdout: %s", e.stdout)
+        if hasattr(e, "stderr") and e.stderr:
+            log.error("stderr: %s", e.stderr)
+        raise
+    if capture and result.returncode != 0:
+        log.debug("exit %d | stderr: %s", result.returncode, result.stderr)
+    elif capture:
+        log.debug("exit 0 | stdout: %s", result.stdout[:200] if result.stdout else "")
+    return result
 
 
 def run_quiet(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:

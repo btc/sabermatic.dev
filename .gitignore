@@ -56,8 +56,9 @@ coverage.out
 coverage-cross.out
 tmp/
 
-# Cloud bootstrap state (resume file)
+# Cloud bootstrap
 .cloud_bootstrap_state
+cloud_bootstrap.log
 
 # Terraform local files
 terraform/terraform.tfvars
