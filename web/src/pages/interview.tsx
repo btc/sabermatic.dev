@@ -32,12 +32,34 @@ import { toast } from "sonner";
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function ReconnectingBanner() {
-  return (
-    <div className="bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-center text-sm py-1.5 px-4">
-      Reconnecting...
-    </div>
-  );
+function ConnectionBanner({
+  state,
+  onRetry,
+}: {
+  state: ConnectionState;
+  onRetry: () => void;
+}) {
+  if (state === ConnectionState.Reconnecting) {
+    return (
+      <div className="bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-center text-sm py-1.5 px-4">
+        Reconnecting...
+      </div>
+    );
+  }
+  if (state === ConnectionState.Disconnected) {
+    return (
+      <div className="bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-200 text-center text-sm py-1.5 px-4 flex items-center justify-center gap-2">
+        <span>Session disconnected</span>
+        <button
+          onClick={onRetry}
+          className="underline font-medium hover:no-underline"
+        >
+          Tap to retry
+        </button>
+      </div>
+    );
+  }
+  return null;
 }
 
 function TtsIndicator() {
@@ -415,8 +437,11 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Reconnecting banner */}
-      {connectionState === ConnectionState.Reconnecting && <ReconnectingBanner />}
+      {/* Connection banner */}
+      <ConnectionBanner
+        state={connectionState}
+        onRetry={() => cmRef.current?.retry()}
+      />
 
       {/* ---- Header strip ---- */}
       <header className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
