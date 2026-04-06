@@ -132,11 +132,16 @@ export function RecordingInput({
         }
       }
     };
+    // Reset spaceHeld on window blur — permission dialogs steal focus,
+    // swallowing the keyup event and leaving spaceHeld stuck true.
+    const handleBlur = () => { spaceHeldRef.current = false; };
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [inputFocused, disabled, isRecording, segmentCount, dialogOpen,
       onStartRecording, onStopRecording, onSend, onDiscard]);
