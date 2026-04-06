@@ -34,7 +34,7 @@ func (s *GCSStore) Put(ctx context.Context, key string, data []byte, contentType
 	w := s.client.Bucket(s.bucket).Object(key).NewWriter(ctx)
 	w.ContentType = contentType
 	if _, err := w.Write(data); err != nil {
-		w.Close()
+		w.Close() //nolint:errcheck // write already failed, cleanup only
 		return "", fmt.Errorf("gcs write %s: %w", key, err)
 	}
 	if err := w.Close(); err != nil {

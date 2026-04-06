@@ -147,7 +147,7 @@ func (a *TTSAccumulator) ttsLoop() {
 					break
 				}
 			}
-			rc.Close()
+			rc.Close() //nolint:errcheck // best-effort cleanup
 
 		case <-a.ctx.Done():
 			return

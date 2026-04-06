@@ -106,11 +106,11 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	lockConn, locked, err := c.backend.AcquireSessionLock(serverCtx, c.sessionID)
 	if err != nil {
 		slog.Error("acquire session lock", "error", err, "session_id", c.sessionID)
-		c.ws.Close(websocket.StatusInternalError, "lock error")
+		c.ws.Close(websocket.StatusInternalError, "lock error") //nolint:errcheck // best-effort WS close
 		return
 	}
 	if !locked {
-		c.ws.Close(websocket.StatusPolicyViolation, "session already in use")
+		c.ws.Close(websocket.StatusPolicyViolation, "session already in use") //nolint:errcheck // best-effort WS close
 		return
 	}
 	c.lockConn = lockConn
@@ -593,7 +593,7 @@ func (c *Conductor) isReconnect() bool {
 
 // close closes the WebSocket and releases the advisory lock connection.
 func (c *Conductor) close() {
-	c.ws.Close(websocket.StatusNormalClosure, "session ended")
+	c.ws.Close(websocket.StatusNormalClosure, "session ended") //nolint:errcheck // best-effort WS close
 	if c.lockConn != nil {
 		c.lockConn.Release()
 		c.lockConn = nil
