@@ -17,9 +17,11 @@ WHERE s.id = $1;
 -- name: ListSessionsByUser :many
 SELECT s.id, s.user_id, s.question_id, s.status, s.config_duration_minutes,
        s.config_tts_enabled, s.started_at, s.ended_at, s.turn_count, s.archived_at,
-       s.created_at, q.title AS question_title
+       s.created_at, q.title AS question_title,
+       e.score_overall
 FROM interview_sessions s
 JOIN questions q ON q.id = s.question_id
+LEFT JOIN evaluations e ON e.session_id = s.id
 WHERE s.user_id = $1
 ORDER BY s.created_at DESC;
 

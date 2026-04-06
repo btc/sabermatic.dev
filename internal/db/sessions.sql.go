@@ -353,9 +353,11 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSe
 const listSessionsByUser = `-- name: ListSessionsByUser :many
 SELECT s.id, s.user_id, s.question_id, s.status, s.config_duration_minutes,
        s.config_tts_enabled, s.started_at, s.ended_at, s.turn_count, s.archived_at,
-       s.created_at, q.title AS question_title
+       s.created_at, q.title AS question_title,
+       e.score_overall
 FROM interview_sessions s
 JOIN questions q ON q.id = s.question_id
+LEFT JOIN evaluations e ON e.session_id = s.id
 WHERE s.user_id = $1
 ORDER BY s.created_at DESC
 `
@@ -373,6 +375,7 @@ type ListSessionsByUserRow struct {
 	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt             time.Time          `json:"created_at"`
 	QuestionTitle         string             `json:"question_title"`
+	ScoreOverall          pgtype.Int4        `json:"score_overall"`
 }
 
 func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error) {
@@ -397,6 +400,7 @@ func (q *Queries) ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]L
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.QuestionTitle,
+			&i.ScoreOverall,
 		); err != nil {
 			return nil, err
 		}
