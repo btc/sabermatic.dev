@@ -225,7 +225,6 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     connectionState,
     sessionInfo,
     lastError,
-    wasReconnected,
     sendText,
     sendAudio,
     endSession,
@@ -320,20 +319,18 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     const trimmed = textInput.trim();
     if (!trimmed) return;
     stopTts();
-    audioPlayer.initContext(); // Fallback for reconnect path (Ready gate skipped)
     sendText(trimmed);
     setTextInput("");
-  }, [textInput, sendText, stopTts, audioPlayer]);
+  }, [textInput, sendText, stopTts]);
 
   const handleSendAudio = useCallback(async () => {
     if (audioRecorder.segmentCount === 0) return;
     stopTts();
-    audioPlayer.initContext(); // Fallback for reconnect path (Ready gate skipped)
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
       sendAudio(audioBase64);
     }
-  }, [audioRecorder, sendAudio, stopTts, audioPlayer]);
+  }, [audioRecorder, sendAudio, stopTts]);
 
   const handleSend = useCallback(() => {
     if (textInput.trim()) {
@@ -346,9 +343,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Recording callbacks ------
   const handleStartRecording = useCallback(async () => {
     stopTts();
-    audioPlayer.initContext(); // Fallback for reconnect path (Ready gate skipped)
     await recStart();
-  }, [stopTts, recStart, audioPlayer]);
+  }, [stopTts, recStart]);
 
   const handleStopRecording = useCallback(async () => {
     await recStop();
@@ -374,7 +370,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const showGate = !ready && !wasReconnected;
+  const showGate = !ready;
 
   // Loading — WS hasn't delivered session_loaded yet.
   if (showGate && !sessionInfo) {
