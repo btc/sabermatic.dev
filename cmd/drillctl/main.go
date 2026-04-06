@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/urfave/cli/v3"
+
+	"github.com/joho/godotenv"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/billing"
@@ -19,11 +23,17 @@ import (
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %s\n", err)
+		os.Exit(1)
+	}
+
 	cmd := &cli.Command{
 		Name:  "drillctl",
 		Usage: "Drill administration CLI",
 		Commands: []*cli.Command{
 			seedCmd(),
+			grantCmd(),
 		},
 	}
 
@@ -41,6 +51,76 @@ func seedCmd() *cli.Command {
 			return runSeed(ctx)
 		},
 	}
+}
+
+func grantCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "grant",
+		Usage:     "Create an admin grant (e.g. drillctl grant 100m)",
+		ArgsUsage: "<minutes>",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "email",
+				Value: "dev@drill.dev",
+				Usage: "user email",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.NArg() != 1 {
+				return fmt.Errorf("usage: drillctl grant [--email EMAIL] <minutes>")
+			}
+			minutes, err := parseMinutes(cmd.Args().First())
+			if err != nil {
+				return err
+			}
+			return runGrant(ctx, cmd.String("email"), minutes)
+		},
+	}
+}
+
+func parseMinutes(s string) (int32, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q (e.g. 100m, 3h, 1h30m): %w", s, err)
+	}
+	mins := int32(math.Ceil(d.Minutes()))
+	if mins <= 0 {
+		return 0, fmt.Errorf("duration must be positive, got %s", d)
+	}
+	return mins, nil
+}
+
+func runGrant(ctx context.Context, email string, minutes int32) error {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	user, err := queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("lookup user %s: %w", email, err)
+	}
+
+	if err := queries.CreateAdminGrant(ctx, db.CreateAdminGrantParams{
+		UserID:  user.ID,
+		Minutes: minutes,
+	}); err != nil {
+		return fmt.Errorf("create grant: %w", err)
+	}
+
+	slog.Info("admin grant created",
+		"email", email,
+		"minutes", minutes,
+	)
+	return nil
 }
 
 // runSeed creates a dev user by directly calling db + billing packages,
