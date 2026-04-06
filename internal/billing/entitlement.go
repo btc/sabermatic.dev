@@ -36,31 +36,43 @@ func Resolve(bs BillingSnapshot) Entitlements {
 }
 
 // CanStartSession reports whether the user can start a session of the given duration.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) CanStartSession(durationMinutes int) bool {
 	return durationMinutes <= e.plan.MaxDurationMinutes && e.totalBalance >= durationMinutes
 }
 
 // DurationAllowed reports whether the requested duration is within the plan limit.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) DurationAllowed(durationMinutes int) bool {
 	return durationMinutes <= e.plan.MaxDurationMinutes
 }
 
 // BalanceSufficient reports whether the user has enough minutes for the given duration.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) BalanceSufficient(durationMinutes int) bool {
 	return e.totalBalance >= durationMinutes
 }
 
 // ConcurrentSessionsAllowed reports whether the user can have another active session.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) ConcurrentSessionsAllowed(activeCount int) bool {
 	return activeCount < e.plan.ConcurrentSessions
 }
 
 // CanAccessCoach reports whether the user can use coach analysis.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) CanAccessCoach() bool {
 	return e.paidBalance > 0
 }
 
 // EducatorAccessLevel returns what level of educator content the user sees.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) EducatorAccessLevel() EducatorAccessLevel {
 	if e.paidBalance > 0 {
 		return Full
@@ -72,16 +84,22 @@ func (e Entitlements) EducatorAccessLevel() EducatorAccessLevel {
 }
 
 // MaxDurationMinutes returns the plan's maximum session duration.
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) MaxDurationMinutes() int {
 	return e.plan.MaxDurationMinutes
 }
 
 // TotalBalance returns the user's total available minutes (for error messages).
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) TotalBalance() int {
 	return e.totalBalance
 }
 
 // FreeEducatorLimit returns the plan's free educator analysis limit (for the atomic increment guard).
+//
+//nolint:gocritic // small immutable struct
 func (e Entitlements) FreeEducatorLimit() int {
 	return e.plan.FreeEducatorLimit
 }

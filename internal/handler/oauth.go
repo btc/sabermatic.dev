@@ -52,7 +52,7 @@ func OAuthCallback(b *backend.Backend) http.HandlerFunc {
 			return
 		}
 
-		displayName := resolveDisplayName(gothUser)
+		displayName := resolveDisplayName(&gothUser)
 
 		result, err := b.OAuthLogin(r.Context(), &backend.OAuthLoginParams{
 			Provider:    provider,
@@ -84,7 +84,7 @@ func OAuthCallback(b *backend.Backend) http.HandlerFunc {
 
 // resolveDisplayName picks the best display name from Goth's user data.
 // Google always has Name. GitHub may have empty Name, so fall back to NickName.
-func resolveDisplayName(u goth.User) string {
+func resolveDisplayName(u *goth.User) string {
 	if u.Name != "" {
 		return u.Name
 	}

@@ -27,6 +27,7 @@ func (h *TraceHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.inner.Enabled(ctx, level)
 }
 
+//nolint:gocritic // slog.Handler interface
 func (h *TraceHandler) Handle(ctx context.Context, r slog.Record) error {
 	sc := trace.SpanFromContext(ctx).SpanContext()
 	if sc.IsValid() {
