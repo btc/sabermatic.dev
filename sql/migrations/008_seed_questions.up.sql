@@ -1,6 +1,5 @@
 -- Seed questions for system design interview practice.
 -- Idempotent: only inserts if no seed questions exist yet.
--- Run with: psql $DATABASE_URL -f seed/questions.sql
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM questions WHERE source = 'seed') THEN
