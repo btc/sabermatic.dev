@@ -1,4 +1,4 @@
-.PHONY: dev dev-log dev-build dev-watch dev-air seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant
+.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant
 
 test:
 	@echo "=== buf lint ==="
@@ -28,33 +28,16 @@ test:
 	@echo ""
 	@echo "=== all checks passed ==="
 
-# Start embedded dev server. Vite rebuilds on save, air bounces Go binary.
-# One origin (port 8080), no proxy, no CSRF issues. Ctrl-C kills all.
+# Start dev server via overmind. Ctrl-C kills all processes cleanly.
+# Runs: npm build, vite watch, air (Go rebuild). One origin on :8080.
 dev:
 	@echo "Starting Drill → http://localhost:8080"
-	@trap 'kill 0' EXIT; \
-	$(MAKE) dev-build && \
-	$(MAKE) dev-watch & \
-	$(MAKE) dev-air & \
-	sleep 3 && open http://localhost:8080 & \
-	wait
+	overmind start -f Procfile.dev
 
 # Same as dev, but tee all output to tmp/dev.log for easy inspection.
 dev-log:
 	@mkdir -p tmp
-	@$(MAKE) dev 2>&1 | tee tmp/dev.log
-
-# Initial frontend build before air starts
-dev-build:
-	cd web && npm install && npm run build
-
-# Vite watch mode — rebuilds web/dist/ on frontend file changes
-dev-watch:
-	cd web && npx vite build --watch
-
-# air watches web/dist/ + Go source, rebuilds and restarts Go binary
-dev-air:
-	set -a && . ./.env && set +a && air
+	overmind start -f Procfile.dev 2>&1 | tee tmp/dev.log
 
 # Create dev user with free trial grant. Does NOT require the server.
 seed:
@@ -112,7 +95,7 @@ $(COVER_OUT):
 # Install project-level dev tools (CLIs, linters, codegen).
 # Run once after clone, or when tool versions change.
 deps:
-	brew install bufbuild/buf/buf
+	brew install bufbuild/buf/buf overmind tmux
 
 # Regenerate protobuf code from .proto sources.
 generate:

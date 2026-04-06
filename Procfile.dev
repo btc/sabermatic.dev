@@ -1,0 +1,3 @@
+build: cd web && npm install && npm run build
+watch: cd web && npx vite build --watch
+server: set -a && . ./.env && set +a && air
