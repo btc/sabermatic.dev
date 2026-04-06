@@ -56,15 +56,16 @@ Moves from `session.go` to `session_lock.go`.
 #### `Release`
 
 ```go
-func (l *SessionLock) Release()
+func (l *SessionLock) Release() error
 ```
 
-1. No-op if receiver is nil or `l.conn` is nil (idempotent).
+1. No-op if receiver is nil or `l.conn` is nil (returns nil, idempotent).
 2. Calls `SELECT pg_advisory_unlock(key1, key2)` with `context.Background()`.
 3. Calls `l.conn.Release()`.
 4. Sets `l.conn = nil` to prevent double-release.
+5. Returns the unlock error if any. All operations always execute regardless of errors.
 
-No context parameter — unlock must always run, never be cancelled. No error return — unlock failure is logged but not actionable by the caller.
+No context parameter — unlock must always run, never be cancelled.
 
 ### Changes to `internal/interview/conductor.go`
 
