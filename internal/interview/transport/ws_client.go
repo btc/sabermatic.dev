@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/base64"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -20,7 +21,9 @@ func NewWSClient(ws observer.WSConn) *WSClient {
 }
 
 func (c *WSClient) send(v any) {
-	_ = c.ws.SendJSON(context.Background(), v)
+	if err := c.ws.SendJSON(context.Background(), v); err != nil {
+		slog.Debug("transport: send failed", "error", err)
+	}
 }
 
 func (c *WSClient) StateChange(state string) {

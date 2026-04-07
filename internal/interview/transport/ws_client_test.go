@@ -161,3 +161,53 @@ func TestWSClient_TTSDone(t *testing.T) {
 	assert.Equal(t, "tts_done", msg["type"])
 	assert.Equal(t, msgID.String(), msg["message_id"])
 }
+
+func TestWSClient_TranscriptionResult(t *testing.T) {
+	ws := &mockWSConn{}
+	c := transport.NewWSClient(ws)
+	c.TranscriptionResult("I would use a hash table.")
+	msg := last(t, ws)
+	assert.Equal(t, "transcription_result", msg["type"])
+	assert.Equal(t, "I would use a hash table.", msg["text"])
+}
+
+func TestWSClient_TimerWarning(t *testing.T) {
+	ws := &mockWSConn{}
+	c := transport.NewWSClient(ws)
+	c.TimerWarning(5)
+	msg := last(t, ws)
+	assert.Equal(t, "timer_warning", msg["type"])
+	assert.Equal(t, float64(5), msg["minutes_remaining"])
+}
+
+func TestWSClient_TimerOvertime(t *testing.T) {
+	ws := &mockWSConn{}
+	c := transport.NewWSClient(ws)
+	c.TimerOvertime()
+	msg := last(t, ws)
+	assert.Equal(t, "timer_overtime", msg["type"])
+}
+
+func TestWSClient_ReconnectPlease(t *testing.T) {
+	ws := &mockWSConn{}
+	c := transport.NewWSClient(ws)
+	c.ReconnectPlease()
+	msg := last(t, ws)
+	assert.Equal(t, "reconnect_please", msg["type"])
+}
+
+func TestWSClient_TTSError(t *testing.T) {
+	ws := &mockWSConn{}
+	c := transport.NewWSClient(ws)
+	c.TTSError()
+	msg := last(t, ws)
+	assert.Equal(t, "tts_error", msg["type"])
+}
+
+func TestWSClient_AudioUploadFailed(t *testing.T) {
+	ws := &mockWSConn{}
+	c := transport.NewWSClient(ws)
+	c.AudioUploadFailed()
+	msg := last(t, ws)
+	assert.Equal(t, "audio_upload_failed", msg["type"])
+}
