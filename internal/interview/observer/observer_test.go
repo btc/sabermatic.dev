@@ -3,39 +3,16 @@ package observer_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
-	"github.com/google/uuid"
-
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/interview/observer"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-type mockWSConn struct {
-	sent [][]byte
-	err  error
-}
-
-func (m *mockWSConn) SendJSON(ctx context.Context, v any) error {
-	if m.err != nil {
-		return m.err
-	}
-	data, _ := json.Marshal(v)
-	m.sent = append(m.sent, data)
-	return nil
-}
-
-func (m *mockWSConn) Close(code websocket.StatusCode, reason string) error {
-	return nil
-}
 
 type spy struct {
 	tokens      []string
@@ -117,33 +94,6 @@ func TestMessageAccumulator_EmptyStream(t *testing.T) {
 	acc := observer.NewMessageAccumulator()
 	acc.OnDone("")
 	assert.Equal(t, "", acc.Text())
-}
-
-func TestWSWriter_OnToken(t *testing.T) {
-	ws := &mockWSConn{}
-	writer := observer.NewWSWriter(ws, uuid.New())
-	writer.OnToken("hello")
-	require.Len(t, ws.sent, 1)
-	assert.Contains(t, string(ws.sent[0]), `"type":"interviewer_token"`)
-	assert.Contains(t, string(ws.sent[0]), `"token":"hello"`)
-}
-
-func TestWSWriter_OnDone(t *testing.T) {
-	ws := &mockWSConn{}
-	msgID := uuid.New()
-	writer := observer.NewWSWriter(ws, msgID)
-	writer.OnDone("full message")
-	require.Len(t, ws.sent, 1)
-	assert.Contains(t, string(ws.sent[0]), `"type":"interviewer_done"`)
-	assert.Contains(t, string(ws.sent[0]), msgID.String())
-}
-
-func TestWSWriter_IgnoresWriteErrors(t *testing.T) {
-	ws := &mockWSConn{err: fmt.Errorf("closed")}
-	writer := observer.NewWSWriter(ws, uuid.New())
-	writer.OnToken("hello")
-	writer.OnDone("hello")
-	// Should not panic -- errors are logged and ignored
 }
 
 // --- TTSSink mock ---
