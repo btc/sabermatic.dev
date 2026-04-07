@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Interactive GCP bootstrap for Sabermatic.
 
-Walks through 9 phases from zero to a running Cloud Run service.
+Walks through 10 phases from zero to a running Cloud Run service.
 Resume-safe: completed phases are tracked in .cloud_bootstrap_state.
 
 Usage: python3 scripts/cloud_bootstrap.py
@@ -93,7 +93,7 @@ def prompt_secret(msg: str) -> str:
 # ── State management ───────────────────────────────────────────────────────
 
 STATE_FILE = Path(".cloud_bootstrap_state")
-TOTAL_PHASES = 9
+TOTAL_PHASES = 10
 
 
 def load_state() -> dict:
@@ -953,14 +953,124 @@ def phase_deploy(state: dict) -> None:
       Webhook:      {live_url}/api/webhooks/stripe
 
     Next steps:
-      - Point sabermatic.dev DNS to the Cloud Run URL
+      - Phase 10 will set up the sabermatic.dev custom domain
       - Set up GitHub Actions secrets for CI/CD:
           WIF_PROVIDER: {state['outputs'].get('wif_pool_id', 'unknown')}/providers/github
           DEPLOYER_SA:  {state['outputs'].get('deployer_sa', 'unknown')}
-      - Update BASE_URL in cloud_run.tf to https://sabermatic.dev
     """))
 
     mark_phase(state, "deploy")
+
+
+# ── Phase 10: Custom Domain Setup ────────────────────────────────────────
+
+
+def phase_domain(state: dict) -> None:
+    header(10, TOTAL_PHASES, "Custom Domain Setup")
+
+    region = state["region"]
+    domain = "sabermatic.dev"
+    service = "sabermatic"
+
+    domain_state = state["phases"].get("domain", {})
+    if not isinstance(domain_state, dict):
+        domain_state = {}
+
+    # ── 10a: Verify domain ownership with Google ──
+    if not domain_state.get("verified"):
+        print(textwrap.dedent(f"""
+        Domain Verification
+        ───────────────────
+        GCP requires you to verify ownership of {domain} before
+        creating a Cloud Run custom domain mapping.
+
+        This will open Google Search Console in your browser.
+        Add the TXT record shown there to your DNS at Dynadot, then
+        come back and confirm.
+
+        Command:
+          gcloud domains verify {domain}
+        """))
+        prompt_continue(f"Have you verified {domain} in Google Search Console?")
+        domain_state["verified"] = True
+        state["phases"]["domain"] = domain_state
+        save_state(state)
+
+    # ── 10b: Create Cloud Run domain mapping ──
+    if not domain_state.get("mapping"):
+        print(f"\nCreating Cloud Run domain mapping for {domain}...")
+        result = run(
+            [
+                "gcloud", "run", "domain-mappings", "create",
+                "--service", service,
+                "--domain", domain,
+                "--region", region,
+            ],
+            check=False,
+        )
+
+        # Mapping may already exist — that's fine
+        already = result.returncode != 0 and (
+            "already exists" in (result.stderr or "")
+            or "already mapped" in (result.stderr or "")
+        )
+        if result.returncode != 0 and not already:
+            error(f"Failed to create domain mapping:\n{result.stderr}")
+            sys.exit(1)
+        if already:
+            info("Domain mapping already exists — continuing")
+        else:
+            info("Domain mapping created")
+
+        domain_state["mapping"] = True
+        state["phases"]["domain"] = domain_state
+        save_state(state)
+
+    # ── 10c: Show DNS records to add ──
+    if not domain_state.get("dns"):
+        print("\nFetching required DNS records from GCP...")
+        result = run_quiet([
+            "gcloud", "run", "domain-mappings", "describe",
+            "--domain", domain,
+            "--region", region,
+            "--format=value(status.resourceRecords)",
+        ])
+
+        print(textwrap.dedent(f"""
+        Add these DNS records at Dynadot:
+          → dynadot.com → My Domains → {domain} → DNS Settings
+
+        GCP resource records:
+        {result.stdout.strip()}
+
+        These are typically A/AAAA records pointing to Google's IPs.
+        Do NOT add a CNAME to the run.app URL — that will not provision SSL.
+
+        After adding the records, DNS propagation can take up to 30 minutes.
+        SSL certificate provisioning can take an additional 15–30 minutes after that.
+        """))
+
+        prompt_continue("DNS records added at Dynadot?")
+        domain_state["dns"] = True
+        state["phases"]["domain"] = domain_state
+        save_state(state)
+
+    # ── 10d: Confirm live ──
+    if not domain_state.get("live"):
+        print(textwrap.dedent(f"""
+        Check domain mapping status:
+          gcloud run domain-mappings describe --domain={domain} --region={region}
+
+        Wait until certificateStatus shows ACTIVE, then verify:
+          curl -I https://{domain}/api/health
+        """))
+        prompt_continue(f"https://{domain} is live with a valid SSL certificate?")
+        domain_state["live"] = True
+        state["phases"]["domain"] = domain_state
+        save_state(state)
+
+    info(f"Custom domain https://{domain} is live")
+    mark_phase(state, "domain")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -975,6 +1085,7 @@ PHASES = [
     ("stripe", phase_stripe),
     ("build", phase_build),
     ("deploy", phase_deploy),
+    ("domain", phase_domain),
 ]
 
 
