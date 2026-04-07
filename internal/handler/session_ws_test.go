@@ -310,18 +310,9 @@ func TestWS_HappyPath_Text(t *testing.T) {
 	loaded := readMsg(t, ws)
 	assert.Equal(t, "session_loaded", loaded["type"])
 
-	// Read state_change to interviewer_speaking, then stream tokens, then interviewer_done,
-	// then state_change to waiting_for_input.
-	stateIS := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateIS["type"])
-	assert.Equal(t, "interviewer_speaking", stateIS["state"])
-
+	// Stream tokens then interviewer_done (which now fires after DB persist).
 	openingText, _ := drainUntilDone(t, ws)
 	assert.Equal(t, "Let's design a URL shortener.", openingText)
-
-	stateWait := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateWait["type"])
-	assert.Equal(t, "waiting_for_input", stateWait["state"])
 
 	// Send candidate text turn.
 	sendMsg(t, ws, wsMsg{
@@ -330,22 +321,9 @@ func TestWS_HappyPath_Text(t *testing.T) {
 		"input_method": "text",
 	})
 
-	// Expect state_change to processing_input.
-	statePI := readMsg(t, ws)
-	assert.Equal(t, "state_change", statePI["type"])
-	assert.Equal(t, "processing_input", statePI["state"])
-
-	// State change to interviewer_speaking, then stream tokens, then done.
-	stateIS2 := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateIS2["type"])
-	assert.Equal(t, "interviewer_speaking", stateIS2["state"])
-
+	// Stream tokens then interviewer_done.
 	responseText, _ := drainUntilDone(t, ws)
 	assert.Equal(t, "Let's design a URL shortener.", responseText)
-
-	stateWait2 := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateWait2["type"])
-	assert.Equal(t, "waiting_for_input", stateWait2["state"])
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
@@ -416,10 +394,9 @@ func TestWS_VoiceInput(t *testing.T) {
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	defer ws.CloseNow()
 
-	// Drain opening: session_loaded, state_change interviewer_speaking, tokens, interviewer_done, state_change waiting.
+	// Drain opening: session_loaded, tokens, interviewer_done.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send voice turn with base64 audio.
 	fakeAudio := base64.StdEncoding.EncodeToString([]byte("fake-webm-audio"))
@@ -429,33 +406,14 @@ func TestWS_VoiceInput(t *testing.T) {
 		"input_method": "voice",
 	})
 
-	// Expect state_change to transcribing.
-	stateTranscribing := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateTranscribing["type"])
-	assert.Equal(t, "transcribing", stateTranscribing["state"])
-
 	// Expect transcription_result.
 	transcription := readMsg(t, ws)
 	assert.Equal(t, "transcription_result", transcription["type"])
 	assert.Equal(t, "I would use a hash-based approach.", transcription["text"])
 
-	// state_change to processing_input.
-	statePI := readMsg(t, ws)
-	assert.Equal(t, "state_change", statePI["type"])
-	assert.Equal(t, "processing_input", statePI["state"])
-
-	// Interviewer response.
-	stateIS := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateIS["type"])
-	assert.Equal(t, "interviewer_speaking", stateIS["state"])
-
+	// Interviewer response — drainUntilDone confirms messages are committed.
 	responseText, _ := drainUntilDone(t, ws)
 	assert.Equal(t, "Good choice.", responseText)
-
-	// Wait for state_change to waiting_for_input — confirms messages are committed.
-	stateWait := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateWait["type"])
-	assert.Equal(t, "waiting_for_input", stateWait["state"])
 
 	// Verify candidate message persisted with voice input method.
 	ctx := context.Background()
@@ -496,7 +454,6 @@ func TestWS_Reconnection(t *testing.T) {
 	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	drainUntilType(t, ws1, "session_loaded")
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	// Disconnect.
 	ws1.Close(websocket.StatusNormalClosure, "done")
@@ -551,7 +508,6 @@ func TestWS_InvalidTransition(t *testing.T) {
 	// After the opening, state is WaitingForInput and end_turn should work.
 	// Let the opening complete first.
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send a text turn to trigger interviewer response.
 	sendMsg(t, ws, wsMsg{
@@ -560,14 +516,8 @@ func TestWS_InvalidTransition(t *testing.T) {
 		"input_method": "text",
 	})
 
-	// Drain through the full response cycle: processing_input, interviewer_speaking,
-	// tokens, interviewer_done, waiting_for_input.
-	drainUntilType(t, ws, "state_change") // processing_input
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
+	// Drain through the full response cycle: tokens, interviewer_done.
 	drainUntilDone(t, ws)
-	stateWait2 := readMsg(t, ws) // state_change to waiting_for_input
-	assert.Equal(t, "state_change", stateWait2["type"])
-	assert.Equal(t, "waiting_for_input", stateWait2["state"])
 
 	// Verify session is still functional.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
@@ -611,7 +561,6 @@ func TestWS_MalformedMessages(t *testing.T) {
 	// Let opening finish.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send garbage JSON.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -826,7 +775,6 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
@@ -924,7 +872,6 @@ func TestWS_UnknownMessageType(t *testing.T) {
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send unknown message type.
 	sendMsg(t, ws, wsMsg{"type": "nonexistent_type"})
@@ -1073,10 +1020,8 @@ func TestWS_AdvisoryLockContention(t *testing.T) {
 		"expected StatusPolicyViolation for lock contention, got: %v", readErr)
 
 	// First connection must still be alive. Drain the full opening sequence
-	// (state_change → interviewer_speaking, tokens, interviewer_done,
-	// state_change → waiting_for_input), then ping.
+	// (tokens, interviewer_done), then ping.
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	sendMsg(t, ws1, wsMsg{"type": "ping"})
 	pong := readMsg(t, ws1)
@@ -1109,31 +1054,21 @@ func TestWS_MultiTurn(t *testing.T) {
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	defer ws.CloseNow()
 
-	// Opening: session_loaded + interviewer stream + waiting_for_input.
+	// Opening: session_loaded + interviewer stream + interviewer_done.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Turn 1.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "First answer", "input_method": "text"})
-	drainUntilType(t, ws, "state_change") // processing_input
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Turn 2.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "Second answer", "input_method": "text"})
-	drainUntilType(t, ws, "state_change") // processing_input
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Turn 3.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "Third answer", "input_method": "text"})
-	drainUntilType(t, ws, "state_change") // processing_input
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
@@ -1205,7 +1140,6 @@ func TestWS_EmptyTextInput(t *testing.T) {
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send empty text.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "", "input_method": "text"})
@@ -1259,7 +1193,6 @@ func TestWS_EmptyVoiceInput(t *testing.T) {
 	// Complete opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send voice turn with no audio data.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "input_method": "voice"})
@@ -1471,14 +1404,10 @@ func TestWS_TTSEnabled(t *testing.T) {
 
 	// Complete opening stream.
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send a text turn.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "Tell me more", "input_method": "text"})
-	drainUntilType(t, ws, "state_change") // processing_input
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
@@ -1629,13 +1558,9 @@ func TestWS_ReconnectAfterMultipleTurns(t *testing.T) {
 	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	drainUntilType(t, ws1, "session_loaded")
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	sendMsg(t, ws1, wsMsg{"type": "end_turn", "content": "My answer", "input_method": "text"})
-	drainUntilType(t, ws1, "state_change") // processing_input
-	drainUntilType(t, ws1, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	// Check DB: should have 3 messages (opening + candidate + response).
 	ctx := context.Background()
@@ -1701,7 +1626,6 @@ func TestWS_PingPong(t *testing.T) {
 	// Finish opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Ping should return pong.
 	sendMsg(t, ws, wsMsg{"type": "ping"})
@@ -1737,7 +1661,6 @@ func TestWS_CancelSession(t *testing.T) {
 	// Wait for the opening sequence to finish before cancelling.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send cancel_session.
 	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
@@ -1781,13 +1704,9 @@ func TestWS_PageRefreshReconnect(t *testing.T) {
 	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	drainUntilType(t, ws1, "session_loaded")
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	sendMsg(t, ws1, wsMsg{"type": "end_turn", "content": "My answer", "input_method": "text"})
-	drainUntilType(t, ws1, "state_change") // processing_input
-	drainUntilType(t, ws1, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	// Disconnect.
 	ws1.Close(websocket.StatusNormalClosure, "done")
@@ -1808,10 +1727,7 @@ func TestWS_PageRefreshReconnect(t *testing.T) {
 	assert.True(t, ok, "messages should be an array")
 	assert.Len(t, messages, 3, "should replay all messages (opening + candidate + response)")
 
-	// Then state_change to waiting_for_input.
-	stateMsg := readMsg(t, ws2)
-	assert.Equal(t, "state_change", stateMsg["type"])
-	assert.Equal(t, "waiting_for_input", stateMsg["state"])
+	assert.Equal(t, "waiting", reconnectMsg["state"])
 }
 
 // ---------------------------------------------------------------------------
@@ -1842,10 +1758,8 @@ func TestWS_EndSessionDuringStreaming(t *testing.T) {
 
 	// Wait for the opening question to start streaming.
 	drainUntilType(t, ws, "session_loaded")
-	// Read a few tokens to confirm streaming started.
+	// Read a token to confirm streaming started.
 	m := readMsg(t, ws)
-	assert.Equal(t, "state_change", m["type"])
-	m = readMsg(t, ws)
 	assert.Equal(t, "interviewer_token", m["type"])
 
 	// Send end_session while streaming is in progress.
@@ -1902,8 +1816,7 @@ func TestWS_DisconnectDuringPipeline(t *testing.T) {
 
 	// Wait for streaming to start.
 	drainUntilType(t, ws, "session_loaded")
-	m := readMsg(t, ws) // state_change
-	assert.Equal(t, "state_change", m["type"])
+	drainUntilType(t, ws, "interviewer_token")
 
 	// Close WS abruptly during streaming.
 	ws.CloseNow()
@@ -1985,7 +1898,6 @@ func TestWS_ConcurrentTurnRejected(t *testing.T) {
 	// Wait for opening question to finish so we can send a turn.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send first turn (will stream slowly).
 	sendMsg(t, ws, wsMsg{
@@ -1994,9 +1906,8 @@ func TestWS_ConcurrentTurnRejected(t *testing.T) {
 		"input_method": "text",
 	})
 
-	// Wait for processing to start.
-	m, _ := drainUntilType(t, ws, "state_change")
-	assert.Equal(t, "processing_input", m["state"])
+	// Wait for pipeline to start streaming.
+	drainUntilType(t, ws, "interviewer_token")
 
 	// Send second turn while first is still processing.
 	sendMsg(t, ws, wsMsg{
@@ -2006,7 +1917,7 @@ func TestWS_ConcurrentTurnRejected(t *testing.T) {
 	})
 
 	// Should get an error rejecting the concurrent turn.
-	m, _ = drainUntilType(t, ws, "error")
+	m, _ := drainUntilType(t, ws, "error")
 	assert.Equal(t, "turn_in_progress", m["code"])
 }
 
@@ -2046,7 +1957,6 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 	// Drain opening: session_loaded, interviewer stream, waiting_for_input.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send end_turn with text content. The opening question's turnResultCh
 	// result may not have been consumed by the event loop yet, which would
@@ -2065,7 +1975,7 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		break // turn accepted; got state_change or other non-error
+		break // turn accepted; got non-error response
 	}
 
 	// Immediately send end_session. The pipeline goroutine is now running
@@ -2142,7 +2052,6 @@ func TestWS_ReconnectRetriggersInterviewerResponse(t *testing.T) {
 	ws1 := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	drainUntilType(t, ws1, "session_loaded")
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	// Send candidate turn and wait for the full pipeline to complete.
 	sendMsg(t, ws1, wsMsg{
@@ -2150,10 +2059,7 @@ func TestWS_ReconnectRetriggersInterviewerResponse(t *testing.T) {
 		"content":      "My approach would be to use consistent hashing.",
 		"input_method": "text",
 	})
-	drainUntilType(t, ws1, "state_change") // processing_input
-	drainUntilType(t, ws1, "state_change") // interviewer_speaking
 	drainUntilDone(t, ws1)
-	drainUntilType(t, ws1, "state_change") // waiting_for_input
 
 	// Disconnect cleanly.
 	ws1.Close(websocket.StatusNormalClosure, "done")
@@ -2188,17 +2094,9 @@ func TestWS_ReconnectRetriggersInterviewerResponse(t *testing.T) {
 	reconnectMsg := readMsg(t, ws2)
 	assert.Equal(t, "reconnect_state", reconnectMsg["type"])
 
-	// Then expect state_change to interviewer_speaking (the re-triggered response).
-	retriggerIS, _ := drainUntilType(t, ws2, "state_change")
-	assert.Equal(t, "interviewer_speaking", retriggerIS["state"])
-
-	// Drain the full response.
+	// Drain the re-triggered response (tokens + interviewer_done).
 	responseText, _ := drainUntilDone(t, ws2)
 	assert.Equal(t, "Let's discuss.", responseText)
-
-	// Expect state_change to waiting_for_input.
-	stateWait, _ := drainUntilType(t, ws2, "state_change")
-	assert.Equal(t, "waiting_for_input", stateWait["state"])
 
 	// Verify DB: now 3 messages (opening + candidate + re-triggered response).
 	msgs, err = db.New(pool).GetMessagesBySession(ctx, session.ID)
@@ -2242,12 +2140,9 @@ func TestWS_CancelSessionDuringTTS(t *testing.T) {
 	// Drain opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send a candidate turn, wait for interviewer to start streaming.
 	sendMsg(t, ws, wsMsg{"type": "end_turn", "content": "My answer", "input_method": "text"})
-	drainUntilType(t, ws, "state_change") // processing_input
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 
 	// Cancel session while interviewer is streaming.
 	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
@@ -2368,13 +2263,13 @@ func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
 	drainUntilType(t, ws, "session_loaded")
 	// The opening pipeline will error. The conductor should ForceState(WaitingForInput)
 	// and send a turn_failed error, then the event loop continues.
-	// Drain until we get either a turn_failed error or state_change to waiting_for_input.
+	// Drain until we get a turn_failed error.
 	for i := 0; i < 50; i++ {
 		m := readMsgTimeout(t, ws, 5*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "error" || (m["type"] == "state_change" && m["state"] == "waiting_for_input") {
+		if m["type"] == "error" {
 			break
 		}
 	}
@@ -2439,7 +2334,6 @@ func TestWS_STTRetry(t *testing.T) {
 	// Drain opening.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
-	drainUntilType(t, ws, "state_change") // waiting_for_input
 
 	// Send voice turn.
 	fakeAudio := base64.StdEncoding.EncodeToString([]byte("fake-webm-audio"))
@@ -2449,11 +2343,7 @@ func TestWS_STTRetry(t *testing.T) {
 		"input_method": "voice",
 	})
 
-	// Should succeed on retry — expect transcribing state, then transcription_result.
-	stateTranscribing := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateTranscribing["type"])
-	assert.Equal(t, "transcribing", stateTranscribing["state"])
-
+	// Should succeed on retry — expect transcription_result.
 	transcription := readMsg(t, ws)
 	assert.Equal(t, "transcription_result", transcription["type"])
 	assert.Equal(t, "I would use a hash-based approach.", transcription["text"])
@@ -2488,7 +2378,6 @@ func TestWS_DisconnectWithPendingCancel(t *testing.T) {
 
 	// Wait for opening to start streaming.
 	drainUntilType(t, ws, "session_loaded")
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 
 	// Send cancel while pipeline is running, then disconnect immediately.
 	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
@@ -2533,7 +2422,6 @@ func TestWS_CancelDuringPipeline_PipelineCompletes(t *testing.T) {
 	defer ws.CloseNow()
 
 	drainUntilType(t, ws, "session_loaded")
-	drainUntilType(t, ws, "state_change") // interviewer_speaking
 
 	// Cancel during the opening question pipeline.
 	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
