@@ -74,14 +74,13 @@ rpc GetSessionState(GetSessionStateRequest) returns (GetSessionStateResponse);
 
 message GetSessionStateRequest {
   string session_id = 1;
-  string page_token = 2;          // opaque cursor; omit for full state
+  int32 known_message_count = 2;  // number of messages client already has; 0 for full state
 }
 
 message GetSessionStateResponse {
   SessionInfo session_info = 1;
-  repeated Message messages = 2;   // messages after cursor, or all if no cursor
+  repeated Message messages = 2;   // messages after known_message_count offset, or all if 0
   SessionStatus status = 3;
-  string next_page_token = 4;     // cursor representing the last message returned
 }
 
 enum SessionStatus {
@@ -96,8 +95,7 @@ enum SessionStatus {
 
 Behavior:
 - Always returns immediately, never blocks.
-- If `page_token` provided, returns only messages after that cursor. The cursor is opaque to the client (server encodes/decodes it internally — initially backed by message count or created_at, but the opacity allows changing the implementation).
-- `next_page_token` is set to a cursor representing the last message returned, so the client can pass it back on the next call.
+- If `known_message_count` is set, returns only messages beyond that offset. The client tracks `messages.length` locally and passes it on each call.
 - Client polls with exponential backoff when status is `GENERATING` (see Polling Backoff below).
 
 ### EndSession (unary)
