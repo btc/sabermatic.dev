@@ -4,7 +4,6 @@ export type ClientMessage =
   | { type: "session_init"; last_seq: number | null; trace_context?: TraceContext }
   | { type: "end_turn"; content: string; input_method: "text"; trace_context?: TraceContext }
   | { type: "end_turn"; audio: string; input_method: "voice"; trace_context?: TraceContext }
-  | { type: "cancel_tts" }
   | { type: "end_session" }
   | { type: "cancel_session" }
   | { type: "ping" };
@@ -29,7 +28,7 @@ export type ServerMessage =
   | { type: "transcription_result"; text: string }
   | { type: "timer_warning"; minutes_remaining: number }
   | { type: "timer_overtime" }
-  | { type: "session_ended"; reason: "candidate" | "interviewer" | "timeout" | "cancelled" }
+  | { type: "ack" }
   | { type: "reconnect_please" }
   | { type: "error"; code: string; message: string }
   | { type: "pong" };
