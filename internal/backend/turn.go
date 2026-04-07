@@ -130,7 +130,9 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 
 	if isOpeningQuestion || isCrashRecovery {
 		// Skip candidate processing, go directly to interviewer response.
-		return b.streamInterviewerResponse(ctx, streamParams{
+		// Use an uncancellable context so the pipeline survives client disconnects.
+		pipelineCtx := context.WithoutCancel(ctx)
+		return b.streamInterviewerResponse(pipelineCtx, streamParams{
 			sessionID:     sessionID,
 			userID:        session.UserID,
 			question:      question,
@@ -238,12 +240,18 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 		InputMethod: inputMethod,
 	})
 	if err != nil {
-		return fmt.Errorf("persist candidate message: %w", err)
+		sink.Error(&drillv1.TurnError{Code: "persist_failed", Message: "failed to save your response"})
+		return nil
 	}
 	messages = append(messages, candidateMsg)
 
 	// Step 8: Stream interviewer response.
-	return b.streamInterviewerResponse(ctx, streamParams{
+	// Use an uncancellable context so the pipeline survives client disconnects.
+	// The initial DB operations above (acquire status, load session) respect
+	// cancellation, but the pipeline (LLM stream, persist) must not be aborted
+	// by a client hangup.
+	pipelineCtx := context.WithoutCancel(ctx)
+	return b.streamInterviewerResponse(pipelineCtx, streamParams{
 		sessionID:     sessionID,
 		userID:        session.UserID,
 		question:      question,
@@ -324,16 +332,21 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 	})
 	if err != nil {
 		fanOut.OnError(err)
-		return fmt.Errorf("start llm stream: %w", err)
+		fanOut.Close()
+		// Client already received TurnError via fanOut.OnError; return nil
+		// so the RPC handler closes the stream cleanly without a second error.
+		return nil
 	}
 
-	// Iterate tokens through observer.
+	// Iterate tokens through observer fan-out.
+	var streamErr error
 	for {
 		token, tokenErr := stream.Next()
 		if tokenErr == io.EOF {
 			break
 		}
 		if tokenErr != nil {
+			streamErr = tokenErr
 			fanOut.OnError(tokenErr)
 			slog.Error("turn: stream token", "error", tokenErr, "session_id", sp.sessionID)
 			break
@@ -341,17 +354,24 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 		fanOut.OnToken(token)
 	}
 
+	// If the LLM stream errored, do NOT persist the partial message or send
+	// InterviewerDone. The client already received a TurnError via fan-out.
+	// Close synchronously so TTS resources are cleaned up before we return.
+	if streamErr != nil {
+		fanOut.Close()
+		return nil
+	}
+
 	fullText := accumulator.Text()
 	fanOut.OnDone(fullText)
 
-	// Clean up the fan-out's TTS context in the background.
-	go fanOut.Close()
+	// Close the fan-out synchronously. This waits for TTS accumulator to flush
+	// remaining sentences — all TTS chunks must be sent before InterviewerDone.
+	fanOut.Close()
 
 	// Persist interviewer message and LLM call atomically.
-	// Use context.WithoutCancel to survive client disconnect while preserving trace.
-	persistCtx := context.WithoutCancel(ctx)
 	sp.sequence++
-	_, err = b.PersistInterviewerTurn(persistCtx, stream, PersistMessageParams{
+	_, err = b.PersistInterviewerTurn(ctx, stream, PersistMessageParams{
 		MessageID:   messageID,
 		SessionID:   sp.sessionID,
 		Seq:         sp.sequence,
@@ -360,7 +380,8 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 		InputMethod: "",
 	})
 	if err != nil {
-		return fmt.Errorf("persist interviewer turn: %w", err)
+		sp.sink.Error(&drillv1.TurnError{Code: "persist_failed", Message: "failed to save interviewer response"})
+		return nil
 	}
 
 	// Release generating status before signaling done, so the client can
@@ -409,7 +430,7 @@ func (w *sinkTokenWriter) OnError(err error) {
 type sinkTTSAdapter struct {
 	sink      TurnEventSink
 	messageID uuid.UUID
-	seq       int32
+	seq       atomic.Int32
 }
 
 func newSinkTTSAdapter(sink TurnEventSink, messageID uuid.UUID) *sinkTTSAdapter {
@@ -417,12 +438,12 @@ func newSinkTTSAdapter(sink TurnEventSink, messageID uuid.UUID) *sinkTTSAdapter 
 }
 
 func (a *sinkTTSAdapter) HandleAudio(data []byte) {
+	seq := a.seq.Add(1) - 1 // first call returns 0
 	a.sink.TtsChunk(&drillv1.TtsChunk{
 		Data:      data,
 		MessageId: a.messageID.String(),
-		Seq:       a.seq,
+		Seq:       seq,
 	})
-	a.seq++
 }
 
 func (a *sinkTTSAdapter) HandleTTSDone() {

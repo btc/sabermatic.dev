@@ -1,6 +1,9 @@
 -- Remove generating_since column.
 ALTER TABLE interview_sessions DROP COLUMN generating_since;
 
+-- Revert any sessions stuck in 'generating' to 'active' before tightening the constraint.
+UPDATE interview_sessions SET status = 'active' WHERE status = 'generating';
+
 -- Revert status CHECK constraint to remove 'generating'.
 ALTER TABLE interview_sessions DROP CONSTRAINT interview_sessions_status_check;
 ALTER TABLE interview_sessions ADD CONSTRAINT interview_sessions_status_check
