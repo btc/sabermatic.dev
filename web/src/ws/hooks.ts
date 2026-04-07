@@ -70,23 +70,15 @@ export function useInterview(sessionId: string) {
             content: m.content,
           })),
         );
-        setState("waiting");
+        setState(msg.state);
         setWasReconnected(true);
         break;
       }
 
-      case "state_change":
-        // Map backend conductor states to UI states
-        if (msg.state === "transcribing") setState("transcribing");
-        else if (msg.state === "processing_input") setState("processing");
-        else if (msg.state === "interviewer_speaking") setState("streaming");
-        else if (msg.state === "waiting_for_input") setState("waiting");
-        else if (msg.state === "ending" || msg.state === "ended") setState("ended");
-        break;
-
       case "interviewer_token":
         streamingTextRef.current += msg.token;
         setStreamingText(streamingTextRef.current);
+        setState("streaming");
         break;
 
       case "interviewer_done": {
@@ -100,6 +92,7 @@ export function useInterview(sessionId: string) {
           const seq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
           return [...prev, { id: msg.message_id, seq, role: "interviewer", content: finalText }];
         });
+        setState("waiting");
         // Close the turn span — full round-trip from send to response complete.
         if (turnSpanRef.current) {
           closeTurnSpan(turnSpanRef.current);
@@ -109,6 +102,7 @@ export function useInterview(sessionId: string) {
       }
 
       case "transcription_result": {
+        setState("processing");
         // Add the candidate's voice message to the chat using transcribed text.
         const text = msg.text;
         setMessages((prev) => {
@@ -142,6 +136,7 @@ export function useInterview(sessionId: string) {
       case "error":
         console.error(`WS error: ${msg.code} — ${msg.message}`);
         setLastError(msg.message);
+        setState("waiting");
         break;
 
       // timer_warning, timer_overtime: handled by useTimer

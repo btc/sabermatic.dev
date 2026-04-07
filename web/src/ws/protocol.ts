@@ -16,8 +16,7 @@ export interface TraceContext {
 
 export type ServerMessage =
   | { type: "session_loaded"; session_id: string; question: { title: string; prompt: string }; duration: number; tts_enabled: boolean }
-  | { type: "reconnect_state"; messages: ReconnectMessage[] }
-  | { type: "state_change"; state: string }
+  | { type: "reconnect_state"; messages: ReconnectMessage[]; state: "waiting" }
   | { type: "interviewer_token"; token: string }
   | { type: "interviewer_done"; message_id: string }
   | { type: "tts_chunk"; data: string; message_id: string; seq: number }
