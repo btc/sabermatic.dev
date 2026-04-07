@@ -7,7 +7,6 @@ resource "google_cloud_run_v2_service" "sabermatic" {
     service_account = google_service_account.sabermatic_app.email
 
     scaling {
-      min_instance_count = 0
       max_instance_count = 2
     }
 
@@ -64,7 +63,7 @@ resource "google_cloud_run_v2_service" "sabermatic" {
       }
       env {
         name  = "BASE_URL"
-        value = "https://sabermatic-${var.environment}" # Updated after first deploy with actual URL
+        value = "https://sabermatic.dev"
       }
       env {
         name  = "OTEL_ENABLED"
@@ -217,6 +216,8 @@ resource "google_cloud_run_v2_service" "sabermatic" {
       template[0].containers[0].image,
       # Bootstrap script sets Stripe price IDs via gcloud run services update.
       template[0].containers[0].env,
+      # Provider bug: GCP always returns manual_instance_count=0 causing spurious drift.
+      scaling,
     ]
   }
 

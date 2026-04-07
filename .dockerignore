@@ -2,6 +2,9 @@ terraform/
 docs/
 .git/
 .github/
+.claude/
+.worktrees/
+web/node_modules/
 coverage.out
 .env*
 *.md
