@@ -1,3 +1,14 @@
+# Code Organization
+
+Docs: ./docs
+Protos: ./pb
+SQL: ./sql
+Backend: ./internal
+Frontend: ./web
+Local deploys: ./scripts/deploy.sh
+Bootstrap: ./scripts/cloud_bootstrap.py
+Prototype: ./v0
+
 # Code Conventions
 
 Backend list endpoints must never return nil slices. Go's `json.Marshal(nil)` produces `null`, not `[]`. Coerce in the backend method for REST, in db-to-proto converters for ConnectRPC.
@@ -33,3 +44,5 @@ After every subagent task that modifies code, a separate review agent must read 
 For tightly-coupled files, agents run sequentially, with later agents receiving committed output of earlier ones.
 
 After any UI-affecting commit, load the page in the browser and verify before moving on.
+
+Boy-scout rule. When your awareness shines on a piece of tech debt. Address it. Either by pointing it out and leaving a comment. Or integrating the cleanup into your current work scope if it is relevant.
