@@ -2261,16 +2261,24 @@ func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
 
 	// Opening will error. Wait for it to settle.
 	drainUntilType(t, ws, "session_loaded")
-	// The opening pipeline will error. The conductor should ForceState(WaitingForInput)
-	// and send a turn_failed error, then the event loop continues.
-	// Drain until we get a turn_failed error.
+	// The opening pipeline will error. TokenWriter.OnError sends "llm_stream_error"
+	// during the pipeline goroutine, but the conductor event loop hasn't processed
+	// turnResultCh yet. We must drain until "turn_failed" (pipeline error path) or
+	// "interviewer_done" (if persist succeeds despite stream error), both of which
+	// mean the conductor has fully settled.
 	for i := 0; i < 50; i++ {
 		m := readMsgTimeout(t, ws, 5*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "error" {
+		if m["type"] == "interviewer_done" {
 			break
+		}
+		if m["type"] == "error" {
+			if code, ok := m["code"].(string); ok && code == "turn_failed" {
+				break
+			}
+			// llm_stream_error fires mid-pipeline; keep draining.
 		}
 	}
 
