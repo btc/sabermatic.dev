@@ -16,7 +16,8 @@ func (w *TokenWriter) OnToken(token string) {
 }
 
 func (w *TokenWriter) OnDone(_ string) {
-	w.client.InterviewerDone(w.messageID)
+	// InterviewerDone is sent by the conductor after DB persist and state
+	// transition, not here.
 }
 
 func (w *TokenWriter) OnError(err error) {
