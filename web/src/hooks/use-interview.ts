@@ -265,7 +265,6 @@ export function useInterview(sessionId: string) {
           { id: `local-${displaySeq}`, seq: displaySeq, role: "candidate", content },
         ];
       });
-      setState("processing");
 
       const abort = new AbortController();
       streamAbortRef.current = abort;
@@ -339,9 +338,9 @@ export function useInterview(sessionId: string) {
 
   // -- endSession --
   const doEndSession = useCallback(async () => {
+    setState("ended"); // Optimistic — show transition immediately.
     try {
       await client.endSession({ sessionId });
-      setState("ended");
       if (turnSpanRef.current) {
         closeTurnSpan(turnSpanRef.current, false);
         turnSpanRef.current = null;
