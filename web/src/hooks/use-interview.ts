@@ -70,10 +70,11 @@ export function useInterview(sessionId: string) {
 
   // -- Handle a single TurnEvent from the SubmitTurn stream --
   const handleTurnEvent = useCallback((event: TurnEvent) => {
-    switch (event.event.case) {
+    const e = event.event;
+    switch (e.case) {
       case "transcriptionResult": {
         setState("processing");
-        const text = event.event.value.text;
+        const text = e.value.text;
         setMessages((prev) => {
           const displaySeq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
           return [
@@ -85,7 +86,7 @@ export function useInterview(sessionId: string) {
       }
 
       case "interviewerToken":
-        streamingTextRef.current += event.event.value.token;
+        streamingTextRef.current += e.value.token;
         setStreamingText(streamingTextRef.current);
         setState("streaming");
         break;
@@ -94,11 +95,12 @@ export function useInterview(sessionId: string) {
         const finalText = streamingTextRef.current;
         streamingTextRef.current = "";
         setStreamingText("");
+        const messageId = e.value.messageId;
         setMessages((prev) => {
           const seq = prev.length > 0 ? prev[prev.length - 1]!.seq + 1 : 1;
           return [
             ...prev,
-            { id: event.event.value.messageId, seq, role: "interviewer", content: finalText },
+            { id: messageId, seq, role: "interviewer", content: finalText },
           ];
         });
         setState("waiting");
@@ -110,7 +112,7 @@ export function useInterview(sessionId: string) {
       }
 
       case "ttsChunk":
-        ttsChunkRef.current?.(event.event.value.data, event.event.value.seq);
+        ttsChunkRef.current?.(e.value.data, e.value.seq);
         break;
 
       case "ttsDone":
@@ -118,7 +120,7 @@ export function useInterview(sessionId: string) {
         break;
 
       case "error": {
-        const err = event.event.value;
+        const err = e.value;
         console.error(`Turn error: ${err.code} -- ${err.message}`);
         setLastError(err.message);
         setState("waiting");
