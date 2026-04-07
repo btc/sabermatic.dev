@@ -8,7 +8,7 @@ import (
 
 type (
 	StateChangeEvent         struct{ State string }
-	SessionEndedEvent        struct{ Reason string }
+	AckEvent                 struct{}
 	TranscriptionResultEvent struct{ Text string }
 	TimerWarningEvent        struct{ MinutesRemaining int }
 	TimerOvertimeEvent       struct{}
@@ -37,7 +37,7 @@ func (r *Recorder) record(e any) {
 }
 
 func (r *Recorder) StateChange(state string)           { r.record(StateChangeEvent{state}) }
-func (r *Recorder) SessionEnded(reason string)          { r.record(SessionEndedEvent{reason}) }
+func (r *Recorder) Ack()                                { r.record(AckEvent{}) }
 func (r *Recorder) TranscriptionResult(text string)     { r.record(TranscriptionResultEvent{text}) }
 func (r *Recorder) TimerWarning(minutesRemaining int)   { r.record(TimerWarningEvent{minutesRemaining}) }
 func (r *Recorder) TimerOvertime()                      { r.record(TimerOvertimeEvent{}) }

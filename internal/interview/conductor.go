@@ -688,7 +688,7 @@ func (c *Conductor) endSession(ctx context.Context) (err error) {
 		return fmt.Errorf("transition to ended: %w", err)
 	}
 
-	c.client.SessionEnded("candidate")
+	c.client.Ack()
 	return nil
 }
 
@@ -710,7 +710,7 @@ func (c *Conductor) cancelSession(ctx context.Context) (err error) {
 		return fmt.Errorf("transition to ended: %w", err)
 	}
 
-	c.client.SessionEnded("cancelled")
+	c.client.Ack()
 	return nil
 }
 

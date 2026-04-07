@@ -15,7 +15,7 @@ import (
 // TTS goroutine all call Client methods.
 type Client interface {
 	StateChange(state string)
-	SessionEnded(reason string)
+	Ack()
 	TranscriptionResult(text string)
 	TimerWarning(minutesRemaining int)
 	TimerOvertime()
