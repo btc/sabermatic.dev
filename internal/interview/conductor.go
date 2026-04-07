@@ -9,7 +9,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -67,9 +66,6 @@ type Conductor struct {
 	// Dedicated connection holding the Postgres advisory lock.
 	lock *backend.SessionLock
 
-	// Current per-turn observer fan-out. Atomic for cross-goroutine access.
-	obs atomic.Pointer[observer.TokenFanOut]
-
 	// Session state loaded from DB.
 	sessionID     uuid.UUID
 	userID        uuid.UUID
@@ -91,20 +87,11 @@ type turnResult struct {
 	err error
 }
 
-// drainPipeline waits for the pipeline goroutine to finish, with a timeout
-// to prevent shutdown hangs if the pipeline ignores context cancellation.
-func drainPipeline(ch <-chan turnResult) {
-	select {
-	case <-ch:
-	case <-time.After(5 * time.Second):
-		slog.Error("conductor: pipeline did not exit after cancel")
-	}
-}
-
 // Pending action constants for deferred lifecycle operations.
 const (
-	actionEnd    = "end"
-	actionCancel = "cancel"
+	actionEnd       = "end"
+	actionCancel    = "cancel"
+	actionReconnect = "reconnect"
 )
 
 // NewConductor constructs a Conductor from the given params.
@@ -153,14 +140,16 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	initCancel()
 	if err != nil {
 		slog.Error("read session_init", "error", err, "session_id", c.sessionID)
-		c.close()
+		c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
+		_ = c.lock.Release()
 		return
 	}
 	initMsg, err := ParseWSMessage(data)
 	if err != nil || initMsg.Type != "session_init" {
 		slog.Error("invalid session_init", "error", err, "session_id", c.sessionID)
 		c.client.Error(transport.ClientError{Code: "invalid_init", Message: "expected session_init message"})
-		c.close()
+		c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
+		_ = c.lock.Release()
 		return
 	}
 	c.initMsg = initMsg
@@ -186,9 +175,6 @@ func (c *Conductor) Run(serverCtx context.Context) {
 				c.client.Error(transport.ClientError{Code: "malformed_message", Message: err.Error()})
 				continue
 			}
-			if msg.Type == "cancel_tts" {
-				continue
-			}
 			select {
 			case msgCh <- msg:
 			case <-readCtx.Done():
@@ -197,11 +183,27 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		}
 	})
 
-	// Cleanup in correct order: cancel readLoop -> wait for exit -> close resources.
+	// Pipeline state — at most one pipeline goroutine runs at a time.
+	var (
+		turnResultCh    <-chan turnResult
+		pipelineRunning bool
+		pendingAction   string // "", actionEnd, actionCancel, or actionReconnect
+	)
+
+	// Cleanup order: wait for pipeline -> close WS -> cancel readLoop -> wait -> release lock.
+	// Key: close WS BEFORE readCancel(). The read goroutine exits because the WS
+	// is closed, not because its context was cancelled. This eliminates the
+	// coder/websocket context.AfterFunc race condition.
 	defer func() {
+		if pipelineRunning {
+			<-turnResultCh
+		}
+		c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
 		readCancel()
 		wg.Wait()
-		c.close()
+		if err := c.lock.Release(); err != nil {
+			slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
+		}
 	}()
 
 	// Load session state from DB.
@@ -225,21 +227,13 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		return
 	}
 
-	// Pipeline state — at most one pipeline goroutine runs at a time.
-	var (
-		turnResultCh  <-chan turnResult  // nil when no pipeline running
-		cancelTurn    context.CancelFunc // non-nil when pipeline running
-		pendingAction string             // "", actionEnd, or actionCancel
-	)
-
 	// Dispatch opening question as a pipeline goroutine for new sessions.
 	if !c.isReconnect() && len(c.messages) == 0 {
 		ch := make(chan turnResult, 1)
 		turnResultCh = ch
-		turnCtx, cancel := context.WithCancel(workCtx)
-		cancelTurn = cancel
+		pipelineRunning = true
 		go func() {
-			ch <- turnResult{err: c.streamInterviewerResponse(turnCtx)}
+			ch <- turnResult{err: c.streamInterviewerResponse(workCtx)}
 		}()
 	}
 
@@ -248,73 +242,43 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	if c.needsInterviewerRecovery() {
 		ch := make(chan turnResult, 1)
 		turnResultCh = ch
-		turnCtx, cancel := context.WithCancel(workCtx)
-		cancelTurn = cancel
+		pipelineRunning = true
 		go func() {
-			ch <- turnResult{err: c.streamInterviewerResponse(turnCtx)}
+			ch <- turnResult{err: c.streamInterviewerResponse(workCtx)}
 		}()
 	}
 
 	// Main loop -- event loop is never blocked by pipeline I/O.
-	reconnectPending := false
 	for {
+		shouldExit := false
+
 		select {
 		case msg, ok := <-msgCh:
 			if !ok {
-				// Client disconnected.
-				if cancelTurn != nil {
-					cancelTurn()
-					drainPipeline(turnResultCh)
-				}
-				if pendingAction == actionEnd {
-					_ = c.endSession(workCtx)
-				}
-				return
-			}
-			if serverCtx.Err() != nil {
-				c.client.ReconnectPlease()
-				if cancelTurn != nil {
-					cancelTurn()
-					drainPipeline(turnResultCh)
-				}
-				return
+				shouldExit = true
+				break
 			}
 			switch msg.Type {
 			case "end_turn":
-				if turnResultCh != nil {
+				if pipelineRunning {
 					c.client.Error(transport.ClientError{Code: "turn_in_progress", Message: "a turn is already being processed"})
 					continue
 				}
 				ch := make(chan turnResult, 1)
 				turnResultCh = ch
-				turnCtx, cancel := context.WithCancel(workCtx)
-				cancelTurn = cancel
+				pipelineRunning = true
 				capturedMsg := msg
 				go func() {
-					ch <- turnResult{err: c.endTurn(turnCtx, capturedMsg)}
+					ch <- turnResult{err: c.endTurn(workCtx, capturedMsg)}
 				}()
 
 			case "end_session":
-				if turnResultCh != nil {
-					pendingAction = actionEnd
-					cancelTurn()
-					continue
-				}
-				if err := c.endSession(workCtx); err != nil {
-					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
-				}
-				return
+				c.client.Ack()
+				pendingAction = actionEnd
 
 			case "cancel_session":
-				if turnResultCh != nil {
-					pendingAction = actionCancel
-					cancelTurn()
-					continue
-				}
-				if err := c.cancelSession(serverCtx); err != nil {
-					slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
-				}
-				return
+				c.client.Ack()
+				pendingAction = actionCancel
 
 			case "ping":
 				c.client.Pong()
@@ -323,35 +287,13 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 
 		case res := <-turnResultCh:
-			// Pipeline completed. Reclaim ownership of shared state.
-			turnResultCh = nil
-			cancelTurn = nil
-
+			pipelineRunning = false
 			if res.err != nil {
-				slog.Error("conductor: end_turn", "error", res.err, "session_id", c.sessionID)
+				slog.Error("conductor: pipeline error", "error", res.err, "session_id", c.sessionID)
 				c.sm.ForceState(StateWaitingForInput)
-				c.client.Error(transport.ClientError{Code: "turn_failed", Message: "failed to process turn, please try again"})
-			}
-
-			// Handle deferred lifecycle action.
-			switch pendingAction {
-			case actionEnd:
-				pendingAction = ""
-				if err := c.endSession(workCtx); err != nil {
-					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
+				if pendingAction == "" {
+					c.client.Error(transport.ClientError{Code: "turn_failed", Message: "failed to process turn, please try again"})
 				}
-				return
-			case actionCancel:
-				pendingAction = ""
-				if err := c.cancelSession(serverCtx); err != nil {
-					slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
-				}
-				return
-			}
-
-			if reconnectPending {
-				c.client.ReconnectPlease()
-				return
 			}
 
 		case <-warningTimer:
@@ -362,28 +304,43 @@ func (c *Conductor) Run(serverCtx context.Context) {
 
 		case <-autoEndTimer:
 			slog.Info("conductor: auto-ending session", "session_id", c.sessionID)
-			if turnResultCh != nil {
-				pendingAction = actionEnd
-				cancelTurn()
-				continue
-			}
-			if err := c.endSession(workCtx); err != nil {
-				slog.Error("conductor: auto-end", "error", err, "session_id", c.sessionID)
-			}
-			return
+			pendingAction = actionEnd
 
 		case <-reconnectTimer:
-			reconnectPending = true
+			if pendingAction == "" {
+				pendingAction = actionReconnect
+			}
 
 		case <-serverCtx.Done():
-			c.client.ReconnectPlease()
-			if cancelTurn != nil {
-				cancelTurn()
-				drainPipeline(turnResultCh)
+			shouldExit = true
+		}
+
+		// Wait for pipeline if exiting.
+		if shouldExit && pipelineRunning {
+			<-turnResultCh
+			pipelineRunning = false
+		}
+
+		// Process pending action when pipeline is done.
+		if !pipelineRunning && pendingAction != "" {
+			action := pendingAction
+			pendingAction = ""
+			switch action {
+			case actionCancel:
+				if err := c.cancelSession(workCtx); err != nil {
+					slog.Error("conductor: cancel_session", "error", err, "session_id", c.sessionID)
+				}
+			case actionEnd:
+				if err := c.endSession(workCtx); err != nil {
+					slog.Error("conductor: end_session", "error", err, "session_id", c.sessionID)
+				}
+			case actionReconnect:
+				c.client.ReconnectPlease()
 			}
-			if pendingAction == actionEnd {
-				_ = c.endSession(workCtx)
-			}
+			return
+		}
+
+		if shouldExit {
 			return
 		}
 	}
@@ -605,7 +562,6 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 		}
 	}
 	fanOut := observer.NewTokenFanOut(observers...)
-	c.obs.Store(fanOut)
 
 	// Stream LLM.
 	stream, err := c.backend.StreamLLM(ctx, ai.StreamParams{
@@ -671,13 +627,13 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 }
 
 // endSession transitions to Ending, persists status + enqueues evaluation atomically, then Ended.
+// Pure internal method — DB operations only, no WS messages.
 func (c *Conductor) endSession(ctx context.Context) (err error) {
 	ctx, span := tracer.Start(ctx, "Conductor.endSession")
 	defer func() { drilotel.End(span, err) }()
 
 	if err := c.sm.Transition(StateEnding); err != nil {
-		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
-		return nil
+		return fmt.Errorf("transition to ending: %w", err)
 	}
 
 	if err := c.backend.CompleteSession(ctx, c.sessionID, c.sm.TurnCount()); err != nil {
@@ -688,18 +644,17 @@ func (c *Conductor) endSession(ctx context.Context) (err error) {
 		return fmt.Errorf("transition to ended: %w", err)
 	}
 
-	c.client.Ack()
 	return nil
 }
 
 // cancelSession ends the session early without evaluation. Archived + refunded.
+// Pure internal method — DB operations only, no WS messages.
 func (c *Conductor) cancelSession(ctx context.Context) (err error) {
 	ctx, span := tracer.Start(ctx, "Conductor.cancelSession")
 	defer func() { drilotel.End(span, err) }()
 
 	if err := c.sm.Transition(StateEnding); err != nil {
-		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
-		return nil
+		return fmt.Errorf("transition to ending: %w", err)
 	}
 
 	if err := c.backend.CancelSession(ctx, c.sessionID, c.sm.TurnCount()); err != nil {
@@ -710,7 +665,6 @@ func (c *Conductor) cancelSession(ctx context.Context) (err error) {
 		return fmt.Errorf("transition to ended: %w", err)
 	}
 
-	c.client.Ack()
 	return nil
 }
 
@@ -750,12 +704,4 @@ func (c *Conductor) needsInterviewerRecovery() bool {
 		return false
 	}
 	return c.messages[len(c.messages)-1].Role == "candidate"
-}
-
-// close closes the WebSocket and releases the advisory lock.
-func (c *Conductor) close() {
-	c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
-	if err := c.lock.Release(); err != nil {
-		slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
-	}
 }
