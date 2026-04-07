@@ -251,7 +251,6 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     sendAudio,
     endSession,
     cancelSession,
-    cancelTts,
     setRawMessageHandler,
     cmRef,
   } = useInterview(sessionId);
@@ -330,9 +329,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   // ------ Cancel TTS when user starts responding ------
   const stopTts = useCallback(() => {
-    cancelTts();
     audioPlayer.cancel();
-  }, [cancelTts, audioPlayer]);
+  }, [audioPlayer]);
 
   // ------ Stable refs from audioRecorder ------
   const { start: recStart, stop: recStop } = audioRecorder;

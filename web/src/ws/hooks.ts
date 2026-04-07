@@ -41,6 +41,7 @@ export function useInterview(sessionId: string) {
   const rawMessageHandlerRef = useRef<((msg: ServerMessage) => void) | null>(null);
   // Active turn span — open from send to interviewer_done.
   const turnSpanRef = useRef<Span | null>(null);
+  const pendingActionRef = useRef<"cancel" | "end" | null>(null);
   const [wasReconnected, setWasReconnected] = useState(false);
 
   const handleMessage = useCallback((msg: ServerMessage) => {
@@ -118,9 +119,14 @@ export function useInterview(sessionId: string) {
         break;
       }
 
-      case "session_ended":
-        setState(msg.reason === "cancelled" ? "cancelled" : "ended");
-        // Close any outstanding turn span on session end.
+      case "ack":
+        if (pendingActionRef.current === "cancel") {
+          setState("cancelled");
+        } else if (pendingActionRef.current === "end") {
+          setState("ended");
+        }
+        pendingActionRef.current = null;
+        // Close any outstanding turn span on ack.
         if (turnSpanRef.current) {
           closeTurnSpan(turnSpanRef.current, false);
           turnSpanRef.current = null;
@@ -176,15 +182,13 @@ export function useInterview(sessionId: string) {
   }, []);
 
   const endSession = useCallback(() => {
+    pendingActionRef.current = "end";
     cmRef.current?.send({ type: "end_session" });
   }, []);
 
   const cancelSession = useCallback(() => {
+    pendingActionRef.current = "cancel";
     cmRef.current?.send({ type: "cancel_session" });
-  }, []);
-
-  const cancelTts = useCallback(() => {
-    cmRef.current?.send({ type: "cancel_tts" });
   }, []);
 
   // Expose raw WS messages for audio player integration (tts_chunk, tts_done)
@@ -214,7 +218,6 @@ export function useInterview(sessionId: string) {
     sendAudio,
     endSession,
     cancelSession,
-    cancelTts,
     setRawMessageHandler,
     cmRef,
   };
