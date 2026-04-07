@@ -1,7 +1,7 @@
 # Transport Client: Protocol-Agnostic Conductor Events
 
 **Date:** 2026-04-07
-**Status:** Draft
+**Status:** Approved
 
 ## Purpose
 
@@ -21,6 +21,10 @@ import (
 // Client is the conductor's interface to the connected client.
 // The conductor emits domain events; the transport implementation
 // handles protocol encoding (WebSocket JSON, test recorder, etc.).
+//
+// Implementations must be safe for concurrent use. The conductor's
+// main goroutine, audio upload goroutine, readLoop goroutine, and
+// TTS goroutine all call Client methods.
 type Client interface {
     // Single-arg or zero-arg — bare values when types differ
     StateChange(state string)
@@ -29,14 +33,17 @@ type Client interface {
     TimerWarning(minutesRemaining int)
     TimerOvertime()
     ReconnectPlease()
+    Pong()
     TTSError()
     TTSDone(messageID uuid.UUID)
     AudioUploadFailed()
 
+    // Single-arg bare values — token streaming
+    InterviewerToken(token string)
+    InterviewerDone(messageID uuid.UUID)
+
     // Multi-arg structs — same-type args or 3+ args
     Error(ClientError)
-    InterviewerToken(InterviewerToken)
-    InterviewerDone(InterviewerDone)
     SessionLoaded(SessionLoaded)
     ReconnectState(ReconnectState)
     TTSChunk(TTSChunk)
@@ -45,9 +52,8 @@ type Client interface {
 
 ### Arg convention
 
-- **Zero args:** bare method — `TimerOvertime()`, `ReconnectPlease()`, `TTSError()`, `AudioUploadFailed()`
-- **One arg:** bare value — `StateChange(state string)`, `SessionEnded(reason string)`
-- **Two args, different types:** bare values — `TTSDone(messageID uuid.UUID)`
+- **Zero args:** bare method — `TimerOvertime()`, `ReconnectPlease()`, `Pong()`, `TTSError()`, `AudioUploadFailed()`
+- **One arg:** bare value — `StateChange(state string)`, `SessionEnded(reason string)`, `InterviewerToken(token string)`, `InterviewerDone(messageID uuid.UUID)`
 - **Two args, same type:** struct — `Error(ClientError)` (both strings)
 - **Three+ args:** struct — `SessionLoaded(SessionLoaded)`, `TTSChunk(TTSChunk)`
 
@@ -57,16 +63,6 @@ type Client interface {
 type ClientError struct {
     Code    string
     Message string
-}
-
-type InterviewerToken struct {
-    MessageID uuid.UUID
-    Token     string
-}
-
-type InterviewerDone struct {
-    MessageID uuid.UUID
-    FullText  string
 }
 
 type SessionLoaded struct {
@@ -105,13 +101,15 @@ type TTSChunk struct {
 ```
 internal/interview/
     transport/
-        client.go      — Client interface + domain types
-        ws_client.go   — WSClient implementation
-        recorder.go    — Recorder for tests
-    conductor.go       — uses transport.Client, no WS imports
-    state_machine.go   — unchanged
-    ws_message.go      — inbound WS parsing (unchanged for now)
-    observer/          — unchanged
+        client.go       — Client interface + domain types
+        ws_client.go    — WSClient implementation
+        token_writer.go — TokenObserver backed by Client
+        tts_sink.go     — TTSSink adapter backed by Client
+        recorder.go     — Recorder for tests
+    conductor.go        — uses transport.Client, no WS imports
+    state_machine.go    — unchanged
+    ws_message.go       — inbound WS parsing (unchanged for now)
+    observer/           — unchanged (interfaces only)
 ```
 
 ## WSClient Implementation
@@ -128,13 +126,25 @@ func NewWSClient(ws observer.WSConn) *WSClient {
 }
 ```
 
-All writes use `context.Background()` because `coder/websocket` closes the connection when the write context is cancelled. The WS's internal write timeout bounds write duration.
+All writes use `context.Background()` because `coder/websocket` closes the connection when the write context is cancelled. The WS's internal write timeout bounds write duration. `SendJSON` is thread-safe (`coder/websocket` serializes writes), so `WSClient` is safe for concurrent use.
 
 Each method encodes to the WS JSON format:
 
 ```go
 func (c *WSClient) StateChange(state string) {
     c.send(map[string]string{"type": "state_change", "state": state})
+}
+
+func (c *WSClient) Pong() {
+    c.send(map[string]string{"type": "pong"})
+}
+
+func (c *WSClient) InterviewerToken(token string) {
+    c.send(map[string]string{"type": "interviewer_token", "token": token})
+}
+
+func (c *WSClient) InterviewerDone(messageID uuid.UUID) {
+    c.send(map[string]any{"type": "interviewer_done", "message_id": messageID.String()})
 }
 
 func (c *WSClient) TTSChunk(chunk TTSChunk) {
@@ -157,12 +167,44 @@ func (c *WSClient) send(v any) {
 }
 ```
 
+## TokenWriter — Observer backed by Client
+
+Replaces `observer.NewWSWriter`. Lives in transport package, implements `observer.TokenObserver`.
+
+```go
+type TokenWriter struct {
+    client    Client
+    messageID uuid.UUID
+}
+
+func NewTokenWriter(client Client, messageID uuid.UUID) *TokenWriter {
+    return &TokenWriter{client: client, messageID: messageID}
+}
+
+func (w *TokenWriter) OnToken(token string) {
+    w.client.InterviewerToken(token)
+}
+
+func (w *TokenWriter) OnDone(_ string) {
+    w.client.InterviewerDone(w.messageID)
+}
+
+func (w *TokenWriter) OnError(err error) {
+    w.client.Error(ClientError{Code: "llm_stream_error", Message: err.Error()})
+}
+
+func (w *TokenWriter) Interrupt() {}
+```
+
+**Note on OnDone:** The `fullText` parameter is ignored — the current wire protocol does not send full text in `interviewer_done`. The conductor uses `MessageAccumulator.Text()` for persistence, not the observer's `OnDone` parameter.
+
+**Note on OnError:** The current `WSWriter.OnError` sends `{"type": "error", "message": err.Error()}` to the client. `TokenWriter.OnError` preserves this behavior by calling `c.client.Error(...)` with a `"llm_stream_error"` code. This is a minor wire format addition (the `code` field) that improves client-side error handling.
+
 ## TTS Sink Adapter
 
 The existing `observer.TTSSink` interface stays unchanged. A thin adapter wraps `transport.Client` with per-turn state (messageID, seq counter):
 
 ```go
-// ttsSink adapts transport.Client to observer.TTSSink for one turn.
 type ttsSink struct {
     client    Client
     messageID uuid.UUID
@@ -201,16 +243,26 @@ sink := transport.NewTTSSink(c.client, messageID)
 
 ```go
 // Recorder implements Client by appending events to a slice.
+// Safe for concurrent use.
 type Recorder struct {
+    mu     sync.Mutex
     Events []any
 }
 
-func (r *Recorder) StateChange(state string) {
-    r.Events = append(r.Events, StateChangeEvent{State: state})
+func (r *Recorder) record(e any) {
+    r.mu.Lock()
+    r.Events = append(r.Events, e)
+    r.mu.Unlock()
 }
 
-// ... one record type per method
+func (r *Recorder) StateChange(state string) {
+    r.record(StateChangeEvent{State: state})
+}
+
+// ... 16 event types total (one per Client method)
 ```
+
+Event types: `StateChangeEvent`, `SessionEndedEvent`, `TranscriptionResultEvent`, `TimerWarningEvent`, `TimerOvertimeEvent`, `ReconnectPleaseEvent`, `PongEvent`, `TTSErrorEvent`, `TTSDoneEvent`, `AudioUploadFailedEvent`, `InterviewerTokenEvent`, `InterviewerDoneEvent`, `ClientErrorEvent`, `SessionLoadedEvent`, `ReconnectStateEvent`, `TTSChunkEvent`.
 
 This enables conductor unit tests without WS infrastructure — assert on the event sequence.
 
@@ -220,54 +272,16 @@ This enables conductor unit tests without WS infrastructure — assert on the ev
 |--------|-------|
 | `ws observer.WSConn` field | `client transport.Client` field |
 | `send(ctx context.Context, v any)` helper | Deleted |
+| `c.send(ctx, msgPong)` | `c.client.Pong()` |
 | `c.send(ctx, msgStateChange(StateWaitingForInput))` | `c.client.StateChange(string(StateWaitingForInput))` |
 | `c.send(ctx, msgError("code", "msg"))` | `c.client.Error(transport.ClientError{Code: "code", Message: "msg"})` |
 | `c.send(ctx, msgSessionLoaded(...))` | `c.client.SessionLoaded(transport.SessionLoaded{...})` |
 | `c.send(ctx, msgReconnectState(seq, msgs))` | `c.client.ReconnectState(transport.ReconnectState{LastSeq: seq, Messages: msgs})` |
+| `c.send(uploadCtx, map[string]string{"type": "audio_upload_failed"})` | `c.client.AudioUploadFailed()` |
+| readLoop `c.send(readCtx, msgError("malformed_message", ...))` | `c.client.Error(transport.ClientError{Code: "malformed_message", Message: ...})` |
 | `ttsSink` struct + 3 methods | Deleted — replaced by `transport.NewTTSSink(c.client, messageID)` |
-| `messages.go` (msgXxx constructors) | Deleted — logic moved into WSClient methods |
-
-## What Does NOT Change
-
-- **Inbound WS parsing:** `ws_message.go` stays. The `WSMessage` struct, `ParseWSMessage`, and the `msg.Type` switch in `Run` are unchanged. Inbound extraction is a separate refactor.
-- **Observer package:** `observer.TokenObserver`, `observer.TTSSink`, `observer.WSConn` interfaces unchanged. `observer.NewWSWriter` still takes a `WSConn` directly (it's an observer, not a transport concern — it streams tokens to the client during LLM output).
-- **State machine:** Unchanged.
-- **`rawWS` field:** The conductor still holds the raw `*websocket.Conn` for the readLoop. Only outbound messages go through `transport.Client`.
-
-## Observer WSWriter Consideration
-
-`observer.NewWSWriter` currently takes `observer.WSConn` and sends `interviewer_token` and `interviewer_done` messages directly. These are the same events as `transport.InterviewerToken` and `transport.InterviewerDone`.
-
-Two options:
-- **A) Leave it:** WSWriter stays in observer, sends WS messages directly. Two paths for token/done messages (WSWriter for streaming, transport.Client for everything else). Inconsistent but avoids changing the observer package.
-- **B) Replace it:** WSWriter becomes a `transport.Client`-backed observer that calls `c.client.InterviewerToken(...)` and `c.client.InterviewerDone(...)`.
-
-**Recommendation: B.** The inconsistency of A is worse than the small change. WSWriter becomes:
-
-```go
-// TokenWriter is a TokenObserver that emits tokens through transport.Client.
-type TokenWriter struct {
-    client    Client
-    messageID uuid.UUID
-}
-
-func NewTokenWriter(client Client, messageID uuid.UUID) *TokenWriter {
-    return &TokenWriter{client: client, messageID: messageID}
-}
-
-func (w *TokenWriter) OnToken(token string) {
-    w.client.InterviewerToken(InterviewerToken{MessageID: w.messageID, Token: token})
-}
-
-func (w *TokenWriter) OnDone(fullText string) {
-    w.client.InterviewerDone(InterviewerDone{MessageID: w.messageID, FullText: fullText})
-}
-
-func (w *TokenWriter) OnError(_ error) {}
-func (w *TokenWriter) Interrupt()      {}
-```
-
-Lives in transport package. Implements `observer.TokenObserver`. Replaces `observer.NewWSWriter` in `streamInterviewerResponse`.
+| `messages.go` (msgXxx constructors + package-level vars) | Deleted — logic moved into WSClient methods |
+| `observer.NewWSWriter(c.ws, messageID)` | `transport.NewTokenWriter(c.client, messageID)` |
 
 ## ConductorParams Change
 
@@ -294,26 +308,23 @@ The handler constructs `transport.NewWSClient(ws)` and passes it in. The conduct
 
 ## Close Behavior
 
-The conductor currently calls `c.ws.Close(code, reason)` in `close()`. With the transport.Client refactor, closing the connection is still needed. Options:
+The conductor closes the WS connection in several paths:
 
-- Add `Close(code websocket.StatusCode, reason string)` to `transport.Client` — but this leaks WS-specific types
-- Keep the `rawWS` field and close it directly in `close()` — the conductor already holds `rawWS` for reads
+- **Normal close** (`close()` method): Uses `rawWS.Close(websocket.StatusNormalClosure, "session ended")`. Called at the end of `Run` via defer.
+- **Early exit — lock error** (line 180): Uses `rawWS.Close(websocket.StatusInternalError, "lock error")` before `c.lock` is set.
+- **Early exit — lock unavailable** (line 184): Uses `rawWS.Close(websocket.StatusPolicyViolation, "session already in use")`.
 
-**Recommendation:** Close via `rawWS` directly. The transport.Client is for outbound events, not connection lifecycle. The `close()` method becomes:
+All close paths use `rawWS` directly. `transport.Client` is for outbound events, not connection lifecycle. The `Conn` wrapper (in `ws_message.go`) that currently implements `observer.WSConn` is only used to construct `WSClient`; the conductor itself no longer references it.
 
-```go
-func (c *Conductor) close() {
-    c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
-    if err := c.lock.Release(); err != nil {
-        slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
-    }
-}
-```
+## What Does NOT Change
 
-Same as today but uses `rawWS` instead of `c.ws.Close()`.
+- **Inbound WS parsing:** `ws_message.go` stays. The `WSMessage` struct, `ParseWSMessage`, and the `msg.Type` switch in `Run` are unchanged. Inbound extraction is a separate refactor.
+- **Observer package:** `observer.TokenObserver`, `observer.TTSSink`, `observer.WSConn` interfaces unchanged. `observer.NewWSWriter` becomes unused and can be deleted after `transport.TokenWriter` replaces it.
+- **State machine:** Unchanged.
+- **`rawWS` field:** The conductor still holds the raw `*websocket.Conn` for the readLoop and close paths. Only outbound messages go through `transport.Client`.
 
 ## Testing Strategy
 
-- **WSClient:** Unit test each method — verify JSON output matches expected WS protocol.
+- **WSClient:** Unit test each method — verify JSON output matches expected WS protocol. Use a mock `WSConn` that captures `SendJSON` args.
 - **Conductor with Recorder:** Unit test conductor logic by asserting on the sequence of emitted events. No WS infrastructure needed.
-- **Existing WS integration tests:** Still pass — they test the full stack (handler → conductor → WSClient → actual WebSocket). These are the primary correctness tests.
+- **Existing WS integration tests:** Still pass unchanged — they test the full stack (handler → conductor → WSClient → actual WebSocket). These are the primary correctness tests.
