@@ -1,6 +1,8 @@
 import { context, propagation, trace, SpanStatusCode } from "@opentelemetry/api";
 import type { Span } from "@opentelemetry/api";
-import type { TraceContext } from "@/ws/protocol";
+export interface TraceContext {
+  traceparent: string;
+}
 
 const tracer = trace.getTracer("drill-web");
 
