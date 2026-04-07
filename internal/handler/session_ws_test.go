@@ -2406,3 +2406,100 @@ func TestWS_STTRetry(t *testing.T) {
 	// Verify transcriber was called twice (first failed, second succeeded).
 	assert.Equal(t, 2, stt.calls, "transcriber should be called twice (retry)")
 }
+
+// ---------------------------------------------------------------------------
+// Test: Disconnect with pending cancel — cancel during pipeline, then close
+// ---------------------------------------------------------------------------
+
+func TestWS_DisconnectWithPendingCancel(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Let's ", "discuss ", "the ", "requirements. ", "First, ", "we ", "need."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+
+	// Wait for opening to start streaming.
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+
+	// Send cancel while pipeline is running, then disconnect immediately.
+	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
+	// Read ack before closing.
+	ack, _ := drainUntilType(t, ws, "ack")
+	assert.Equal(t, "ack", ack["type"])
+
+	ws.Close(websocket.StatusNormalClosure, "leaving")
+
+	// Conductor should wait for pipeline then cancel.
+	ctx := context.Background()
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSessionByID(ctx, session.ID)
+		return err == nil && s.Status == "cancelled"
+	}, 15*time.Second, 100*time.Millisecond, "session should be cancelled after disconnect")
+}
+
+// ---------------------------------------------------------------------------
+// Test: Cancel during pipeline — pipeline completes, message persisted
+// ---------------------------------------------------------------------------
+
+func TestWS_CancelDuringPipeline_PipelineCompletes(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"Let's ", "discuss ", "this."}
+	anthropicSrv := newFakeAnthropicServer(t, tokens)
+	b := newWSTestBackend(t, anthropicSrv.URL)
+
+	mux := http.NewServeMux()
+	require.NoError(t, handler.RegisterRoutes(mux, b))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	pool := b.Pool()
+	userID := backendtest.SeedUser(t, b)
+	question := createTestQuestion(t, pool)
+	session := createTestSession(t, pool, userID, question.ID)
+	cookie := createAuthCookie(t, pool, userID)
+
+	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
+	defer ws.CloseNow()
+
+	drainUntilType(t, ws, "session_loaded")
+	drainUntilType(t, ws, "state_change") // interviewer_speaking
+
+	// Cancel during the opening question pipeline.
+	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
+
+	// Should get ack immediately.
+	ack, _ := drainUntilType(t, ws, "ack")
+	assert.Equal(t, "ack", ack["type"])
+
+	// Pipeline should still complete — verify the interviewer message was persisted.
+	ctx := context.Background()
+	assert.Eventually(t, func() bool {
+		msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
+		if err != nil {
+			return false
+		}
+		// Opening question should be persisted despite cancel.
+		return len(msgs) >= 1 && msgs[0].Role == "interviewer"
+	}, 15*time.Second, 100*time.Millisecond, "interviewer message should be persisted even after cancel")
+
+	// Session should be cancelled.
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSessionByID(ctx, session.ID)
+		return err == nil && s.Status == "cancelled"
+	}, 15*time.Second, 100*time.Millisecond, "session should be cancelled")
+}
