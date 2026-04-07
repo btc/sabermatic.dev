@@ -899,3 +899,24 @@ Expected: no output
 
 Run: `wc -l internal/interview/conductor.go`
 Expected: ~720 lines (down from 822 — removed ttsSink, send helper, reduced inline message construction)
+
+---
+
+## Task 8: Opus review — up to 2 passes
+
+After all tasks are complete and tests pass, dispatch an Opus subagent to review the full refactor.
+
+**Review scope:** All files in `internal/interview/transport/`, changes to `internal/interview/conductor.go`, changes to `internal/handler/session_ws.go`, deleted files.
+
+**Review criteria:**
+- Wire format preserved (no WS protocol changes vs. pre-refactor)
+- Interface completeness (every conductor outbound event goes through transport.Client)
+- Thread-safety (concurrent callers documented and safe)
+- No dead code left behind (unused imports, orphaned references)
+- Type consistency between Client interface, WSClient, Recorder, and conductor callsites
+- Test coverage (WSClient unit tests cover all 16 methods)
+
+**Process:**
+- [ ] **Pass 1:** Dispatch Opus review subagent. Fix ALL findings (HIGH, MEDIUM, LOW, NIT). Commit fixes.
+- [ ] **Pass 2 (if needed):** If Pass 1 had findings, dispatch a second Opus review to verify fixes and check for new issues. Fix any new findings. Commit.
+- [ ] **Escalate:** If you disagree with a finding, do not silently skip it. Escalate to the user with the finding and your reasoning.
