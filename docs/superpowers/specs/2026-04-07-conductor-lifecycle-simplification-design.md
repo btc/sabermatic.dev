@@ -40,13 +40,20 @@ The select cases record what happened. The code after the select decides what to
 Three distinct concepts govern the loop:
 - **`pendingAction`** (end / cancel / reconnect) — what to do after the pipeline finishes, then return.
 - **`shouldExit`** (disconnect / shutdown) — the loop's input sources are exhausted and it cannot continue. Wait for pipeline, process any pending action, return.
-- **`turnResultCh == nil`** — gate for processing pending actions.
+- **`pipelineRunning`** — bool gate for processing pending actions. Explicit state, not derived from channel nil-ness.
+
+The pipeline result channel is created per-pipeline and read once. After reading, the drained channel is never selected again (no writers), so there is no need to nil it.
 
 ```
 const (
     actionEnd       = "end"
     actionCancel    = "cancel"
     actionReconnect = "reconnect"
+)
+
+var (
+    turnResultCh   <-chan turnResult
+    pipelineRunning bool
 )
 
 for {
@@ -61,6 +68,7 @@ for {
         switch msg.Type:
         case "end_turn":
             // unchanged — dispatch pipeline
+            // sets pipelineRunning = true, assigns turnResultCh
         case "end_session":
             client.Ack()
             pendingAction = actionEnd
@@ -70,8 +78,8 @@ for {
         case "ping":
             client.Pong()
 
-    case <-turnResultCh:
-        turnResultCh = nil
+    case res := <-turnResultCh:
+        pipelineRunning = false
         // handle pipeline error (log, ForceState, send error to client if no pendingAction)
 
     case <-warningTimer:
@@ -88,17 +96,17 @@ for {
     }
 
     // Wait for pipeline if exiting
-    if shouldExit && turnResultCh != nil:
+    if shouldExit && pipelineRunning:
         <-turnResultCh
-        turnResultCh = nil
+        pipelineRunning = false
 
     // Process pending action when pipeline is done
-    if turnResultCh == nil && pendingAction != "":
+    if !pipelineRunning && pendingAction != "":
         action := pendingAction
         pendingAction = ""
         switch action:
-            actionCancel  → cancelSession(workCtx)
-            actionEnd     → endSession(workCtx)
+            actionCancel    → cancelSession(workCtx)
+            actionEnd       → endSession(workCtx)
             actionReconnect → client.ReconnectPlease()
         return
 
