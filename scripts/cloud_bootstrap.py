@@ -958,19 +958,17 @@ def phase_domain(state: dict) -> None:
     # ── 10a: Verify domain ownership with Google ──
     if not domain_state.get("verified"):
         print(textwrap.dedent(f"""
-        Domain Verification
-        ───────────────────
-        GCP requires you to verify ownership of {domain} before
-        creating a Cloud Run custom domain mapping.
+          Domain verification:
+            {link("https://search.google.com/search-console")}
+            → Add property → Domain → enter: {domain}
+            → Copy the TXT record value shown
+            → Add it at Dynadot: My Domains → {domain} → DNS Settings → Domain Record → TXT
+            → Click Verify in Search Console
 
-        This will open Google Search Console in your browser.
-        Add the TXT record shown there to your DNS at Dynadot, then
-        come back and confirm.
-
-        Command:
-          gcloud domains verify {domain}
+          Or via CLI:
+            gcloud domains verify {domain}
         """))
-        prompt_continue(f"Have you verified {domain} in Google Search Console?")
+        prompt_continue(f"{domain} verified in Google Search Console?")
         domain_state["verified"] = True
         state["phases"]["domain"] = domain_state
         save_state(state)
