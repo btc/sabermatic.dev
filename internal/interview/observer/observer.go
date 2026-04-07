@@ -17,7 +17,6 @@ type TokenObserver interface {
 	OnToken(token string)
 	OnDone(fullMessage string)
 	OnError(err error)
-	Interrupt()
 }
 
 // Closeable is an optional interface for observers that need cleanup.

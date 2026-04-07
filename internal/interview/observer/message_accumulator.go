@@ -14,5 +14,4 @@ func NewMessageAccumulator() *MessageAccumulator {
 func (a *MessageAccumulator) OnToken(token string) { a.buf.WriteString(token) }
 func (a *MessageAccumulator) OnDone(string)        {}
 func (a *MessageAccumulator) OnError(error)        {}
-func (a *MessageAccumulator) Interrupt()           {}
 func (a *MessageAccumulator) Text() string         { return a.buf.String() }

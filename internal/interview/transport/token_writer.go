@@ -22,5 +22,3 @@ func (w *TokenWriter) OnDone(_ string) {
 func (w *TokenWriter) OnError(err error) {
 	w.client.Error(ClientError{Code: "llm_stream_error", Message: err.Error()})
 }
-
-func (w *TokenWriter) Interrupt() {}
