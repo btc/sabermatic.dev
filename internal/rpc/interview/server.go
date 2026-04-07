@@ -141,6 +141,7 @@ func backendToConnectError(err error) *connect.Error {
 	case errors.Is(err, backend.ErrSessionNotFound):
 		return connect.NewError(connect.CodeNotFound, errors.New("session not found"))
 	case errors.Is(err, backend.ErrSessionNotOwned):
+		// Map to NotFound to avoid leaking session existence.
 		return connect.NewError(connect.CodeNotFound, errors.New("session not found"))
 	case errors.Is(err, backend.ErrSessionNotActive):
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New("session is not active"))

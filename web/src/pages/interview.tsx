@@ -285,6 +285,15 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const isEnded = state === "ended" || state === "cancelled";
   const inputDisabled = isStreaming || isEnded;
 
+  // ------ Auto-end: call endSession 2 minutes after overtime begins ------
+  useEffect(() => {
+    if (timerPhase !== "overtime" || isEnded) return;
+    const timeout = setTimeout(() => {
+      endSession();
+    }, 2 * 60 * 1000);
+    return () => clearTimeout(timeout);
+  }, [timerPhase, isEnded, endSession]);
+
   // ------ Auto-scroll ------
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
