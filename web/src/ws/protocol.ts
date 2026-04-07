@@ -13,7 +13,6 @@ export interface TraceContext {
 }
 
 // --- Server → Client ---
-// NB: These types match the actual backend message shapes in internal/interview/messages.go.
 
 export type ServerMessage =
   | { type: "session_loaded"; session_id: string; question: { title: string; prompt: string }; duration: number; tts_enabled: boolean }
