@@ -896,7 +896,7 @@ def phase_build(state: dict) -> None:
 
     # Build
     print(f"\nBuilding container image: {image}")
-    run(["docker", "build", "-t", image, "."], cwd=project_root)
+    run(["docker", "build", "--platform", "linux/amd64", "-t", image, "."], cwd=project_root)
     info("Image built")
 
     # Push

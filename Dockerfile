@@ -13,7 +13,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /app/web/dist ./web/dist
-RUN GOOS=linux GOARCH=amd64 go build -p 4 -o sabermatic ./cmd/drill
+RUN go build -p 4 -o sabermatic ./cmd/drill
 
 # Stage 3: Runtime
 FROM gcr.io/distroless/static-debian12
