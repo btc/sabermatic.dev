@@ -256,15 +256,9 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // ------ Audio player wiring ------
-  // TTS chunks arrive as Uint8Array from the proto; the AudioPlayer expects
-  // base64 strings. Convert here at the boundary.
   useEffect(() => {
     setOnTtsChunk((data: Uint8Array, seq: number) => {
-      let binary = "";
-      for (let i = 0; i < data.length; i++) {
-        binary += String.fromCharCode(data[i]!);
-      }
-      audioPlayer.enqueue(btoa(binary), seq);
+      audioPlayer.enqueue(data, seq);
     });
     setOnTtsDone(() => audioPlayer.done());
   }, [setOnTtsChunk, setOnTtsDone, audioPlayer]);
@@ -326,16 +320,10 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const handleSendAudio = useCallback(async () => {
     if (audioRecorder.segmentCount === 0) return;
     stopTts();
-    const audioBase64 = await audioRecorder.submit();
-    if (audioBase64) {
-      // AudioRecorder.submit() returns base64; the proto wants Uint8Array.
-      const binary = atob(audioBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
+    const audio = await audioRecorder.submit();
+    if (audio) {
       const mimeType = AudioRecorder.preferredMimeType() || "audio/webm";
-      sendAudio(bytes, mimeType);
+      sendAudio(audio, mimeType);
     }
   }, [audioRecorder, sendAudio, stopTts]);
 

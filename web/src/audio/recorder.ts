@@ -94,7 +94,7 @@ export class AudioRecorder {
     });
   }
 
-  async submit(): Promise<string> {
+  async submit(): Promise<Uint8Array> {
     if (this.segments.length === 0) {
       throw new Error("No segments to submit");
     }
@@ -105,12 +105,7 @@ export class AudioRecorder {
     this._totalDuration = 0;
 
     const buffer = await blobToArrayBuffer(combined);
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]!);
-    }
-    return btoa(binary);
+    return new Uint8Array(buffer);
   }
 
   discard(): void {
