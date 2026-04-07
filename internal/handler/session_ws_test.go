@@ -1500,7 +1500,7 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 	// - session_loaded
 	// - timer_warning (fires immediately since elapsed > duration - warning)
 	// - timer_overtime (fires immediately since elapsed > duration)
-	// - interviewer_speaking + tokens + interviewer_done + waiting_for_input
+	// - interviewer_token(s) + interviewer_done
 	// Auto-end is server-side (no ack sent), so just drain messages.
 	//
 	// Order between timers and opening stream depends on goroutine scheduling,
@@ -1954,7 +1954,7 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
 	defer ws.CloseNow()
 
-	// Drain opening: session_loaded, interviewer stream, waiting_for_input.
+	// Drain opening: session_loaded, interviewer_token(s), interviewer_done.
 	drainUntilType(t, ws, "session_loaded")
 	drainUntilDone(t, ws)
 
