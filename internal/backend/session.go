@@ -310,11 +310,15 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		slog.Warn("session refund failed", "session_id", sessionID, "error", err)
 	}
 
-	evalOpts := jobs.EvaluateSessionInsertOpts()
-	drilotel.SetTraceMetadata(ctx, evalOpts)
-	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, evalOpts)
-	if err != nil {
-		return fmt.Errorf("enqueue evaluate_session: %w", err)
+	// Only evaluate sessions with real candidate interaction. A session with
+	// only the opening question (turnCount <= 1) has nothing to evaluate.
+	if turnCount > 1 {
+		evalOpts := jobs.EvaluateSessionInsertOpts()
+		drilotel.SetTraceMetadata(ctx, evalOpts)
+		_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, evalOpts)
+		if err != nil {
+			return fmt.Errorf("enqueue evaluate_session: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
