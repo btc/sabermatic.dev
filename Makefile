@@ -31,7 +31,7 @@ test:
 # Start dev server via overmind. Ctrl-C kills all processes cleanly.
 # Runs: npm build, vite watch, air (Go rebuild). One origin on :8080.
 dev:
-	@echo "Starting Drill → http://localhost:8080"
+	@echo "Starting Sabermatic → http://localhost:8080"
 	overmind start -f Procfile.dev
 
 # Same as dev, but tee all output to tmp/dev.log for easy inspection.
@@ -47,7 +47,7 @@ seed:
 drillctl:
 	go build -o drillctl ./cmd/drillctl
 
-# Create admin grant. Usage: make grant MINUTES=100m [EMAIL=dev@drill.dev]
+# Create admin grant. Usage: make grant MINUTES=100m [EMAIL=dev@sabermatic.dev]
 grant: drillctl
 	set -a && . ./.env && set +a && ./drillctl grant $(if $(EMAIL),--email $(EMAIL)) $(MINUTES)
 

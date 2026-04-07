@@ -61,5 +61,7 @@ tmp/
 cloud_bootstrap.log
 
 # Terraform local files
+terraform/.terraform/
+terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/tfplan
