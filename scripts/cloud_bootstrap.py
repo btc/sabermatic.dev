@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive GCP bootstrap for Sabermatic (Drill).
+"""Interactive GCP bootstrap for Sabermatic.
 
 Walks through 9 phases from zero to a running Cloud Run service.
 Resume-safe: completed phases are tracked in .cloud_bootstrap_state.
@@ -18,6 +18,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -127,35 +129,56 @@ def run(
     input_data: str | None = None,
     cwd: str | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run a subprocess, streaming output unless capture=True."""
+    """Run a subprocess, tee-ing all output to the log file.
+
+    capture=True: output is logged but not printed to the terminal.
+    capture=False: output is logged AND streamed to the terminal.
+    """
     cmd_str = " ".join(cmd)
     log.debug("$ %s", cmd_str)
-    kwargs: dict = {
-        "check": check,
-        "cwd": cwd,
-    }
-    if capture:
-        kwargs["capture_output"] = True
-        kwargs["text"] = True
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE if input_data is not None else None,
+        cwd=cwd,
+        text=True,
+    )
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def _drain(stream, lines: list[str], sink) -> None:
+        for line in stream:
+            lines.append(line)
+            log.debug(line.rstrip())
+            if not capture:
+                sink.write(line)
+                sink.flush()
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_lines, sys.stdout))
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_lines, sys.stderr))
+    t_out.start()
+    t_err.start()
+
     if input_data is not None:
-        if capture:
-            kwargs["input"] = input_data
-        else:
-            kwargs["input"] = input_data.encode()
-    try:
-        result = subprocess.run(cmd, **kwargs)
-    except subprocess.CalledProcessError as e:
-        log.error("Command failed (exit %d): %s", e.returncode, cmd_str)
-        if hasattr(e, "stdout") and e.stdout:
-            log.error("stdout: %s", e.stdout)
-        if hasattr(e, "stderr") and e.stderr:
-            log.error("stderr: %s", e.stderr)
-        raise
-    if capture and result.returncode != 0:
-        log.debug("exit %d | stderr: %s", result.returncode, result.stderr)
-    elif capture:
-        log.debug("exit 0 | stdout: %s", result.stdout[:200] if result.stdout else "")
-    return result
+        assert proc.stdin is not None
+        proc.stdin.write(input_data)
+        proc.stdin.close()
+
+    t_out.join()
+    t_err.join()
+    proc.wait()
+
+    stdout = "".join(stdout_lines)
+    stderr = "".join(stderr_lines)
+
+    if check and proc.returncode != 0:
+        log.error("Command failed (exit %d): %s", proc.returncode, cmd_str)
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stdout, stderr)
+
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def run_quiet(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -258,7 +281,7 @@ def phase_project(state: dict) -> None:
     result = run_quiet(["gcloud", "projects", "create", project_id, "--name=Sabermatic"])
     if result.returncode == 0:
         info(f"Project {project_id} created")
-    elif "ALREADY_EXISTS" in (result.stderr or ""):
+    elif "ALREADY_EXISTS" in (result.stderr or "") or "already in use" in (result.stderr or ""):
         info(f"Project {project_id} already exists")
     else:
         error(f"Failed to create project: {result.stderr}")
@@ -267,26 +290,41 @@ def phase_project(state: dict) -> None:
     run(["gcloud", "config", "set", "project", project_id])
     info(f"Active project set to {project_id}")
 
-    # Enable billing
-    print("\n  Billing must be enabled before we can create resources.\n")
-    billing_url = f"https://console.cloud.google.com/billing/linkedaccount?project={project_id}"
-    print(f"  Open this URL and link a billing account:")
-    print(f"    {link(billing_url)}\n")
-    prompt_continue("Press Enter when billing is enabled...")
-
-    # Verify billing
+    # Enable billing — link via CLI if billing account ID is known
     result = run_quiet([
         "gcloud", "billing", "projects", "describe", project_id,
         "--format=json",
     ])
+    already_billed = False
     if result.returncode == 0:
-        billing_info = json.loads(result.stdout)
-        if billing_info.get("billingEnabled"):
-            info("Billing is enabled")
-        else:
-            warn("Billing does not appear enabled. Continuing anyway — Terraform will fail if it's not.")
+        try:
+            already_billed = json.loads(result.stdout).get("billingEnabled", False)
+        except json.JSONDecodeError:
+            pass
+
+    if already_billed:
+        info("Billing already enabled")
     else:
-        warn("Could not verify billing status (API may not be enabled yet). Continuing.")
+        billing_account = state.get("billing_account", "")
+        if not billing_account:
+            print("\nFind your billing account ID:")
+            run(["gcloud", "billing", "accounts", "list"])
+            billing_account = prompt_value("Billing account ID (e.g. 012345-ABCDEF-012345)")
+            state["billing_account"] = billing_account
+            save_state(state)
+
+        print(f"\nLinking billing account {billing_account} to {project_id}...")
+        result = run_quiet([
+            "gcloud", "billing", "projects", "link", project_id,
+            f"--billing-account={billing_account}",
+        ])
+        if result.returncode == 0:
+            info("Billing enabled")
+        else:
+            error(f"Failed to link billing account: {result.stderr}")
+            billing_url = f"https://console.cloud.google.com/billing/linkedaccount?project={project_id}"
+            warn(f"Link manually: {link(billing_url)}")
+            prompt_continue("Press Enter when billing is enabled...")
 
     mark_phase(state, "project")
 
@@ -422,15 +460,53 @@ def phase_terraform(state: dict) -> None:
     github_repo = state["github_repo"]
     tf_dir = str(Path(__file__).resolve().parent.parent / "terraform")
 
+    if not state.get("mailgun_domain"):
+        state["mailgun_domain"] = prompt_value(
+            "Mailgun sending subdomain", "mg.sabermatic.dev"
+        )
+        save_state(state)
+    mailgun_domain = state["mailgun_domain"]
+
+    if not state.get("oauth_google_client_id"):
+        base_url = f"https://sabermatic-{state.get('region', 'us-central1')}.run.app"
+        print(textwrap.dedent(f"""
+          Google OAuth setup:
+            {link(f"https://console.cloud.google.com/apis/credentials?project={project_id}")}
+            → Create credentials → OAuth 2.0 Client ID
+            → Application type: Web application
+            → Authorized redirect URI: {base_url}/api/auth/oauth/google/callback
+            (Update the redirect URI after you have the real Cloud Run URL.)
+        """))
+        state["oauth_google_client_id"] = prompt_value("Google OAuth client ID")
+        save_state(state)
+    oauth_google_client_id = state["oauth_google_client_id"]
+
+    if not state.get("oauth_github_client_id"):
+        base_url = f"https://sabermatic-{state.get('region', 'us-central1')}.run.app"
+        print(textwrap.dedent(f"""
+          GitHub OAuth setup:
+            {link("https://github.com/settings/developers")}
+            → OAuth Apps → New OAuth App
+            → Homepage URL: https://sabermatic.dev
+            → Authorization callback URL: {base_url}/api/auth/oauth/github/callback
+            (Update the callback URL after you have the real Cloud Run URL.)
+        """))
+        state["oauth_github_client_id"] = prompt_value("GitHub OAuth client ID")
+        save_state(state)
+    oauth_github_client_id = state["oauth_github_client_id"]
+
     # Write terraform.tfvars — sanitize values to prevent HCL injection
     def hcl_escape(s: str) -> str:
         return s.replace("\\", "\\\\").replace('"', '\\"')
 
     tfvars_content = textwrap.dedent(f"""\
-        project_id  = "{hcl_escape(project_id)}"
-        region      = "{hcl_escape(region)}"
-        environment = "prod"
-        github_repo = "{hcl_escape(github_repo)}"
+        project_id             = "{hcl_escape(project_id)}"
+        region                 = "{hcl_escape(region)}"
+        environment            = "prod"
+        github_repo            = "{hcl_escape(github_repo)}"
+        mailgun_domain         = "{hcl_escape(mailgun_domain)}"
+        oauth_google_client_id = "{hcl_escape(oauth_google_client_id)}"
+        oauth_github_client_id = "{hcl_escape(oauth_github_client_id)}"
     """)
     tfvars_path = Path(tf_dir) / "terraform.tfvars"
     tfvars_path.write_text(tfvars_content)
@@ -449,7 +525,6 @@ def phase_terraform(state: dict) -> None:
     # Init — billing propagation can take a few minutes after project setup
     state_bucket = f"{project_id}-tfstate"
     print("\nRunning terraform init...")
-    import time
     attempt = 0
     while True:
         result = run_quiet(
@@ -463,30 +538,62 @@ def phase_terraform(state: dict) -> None:
             delay = min(30 * (2 ** (attempt - 1)), 300)  # 30s, 60s, 120s, 240s, 300s cap
             warn(f"Billing not yet propagated. Retrying in {delay}s... (attempt {attempt})")
             time.sleep(delay)
+        elif "Backend configuration changed" in (result.stderr or ""):
+            # Backend bucket changed (e.g. new project) — reconfigure without migrating
+            warn("Backend configuration changed, reconfiguring...")
+            result = run_quiet(
+                ["terraform", "init", "-reconfigure", f"-backend-config=bucket={state_bucket}"],
+                cwd=tf_dir,
+            )
+            if result.returncode == 0:
+                break
+            error(f"terraform init -reconfigure failed:\n{result.stderr}")
+            sys.exit(1)
         else:
             error(f"terraform init failed:\n{result.stderr}")
             sys.exit(1)
     info("Terraform initialized")
 
-    # Plan
+    # Plan — use -detailed-exitcode: 0=no changes, 1=error, 2=changes pending
     print("\nRunning terraform plan...")
-    print(f"{YELLOW}(Cloud SQL takes 5–10 minutes to provision){RESET}\n")
-    run(["terraform", "plan", "-out=tfplan"], cwd=tf_dir)
+    already_applied = phase_done(state, "terraform")
+    if not already_applied:
+        print(f"{YELLOW}(Cloud SQL takes 5–10 minutes to provision){RESET}\n")
+    result = run_quiet(
+        ["terraform", "plan", "-detailed-exitcode", "-out=tfplan"],
+        cwd=tf_dir,
+    )
+    if result.returncode == 1:
+        error(f"terraform plan failed:\n{result.stderr}")
+        sys.exit(1)
 
+    def _capture_outputs() -> None:
+        for key in ["cloud_run_url", "sql_connection_name", "artifact_registry_url"]:
+            r = run_quiet(["terraform", "output", "-raw", key], cwd=tf_dir)
+            if r.returncode == 0:
+                state["outputs"][key] = r.stdout.strip()
+
+    if result.returncode == 0:
+        info("Infrastructure is up to date — no changes needed")
+        _capture_outputs()
+        mark_phase(state, "terraform")
+        return
+
+    # Exit code 2: changes present — show the plan then prompt
+    print(result.stdout)
     if not prompt_yes_no("\nApply this plan?"):
-        warn("Skipping terraform apply. Re-run the script to try again.")
-        sys.exit(0)
+        warn("Skipping terraform apply. Re-run the script to apply later.")
+        if not already_applied:
+            sys.exit(0)
+        return
 
     # Apply
-    print("\nApplying (this may take 5–10 minutes for Cloud SQL)...")
+    suffix = "" if already_applied else " (this may take 5–10 minutes for Cloud SQL)"
+    print(f"\nApplying{suffix}...")
     run(["terraform", "apply", "tfplan"], cwd=tf_dir)
     info("Terraform apply complete")
 
-    # Capture outputs
-    for key in ["cloud_run_url", "sql_connection_name", "artifact_registry_url"]:
-        result = run_quiet(["terraform", "output", "-raw", key], cwd=tf_dir)
-        state["outputs"][key] = result.stdout.strip()
-
+    _capture_outputs()
     info(f"Cloud Run URL: {state['outputs'].get('cloud_run_url', 'unknown')}")
     mark_phase(state, "terraform")
 
@@ -496,18 +603,16 @@ def phase_terraform(state: dict) -> None:
 SECRETS = [
     # (secret_id, method, help_text, help_url)
     ("auth-token-secret", "auto", None, None),
-    ("anthropic-api-key", "prompt", "Paste your Anthropic API key", None),
-    ("openai-api-key", "prompt", "Paste your OpenAI API key", None),
+    ("anthropic-api-key", "prompt", "Paste your Anthropic API key",
+     "https://console.anthropic.com/settings/keys"),
+    ("openai-api-key", "prompt", "Paste your OpenAI API key",
+     "https://platform.openai.com/api-keys"),
     ("mailgun-api-key", "prompt", "Paste your Mailgun API key",
      "https://app.mailgun.com/settings/api_security"),
-    ("mailgun-domain", "prompt", "Paste your Mailgun domain (e.g. mg.sabermatic.dev)",
-     "https://app.mailgun.com/settings/api_security"),
-    ("oauth-google-client-id", "prompt", "Paste Google OAuth client ID",
+    ("oauth-google-client-secret", "prompt", "Paste Google OAuth client secret",
      "https://console.cloud.google.com/apis/credentials?project={project_id}"),
-    ("oauth-google-client-secret", "prompt", "Paste Google OAuth client secret", None),
-    ("oauth-github-client-id", "prompt", "Paste GitHub OAuth client ID",
+    ("oauth-github-client-secret", "prompt", "Paste GitHub OAuth client secret",
      "https://github.com/settings/developers"),
-    ("oauth-github-client-secret", "prompt", "Paste GitHub OAuth client secret", None),
     ("stripe-secret-key", "prompt", "Paste your Stripe secret key (sk_live_... or sk_test_...)",
      "https://dashboard.stripe.com/apikeys"),
     # stripe-webhook-secret is set in Phase 7 — skip here
@@ -758,7 +863,7 @@ def phase_stripe(state: dict) -> None:
         ])
 
         run([
-            "gcloud", "run", "services", "update", "drill",
+            "gcloud", "run", "services", "update", "sabermatic",
             "--region", state["region"],
             f"--update-env-vars={env_vars}",
         ])
@@ -781,7 +886,7 @@ def phase_build(state: dict) -> None:
         error("Artifact Registry URL not found. Run Phase 5 first.")
         sys.exit(1)
 
-    image = f"{ar_url}/drill:latest"
+    image = f"{ar_url}/sabermatic:latest"
     project_root = str(Path(__file__).resolve().parent.parent)
 
     # Configure Docker auth
@@ -817,14 +922,14 @@ def phase_deploy(state: dict) -> None:
 
     print(f"Deploying {image} to Cloud Run...")
     run([
-        "gcloud", "run", "deploy", "drill",
+        "gcloud", "run", "deploy", "sabermatic",
         "--image", image,
         "--region", region,
     ])
 
     # Fetch the live URL
     result = run_quiet([
-        "gcloud", "run", "services", "describe", "drill",
+        "gcloud", "run", "services", "describe", "sabermatic",
         "--region", region,
         "--format=value(status.url)",
     ])
@@ -884,9 +989,12 @@ def main() -> None:
     if completed:
         info(f"Resuming — completed phases: {', '.join(completed)}")
 
+    # terraform always runs so it can detect and apply config drift
+    ALWAYS_CHECK = {"terraform"}
+
     try:
         for name, fn in PHASES:
-            if phase_done(state, name):
+            if phase_done(state, name) and name not in ALWAYS_CHECK:
                 continue
             fn(state)
     except KeyboardInterrupt:
