@@ -155,8 +155,9 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 		voice := input.VoiceInput
 		inputMethod = "voice"
 
-		// Validate MIME type.
-		ext, ok := validAudioMIME[voice.GetAudioMimeType()]
+		// Validate MIME type. Strip codec params (e.g. "audio/webm;codecs=opus" → "audio/webm").
+		baseMIME, _, _ := strings.Cut(voice.GetAudioMimeType(), ";")
+		ext, ok := validAudioMIME[baseMIME]
 		if !ok {
 			sink.Error(&drillv1.TurnError{Code: "invalid_audio_mime", Message: "unsupported audio MIME type: " + voice.GetAudioMimeType()})
 			return nil
