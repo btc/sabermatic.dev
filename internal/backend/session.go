@@ -618,8 +618,10 @@ func dbMessageToProto(m *db.Message) *drillv1.Message {
 // statusStringToProto maps a status string to the proto enum.
 func statusStringToProto(s string) drillv1.SessionStatus {
 	switch s {
-	case "active", "generating":
+	case "active":
 		return drillv1.SessionStatus_SESSION_STATUS_ACTIVE
+	case "generating":
+		return drillv1.SessionStatus_SESSION_STATUS_GENERATING
 	case "completed":
 		return drillv1.SessionStatus_SESSION_STATUS_COMPLETED
 	case "evaluating":
