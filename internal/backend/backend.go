@@ -119,6 +119,13 @@ func New(cfg *config.Config) (*Backend, error) {
 				},
 				nil,
 			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(60*time.Second),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return jobs.CleanupStaleGeneratingArgs{}, nil
+				},
+				nil,
+			),
 		},
 	})
 	if err != nil {

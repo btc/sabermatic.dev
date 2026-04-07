@@ -33,6 +33,7 @@ const (
 	SessionStatus_SESSION_STATUS_EVALUATION_FAILED SessionStatus = 5
 	SessionStatus_SESSION_STATUS_FAILED            SessionStatus = 6
 	SessionStatus_SESSION_STATUS_CANCELLED         SessionStatus = 7
+	SessionStatus_SESSION_STATUS_GENERATING        SessionStatus = 8
 )
 
 // Enum value maps for SessionStatus.
@@ -46,6 +47,7 @@ var (
 		5: "SESSION_STATUS_EVALUATION_FAILED",
 		6: "SESSION_STATUS_FAILED",
 		7: "SESSION_STATUS_CANCELLED",
+		8: "SESSION_STATUS_GENERATING",
 	}
 	SessionStatus_value = map[string]int32{
 		"SESSION_STATUS_UNSPECIFIED":       0,
@@ -56,6 +58,7 @@ var (
 		"SESSION_STATUS_EVALUATION_FAILED": 5,
 		"SESSION_STATUS_FAILED":            6,
 		"SESSION_STATUS_CANCELLED":         7,
+		"SESSION_STATUS_GENERATING":        8,
 	}
 )
 
@@ -1068,7 +1071,7 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	"createTimeB\x0f\n" +
 	"\r_input_methodB\f\n" +
 	"\n" +
-	"_audio_url*\x83\x02\n" +
+	"_audio_url*\xa2\x02\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1c\n" +
@@ -1077,7 +1080,8 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	"\x17SESSION_STATUS_REVIEWED\x10\x04\x12$\n" +
 	" SESSION_STATUS_EVALUATION_FAILED\x10\x05\x12\x19\n" +
 	"\x15SESSION_STATUS_FAILED\x10\x06\x12\x1c\n" +
-	"\x18SESSION_STATUS_CANCELLED\x10\a2\xa4\x03\n" +
+	"\x18SESSION_STATUS_CANCELLED\x10\a\x12\x1d\n" +
+	"\x19SESSION_STATUS_GENERATING\x10\b2\xa4\x03\n" +
 	"\x0eSessionService\x12G\n" +
 	"\n" +
 	"GetSession\x12\x1b.drill.v1.GetSessionRequest\x1a\x1c.drill.v1.GetSessionResponse\x12M\n" +

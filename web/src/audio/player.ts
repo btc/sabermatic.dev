@@ -1,5 +1,5 @@
 interface QueueEntry {
-  data: string;
+  data: Uint8Array;
   seq: number;
 }
 
@@ -33,7 +33,7 @@ export class AudioPlayer {
     }
   }
 
-  enqueue(data: string, seq: number): void {
+  enqueue(data: Uint8Array, seq: number): void {
     this.queue.push({ data, seq });
     this.queue.sort((a, b) => a.seq - b.seq);
 
@@ -65,14 +65,11 @@ export class AudioPlayer {
     this.nextExpectedSeq++;
     this._isPlaying = true;
 
-    const binary = atob(entry.data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-
+    // Copy to a standalone ArrayBuffer — decodeAudioData requires ownership
+    // and Uint8Array.buffer may be a view into a larger allocation.
+    const arrayBuf = entry.data.slice().buffer as ArrayBuffer;
     this.ctx.decodeAudioData(
-      bytes.buffer.slice(0),
+      arrayBuf,
       (audioBuffer) => {
         if (!this.ctx || !this._isPlaying) {
           // Cancelled while decoding
