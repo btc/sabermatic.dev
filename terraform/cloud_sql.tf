@@ -1,5 +1,5 @@
 resource "google_sql_database_instance" "sabermatic" {
-  name             = "sabermatic-${var.environment}"
+  name             = var.project_id
   database_version = "POSTGRES_16"
   region           = var.region
 
