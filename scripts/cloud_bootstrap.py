@@ -978,7 +978,7 @@ def phase_domain(state: dict) -> None:
         print(f"\nCreating Cloud Run domain mapping for {domain}...")
         result = run(
             [
-                "gcloud", "run", "domain-mappings", "create",
+                "gcloud", "beta", "run", "domain-mappings", "create",
                 "--service", service,
                 "--domain", domain,
                 "--region", region,
@@ -1007,7 +1007,7 @@ def phase_domain(state: dict) -> None:
     if not domain_state.get("dns"):
         print("\nFetching required DNS records from GCP...")
         result = run_quiet([
-            "gcloud", "run", "domain-mappings", "describe",
+            "gcloud", "beta", "run", "domain-mappings", "describe",
             "--domain", domain,
             "--region", region,
             "--format=value(status.resourceRecords)",
@@ -1036,7 +1036,7 @@ def phase_domain(state: dict) -> None:
     if not domain_state.get("live"):
         print(textwrap.dedent(f"""
         Check domain mapping status:
-          gcloud run domain-mappings describe --domain={domain} --region={region}
+          gcloud beta run domain-mappings describe --domain={domain} --region={region}
 
         Wait until certificateStatus shows ACTIVE, then verify:
           curl -I https://{domain}/api/health
