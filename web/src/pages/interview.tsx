@@ -4,14 +4,13 @@ import {
   ArrowLeft,
   Volume2,
 } from "lucide-react";
-import { useInterview } from "@/ws/hooks";
+import { useInterview } from "@/hooks/use-interview";
 import { useTimer } from "@/hooks/use-timer";
-import { useAudioRecorder } from "@/audio/hooks";
-import { useAudioPlayer } from "@/audio/hooks";
+import { useAudioRecorder, useAudioPlayer } from "@/audio/hooks";
+import { AudioRecorder } from "@/audio/recorder";
 import { useQuery } from "@connectrpc/connect-query";
 import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import { ConnectionState } from "@/ws/connection";
 import { Button } from "@/components/ui/button";
 import { RecordingInput } from "@/components/recording-input";
 import {
@@ -31,36 +30,6 @@ import { toast } from "sonner";
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
-function ConnectionBanner({
-  state,
-  onRetry,
-}: {
-  state: ConnectionState;
-  onRetry: () => void;
-}) {
-  if (state === ConnectionState.Reconnecting) {
-    return (
-      <div className="bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-center text-sm py-1.5 px-4">
-        Reconnecting...
-      </div>
-    );
-  }
-  if (state === ConnectionState.Disconnected) {
-    return (
-      <div className="bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-200 text-center text-sm py-1.5 px-4 flex items-center justify-center gap-2">
-        <span>Session disconnected</span>
-        <button
-          onClick={onRetry}
-          className="underline font-medium hover:no-underline"
-        >
-          Tap to retry
-        </button>
-      </div>
-    );
-  }
-  return null;
-}
 
 function TtsIndicator() {
   return (
@@ -244,26 +213,23 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     messages,
     streamingText,
     state,
-    connectionState,
     sessionInfo,
     lastError,
     sendText,
     sendAudio,
     endSession,
     cancelSession,
-    setRawMessageHandler,
-    cmRef,
+    setOnTtsChunk,
+    setOnTtsDone,
   } = useInterview(sessionId);
 
   const navigate = useNavigate();
-  const { data: sessionResp } = useQuery(getSession, { id: sessionId });
-  const session = sessionResp?.session;
   const audioRecorder = useAudioRecorder();
   const audioPlayer = useAudioPlayer();
 
   const { display: timerDisplay, phase: timerPhase, elapsed } = useTimer(
-    session?.startTime ? new Date(Number(session.startTime.seconds) * 1000).toISOString() : null,
-    sessionInfo?.duration ?? 0,
+    sessionInfo?.startTime ? new Date(Number(sessionInfo.startTime.seconds) * 1000).toISOString() : null,
+    sessionInfo?.durationMinutes ?? 0,
   );
 
   // Navigate home when session is cancelled
@@ -290,15 +256,18 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // ------ Audio player wiring ------
+  // TTS chunks arrive as Uint8Array from the proto; the AudioPlayer expects
+  // base64 strings. Convert here at the boundary.
   useEffect(() => {
-    setRawMessageHandler((msg) => {
-      if (msg.type === "tts_chunk") {
-        audioPlayer.enqueue(msg.data, msg.seq);
-      } else if (msg.type === "tts_done") {
-        audioPlayer.done();
+    setOnTtsChunk((data: Uint8Array, seq: number) => {
+      let binary = "";
+      for (let i = 0; i < data.length; i++) {
+        binary += String.fromCharCode(data[i]!);
       }
+      audioPlayer.enqueue(btoa(binary), seq);
     });
-  }, [setRawMessageHandler, audioPlayer]);
+    setOnTtsDone(() => audioPlayer.done());
+  }, [setOnTtsChunk, setOnTtsDone, audioPlayer]);
 
   // ------ Ready gate ------
   const handleReady = useCallback(async () => {
@@ -320,7 +289,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   const isStreaming = state === "streaming";
   const isProcessing = state === "transcribing" || state === "processing";
   const isEnded = state === "ended" || state === "cancelled";
-  const inputDisabled = isStreaming || isEnded || connectionState === ConnectionState.Reconnecting;
+  const inputDisabled = isStreaming || isEnded;
 
   // ------ Auto-scroll ------
   useEffect(() => {
@@ -335,23 +304,15 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
   // ------ Stable refs from audioRecorder ------
   const { start: recStart, stop: recStop } = audioRecorder;
 
-  // ------ Auto-stop recording on disconnect ------
-  useEffect(() => {
-    if (connectionState === ConnectionState.Reconnecting && audioRecorder.isRecording) {
-      recStop();
-    }
-  }, [connectionState, audioRecorder.isRecording, recStop]);
-
-  // ------ Visibility change recovery ------
+  // ------ Visibility change recovery (re-init audio context) ------
   useEffect(() => {
     const handler = () => {
       if (document.visibilityState !== "visible") return;
-      cmRef.current?.healthCheck();
       audioPlayer.initContext();
     };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
-  }, [audioPlayer, cmRef]);
+  }, [audioPlayer]);
 
   // ------ Send handlers ------
   const handleSendText = useCallback(() => {
@@ -367,7 +328,14 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     stopTts();
     const audioBase64 = await audioRecorder.submit();
     if (audioBase64) {
-      sendAudio(audioBase64);
+      // AudioRecorder.submit() returns base64; the proto wants Uint8Array.
+      const binary = atob(audioBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const mimeType = AudioRecorder.preferredMimeType() || "audio/webm";
+      sendAudio(bytes, mimeType);
     }
   }, [audioRecorder, sendAudio, stopTts]);
 
@@ -402,7 +370,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     return (
       <WaitingView
         sessionId={sessionId}
-        questionTitle={sessionInfo?.question.title}
+        questionTitle={sessionInfo?.questionTitle}
         messageCount={messages.length}
         elapsed={elapsed}
       />
@@ -411,7 +379,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   const showGate = !ready;
 
-  // Loading — WS hasn't delivered session_loaded yet.
+  // Loading — GetSessionState hasn't returned yet.
   if (showGate && !sessionInfo) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -425,8 +393,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
     return (
       <div className="flex flex-col h-full">
         <ReadyGate
-          questionTitle={sessionInfo!.question.title}
-          questionPrompt={sessionInfo!.question.prompt}
+          questionTitle={sessionInfo!.questionTitle}
+          questionPrompt={sessionInfo!.questionPrompt}
           onReady={handleReady}
         />
       </div>
@@ -435,12 +403,6 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Connection banner */}
-      <ConnectionBanner
-        state={connectionState}
-        onRetry={() => cmRef.current?.retry()}
-      />
-
       {/* ---- Header strip ---- */}
       <header className="flex items-center justify-between px-4 h-12 border-b border-border shrink-0">
         {/* Cancel */}
@@ -455,7 +417,7 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
         {/* Question title */}
         <span className="text-sm font-medium truncate max-w-[40%] text-center">
-          {sessionInfo?.question.title}
+          {sessionInfo?.questionTitle}
         </span>
 
         {/* Timer + End Session */}
