@@ -40,15 +40,6 @@ func last(t *testing.T, m *mockWSConn) map[string]any {
 	return result
 }
 
-func TestWSClient_StateChange(t *testing.T) {
-	ws := &mockWSConn{}
-	c := transport.NewWSClient(ws)
-	c.StateChange("active")
-	msg := last(t, ws)
-	assert.Equal(t, "state_change", msg["type"])
-	assert.Equal(t, "active", msg["state"])
-}
-
 func TestWSClient_Pong(t *testing.T) {
 	ws := &mockWSConn{}
 	c := transport.NewWSClient(ws)
@@ -117,9 +108,10 @@ func TestWSClient_ReconnectState(t *testing.T) {
 		{Seq: 3, Role: "user", Content: "thanks"},
 	}
 	// LastSeq=1 means only seq 2 and 3 are missed
-	c.ReconnectState(transport.ReconnectState{LastSeq: 1, Messages: msgs})
+	c.ReconnectState(transport.ReconnectState{LastSeq: 1, Messages: msgs, State: "waiting"})
 	msg := last(t, ws)
 	assert.Equal(t, "reconnect_state", msg["type"])
+	assert.Equal(t, "waiting", msg["state"])
 	messages, ok := msg["messages"].([]any)
 	require.True(t, ok)
 	assert.Len(t, messages, 2, "only missed messages should be sent")

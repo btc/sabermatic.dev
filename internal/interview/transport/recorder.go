@@ -7,7 +7,6 @@ import (
 )
 
 type (
-	StateChangeEvent         struct{ State string }
 	AckEvent                 struct{ Action string }
 	TranscriptionResultEvent struct{ Text string }
 	TimerWarningEvent        struct{ MinutesRemaining int }
@@ -36,7 +35,6 @@ func (r *Recorder) record(e any) {
 	r.mu.Unlock()
 }
 
-func (r *Recorder) StateChange(state string)           { r.record(StateChangeEvent{state}) }
 func (r *Recorder) Ack(action string)                    { r.record(AckEvent{action}) }
 func (r *Recorder) TranscriptionResult(text string)     { r.record(TranscriptionResultEvent{text}) }
 func (r *Recorder) TimerWarning(minutesRemaining int)   { r.record(TimerWarningEvent{minutesRemaining}) }
