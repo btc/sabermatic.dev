@@ -27,7 +27,7 @@ export type ServerMessage =
   | { type: "transcription_result"; text: string }
   | { type: "timer_warning"; minutes_remaining: number }
   | { type: "timer_overtime" }
-  | { type: "ack" }
+  | { type: "ack"; action: "cancel_session" | "end_session" }
   | { type: "reconnect_please" }
   | { type: "error"; code: string; message: string }
   | { type: "pong" };

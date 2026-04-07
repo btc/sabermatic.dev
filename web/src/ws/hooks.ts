@@ -41,7 +41,6 @@ export function useInterview(sessionId: string) {
   const rawMessageHandlerRef = useRef<((msg: ServerMessage) => void) | null>(null);
   // Active turn span — open from send to interviewer_done.
   const turnSpanRef = useRef<Span | null>(null);
-  const pendingActionRef = useRef<"cancel" | "end" | null>(null);
   const [wasReconnected, setWasReconnected] = useState(false);
 
   const handleMessage = useCallback((msg: ServerMessage) => {
@@ -120,12 +119,11 @@ export function useInterview(sessionId: string) {
       }
 
       case "ack":
-        if (pendingActionRef.current === "cancel") {
+        if (msg.action === "cancel_session") {
           setState("cancelled");
-        } else if (pendingActionRef.current === "end") {
+        } else if (msg.action === "end_session") {
           setState("ended");
         }
-        pendingActionRef.current = null;
         // Close any outstanding turn span on ack.
         if (turnSpanRef.current) {
           closeTurnSpan(turnSpanRef.current, false);
@@ -182,12 +180,10 @@ export function useInterview(sessionId: string) {
   }, []);
 
   const endSession = useCallback(() => {
-    pendingActionRef.current = "end";
     cmRef.current?.send({ type: "end_session" });
   }, []);
 
   const cancelSession = useCallback(() => {
-    pendingActionRef.current = "cancel";
     cmRef.current?.send({ type: "cancel_session" });
   }, []);
 

@@ -141,7 +141,9 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	if err != nil {
 		slog.Error("read session_init", "error", err, "session_id", c.sessionID)
 		c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
-		_ = c.lock.Release()
+		if err := c.lock.Release(); err != nil {
+			slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
+		}
 		return
 	}
 	initMsg, err := ParseWSMessage(data)
@@ -149,7 +151,9 @@ func (c *Conductor) Run(serverCtx context.Context) {
 		slog.Error("invalid session_init", "error", err, "session_id", c.sessionID)
 		c.client.Error(transport.ClientError{Code: "invalid_init", Message: "expected session_init message"})
 		c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
-		_ = c.lock.Release()
+		if err := c.lock.Release(); err != nil {
+			slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
+		}
 		return
 	}
 	c.initMsg = initMsg
@@ -273,11 +277,11 @@ func (c *Conductor) Run(serverCtx context.Context) {
 				}()
 
 			case "end_session":
-				c.client.Ack()
+				c.client.Ack("end_session")
 				pendingAction = actionEnd
 
 			case "cancel_session":
-				c.client.Ack()
+				c.client.Ack("cancel_session")
 				pendingAction = actionCancel
 
 			case "ping":
@@ -307,13 +311,17 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			pendingAction = actionEnd
 
 		case <-reconnectTimer:
+			// Don't overwrite end/cancel — user-initiated lifecycle actions
+			// take priority over the periodic reconnect.
 			if pendingAction == "" {
 				pendingAction = actionReconnect
 			}
 
 		case <-serverCtx.Done():
+			// Server shutting down. If no lifecycle action is pending,
+			// tell the client to reconnect to a new instance.
 			if pendingAction == "" {
-				c.client.ReconnectPlease()
+				pendingAction = actionReconnect
 			}
 			shouldExit = true
 		}
