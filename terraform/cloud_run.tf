@@ -1,10 +1,10 @@
-resource "google_cloud_run_v2_service" "drill" {
-  name     = "drill"
+resource "google_cloud_run_v2_service" "sabermatic" {
+  name     = "sabermatic"
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
-    service_account = google_service_account.drill_app.email
+    service_account = google_service_account.sabermatic_app.email
 
     scaling {
       min_instance_count = 0
@@ -17,7 +17,7 @@ resource "google_cloud_run_v2_service" "drill" {
     volumes {
       name = "cloudsql"
       cloud_sql_instance {
-        instances = [google_sql_database_instance.drill.connection_name]
+        instances = [google_sql_database_instance.sabermatic.connection_name]
       }
     }
 
@@ -64,7 +64,7 @@ resource "google_cloud_run_v2_service" "drill" {
       }
       env {
         name  = "BASE_URL"
-        value = "https://drill-${var.environment}" # Updated after first deploy with actual URL
+        value = "https://sabermatic-${var.environment}" # Updated after first deploy with actual URL
       }
       env {
         name  = "OTEL_ENABLED"
@@ -80,11 +80,11 @@ resource "google_cloud_run_v2_service" "drill" {
       }
       env {
         name  = "OTEL_SERVICE_NAME"
-        value = "drill"
+        value = "sabermatic"
       }
       env {
         name  = "EMAIL_FROM"
-        value = "noreply@drill.dev"
+        value = "noreply@sabermatic.dev"
       }
 
       env {
@@ -143,22 +143,12 @@ resource "google_cloud_run_v2_service" "drill" {
         }
       }
       env {
-        name = "MAILGUN_DOMAIN"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["mailgun-domain"].secret_id
-            version = "latest"
-          }
-        }
+        name  = "MAILGUN_DOMAIN"
+        value = var.mailgun_domain
       }
       env {
-        name = "OAUTH_GOOGLE_CLIENT_ID"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["oauth-google-client-id"].secret_id
-            version = "latest"
-          }
-        }
+        name  = "OAUTH_GOOGLE_CLIENT_ID"
+        value = var.oauth_google_client_id
       }
       env {
         name = "OAUTH_GOOGLE_CLIENT_SECRET"
@@ -170,13 +160,8 @@ resource "google_cloud_run_v2_service" "drill" {
         }
       }
       env {
-        name = "OAUTH_GITHUB_CLIENT_ID"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secrets["oauth-github-client-id"].secret_id
-            version = "latest"
-          }
-        }
+        name  = "OAUTH_GITHUB_CLIENT_ID"
+        value = var.oauth_github_client_id
       }
       env {
         name = "OAUTH_GITHUB_CLIENT_SECRET"
@@ -242,7 +227,7 @@ resource "google_cloud_run_v2_service" "drill" {
 
 # Public access — auth is handled by the application layer.
 resource "google_cloud_run_v2_service_iam_member" "public" {
-  name     = google_cloud_run_v2_service.drill.name
+  name     = google_cloud_run_v2_service.sabermatic.name
   location = var.region
   role     = "roles/run.invoker"
   member   = "allUsers"

@@ -1,12 +1,13 @@
-resource "google_sql_database_instance" "drill" {
-  name             = "drill-${var.environment}"
+resource "google_sql_database_instance" "sabermatic" {
+  name             = "sabermatic-${var.environment}"
   database_version = "POSTGRES_16"
   region           = var.region
 
   settings {
-    tier              = "db-f1-micro"
+    edition           = "ENTERPRISE"
+    tier              = "db-g1-small"
     disk_size         = 10
-    disk_type         = "PD_SSD"
+    disk_type         = "PD_HDD"
     disk_autoresize   = false
     availability_type = "ZONAL"
 
@@ -29,9 +30,9 @@ resource "google_sql_database_instance" "drill" {
   deletion_protection = true
 }
 
-resource "google_sql_database" "drill" {
-  name     = "drill"
-  instance = google_sql_database_instance.drill.name
+resource "google_sql_database" "sabermatic" {
+  name     = "sabermatic"
+  instance = google_sql_database_instance.sabermatic.name
 }
 
 resource "random_password" "db_password" {
@@ -39,8 +40,8 @@ resource "random_password" "db_password" {
   special = false
 }
 
-resource "google_sql_user" "drill" {
-  name     = "drill"
-  instance = google_sql_database_instance.drill.name
+resource "google_sql_user" "sabermatic" {
+  name     = "sabermatic"
+  instance = google_sql_database_instance.sabermatic.name
   password = random_password.db_password.result
 }

@@ -1,6 +1,6 @@
-resource "google_artifact_registry_repository" "drill" {
-  repository_id = "drill"
+resource "google_artifact_registry_repository" "sabermatic" {
+  repository_id = "sabermatic"
   location      = var.region
   format        = "DOCKER"
-  description   = "Drill container images"
+  description   = "Sabermatic container images"
 }
