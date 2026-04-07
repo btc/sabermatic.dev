@@ -67,8 +67,13 @@ for {
 
         switch msg.Type:
         case "end_turn":
-            // unchanged — dispatch pipeline
-            // sets pipelineRunning = true, assigns turnResultCh
+            if pipelineRunning:
+                client.Error("turn_in_progress", ...)
+                continue
+            ch := make(chan turnResult, 1)
+            turnResultCh = ch
+            pipelineRunning = true
+            go func() { ch <- turnResult{err: c.endTurn(workCtx, msg)} }()
         case "end_session":
             client.Ack()
             pendingAction = actionEnd
