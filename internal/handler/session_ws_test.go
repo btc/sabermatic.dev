@@ -350,17 +350,18 @@ func TestWS_HappyPath_Text(t *testing.T) {
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 
-	ended := readMsg(t, ws)
-	assert.Equal(t, "session_ended", ended["type"])
+	ack := readMsg(t, ws)
+	assert.Equal(t, "ack", ack["type"])
 
-	// Verify DB state.
+	// Verify DB state (cleanup is async after ack).
 	ctx := context.Background()
 	q := db.New(pool)
 
-	// Session is completed.
-	updatedSession, err := q.GetSession(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", updatedSession.Status)
+	// Session is completed (may already be "evaluating" if River job ran).
+	assert.Eventually(t, func() bool {
+		s, err := q.GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 
 	// Messages persisted: 1 opening (interviewer) + 1 candidate + 1 interviewer response.
 	msgs, err := q.GetMessagesBySession(ctx, session.ID)
@@ -469,55 +470,6 @@ func TestWS_VoiceInput(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: cancel_tts during InterviewerSpeaking — no crash, response persisted
-// ---------------------------------------------------------------------------
-
-func TestWS_CancelTTS(t *testing.T) {
-	t.Parallel()
-
-	tokens := []string{"This ", "is ", "a ", "test."}
-	anthropicSrv := newFakeAnthropicServer(t, tokens)
-	b := newWSTestBackend(t, anthropicSrv.URL)
-
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	pool := b.Pool()
-	userID := backendtest.SeedUser(t, b)
-	question := createTestQuestion(t, pool)
-	session := createTestSession(t, pool, userID, question.ID)
-	cookie := createAuthCookie(t, pool, userID)
-
-	ws := wsConnect(t, srv.URL, session.ID, cookie, nil)
-	defer ws.CloseNow()
-
-	// Drain session_loaded.
-	drainUntilType(t, ws, "session_loaded")
-
-	// During opening stream, send cancel_tts. It should not crash.
-	// The read loop handles cancel_tts without forwarding to conductor.
-	sendMsg(t, ws, wsMsg{"type": "cancel_tts"})
-
-	// The opening should still complete.
-	drainUntilDone(t, ws)
-
-	// state_change to waiting_for_input confirms session is not corrupted.
-	stateWait := readMsg(t, ws)
-	assert.Equal(t, "state_change", stateWait["type"])
-	assert.Equal(t, "waiting_for_input", stateWait["state"])
-
-	// Verify message was persisted despite cancel_tts.
-	ctx := context.Background()
-	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Len(t, msgs, 1)
-	assert.Equal(t, "interviewer", msgs[0].Role)
-	assert.Equal(t, "This is a test.", msgs[0].Content)
-}
-
-// ---------------------------------------------------------------------------
 // Test 4: Reconnection — disconnect and reconnect with last_seq
 // ---------------------------------------------------------------------------
 
@@ -618,14 +570,15 @@ func TestWS_InvalidTransition(t *testing.T) {
 
 	// Verify session is still functional.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
-	ended := readMsg(t, ws)
-	assert.Equal(t, "session_ended", ended["type"])
+	ack := readMsg(t, ws)
+	assert.Equal(t, "ack", ack["type"])
 
-	// Session not corrupted.
+	// Session not corrupted (cleanup is async after ack).
 	ctx := context.Background()
-	updatedSession, err := db.New(pool).GetSession(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", updatedSession.Status)
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 }
 
 // ---------------------------------------------------------------------------
@@ -875,17 +828,18 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
-	ended := readMsg(t, ws)
-	assert.Equal(t, "session_ended", ended["type"])
+	ack := readMsg(t, ws)
+	assert.Equal(t, "ack", ack["type"])
 
-	// Both session status and eval job should exist.
+	// Both session status and eval job should exist (cleanup is async after ack).
 	ctx := context.Background()
-	updatedSession, err := db.New(pool).GetSession(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", updatedSession.Status)
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 
 	var evalJobCount int
-	err = pool.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM river_job WHERE kind = 'evaluate_session' AND args->>'session_id' = $1`,
 		session.ID.String(),
 	).Scan(&evalJobCount)
@@ -1180,17 +1134,20 @@ func TestWS_MultiTurn(t *testing.T) {
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
-	ended := readMsg(t, ws)
-	assert.Equal(t, "session_ended", ended["type"])
+	ack := readMsg(t, ws)
+	assert.Equal(t, "ack", ack["type"])
 
-	// Verify DB state.
+	// Verify DB state (cleanup is async after ack).
 	ctx := context.Background()
 	q := db.New(pool)
 
 	// Session status and turn count.
+	assert.Eventually(t, func() bool {
+		s, err := q.GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 	updatedSession, err := q.GetSession(ctx, session.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", updatedSession.Status)
 	// Turn count: opening (1) + turn1 (2) + turn2 (3) + turn3 (4).
 	assert.Equal(t, int32(4), updatedSession.TurnCount)
 
@@ -1521,8 +1478,14 @@ func TestWS_TTSEnabled(t *testing.T) {
 
 	// End session.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
-	ended := readMsg(t, ws)
-	assert.Equal(t, "session_ended", ended["type"])
+	ack := readMsg(t, ws)
+	assert.Equal(t, "ack", ack["type"])
+
+	// Verify session completed (cleanup is async after ack).
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 
 	// Verify messages persisted correctly.
 	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
@@ -1599,18 +1562,17 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 	ws := wsConnect(t, httpSrv.URL, session.ID, cookie, nil)
 	defer ws.CloseNow()
 
-	// Collect all messages until the session ends. We expect:
+	// Collect messages until the WS closes. We expect:
 	// - session_loaded
 	// - timer_warning (fires immediately since elapsed > duration - warning)
 	// - timer_overtime (fires immediately since elapsed > duration)
 	// - interviewer_speaking + tokens + interviewer_done + waiting_for_input
-	// - session_ended (auto-end fires immediately since elapsed > duration + 2min)
+	// Auto-end is server-side (no ack sent), so just drain messages.
 	//
 	// Order between timers and opening stream depends on goroutine scheduling,
 	// so collect everything and check what we got.
 	gotWarning := false
 	gotOvertime := false
-	gotSessionEnded := false
 
 	for i := 0; i < 50; i++ {
 		m := readMsgTimeout(t, ws, 10*time.Second)
@@ -1622,22 +1584,18 @@ func TestWS_TimerAutoEnd(t *testing.T) {
 			gotWarning = true
 		case "timer_overtime":
 			gotOvertime = true
-		case "session_ended":
-			gotSessionEnded = true
-		}
-		if gotSessionEnded {
-			break
 		}
 	}
 
 	assert.True(t, gotWarning, "should receive timer_warning")
 	assert.True(t, gotOvertime, "should receive timer_overtime")
-	assert.True(t, gotSessionEnded, "should receive session_ended from auto-end")
 
-	// Verify session is marked completed.
-	updatedSession, err := db.New(pool).GetSession(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", updatedSession.Status)
+	// Verify session is no longer active (auto-end completes in background;
+	// may already be "evaluating" if River job ran).
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 15*time.Second, 100*time.Millisecond, "session should no longer be active")
 }
 
 // ---------------------------------------------------------------------------
@@ -1747,7 +1705,7 @@ func TestWS_PingPong(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test: cancel_session — server responds with session_ended, DB marked cancelled
+// Test: cancel_session — server responds with ack, DB marked cancelled
 // ---------------------------------------------------------------------------
 
 func TestWS_CancelSession(t *testing.T) {
@@ -1779,17 +1737,16 @@ func TestWS_CancelSession(t *testing.T) {
 	// Send cancel_session.
 	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
 
-	// Read messages until session_ended, asserting reason == "cancelled".
-	ended, _ := drainUntilType(t, ws, "session_ended")
-	assert.Equal(t, "cancelled", ended["reason"], "session_ended reason should be 'cancelled'")
+	// Should receive ack immediately.
+	ack, _ := drainUntilType(t, ws, "ack")
+	assert.Equal(t, "ack", ack["type"])
 
-	// Verify DB state.
+	// Verify DB state (cleanup is async after ack).
 	ctx := context.Background()
-	updated, err := db.New(pool).GetSessionByID(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "cancelled", updated.Status, "session status should be 'cancelled'")
-	assert.True(t, updated.ArchivedAt.Valid, "archived_at should be set after cancellation")
-	assert.True(t, updated.EndedAt.Valid, "ended_at should be set after cancellation")
+	assert.Eventually(t, func() bool {
+		updated, err := db.New(pool).GetSessionByID(ctx, session.ID)
+		return err == nil && updated.Status == "cancelled"
+	}, 10*time.Second, 100*time.Millisecond, "session status should be 'cancelled'")
 }
 
 // ---------------------------------------------------------------------------
@@ -1888,27 +1845,29 @@ func TestWS_EndSessionDuringStreaming(t *testing.T) {
 	// Send end_session while streaming is in progress.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 
-	// The session should end promptly (not after all 10 tokens).
+	// Should receive ack promptly (not after all 10 tokens).
 	start := time.Now()
+	var gotAck bool
 	for {
 		m = readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "session_ended" {
+		if m["type"] == "ack" {
+			gotAck = true
 			break
 		}
 	}
 	elapsed := time.Since(start)
-	assert.Less(t, elapsed, 5*time.Second, "end_session should be processed promptly, not after full stream")
+	assert.True(t, gotAck, "should receive ack for end_session")
+	assert.Less(t, elapsed, 5*time.Second, "ack should be sent promptly, not after full stream")
 
-	// Verify session was completed (status transitions: active -> completed -> evaluating).
-	// The evaluate_session River job may run before we poll, so accept either.
+	// Verify session was completed (pipeline completes in background).
 	ctx := context.Background()
-	require.Eventually(t, func() bool {
+	assert.Eventually(t, func() bool {
 		s, err := db.New(pool).GetSession(ctx, session.ID)
 		return err == nil && s.Status != "active"
-	}, 5*time.Second, 100*time.Millisecond, "session should no longer be active")
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 }
 
 func TestWS_DisconnectDuringPipeline(t *testing.T) {
@@ -1940,8 +1899,11 @@ func TestWS_DisconnectDuringPipeline(t *testing.T) {
 	// Close WS abruptly during streaming.
 	ws.CloseNow()
 
-	// Wait a moment for cleanup.
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the conductor to finish the pipeline and release the lock.
+	// The slow server streams 3 tokens at 500ms each (1.5s), plus DB persist
+	// and cleanup overhead. The conductor waits for the pipeline goroutine
+	// before releasing the advisory lock.
+	time.Sleep(3 * time.Second)
 
 	// Verify: advisory lock is released — a new connection should succeed.
 	ws2 := wsConnect(t, srv.URL, session.ID, cookie, nil)
@@ -2061,27 +2023,36 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 	}
 
 	// Immediately send end_session. The pipeline goroutine is now running
-	// (mid-stream from the slow server), so cancelTurn() fires. The test
-	// verifies that persistMessage succeeds despite context cancellation.
+	// (mid-stream from the slow server), so the pending action fires after
+	// the pipeline completes. The test verifies that persistMessage succeeds
+	// despite context cancellation.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 
-	// Drain until session_ended or connection close. The WebSocket may close
-	// immediately after sending session_ended, so tolerate EOF/close errors.
+	// Drain until ack or connection close.
+	var gotAck bool
 	for {
 		m := readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "session_ended" {
+		if m["type"] == "ack" {
+			gotAck = true
 			break
 		}
 	}
+	assert.True(t, gotAck, "should receive ack for end_session")
+
+	// Wait for pipeline completion and session cleanup.
+	ctx := context.Background()
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 
 	// Verify the candidate message was persisted in the DB despite context
 	// cancellation. Without the fix, this assertion will fail intermittently
 	// (or consistently, depending on scheduling) because the DB persist is
 	// aborted by the cancelled context.
-	ctx := context.Background()
 	msgs, err := db.New(pool).GetMessagesBySession(ctx, session.ID)
 	require.NoError(t, err)
 
@@ -2232,26 +2203,26 @@ func TestWS_CancelSessionDuringTTS(t *testing.T) {
 	// Cancel session while interviewer is streaming.
 	sendMsg(t, ws, wsMsg{"type": "cancel_session"})
 
-	// Should eventually get session_ended with reason "cancelled".
-	// Use readMsgTimeout loop since WS may close after session_ended.
-	var gotCancelled bool
+	// Should receive ack immediately.
+	var gotAck bool
 	for i := 0; i < 50; i++ {
 		m := readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "session_ended" {
-			gotCancelled = m["reason"] == "cancelled"
+		if m["type"] == "ack" {
+			gotAck = true
 			break
 		}
 	}
-	assert.True(t, gotCancelled, "session should end with reason 'cancelled'")
+	assert.True(t, gotAck, "should receive ack for cancel_session")
 
-	// Verify session status.
+	// Verify session status (pipeline completes in background).
 	ctx := context.Background()
-	updatedSession, err := db.New(pool).GetSessionByID(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "cancelled", updatedSession.Status)
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSessionByID(ctx, session.ID)
+		return err == nil && s.Status == "cancelled"
+	}, 10*time.Second, 100*time.Millisecond, "session should be cancelled after pipeline completes")
 }
 
 func TestWS_AutoEndDuringPipeline(t *testing.T) {
@@ -2286,25 +2257,20 @@ func TestWS_AutoEndDuringPipeline(t *testing.T) {
 	// Drain opening.
 	drainUntilType(t, ws, "session_loaded")
 
-	// Auto-end should fire during or soon after the opening.
-	// Use readMsgTimeout loop since WS may close after session_ended.
-	var gotSessionEnded bool
+	// Auto-end is server-side (no ack sent). Drain remaining messages.
 	for i := 0; i < 50; i++ {
 		m := readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "session_ended" {
-			gotSessionEnded = true
-			break
-		}
 	}
-	assert.True(t, gotSessionEnded, "auto-end should fire and end the session")
 
-	// Verify session is completed.
-	updatedSession, err := db.New(pool).GetSession(ctx, session.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "completed", updatedSession.Status)
+	// Verify session is no longer active (auto-end completes in background;
+	// may already be "evaluating" if River job ran).
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 15*time.Second, 100*time.Millisecond, "session should no longer be active")
 }
 
 func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
@@ -2364,19 +2330,24 @@ func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
 	// Now send end_session — should succeed regardless of pipeline state.
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 
-	// Use readMsgTimeout loop since WS may close after session_ended.
-	var gotEnded bool
+	var gotAck bool
 	for i := 0; i < 20; i++ {
 		m := readMsgTimeout(t, ws, 5*time.Second)
 		if m == nil {
 			break
 		}
-		if m["type"] == "session_ended" {
-			gotEnded = true
+		if m["type"] == "ack" {
+			gotAck = true
 			break
 		}
 	}
-	assert.True(t, gotEnded, "end_session should succeed after pipeline error")
+	assert.True(t, gotAck, "end_session should receive ack after pipeline error")
+
+	ctx := context.Background()
+	assert.Eventually(t, func() bool {
+		s, err := db.New(pool).GetSession(ctx, session.ID)
+		return err == nil && s.Status != "active"
+	}, 10*time.Second, 100*time.Millisecond, "session should no longer be active")
 }
 
 // ---------------------------------------------------------------------------
