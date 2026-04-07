@@ -63,15 +63,9 @@ for {
             // unchanged — dispatch pipeline
         case "end_session":
             client.Ack()
-            if turnResultCh == nil:
-                endSession(workCtx)
-                return
             pendingAction = actionEnd
         case "cancel_session":
             client.Ack()
-            if turnResultCh == nil:
-                cancelSession(workCtx)
-                return
             pendingAction = actionCancel
         case "ping":
             client.Pong()
@@ -85,9 +79,6 @@ for {
     case <-overtimeTimer:
         client.TimerOvertime()
     case <-autoEndTimer:
-        if turnResultCh == nil:
-            endSession(workCtx)
-            return
         pendingAction = actionEnd
     case <-reconnectTimer:
         if pendingAction == "":
