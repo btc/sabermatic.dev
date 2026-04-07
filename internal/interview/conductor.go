@@ -411,14 +411,13 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 
 	if c.isReconnect() {
 		afterSeq := *c.initMsg.LastSeq // isReconnect already verified non-nil
-		c.client.ReconnectState(transport.ReconnectState{LastSeq: afterSeq, Messages: c.messages})
+		c.client.ReconnectState(transport.ReconnectState{LastSeq: afterSeq, Messages: c.messages, State: "waiting"})
 		return nil
 	}
 	c.client.SessionLoaded(transport.SessionLoaded{SessionID: c.sessionID, Question: c.question, DurationMin: int(c.duration.Minutes()), TTSEnabled: c.ttsEnabled})
 	if len(c.messages) > 0 {
 		// Page refresh of existing session — send all messages, skip opening question.
-		c.client.ReconnectState(transport.ReconnectState{LastSeq: 0, Messages: c.messages})
-		c.client.StateChange(string(StateWaitingForInput))
+		c.client.ReconnectState(transport.ReconnectState{LastSeq: 0, Messages: c.messages, State: "waiting"})
 		return nil
 	}
 	// New session: opening question is dispatched by the caller as a
@@ -451,7 +450,6 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 			c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 			return nil
 		}
-		c.client.StateChange(string(StateTranscribing))
 
 		// Fire upload goroutine — does not block transcription.
 		go func() {
@@ -512,7 +510,6 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 		return nil
 	}
-	c.client.StateChange(string(StateProcessingInput))
 
 	// Persist candidate message.
 	candidateMsg, err := c.persistMessage(context.WithoutCancel(ctx), messageID, "candidate", candidateContent, msg.InputMethod)
@@ -539,7 +536,6 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 		return nil
 	}
-	c.client.StateChange(string(StateInterviewerSpeaking))
 
 	messageID := uuid.New()
 
@@ -632,7 +628,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	if err := c.sm.Transition(StateWaitingForInput); err != nil {
 		return fmt.Errorf("transition to waiting: %w", err)
 	}
-	c.client.StateChange(string(StateWaitingForInput))
+	c.client.InterviewerDone(messageID)
 
 	return nil
 }
