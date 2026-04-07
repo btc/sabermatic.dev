@@ -94,7 +94,7 @@ Additional changes:
 
 ### `internal/interview/state_machine.go`
 
-- Remove `StateEnding` and `StateEnded` constants (already unused by the client since the ack protocol).
+No changes. `StateEnding` and `StateEnded` are used for internal conductor state machine transitions in `endSession`/`cancelSession` — they are not broadcast to the client and are not removed.
 
 ## Frontend Changes
 
