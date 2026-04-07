@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
@@ -23,7 +22,6 @@ func (CleanupStaleGeneratingArgs) Kind() string { return "cleanup_stale_generati
 type CleanupStaleGeneratingWorker struct {
 	river.WorkerDefaults[CleanupStaleGeneratingArgs]
 	Pool *pgxpool.Pool
-	Jobs *river.Client[pgx.Tx]
 }
 
 func (w *CleanupStaleGeneratingWorker) Work(ctx context.Context, job *river.Job[CleanupStaleGeneratingArgs]) error {

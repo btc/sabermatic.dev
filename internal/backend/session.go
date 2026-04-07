@@ -160,7 +160,7 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 }
 
 // ---------------------------------------------------------------------------
-// Conductor-facing methods
+// Session data access
 // ---------------------------------------------------------------------------
 
 // GetMessagesBySession returns all messages for the given session.
@@ -262,7 +262,7 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 	if err != nil {
 		return db.Message{}, fmt.Errorf("begin tx for interviewer msg: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	msg, err := b.persistMessage(ctx, tx, p)
 	if err != nil {
@@ -404,7 +404,6 @@ func (b *Backend) Transcribe(ctx context.Context, audio []byte, format string) (
 }
 
 // Synthesizer returns the TTS synthesizer, or nil if not configured.
-// The conductor uses this to construct a TTSAccumulator.
 func (b *Backend) Synthesizer() (ai.Synthesizer, error) {
 	return b.tts, nil
 }

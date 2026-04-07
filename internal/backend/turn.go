@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	pgx "github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/btc/drill/internal/ai"
