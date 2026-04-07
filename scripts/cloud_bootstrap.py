@@ -970,7 +970,8 @@ def phase_domain(state: dict) -> None:
           Or via CLI:
             gcloud domains verify {domain}
         """))
-        prompt_continue(f"{domain} verified in Google Search Console?")
+        if not prompt_yes_no(f"  {domain} verified in Google Search Console?"):
+            prompt_continue("  Complete verification, then press Enter to continue...")
         domain_state["verified"] = True
         state["phases"]["domain"] = domain_state
         save_state(state)
@@ -1016,20 +1017,20 @@ def phase_domain(state: dict) -> None:
         ])
 
         print(textwrap.dedent(f"""
-        Add these DNS records at Dynadot:
-          → dynadot.com → My Domains → {domain} → DNS Settings
+          DNS setup:
+            → dynadot.com → My Domains → {domain} → DNS Settings
+            → Replace any existing A/AAAA records with the GCP records below
+            → Do NOT use a CNAME to the run.app URL — it will not provision SSL
 
-        GCP resource records:
-        {result.stdout.strip()}
+          GCP resource records:
+            {result.stdout.strip().replace(chr(10), chr(10) + "    ")}
 
-        These are typically A/AAAA records pointing to Google's IPs.
-        Do NOT add a CNAME to the run.app URL — that will not provision SSL.
-
-        After adding the records, DNS propagation can take up to 30 minutes.
-        SSL certificate provisioning can take an additional 15–30 minutes after that.
+          DNS propagation can take up to 30 minutes.
+          SSL certificate provisioning takes an additional 15–30 minutes after that.
         """))
 
-        prompt_continue("DNS records added at Dynadot?")
+        if not prompt_yes_no("  DNS records added at Dynadot?"):
+            prompt_continue("  Add the records above, then press Enter to continue...")
         domain_state["dns"] = True
         state["phases"]["domain"] = domain_state
         save_state(state)
@@ -1037,13 +1038,14 @@ def phase_domain(state: dict) -> None:
     # ── 10d: Confirm live ──
     if not domain_state.get("live"):
         print(textwrap.dedent(f"""
-        Check domain mapping status:
-          gcloud beta run domain-mappings describe --domain={domain} --region={region}
+          Check certificate status:
+            gcloud beta run domain-mappings describe --domain={domain} --region={region}
 
-        Wait until certificateStatus shows ACTIVE, then verify:
-          curl -I https://{domain}/api/health
+          Wait until certificateStatus shows ACTIVE, then verify:
+            curl -I https://{domain}/api/health
         """))
-        prompt_continue(f"https://{domain} is live with a valid SSL certificate?")
+        if not prompt_yes_no(f"  https://{domain} is live with a valid SSL certificate?"):
+            prompt_continue("  Wait for SSL to provision, then press Enter to continue...")
         domain_state["live"] = True
         state["phases"]["domain"] = domain_state
         save_state(state)
