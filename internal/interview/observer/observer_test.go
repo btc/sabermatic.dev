@@ -15,16 +15,14 @@ import (
 )
 
 type spy struct {
-	tokens      []string
-	doneMsg     string
-	errVal      error
-	interrupted bool
+	tokens  []string
+	doneMsg string
+	errVal  error
 }
 
 func (s *spy) OnToken(token string)     { s.tokens = append(s.tokens, token) }
 func (s *spy) OnDone(fullMessage string) { s.doneMsg = fullMessage }
 func (s *spy) OnError(err error)         { s.errVal = err }
-func (s *spy) Interrupt()                { s.interrupted = true }
 
 func TestTokenFanOut_DistributesToAll(t *testing.T) {
 	a, b := &spy{}, &spy{}
@@ -38,16 +36,6 @@ func TestTokenFanOut_DistributesToAll(t *testing.T) {
 	assert.Equal(t, []string{"hello", " world"}, b.tokens)
 	assert.Equal(t, "hello world", a.doneMsg)
 	assert.Equal(t, "hello world", b.doneMsg)
-}
-
-func TestTokenFanOut_InterruptPropagates(t *testing.T) {
-	a, b := &spy{}, &spy{}
-	fan := observer.NewTokenFanOut(a, b)
-
-	fan.Interrupt()
-
-	assert.True(t, a.interrupted)
-	assert.True(t, b.interrupted)
 }
 
 func TestTokenFanOut_ErrorPropagates(t *testing.T) {
@@ -193,20 +181,6 @@ func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
 	}
 	assert.True(t, sink.done, "HandleTTSDone must be called")
 	assert.Equal(t, 0, sink.errors, "no errors expected")
-}
-
-func TestTTSAccumulator_Interrupt(t *testing.T) {
-	sink := &mockTTSSink{}
-	acc := newTestAccumulator(sink, &blockingSynth{})
-
-	acc.OnToken("First sentence. Second sentence. ")
-	acc.Interrupt()
-	acc.OnDone("First sentence. Second sentence. ")
-	acc.Close() // must not hang
-
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	assert.False(t, sink.done, "HandleTTSDone must not be called after interrupt")
 }
 
 func TestTTSAccumulator_SentenceTimeout(t *testing.T) {

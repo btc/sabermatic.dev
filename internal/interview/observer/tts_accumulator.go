@@ -34,9 +34,9 @@ type TTSAccumulator struct {
 
 // NewTTSAccumulator constructs a TTSAccumulator and starts the TTS goroutine.
 // The accumulator owns its internal context — no parent context accepted.
-// The lifecycle is managed entirely by Close() (graceful) and Interrupt()
-// (forced). Per-sentence timeouts bound each operation, so the goroutine
-// always terminates in finite time without external cancellation.
+// The lifecycle is managed by Close() (graceful) and OnError() (forced cancel).
+// Per-sentence timeouts bound each operation, so the goroutine always
+// terminates in finite time without external cancellation.
 func NewTTSAccumulator(p TTSAccumulatorParams) *TTSAccumulator {
 	ctx, cancel := context.WithCancel(context.Background())
 	acc := &TTSAccumulator{
@@ -108,11 +108,6 @@ func (a *TTSAccumulator) OnDone(_ string) {
 
 // OnError cancels the context to abort in-flight TTS.
 func (a *TTSAccumulator) OnError(_ error) {
-	a.cancel()
-}
-
-// Interrupt cancels the context (called by cancel_tts client message).
-func (a *TTSAccumulator) Interrupt() {
 	a.cancel()
 }
 
