@@ -47,9 +47,10 @@ message TurnEvent {
 ```
 
 Behavior:
-- Before acquiring generating status, check if the last persisted message is from the candidate (no interviewer response). If so, this is crash recovery — skip candidate persistence and proceed directly to interviewer response generation.
 - Sets session status to `"generating"` at start via `UPDATE sessions SET status = 'generating', generating_since = now() WHERE id = $1 AND status = 'active' RETURNING id`. If no row returned, reject with error (session not active or already generating).
 - Loads question, messages, coach briefing from DB (full reload each turn, no accumulated state).
+- Validates `audio_mime` against supported formats (e.g. `audio/webm`, `audio/mp4`) when `input_method = VOICE`. Rejects with a descriptive error if unsupported.
+- Check if this is an opening question (zero messages, `input_method = TEXT`, empty content) or crash recovery (last message from candidate with no interviewer response). If either, skip transcription and candidate persistence, proceed directly to interviewer response generation.
 - If voice: transcribe with single retry (500ms delay), stream `transcription_result`.
 - Persist candidate message.
 - Fire background goroutine to upload raw audio to object storage and set `audio_url` on the persisted message. This runs independently of the pipeline and must not block turn progression.
@@ -72,7 +73,16 @@ message GetSessionStateRequest {
 message GetSessionStateResponse {
   SessionInfo session_info = 1;    // question, duration_minutes, tts_enabled, started_at
   repeated Message messages = 2;   // messages after cursor, or all if no cursor
-  string status = 3;               // "active", "generating", "completed", "cancelled"
+  SessionStatus status = 3;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;
+  GENERATING = 2;
+  COMPLETED = 3;
+  CANCELLED = 4;
+  FAILED = 5;                      // backend-only (crash/error); client treats as terminal
 }
 ```
 
@@ -95,8 +105,8 @@ message EndSessionResponse {}
 
 Behavior:
 - Blocks until any in-flight turn completes (polls status every 500ms until not `"generating"`, timeout after 60 seconds).
-- If `generating_since` exceeds the crash recovery threshold (5 minutes) during the polling loop, performs inline crash recovery (resets status to `"active"`) rather than waiting for the periodic cleanup.
-- Derives turn count from `SELECT COUNT(*) FROM messages WHERE session_id = $1 AND role = 'candidate'`.
+- If `generating_since` exceeds the crash recovery threshold (5 minutes) during the polling loop, performs inline crash recovery via `UPDATE sessions SET status = 'active', generating_since = NULL WHERE id = $1 AND status = 'generating' AND generating_since < now() - interval '5 minutes'`. The conditional WHERE clause makes this idempotent and race-free across instances.
+- Derives turn count from `SELECT COUNT(*) FROM messages WHERE session_id = $1 AND role = 'interviewer'` (counts completed interviewer turns, matching the current state machine's `TurnCount()` semantics which counts the opening question as turn 1).
 - Sets status `"completed"`, records turn count, refunds unused minutes, enqueues `evaluate_session` job. All in one transaction.
 - Returns success/error.
 
@@ -114,16 +124,16 @@ message CancelSessionResponse {}
 
 Behavior:
 - Blocks until any in-flight turn completes (polls status every 500ms until not `"generating"`, timeout after 60 seconds).
-- If `generating_since` exceeds the crash recovery threshold (5 minutes) during the polling loop, performs inline crash recovery (resets status to `"active"`) rather than waiting for the periodic cleanup.
-- Derives turn count from `SELECT COUNT(*) FROM messages WHERE session_id = $1 AND role = 'candidate'`.
+- If `generating_since` exceeds the crash recovery threshold (5 minutes) during the polling loop, performs inline crash recovery via the same conditional UPDATE as EndSession (idempotent, race-free).
+- Derives turn count from `SELECT COUNT(*) FROM messages WHERE session_id = $1 AND role = 'interviewer'`.
 - Sets status `"cancelled"` + archived, full refund, no evaluation. All in one transaction.
 - Returns success/error.
 
 ## Opening Question
 
-The first turn in a new session triggers the opening interviewer question. The client calls `SubmitTurn` with `input_method = TEXT` and empty `content`. `ExecuteTurn` detects zero existing messages and skips candidate message persistence, proceeding directly to interviewer response generation (the opening question).
+The first turn in a new session triggers the opening interviewer question. The client calls `SubmitTurn` with `input_method = TEXT` and empty `content`. `ExecuteTurn` acquires generating status, loads session state, detects zero existing messages with empty text content, and skips transcription and candidate persistence — proceeding directly to interviewer response generation.
 
-This reuses the same pipeline for all turns — no special "start session" RPC. The opening question is just a turn with no candidate input.
+This reuses the same pipeline for all turns — no special "start session" RPC. The opening question is just a turn with no candidate input. Normal empty-text validation does not apply to the opening question case (explicitly bypassed in step 3 of `ExecuteTurn`).
 
 ## Backend ExecuteTurn
 
@@ -158,10 +168,13 @@ func (s *InterviewServer) SubmitTurn(
 The `connectTurnSink` must silently drop writes that fail due to client disconnect. The pipeline must not abort on sink write errors — only on LLM/STT/TTS/DB errors. This matches the current `WSClient.send` pattern which logs and continues on write failure.
 
 Internally, `ExecuteTurn`:
-1. Checks for crash recovery (last message from candidate with no interviewer response — skip to step 6).
-2. Acquires generating status (atomic UPDATE, rejects if not active).
-3. Loads session, question, messages, coach briefing from DB.
-4. If voice: transcribes audio (single retry), sinks `TranscriptionResult`.
+1. Acquires generating status (atomic UPDATE, rejects if not active).
+2. Loads session, question, messages, coach briefing from DB.
+3. Determines turn type:
+   - **Opening question**: zero messages, `input_method = TEXT`, empty content → skip to step 6.
+   - **Crash recovery**: last message from candidate with no interviewer response → skip to step 6.
+   - **Normal turn**: proceed to step 4.
+4. If voice: validates `audio_mime`, transcribes audio (single retry), sinks `TranscriptionResult`.
 5. Persists candidate message. Fires background goroutine to upload audio to object storage.
 6. Builds LLM prompt from loaded messages + question + coach briefing + remaining duration.
 7. Streams LLM response with fan-out to token sink + TTS accumulator (existing observer pattern).
@@ -169,7 +182,9 @@ Internally, `ExecuteTurn`:
 9. Sets status back to `"active"`.
 10. On any error: reverts status to `"active"`, sinks error, returns.
 
-The observer/fan-out pattern (`TokenFanOut`, `TTSAccumulator`, `MessageAccumulator`) carries over from the current conductor. The `TokenWriter` and `TTSSink` adapters will be substantially rewritten to satisfy the `TurnEventSink` interface, which uses proto message types rather than plain strings and byte slices.
+The `connectTurnSink` logs at debug level on write failure, matching the current `WSClient.send` behavior. Sink write failures must not abort the pipeline.
+
+The observer/fan-out pattern (`TokenFanOut`, `TTSAccumulator`, `MessageAccumulator`) carries over from the current conductor. The `TokenWriter` and `TTSSink` adapters will be substantially rewritten to emit events via `TurnEventSink` instead of the WebSocket `Client` interface.
 
 ## Concurrency Control
 
@@ -197,7 +212,7 @@ No row returned = concurrent turn or inactive session. Return an error.
 
 Two mechanisms:
 
-1. **Periodic cleanup** (every 60 seconds): any session stuck in `"generating"` for >5 minutes gets reset to `"active"`. This handles the case where a Cloud Run instance dies mid-pipeline without setting status back.
+1. **Periodic cleanup** via a new River periodic job (`cleanup_stale_generating`, every 60 seconds): any session stuck in `"generating"` for >5 minutes gets reset to `"active"`. This handles the case where a Cloud Run instance dies mid-pipeline without setting status back. Separate from the existing `cleanup_abandoned_sessions` worker which runs every 3 minutes.
 
 ```sql
 UPDATE sessions
@@ -326,7 +341,7 @@ Proto definitions in `pb/`. Generated code via `buf generate` into `internal/pb/
 ## What Gets Kept and Moved
 
 - **Observer pattern** (`observer/fan_out.go`, `observer/tts_accumulator.go`, `observer/message_accumulator.go`) — used by `ExecuteTurn`, adapted to sink via `TurnEventSink`.
-- **Transport sinks** (`transport/token_writer.go`, `transport/tts_sink.go`) — substantially rewritten to implement `TurnEventSink` with proto types instead of plain Go types.
+- **Transport sinks** (`transport/token_writer.go`, `transport/tts_sink.go`) — substantially rewritten to emit events via `TurnEventSink` instead of the WebSocket `Client` interface.
 - **Prompt building** (`prompt/`) — unchanged, called from `ExecuteTurn`.
 - **LLM streaming, STT, TTS clients** — absorbed into backend constructor and lifecycle.
 - **Crash recovery for missing interviewer response** (`needsInterviewerRecovery`) — logic moves into `ExecuteTurn` as a pre-check: if last message is from candidate, skip to interviewer response generation.
