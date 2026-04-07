@@ -33,3 +33,5 @@ After every subagent task that modifies code, a separate review agent must read 
 For tightly-coupled files, agents run sequentially, with later agents receiving committed output of earlier ones.
 
 After any UI-affecting commit, load the page in the browser and verify before moving on.
+
+Boy-scout rule. When your awareness shines on a piece of tech debt. Address it. Either by pointing it out and leaving a comment. Or integrating the cleanup into your current work scope if it is relevant.
