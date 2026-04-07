@@ -62,15 +62,16 @@ func fakeAnthropicServer(t *testing.T, tokens []string) *httptest.Server {
 }
 
 // newBackendWithFakeLLM creates a backend with a real Postgres database and a
-// fake Anthropic server that returns the given tokens.
-func newBackendWithFakeLLM(t *testing.T, tokens []string) (*backend.Backend, *httptest.Server) {
+// fake Anthropic server that returns the given tokens. The fake server is
+// registered with t.Cleanup and does not need to be closed by the caller.
+func newBackendWithFakeLLM(t *testing.T, tokens []string) *backend.Backend {
 	t.Helper()
 	anthropicSrv := fakeAnthropicServer(t, tokens)
 	b := pg.NewBackend(t)
 	b.ApplyTestOverrides(backend.TestOverrides{
 		LLM: ai.NewTestClient(anthropicSrv.URL, b.Pool()),
 	})
-	return b, anthropicSrv
+	return b
 }
 
 // startInterviewServer creates the ConnectRPC InterviewService handler with
@@ -165,7 +166,7 @@ func submitTurn(t *testing.T, client drillv1connect.InterviewServiceClient, req 
 func TestSubmitTurn_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
-	b, _ := newBackendWithFakeLLM(t, []string{"Hello"})
+	b := newBackendWithFakeLLM(t, []string{"Hello"})
 	srvURL := startInterviewServer(t, b)
 
 	client := drillv1connect.NewInterviewServiceClient(&http.Client{}, srvURL)
@@ -189,7 +190,7 @@ func TestSubmitTurn_OpeningQuestion(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Welcome", " to", " your", " interview."}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -223,7 +224,7 @@ func TestGetSessionState_ReturnsMessages(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Tell me about caching."}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -257,7 +258,7 @@ func TestSubmitTurn_TextTurn(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Great", " point."}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -297,7 +298,7 @@ func TestGetSessionState_KnownMessageCount(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Good answer."}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -340,7 +341,7 @@ func TestEndSession(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Let's begin."}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -373,7 +374,7 @@ func TestCancelSession(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Let's begin."}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -406,7 +407,7 @@ func TestSubmitTurn_RejectsConcurrent(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"Hello"}
-	b, _ := newBackendWithFakeLLM(t, tokens)
+	b := newBackendWithFakeLLM(t, tokens)
 	srvURL := startInterviewServer(t, b)
 	rawToken := testutil.SignupAndLogin(t, b)
 	client := authedClient(t, srvURL, rawToken)
@@ -445,7 +446,7 @@ func TestSubmitTurn_RejectsConcurrent(t *testing.T) {
 func TestGetSessionState_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
-	b, _ := newBackendWithFakeLLM(t, []string{"Hello"})
+	b := newBackendWithFakeLLM(t, []string{"Hello"})
 	srvURL := startInterviewServer(t, b)
 
 	client := drillv1connect.NewInterviewServiceClient(&http.Client{}, srvURL)
@@ -459,7 +460,7 @@ func TestGetSessionState_Unauthenticated(t *testing.T) {
 func TestEndSession_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
-	b, _ := newBackendWithFakeLLM(t, []string{"Hello"})
+	b := newBackendWithFakeLLM(t, []string{"Hello"})
 	srvURL := startInterviewServer(t, b)
 
 	client := drillv1connect.NewInterviewServiceClient(&http.Client{}, srvURL)
@@ -473,7 +474,7 @@ func TestEndSession_Unauthenticated(t *testing.T) {
 func TestCancelSession_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
-	b, _ := newBackendWithFakeLLM(t, []string{"Hello"})
+	b := newBackendWithFakeLLM(t, []string{"Hello"})
 	srvURL := startInterviewServer(t, b)
 
 	client := drillv1connect.NewInterviewServiceClient(&http.Client{}, srvURL)

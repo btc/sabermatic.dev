@@ -206,10 +206,12 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 		if sttErr != nil {
 			slog.Error("turn: transcription failed after retry",
 				"error", sttErr, "session_id", sessionID)
-			return fmt.Errorf("transcription: %w", sttErr)
+			sink.Error(&drillv1.TurnError{Code: "transcription_failed", Message: "speech transcription failed"})
+			return nil
 		}
 		if strings.TrimSpace(text) == "" {
-			return fmt.Errorf("transcription returned empty text")
+			sink.Error(&drillv1.TurnError{Code: "empty_transcription", Message: "No speech detected. Please try again."})
+			return nil
 		}
 
 		sink.TranscriptionResult(&drillv1.TranscriptionResult{Text: text})
