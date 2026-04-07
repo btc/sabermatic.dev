@@ -65,9 +65,6 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", OAuthStart(b))
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", OAuthCallback(b))
 
-	mux.Handle("GET /api/sessions/{id}/ws", requireAuth(http.HandlerFunc(SessionWS(b))))
-
-
 	// Stripe webhook — no auth, signature verified.
 	// Must be exempt from CSRF middleware. Registered here before any
 	// CSRF wrapping, or add to CSRF exemption filter.

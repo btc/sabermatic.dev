@@ -12,10 +12,11 @@ import (
 // WorkerRefs holds references to workers that need post-creation wiring
 // (their Jobs field must be set after the River client is created).
 type WorkerRefs struct {
-	Evaluate *EvaluateSessionWorker
-	Cleanup  *CleanupAbandonedSessionsWorker
-	Educator *GenerateEducatorContentWorker
-	Coach    *RunCoachAnalysisWorker
+	Evaluate         *EvaluateSessionWorker
+	Cleanup          *CleanupAbandonedSessionsWorker
+	CleanupGenerating *CleanupStaleGeneratingWorker
+	Educator         *GenerateEducatorContentWorker
+	Coach            *RunCoachAnalysisWorker
 }
 
 // RegisterWorkers creates a Workers bundle with all job workers registered.
@@ -27,9 +28,11 @@ func RegisterWorkers(cfg *config.Config, sender email.Sender, pool *pgxpool.Pool
 	river.AddWorker(workers, eval)
 	cleanup := &CleanupAbandonedSessionsWorker{Pool: pool}
 	river.AddWorker(workers, cleanup)
+	cleanupGenerating := &CleanupStaleGeneratingWorker{Pool: pool}
+	river.AddWorker(workers, cleanupGenerating)
 	edu := &GenerateEducatorContentWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM}
 	river.AddWorker(workers, edu)
 	coachWorker := &RunCoachAnalysisWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM}
 	river.AddWorker(workers, coachWorker)
-	return workers, WorkerRefs{Evaluate: eval, Cleanup: cleanup, Educator: edu, Coach: coachWorker}
+	return workers, WorkerRefs{Evaluate: eval, Cleanup: cleanup, CleanupGenerating: cleanupGenerating, Educator: edu, Coach: coachWorker}
 }

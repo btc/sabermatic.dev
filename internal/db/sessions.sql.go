@@ -135,7 +135,7 @@ func (q *Queries) CountActiveSessionsByUser(ctx context.Context, userID uuid.UUI
 const createSession = `-- name: CreateSession :one
 INSERT INTO interview_sessions (user_id, question_id, config_duration_minutes, config_tts_enabled, reserved_minutes)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at
+RETURNING id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at, generating_since
 `
 
 type CreateSessionParams struct {
@@ -170,6 +170,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (I
 		&i.UpdatedAt,
 		&i.ReservedMinutes,
 		&i.ArchivedAt,
+		&i.GeneratingSince,
 	)
 	return i, err
 }
@@ -227,7 +228,7 @@ func (q *Queries) GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.
 }
 
 const getReviewedSessionsForUser = `-- name: GetReviewedSessionsForUser :many
-SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at FROM interview_sessions
+SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at, generating_since FROM interview_sessions
 WHERE user_id = $1 AND status = 'reviewed' AND archived_at IS NULL
 ORDER BY created_at
 `
@@ -256,6 +257,7 @@ func (q *Queries) GetReviewedSessionsForUser(ctx context.Context, userID uuid.UU
 			&i.UpdatedAt,
 			&i.ReservedMinutes,
 			&i.ArchivedAt,
+			&i.GeneratingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -325,7 +327,7 @@ func (q *Queries) GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, 
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at FROM interview_sessions WHERE id = $1
+SELECT id, user_id, question_id, status, config_duration_minutes, config_tts_enabled, config_coach_briefing, started_at, ended_at, turn_count, created_at, updated_at, reserved_minutes, archived_at, generating_since FROM interview_sessions WHERE id = $1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error) {
@@ -346,6 +348,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSe
 		&i.UpdatedAt,
 		&i.ReservedMinutes,
 		&i.ArchivedAt,
+		&i.GeneratingSince,
 	)
 	return i, err
 }

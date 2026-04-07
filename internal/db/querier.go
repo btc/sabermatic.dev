@@ -12,15 +12,22 @@ import (
 )
 
 type Querier interface {
+	// Atomically set status to 'generating'. Returns the session ID if successful.
+	// No row returned means the session is not active or already generating.
+	AcquireGeneratingStatus(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ArchiveSessionsBulk(ctx context.Context, arg ArchiveSessionsBulkParams) (int64, error)
 	// Batch-cancels abandoned sessions that have zero candidate messages.
 	// These are empty sessions where no interview happened.
 	CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error)
 	CancelSession(ctx context.Context, arg CancelSessionParams) error
+	// Reset sessions stuck in 'generating' for too long (crash recovery).
+	CleanupStaleGenerating(ctx context.Context) error
 	// Batch-completes abandoned sessions that have at least one candidate message.
 	// These are real interviews that the user forgot to end.
 	CompleteAbandonedActiveSessions(ctx context.Context) ([]uuid.UUID, error)
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
+	// Count completed interviewer turns for turn_count derivation.
+	CountInterviewerMessages(ctx context.Context, sessionID uuid.UUID) (int32, error)
 	// Creates an admin grant + ledger entry atomically.
 	CreateAdminGrant(ctx context.Context, arg CreateAdminGrantParams) error
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
@@ -63,6 +70,8 @@ type Querier interface {
 	GetMaxSeqForSession(ctx context.Context, sessionID uuid.UUID) (int32, error)
 	GetMessagesBySession(ctx context.Context, sessionID uuid.UUID) ([]Message, error)
 	GetMessagesBySessionAfterSeq(ctx context.Context, arg GetMessagesBySessionAfterSeqParams) ([]Message, error)
+	// Return messages after the given offset (for known_message_count cursor).
+	GetMessagesBySessionOffset(ctx context.Context, arg GetMessagesBySessionOffsetParams) ([]Message, error)
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
@@ -72,6 +81,10 @@ type Querier interface {
 	GetReviewedSessionsForUser(ctx context.Context, userID uuid.UUID) ([]InterviewSession, error)
 	GetSession(ctx context.Context, id uuid.UUID) (GetSessionRow, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (InterviewSession, error)
+	// Load session + question in a single query for turn execution.
+	GetSessionForTurn(ctx context.Context, id uuid.UUID) (GetSessionForTurnRow, error)
+	// Lightweight status check for EndSession/CancelSession polling.
+	GetSessionStatus(ctx context.Context, id uuid.UUID) (GetSessionStatusRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailForUpdate(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
@@ -79,6 +92,9 @@ type Querier interface {
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
+	// Inline crash recovery for EndSession/CancelSession.
+	// Conditional WHERE makes this idempotent and race-free.
+	InlineRecoverStaleGenerating(ctx context.Context, id uuid.UUID) error
 	InsertAnnotation(ctx context.Context, arg InsertAnnotationParams) error
 	InsertCoachAnalysis(ctx context.Context, arg InsertCoachAnalysisParams) (uuid.UUID, error)
 	InsertEducatorAnalysis(ctx context.Context, sessionID uuid.UUID) (uuid.UUID, error)
@@ -100,6 +116,8 @@ type Querier interface {
 	// Derives user_id from the session — caller only needs session_id.
 	// Idempotent: returns 0 rows if session_refund ledger entries already exist.
 	RefundSessionMinutes(ctx context.Context, sessionID pgtype.UUID) ([]RefundSessionMinutesRow, error)
+	// Revert status to 'active' after a turn completes or fails.
+	ReleaseGeneratingStatus(ctx context.Context, id uuid.UUID) error
 	// Atomically reserves @minutes from the user's grants in FIFO-by-expiry order.
 	// Returns one row per grant debited. Returns zero rows if balance is insufficient
 	// (all-or-nothing: no mutations occur when balance < requested).

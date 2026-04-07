@@ -6,15 +6,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/jobs"
+	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 )
 
 // CreateSessionParams holds the parameters for CreateSession.
@@ -157,7 +160,7 @@ func (b *Backend) ListSessions(ctx context.Context, userID uuid.UUID) (_ []db.Li
 }
 
 // ---------------------------------------------------------------------------
-// Conductor-facing methods
+// Session data access
 // ---------------------------------------------------------------------------
 
 // GetMessagesBySession returns all messages for the given session.
@@ -259,7 +262,7 @@ func (b *Backend) PersistInterviewerTurn(ctx context.Context, stream *ai.TokenSt
 	if err != nil {
 		return db.Message{}, fmt.Errorf("begin tx for interviewer msg: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	msg, err := b.persistMessage(ctx, tx, p)
 	if err != nil {
@@ -307,11 +310,15 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		slog.Warn("session refund failed", "session_id", sessionID, "error", err)
 	}
 
-	evalOpts := jobs.EvaluateSessionInsertOpts()
-	drilotel.SetTraceMetadata(ctx, evalOpts)
-	_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, evalOpts)
-	if err != nil {
-		return fmt.Errorf("enqueue evaluate_session: %w", err)
+	// Only evaluate sessions with real candidate interaction. A session with
+	// only the opening question (turnCount <= 1) has nothing to evaluate.
+	if turnCount > 1 {
+		evalOpts := jobs.EvaluateSessionInsertOpts()
+		drilotel.SetTraceMetadata(ctx, evalOpts)
+		_, err = b.jobs.InsertTx(ctx, tx, jobs.EvaluateSessionArgs{SessionID: sessionID}, evalOpts)
+		if err != nil {
+			return fmt.Errorf("enqueue evaluate_session: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -397,7 +404,6 @@ func (b *Backend) Transcribe(ctx context.Context, audio []byte, format string) (
 }
 
 // Synthesizer returns the TTS synthesizer, or nil if not configured.
-// The conductor uses this to construct a TTSAccumulator.
 func (b *Backend) Synthesizer() (ai.Synthesizer, error) {
 	return b.tts, nil
 }
@@ -431,4 +437,207 @@ func (b *Backend) SetAudioURL(ctx context.Context, id uuid.UUID, url string) (er
 		ID:       id,
 		AudioUrl: pgtype.Text{String: url, Valid: true},
 	})
+}
+
+// ---------------------------------------------------------------------------
+// InterviewService helpers
+// ---------------------------------------------------------------------------
+
+// VerifySessionOwnership checks that the session exists and belongs to the
+// given user. Returns ErrSessionNotFound or ErrSessionNotOwned on failure.
+func (b *Backend) VerifySessionOwnership(ctx context.Context, sessionID, userID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.VerifySessionOwnership")
+	defer func() { drilotel.End(span, err) }()
+
+	session, err := db.New(b.pool).GetSessionByID(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrSessionNotFound
+		}
+		return fmt.Errorf("get session: %w", err)
+	}
+	if session.UserID != userID {
+		return ErrSessionNotOwned
+	}
+	return nil
+}
+
+// GetSessionState loads the session info and messages for the
+// GetSessionState RPC. If knownCount > 0, only messages after that offset
+// are returned (cursor-based delta).
+func (b *Backend) GetSessionState(ctx context.Context, sessionID uuid.UUID, knownCount int) (_ *drillv1.GetSessionStateResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.GetSessionState")
+	defer func() { drilotel.End(span, err) }()
+
+	q := db.New(b.pool)
+
+	session, err := q.GetSessionForTurn(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("get session for state: %w", err)
+	}
+
+	var msgs []db.Message
+	if knownCount > 0 {
+		msgs, err = q.GetMessagesBySessionOffset(ctx, db.GetMessagesBySessionOffsetParams{
+			SessionID: sessionID,
+			Offset:    int32(knownCount),
+		})
+	} else {
+		msgs, err = q.GetMessagesBySession(ctx, sessionID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get messages: %w", err)
+	}
+
+	// Coerce nil slices to empty (proto convention).
+	protoMsgs := make([]*drillv1.Message, len(msgs))
+	for i := range msgs {
+		protoMsgs[i] = dbMessageToProto(&msgs[i])
+	}
+
+	return &drillv1.GetSessionStateResponse{
+		SessionInfo: &drillv1.InterviewSessionInfo{
+			SessionId:       sessionID.String(),
+			QuestionTitle:   session.QuestionTitle,
+			QuestionPrompt:  session.QuestionPrompt,
+			DurationMinutes: session.ConfigDurationMinutes,
+			TtsEnabled:      session.ConfigTtsEnabled,
+			StartTime:       timestamppb.New(session.StartedAt),
+		},
+		Messages: protoMsgs,
+		Status:   statusStringToProto(session.Status),
+	}, nil
+}
+
+// WaitAndCompleteSession waits for any in-progress generation to finish,
+// then completes the session and enqueues evaluation.
+func (b *Backend) WaitAndCompleteSession(ctx context.Context, sessionID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.WaitAndCompleteSession")
+	defer func() { drilotel.End(span, err) }()
+
+	if err := b.waitForGeneration(ctx, sessionID); err != nil {
+		return fmt.Errorf("wait for generation: %w", err)
+	}
+
+	turnCount, err := db.New(b.pool).CountInterviewerMessages(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("count interviewer messages: %w", err)
+	}
+
+	return b.CompleteSession(ctx, sessionID, int(turnCount))
+}
+
+// WaitAndCancelSession waits for any in-progress generation to finish,
+// then cancels the session and refunds unused minutes.
+func (b *Backend) WaitAndCancelSession(ctx context.Context, sessionID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.WaitAndCancelSession")
+	defer func() { drilotel.End(span, err) }()
+
+	if err := b.waitForGeneration(ctx, sessionID); err != nil {
+		return fmt.Errorf("wait for generation: %w", err)
+	}
+
+	turnCount, err := db.New(b.pool).CountInterviewerMessages(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("count interviewer messages: %w", err)
+	}
+
+	return b.CancelSession(ctx, sessionID, int(turnCount))
+}
+
+// waitForGeneration polls the session status until it is no longer
+// "generating". If the generation has been stale for >5 minutes, it
+// triggers inline recovery. Times out after 60 seconds.
+func (b *Backend) waitForGeneration(ctx context.Context, sessionID uuid.UUID) error {
+	const (
+		pollInterval    = 500 * time.Millisecond
+		timeout         = 60 * time.Second
+		staleThreshold  = 5 * time.Minute
+	)
+
+	deadline := time.Now().Add(timeout)
+	q := db.New(b.pool)
+
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for generation to complete")
+		}
+
+		row, err := q.GetSessionStatus(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("get session status: %w", err)
+		}
+
+		if row.Status != "generating" {
+			return nil
+		}
+
+		// Check for stale generation and attempt inline recovery.
+		if row.GeneratingSince.Valid && time.Since(row.GeneratingSince.Time) > staleThreshold {
+			slog.Warn("waitForGeneration: stale generating detected, recovering",
+				"session_id", sessionID,
+				"generating_since", row.GeneratingSince.Time)
+			if recoverErr := q.InlineRecoverStaleGenerating(ctx, sessionID); recoverErr != nil {
+				slog.Error("waitForGeneration: inline recovery failed",
+					"error", recoverErr, "session_id", sessionID)
+			}
+			// Re-check on next iteration.
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proto conversion helpers (shared with InterviewService)
+// ---------------------------------------------------------------------------
+
+// dbMessageToProto converts a db.Message to its proto representation.
+func dbMessageToProto(m *db.Message) *drillv1.Message {
+	msg := &drillv1.Message{
+		Id:         m.ID.String(),
+		SessionId:  m.SessionID.String(),
+		Seq:        m.Seq,
+		Role:       m.Role,
+		Content:    m.Content,
+		CreateTime: timestamppb.New(m.CreatedAt),
+	}
+	if m.InputMethod.Valid {
+		msg.InputMethod = &m.InputMethod.String
+	}
+	if m.AudioUrl.Valid {
+		msg.AudioUrl = &m.AudioUrl.String
+	}
+	return msg
+}
+
+// statusStringToProto maps a status string to the proto enum.
+func statusStringToProto(s string) drillv1.SessionStatus {
+	switch s {
+	case "active":
+		return drillv1.SessionStatus_SESSION_STATUS_ACTIVE
+	case "generating":
+		return drillv1.SessionStatus_SESSION_STATUS_GENERATING
+	case "completed":
+		return drillv1.SessionStatus_SESSION_STATUS_COMPLETED
+	case "evaluating":
+		return drillv1.SessionStatus_SESSION_STATUS_EVALUATING
+	case "reviewed":
+		return drillv1.SessionStatus_SESSION_STATUS_REVIEWED
+	case "evaluation_failed":
+		return drillv1.SessionStatus_SESSION_STATUS_EVALUATION_FAILED
+	case "failed":
+		return drillv1.SessionStatus_SESSION_STATUS_FAILED
+	case "cancelled":
+		return drillv1.SessionStatus_SESSION_STATUS_CANCELLED
+	default:
+		return drillv1.SessionStatus_SESSION_STATUS_UNSPECIFIED
+	}
 }

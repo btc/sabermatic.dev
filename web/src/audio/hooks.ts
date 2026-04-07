@@ -29,11 +29,11 @@ export function useAudioRecorder() {
     setPendingDuration(recorderRef.current?.totalDuration ?? 0);
   }, []);
 
-  const submit = useCallback(async () => {
+  const submit = useCallback(async (): Promise<Uint8Array | null> => {
     const data = await recorderRef.current?.submit();
     setSegmentCount(0);
     setPendingDuration(0);
-    return data ?? "";
+    return data ?? null;
   }, []);
 
   const discard = useCallback(() => {
@@ -63,7 +63,7 @@ export function useAudioPlayer() {
     await playerRef.current?.initContext();
   }, []);
 
-  const enqueue = useCallback((data: string, seq: number) => {
+  const enqueue = useCallback((data: Uint8Array, seq: number) => {
     setIsPlaying(true);
     playerRef.current?.enqueue(data, seq);
   }, []);

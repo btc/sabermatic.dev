@@ -1,0 +1,114 @@
+// pb/drill/v1/interview.proto
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "drill/v1/session.proto";
+import "google/protobuf/timestamp.proto";
+
+service InterviewService {
+  // AIP-136: Custom method — submit a turn and stream the interviewer response.
+  rpc SubmitTurn(SubmitTurnRequest) returns (stream TurnEvent);
+  // AIP-131: Get current session state (messages, status, session info).
+  rpc GetSessionState(GetSessionStateRequest) returns (GetSessionStateResponse);
+  // AIP-136: Custom method — end the session (complete + evaluate).
+  rpc EndSession(EndSessionRequest) returns (EndSessionResponse);
+  // AIP-136: Custom method — cancel the session (archive + refund).
+  rpc CancelSession(CancelSessionRequest) returns (CancelSessionResponse);
+}
+
+// --- SubmitTurn ---
+
+message SubmitTurnRequest {
+  string session_id = 1;
+  string traceparent = 2;
+
+  oneof input {
+    TextInput text_input = 3;
+    VoiceInput voice_input = 4;
+  }
+}
+
+message TextInput {
+  string content = 1;
+}
+
+message VoiceInput {
+  bytes audio = 1;
+  string audio_mime_type = 2;
+}
+
+message TurnEvent {
+  oneof event {
+    TranscriptionResult transcription_result = 1;
+    InterviewerToken interviewer_token = 2;
+    InterviewerDone interviewer_done = 3;
+    TtsChunk tts_chunk = 4;
+    TtsDone tts_done = 5;
+    TurnError error = 6;
+  }
+}
+
+message TranscriptionResult {
+  string text = 1;
+}
+
+message InterviewerToken {
+  string token = 1;
+}
+
+message InterviewerDone {
+  string message_id = 1;
+}
+
+message TtsChunk {
+  bytes data = 1;
+  string message_id = 2;
+  int32 seq = 3;
+}
+
+message TtsDone {
+  string message_id = 1;
+}
+
+message TurnError {
+  string code = 1;
+  string message = 2;
+}
+
+// --- GetSessionState ---
+
+message GetSessionStateRequest {
+  string session_id = 1;
+  int32 known_message_count = 2;
+}
+
+message GetSessionStateResponse {
+  InterviewSessionInfo session_info = 1;
+  repeated Message messages = 2;
+  SessionStatus status = 3;
+}
+
+message InterviewSessionInfo {
+  string session_id = 1;
+  string question_title = 2;
+  string question_prompt = 3;
+  int32 duration_minutes = 4;
+  bool tts_enabled = 5;
+  google.protobuf.Timestamp start_time = 6;
+}
+
+// --- EndSession / CancelSession ---
+
+message EndSessionRequest {
+  string session_id = 1;
+}
+
+message EndSessionResponse {}
+
+message CancelSessionRequest {
+  string session_id = 1;
+}
+
+message CancelSessionResponse {}
