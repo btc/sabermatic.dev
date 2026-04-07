@@ -146,9 +146,10 @@ func TestWSClient_TTSChunk(t *testing.T) {
 func TestWSClient_Ack(t *testing.T) {
 	ws := &mockWSConn{}
 	c := transport.NewWSClient(ws)
-	c.Ack()
+	c.Ack("cancel_session")
 	msg := last(t, ws)
 	assert.Equal(t, "ack", msg["type"])
+	assert.Equal(t, "cancel_session", msg["action"])
 }
 
 func TestWSClient_TTSDone(t *testing.T) {

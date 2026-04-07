@@ -30,8 +30,8 @@ func (c *WSClient) StateChange(state string) {
 	c.send(map[string]string{"type": "state_change", "state": state})
 }
 
-func (c *WSClient) Ack() {
-	c.send(map[string]string{"type": "ack"})
+func (c *WSClient) Ack(action string) {
+	c.send(map[string]string{"type": "ack", "action": action})
 }
 
 func (c *WSClient) TranscriptionResult(text string) {

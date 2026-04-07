@@ -352,6 +352,7 @@ func TestWS_HappyPath_Text(t *testing.T) {
 
 	ack := readMsg(t, ws)
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "end_session", ack["action"])
 
 	// Verify DB state (cleanup is async after ack).
 	ctx := context.Background()
@@ -572,6 +573,7 @@ func TestWS_InvalidTransition(t *testing.T) {
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 	ack := readMsg(t, ws)
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "end_session", ack["action"])
 
 	// Session not corrupted (cleanup is async after ack).
 	ctx := context.Background()
@@ -830,6 +832,7 @@ func TestWS_TransactionalEnqueue(t *testing.T) {
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 	ack := readMsg(t, ws)
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "end_session", ack["action"])
 
 	// Both session status and eval job should exist (cleanup is async after ack).
 	ctx := context.Background()
@@ -1136,6 +1139,7 @@ func TestWS_MultiTurn(t *testing.T) {
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 	ack := readMsg(t, ws)
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "end_session", ack["action"])
 
 	// Verify DB state (cleanup is async after ack).
 	ctx := context.Background()
@@ -1480,6 +1484,7 @@ func TestWS_TTSEnabled(t *testing.T) {
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 	ack := readMsg(t, ws)
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "end_session", ack["action"])
 
 	// Verify session completed (cleanup is async after ack).
 	assert.Eventually(t, func() bool {
@@ -1740,6 +1745,7 @@ func TestWS_CancelSession(t *testing.T) {
 	// Should receive ack immediately.
 	ack, _ := drainUntilType(t, ws, "ack")
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "cancel_session", ack["action"])
 
 	// Verify DB state (cleanup is async after ack).
 	ctx := context.Background()
@@ -1848,6 +1854,7 @@ func TestWS_EndSessionDuringStreaming(t *testing.T) {
 	// Should receive ack promptly (not after all 10 tokens).
 	start := time.Now()
 	var gotAck bool
+	var ackMsg wsMsg
 	for {
 		m = readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
@@ -1855,11 +1862,13 @@ func TestWS_EndSessionDuringStreaming(t *testing.T) {
 		}
 		if m["type"] == "ack" {
 			gotAck = true
+			ackMsg = m
 			break
 		}
 	}
 	elapsed := time.Since(start)
 	assert.True(t, gotAck, "should receive ack for end_session")
+	assert.Equal(t, "end_session", ackMsg["action"])
 	assert.Less(t, elapsed, 5*time.Second, "ack should be sent promptly, not after full stream")
 
 	// Verify session was completed (pipeline completes in background).
@@ -1899,18 +1908,56 @@ func TestWS_DisconnectDuringPipeline(t *testing.T) {
 	// Close WS abruptly during streaming.
 	ws.CloseNow()
 
-	// Wait for the conductor to finish the pipeline and release the lock.
-	// The slow server streams 3 tokens at 500ms each (1.5s), plus DB persist
-	// and cleanup overhead. The conductor waits for the pipeline goroutine
-	// before releasing the advisory lock.
-	time.Sleep(3 * time.Second)
+	// Wait for conductor to finish pipeline and release the advisory lock.
+	// Poll with assert.Eventually instead of a fixed sleep.
+	var ws2 *websocket.Conn
+	assert.Eventually(t, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
 
-	// Verify: advisory lock is released — a new connection should succeed.
-	ws2 := wsConnect(t, srv.URL, session.ID, cookie, nil)
+		wsURL := strings.Replace(srv.URL, "http://", "ws://", 1) +
+			"/api/sessions/" + session.ID.String() + "/ws"
+		conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+			HTTPHeader: http.Header{"Cookie": {cookie.String()}},
+		})
+		if err != nil {
+			return false
+		}
+		conn.SetReadLimit(10 * 1024 * 1024)
+
+		// Send session_init.
+		initData, err := json.Marshal(wsMsg{"type": "session_init"})
+		if err != nil {
+			conn.CloseNow()
+			return false
+		}
+		if err := conn.Write(ctx, websocket.MessageText, initData); err != nil {
+			conn.CloseNow()
+			return false
+		}
+
+		// Try to read session_loaded — if the lock is still held, the
+		// server will reject with "session already in use".
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			conn.CloseNow()
+			return false
+		}
+		var msg wsMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			conn.CloseNow()
+			return false
+		}
+		if msg["type"] == "session_loaded" {
+			ws2 = conn
+			return true
+		}
+		conn.CloseNow()
+		return false
+	}, 10*time.Second, 200*time.Millisecond, "second connection should succeed after lock release")
+
+	require.NotNil(t, ws2, "ws2 should be connected")
 	defer ws2.CloseNow()
-	m = readMsg(t, ws2)
-	// Should get session_loaded (lock was released, reconnection works).
-	assert.Equal(t, "session_loaded", m["type"])
 }
 
 func TestWS_ConcurrentTurnRejected(t *testing.T) {
@@ -2029,6 +2076,7 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 
 	// Drain until ack or connection close.
 	var gotAck bool
+	var ackMsg wsMsg
 	for {
 		m := readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
@@ -2036,10 +2084,12 @@ func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 		}
 		if m["type"] == "ack" {
 			gotAck = true
+			ackMsg = m
 			break
 		}
 	}
 	assert.True(t, gotAck, "should receive ack for end_session")
+	assert.Equal(t, "end_session", ackMsg["action"])
 
 	// Wait for pipeline completion and session cleanup.
 	ctx := context.Background()
@@ -2204,6 +2254,7 @@ func TestWS_CancelSessionDuringTTS(t *testing.T) {
 
 	// Should receive ack immediately.
 	var gotAck bool
+	var ackMsg wsMsg
 	for i := 0; i < 50; i++ {
 		m := readMsgTimeout(t, ws, 10*time.Second)
 		if m == nil {
@@ -2211,10 +2262,12 @@ func TestWS_CancelSessionDuringTTS(t *testing.T) {
 		}
 		if m["type"] == "ack" {
 			gotAck = true
+			ackMsg = m
 			break
 		}
 	}
 	assert.True(t, gotAck, "should receive ack for cancel_session")
+	assert.Equal(t, "cancel_session", ackMsg["action"])
 
 	// Verify session status (pipeline completes in background).
 	ctx := context.Background()
@@ -2330,6 +2383,7 @@ func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
 	sendMsg(t, ws, wsMsg{"type": "end_session"})
 
 	var gotAck bool
+	var ackMsg wsMsg
 	for i := 0; i < 20; i++ {
 		m := readMsgTimeout(t, ws, 5*time.Second)
 		if m == nil {
@@ -2337,10 +2391,12 @@ func TestWS_PipelineErrorWithPendingEnd(t *testing.T) {
 		}
 		if m["type"] == "ack" {
 			gotAck = true
+			ackMsg = m
 			break
 		}
 	}
 	assert.True(t, gotAck, "end_session should receive ack after pipeline error")
+	assert.Equal(t, "end_session", ackMsg["action"])
 
 	ctx := context.Background()
 	assert.Eventually(t, func() bool {
@@ -2439,6 +2495,7 @@ func TestWS_DisconnectWithPendingCancel(t *testing.T) {
 	// Read ack before closing.
 	ack, _ := drainUntilType(t, ws, "ack")
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "cancel_session", ack["action"])
 
 	ws.Close(websocket.StatusNormalClosure, "leaving")
 
@@ -2484,6 +2541,7 @@ func TestWS_CancelDuringPipeline_PipelineCompletes(t *testing.T) {
 	// Should get ack immediately.
 	ack, _ := drainUntilType(t, ws, "ack")
 	assert.Equal(t, "ack", ack["type"])
+	assert.Equal(t, "cancel_session", ack["action"])
 
 	// Pipeline should still complete — verify the interviewer message was persisted.
 	ctx := context.Background()
