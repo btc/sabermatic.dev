@@ -874,36 +874,21 @@ def phase_stripe(state: dict) -> None:
         save_state(state)
 
 
-# ── Phase 8: Build & Push Container ───────────────────────────────────────
+# ── Phase 8 + 9: Build & Deploy ───────────────────────────────────────────
 
 
 def phase_build(state: dict) -> None:
     header(8, TOTAL_PHASES, "Build & Push Container")
-
-    region = state["region"]
+    project_root = str(Path(__file__).resolve().parent.parent)
     ar_url = state["outputs"].get("artifact_registry_url", "")
     if not ar_url:
         error("Artifact Registry URL not found. Run Phase 5 first.")
         sys.exit(1)
-
     image = f"{ar_url}/sabermatic:latest"
-    project_root = str(Path(__file__).resolve().parent.parent)
-
-    # Configure Docker auth
-    print("Configuring Docker auth for Artifact Registry...")
+    region = state["region"]
     run(["gcloud", "auth", "configure-docker", f"{region}-docker.pkg.dev", "--quiet"])
-    info("Docker auth configured")
-
-    # Build
-    print(f"\nBuilding container image: {image}")
     run(["docker", "build", "--platform", "linux/amd64", "-t", image, "."], cwd=project_root)
-    info("Image built")
-
-    # Push
-    print("\nPushing to Artifact Registry...")
     run(["docker", "push", image])
-    info("Image pushed")
-
     state["outputs"]["image"] = image
     mark_phase(state, "build")
 
@@ -914,23 +899,17 @@ def phase_build(state: dict) -> None:
 def phase_deploy(state: dict) -> None:
     header(9, TOTAL_PHASES, "Deploy to Cloud Run")
 
-    region = state["region"]
-    image = state["outputs"].get("image", "")
-    if not image:
-        error("No image found in state. Run Phase 8 first.")
-        sys.exit(1)
+    deploy_script = str(Path(__file__).resolve().parent / "deploy.sh")
+    project_root = str(Path(__file__).resolve().parent.parent)
 
-    print(f"Deploying {image} to Cloud Run...")
-    run([
-        "gcloud", "run", "deploy", "sabermatic",
-        "--image", image,
-        "--region", region,
-    ])
+    print("Running deploy.sh...")
+    run(["bash", deploy_script], cwd=project_root)
 
     # Fetch the live URL
     result = run_quiet([
         "gcloud", "run", "services", "describe", "sabermatic",
-        "--region", region,
+        "--region", "us-central1",
+        "--project", "sabermatic-production",
         "--format=value(status.url)",
     ])
     live_url = result.stdout.strip()
