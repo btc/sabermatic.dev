@@ -2,7 +2,6 @@ package interview
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +22,7 @@ import (
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/interview/observer"
+	"github.com/btc/drill/internal/interview/transport"
 )
 
 var tracer = drilotel.Tracer("interview")
@@ -31,9 +31,11 @@ var tracer = drilotel.Tracer("interview")
 // The handler creates these after auth, validation, and WebSocket upgrade.
 // Lock acquisition and session_init reading happen inside Run.
 type ConductorParams struct {
-	// WS is the upgraded WebSocket connection. The conductor wraps it
-	// in a WSConn for writes and uses rawWS directly for readLoop reads.
-	WS *websocket.Conn
+	// Client is the transport layer for sending events to the connected client.
+	Client transport.Client
+
+	// RawWS is the raw WebSocket for readLoop reads and connection lifecycle.
+	RawWS *websocket.Conn
 
 	// Backend is the service layer for DB, LLM, STT, and TTS operations.
 	Backend *backend.Backend
@@ -53,8 +55,8 @@ type Conductor struct {
 	// State machine (pure logic, no I/O).
 	sm *StateMachine
 
-	// WebSocket write interface. Thread-safe (coder/websocket).
-	ws observer.WSConn
+	// Transport layer for sending typed events to the connected client.
+	client transport.Client
 
 	// Raw WebSocket for reads (readLoop closure needs Read()).
 	rawWS *websocket.Conn
@@ -86,44 +88,6 @@ type Conductor struct {
 	initMsg WSMessage
 }
 
-// ttsSink is created per turn, so seq and messageID are scoped to one
-// interviewer response. HandleTTSError may be called concurrently from
-// the conductor goroutine (OnToken buffer-full) and the TTS goroutine;
-// SendJSON is thread-safe, so no additional synchronization is needed.
-// seq is only incremented by HandleAudio (TTS goroutine), never by
-// HandleTTSError, so there is no data race on the counter.
-type ttsSink struct {
-	ws        observer.WSConn
-	messageID uuid.UUID
-	seq       int
-}
-
-func (s *ttsSink) HandleAudio(data []byte) {
-	// context.Background(): coder/websocket closes the connection when
-	// the write context is cancelled, so pipeline contexts are unsafe here.
-	// The WS's internal write timeout bounds the write duration.
-	_ = s.ws.SendJSON(context.Background(), map[string]any{
-		"type":       "tts_chunk",
-		"data":       base64.StdEncoding.EncodeToString(data),
-		"message_id": s.messageID.String(),
-		"seq":        s.seq,
-	})
-	s.seq++
-}
-
-func (s *ttsSink) HandleTTSDone() {
-	_ = s.ws.SendJSON(context.Background(), map[string]any{
-		"type":       "tts_done",
-		"message_id": s.messageID.String(),
-	})
-}
-
-func (s *ttsSink) HandleTTSError() {
-	_ = s.ws.SendJSON(context.Background(), map[string]any{
-		"type": "tts_error",
-	})
-}
-
 // turnResult carries the outcome of a pipeline run.
 type turnResult struct {
 	err error
@@ -148,8 +112,8 @@ const (
 // NewConductor constructs a Conductor from the given params.
 func NewConductor(p ConductorParams) *Conductor {
 	c := &Conductor{
-		rawWS:     p.WS,
-		ws:        &Conn{WS: p.WS},
+		rawWS:     p.RawWS,
+		client:    p.Client,
 		backend:   p.Backend,
 		sessionID: p.SessionID,
 		userID:    p.UserID,
@@ -177,11 +141,11 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	lock, locked, err := c.backend.AcquireSessionLock(serverCtx, c.sessionID)
 	if err != nil {
 		slog.Error("acquire session lock", "error", err, "session_id", c.sessionID)
-		c.ws.Close(websocket.StatusInternalError, "lock error")
+		c.rawWS.Close(websocket.StatusInternalError, "lock error")
 		return
 	}
 	if !locked {
-		c.ws.Close(websocket.StatusPolicyViolation, "session already in use")
+		c.rawWS.Close(websocket.StatusPolicyViolation, "session already in use")
 		return
 	}
 	c.lock = lock
@@ -198,7 +162,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	initMsg, err := ParseWSMessage(data)
 	if err != nil || initMsg.Type != "session_init" {
 		slog.Error("invalid session_init", "error", err, "session_id", c.sessionID)
-		c.send(serverCtx, msgError("invalid_init", "expected session_init message"))
+		c.client.Error(transport.ClientError{Code: "invalid_init", Message: "expected session_init message"})
 		c.close()
 		return
 	}
@@ -222,7 +186,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 			msg, err := ParseWSMessage(data)
 			if err != nil {
-				c.send(readCtx, msgError("malformed_message", err.Error()))
+				c.client.Error(transport.ClientError{Code: "malformed_message", Message: err.Error()})
 				continue
 			}
 			if msg.Type == "cancel_tts" {
@@ -248,7 +212,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 	// Load session state from DB.
 	if err := c.loadSession(workCtx); err != nil {
 		slog.Error("conductor: load session", "error", err, "session_id", c.sessionID)
-		c.send(workCtx, msgError("load_failed", "failed to load session"))
+		c.client.Error(transport.ClientError{Code: "load_failed", Message: "failed to load session"})
 		return
 	}
 
@@ -313,7 +277,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 				return
 			}
 			if serverCtx.Err() != nil {
-				c.send(workCtx, msgReconnectPlease)
+				c.client.ReconnectPlease()
 				if cancelTurn != nil {
 					cancelTurn()
 					drainPipeline(turnResultCh)
@@ -323,7 +287,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			switch msg.Type {
 			case "end_turn":
 				if turnResultCh != nil {
-					c.send(workCtx, msgError("turn_in_progress", "a turn is already being processed"))
+					c.client.Error(transport.ClientError{Code: "turn_in_progress", Message: "a turn is already being processed"})
 					continue
 				}
 				ch := make(chan turnResult, 1)
@@ -358,9 +322,9 @@ func (c *Conductor) Run(serverCtx context.Context) {
 				return
 
 			case "ping":
-				c.send(workCtx, msgPong)
+				c.client.Pong()
 			default:
-				c.send(workCtx, msgError("unknown_message_type", "unknown message type: "+msg.Type))
+				c.client.Error(transport.ClientError{Code: "unknown_message_type", Message: "unknown message type: " + msg.Type})
 			}
 
 		case res := <-turnResultCh:
@@ -371,7 +335,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			if res.err != nil {
 				slog.Error("conductor: end_turn", "error", res.err, "session_id", c.sessionID)
 				c.sm.ForceState(StateWaitingForInput)
-				c.send(workCtx, msgError("turn_failed", "failed to process turn, please try again"))
+				c.client.Error(transport.ClientError{Code: "turn_failed", Message: "failed to process turn, please try again"})
 			}
 
 			// Handle deferred lifecycle action.
@@ -391,15 +355,15 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 
 			if reconnectPending {
-				c.send(workCtx, msgReconnectPlease)
+				c.client.ReconnectPlease()
 				return
 			}
 
 		case <-warningTimer:
-			c.send(workCtx, msgTimerWarning(warningMinutes(c.duration)))
+			c.client.TimerWarning(warningMinutes(c.duration))
 
 		case <-overtimeTimer:
-			c.send(workCtx, msgTimerOvertime)
+			c.client.TimerOvertime()
 
 		case <-autoEndTimer:
 			slog.Info("conductor: auto-ending session", "session_id", c.sessionID)
@@ -417,7 +381,7 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			reconnectPending = true
 
 		case <-serverCtx.Done():
-			c.send(workCtx, msgReconnectPlease)
+			c.client.ReconnectPlease()
 			if cancelTurn != nil {
 				cancelTurn()
 				drainPipeline(turnResultCh)
@@ -484,14 +448,14 @@ func (c *Conductor) sendInitialMessage(ctx context.Context) (err error) {
 
 	if c.isReconnect() {
 		afterSeq := *c.initMsg.LastSeq // isReconnect already verified non-nil
-		c.send(ctx, msgReconnectState(afterSeq, c.messages))
+		c.client.ReconnectState(transport.ReconnectState{LastSeq: afterSeq, Messages: c.messages})
 		return nil
 	}
-	c.send(ctx, msgSessionLoaded(c.sessionID, c.question, int(c.duration.Minutes()), c.ttsEnabled))
+	c.client.SessionLoaded(transport.SessionLoaded{SessionID: c.sessionID, Question: c.question, DurationMin: int(c.duration.Minutes()), TTSEnabled: c.ttsEnabled})
 	if len(c.messages) > 0 {
 		// Page refresh of existing session — send all messages, skip opening question.
-		c.send(ctx, msgReconnectState(0, c.messages))
-		c.send(ctx, msgStateChange(StateWaitingForInput))
+		c.client.ReconnectState(transport.ReconnectState{LastSeq: 0, Messages: c.messages})
+		c.client.StateChange(string(StateWaitingForInput))
 		return nil
 	}
 	// New session: opening question is dispatched by the caller as a
@@ -513,7 +477,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 	if msg.InputMethod == "voice" {
 		// Validate audio.
 		if len(msg.Audio) == 0 {
-			c.send(context.Background(), msgError("audio_validation_failed", "no audio data provided"))
+			c.client.Error(transport.ClientError{Code: "audio_validation_failed", Message: "no audio data provided"})
 			return nil
 		}
 
@@ -521,10 +485,10 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 		// WS sends use context.Background() so that turn-context cancellation does
 		// not close the underlying WebSocket connection.
 		if err := c.sm.Transition(StateTranscribing); err != nil {
-			c.send(context.Background(), msgError("invalid_state_transition", err.Error()))
+			c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 			return nil
 		}
-		c.send(context.Background(), msgStateChange(StateTranscribing))
+		c.client.StateChange(string(StateTranscribing))
 
 		// Fire upload goroutine — does not block transcription.
 		go func() {
@@ -540,7 +504,7 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 					"error", uploadErr,
 					"session_id", c.sessionID,
 					"message_id", messageID)
-				c.send(uploadCtx, map[string]string{"type": "audio_upload_failed"})
+				c.client.AudioUploadFailed()
 				return
 			}
 			if setErr := c.backend.SetAudioURL(uploadCtx, messageID, url); setErr != nil {
@@ -569,12 +533,12 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 			return fmt.Errorf("transcription returned empty text")
 		}
 
-		c.send(context.Background(), msgTranscriptionResult(text))
+		c.client.TranscriptionResult(text)
 		candidateContent = text
 	} else {
 		// Text input -- reject empty content.
 		if strings.TrimSpace(msg.Content) == "" {
-			c.send(context.Background(), msgError("empty_content", "text content cannot be empty"))
+			c.client.Error(transport.ClientError{Code: "empty_content", Message: "text content cannot be empty"})
 			return nil
 		}
 		candidateContent = msg.Content
@@ -582,10 +546,10 @@ func (c *Conductor) endTurn(ctx context.Context, msg WSMessage) (err error) {
 
 	// Transition to ProcessingInput.
 	if err := c.sm.Transition(StateProcessingInput); err != nil {
-		c.send(context.Background(), msgError("invalid_state_transition", err.Error()))
+		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 		return nil
 	}
-	c.send(context.Background(), msgStateChange(StateProcessingInput))
+	c.client.StateChange(string(StateProcessingInput))
 
 	// Persist candidate message.
 	candidateMsg, err := c.persistMessage(context.WithoutCancel(ctx), messageID, "candidate", candidateContent, msg.InputMethod)
@@ -612,10 +576,10 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	// not close the underlying WebSocket connection (coder/websocket registers
 	// context.AfterFunc to close the conn when the write ctx is cancelled).
 	if err := c.sm.Transition(StateInterviewerSpeaking); err != nil {
-		c.send(context.Background(), msgError("invalid_state_transition", err.Error()))
+		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 		return nil
 	}
-	c.send(context.Background(), msgStateChange(StateInterviewerSpeaking))
+	c.client.StateChange(string(StateInterviewerSpeaking))
 
 	messageID := uuid.New()
 
@@ -634,13 +598,13 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	// Create observer fan-out.
 	accumulator := observer.NewMessageAccumulator()
 	observers := []observer.TokenObserver{
-		observer.NewWSWriter(c.ws, messageID),
+		transport.NewTokenWriter(c.client, messageID),
 		accumulator,
 	}
 	if c.ttsEnabled {
 		synth, err := c.backend.Synthesizer()
 		if err == nil && synth != nil {
-			sink := &ttsSink{ws: c.ws, messageID: messageID}
+			sink := transport.NewTTSSink(c.client, messageID)
 			observers = append(observers, observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
 				Sink:            sink,
 				Synth:           synth,
@@ -713,7 +677,7 @@ func (c *Conductor) streamInterviewerResponse(ctx context.Context) (err error) {
 	if err := c.sm.Transition(StateWaitingForInput); err != nil {
 		return fmt.Errorf("transition to waiting: %w", err)
 	}
-	c.send(context.Background(), msgStateChange(StateWaitingForInput))
+	c.client.StateChange(string(StateWaitingForInput))
 
 	return nil
 }
@@ -726,7 +690,7 @@ func (c *Conductor) endSession(ctx context.Context) (err error) {
 	c.obs.Load().Interrupt()
 
 	if err := c.sm.Transition(StateEnding); err != nil {
-		c.send(ctx, msgError("invalid_state_transition", err.Error()))
+		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 		return nil
 	}
 
@@ -738,7 +702,7 @@ func (c *Conductor) endSession(ctx context.Context) (err error) {
 		return fmt.Errorf("transition to ended: %w", err)
 	}
 
-	c.send(ctx, msgSessionEnded("candidate"))
+	c.client.SessionEnded("candidate")
 	return nil
 }
 
@@ -750,7 +714,7 @@ func (c *Conductor) cancelSession(ctx context.Context) (err error) {
 	c.obs.Load().Interrupt()
 
 	if err := c.sm.Transition(StateEnding); err != nil {
-		c.send(ctx, msgError("invalid_state_transition", err.Error()))
+		c.client.Error(transport.ClientError{Code: "invalid_state_transition", Message: err.Error()})
 		return nil
 	}
 
@@ -762,7 +726,7 @@ func (c *Conductor) cancelSession(ctx context.Context) (err error) {
 		return fmt.Errorf("transition to ended: %w", err)
 	}
 
-	c.send(ctx, msgSessionEnded("cancelled"))
+	c.client.SessionEnded("cancelled")
 	return nil
 }
 
@@ -788,14 +752,6 @@ func (c *Conductor) persistMessage(ctx context.Context, id uuid.UUID, role, cont
 	return msg, nil
 }
 
-// send writes a JSON message to the WebSocket. Errors are logged and ignored
-// (writes to a disconnected client are expected failures).
-func (c *Conductor) send(ctx context.Context, v any) {
-	if err := c.ws.SendJSON(ctx, v); err != nil {
-		slog.Debug("conductor: send failed", "error", err, "session_id", c.sessionID)
-	}
-}
-
 // isReconnect returns true if the client sent a last_seq in session_init.
 func (c *Conductor) isReconnect() bool {
 	return c.initMsg.LastSeq != nil
@@ -814,7 +770,7 @@ func (c *Conductor) needsInterviewerRecovery() bool {
 
 // close closes the WebSocket and releases the advisory lock.
 func (c *Conductor) close() {
-	c.ws.Close(websocket.StatusNormalClosure, "session ended")
+	c.rawWS.Close(websocket.StatusNormalClosure, "session ended")
 	if err := c.lock.Release(); err != nil {
 		slog.Error("conductor: release session lock", "error", err, "session_id", c.sessionID)
 	}

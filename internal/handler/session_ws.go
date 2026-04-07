@@ -11,6 +11,7 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/interview"
+	"github.com/btc/drill/internal/interview/transport"
 )
 
 // SessionWS returns a handler that upgrades to WebSocket and runs the interview conductor.
@@ -59,7 +60,8 @@ func SessionWS(b *backend.Backend) http.HandlerFunc {
 		// Hand off to the conductor. Run acquires the lock, reads session_init,
 		// and blocks until the session ends.
 		conductor := interview.NewConductor(interview.ConductorParams{
-			WS:        ws,
+			Client:    transport.NewWSClient(&interview.Conn{WS: ws}),
+			RawWS:     ws,
 			Backend:   b,
 			SessionID: sessionID,
 			UserID:    user.ID,
