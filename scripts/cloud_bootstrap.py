@@ -1041,18 +1041,6 @@ def phase_domain(state: dict) -> None:
         deadline = time.time() + 60 * 45  # 45 min max
         cert_active = False
         while time.time() < deadline:
-            result = run_quiet([
-                "gcloud", "beta", "run", "domain-mappings", "describe",
-                "--domain", domain,
-                "--region", region,
-                "--format=value(status.resourceRecords[0].rrdata,status.conditions[0].message)",
-            ], check=False)
-            status = run_quiet([
-                "gcloud", "beta", "run", "domain-mappings", "describe",
-                "--domain", domain,
-                "--region", region,
-                "--format=value(status.conditions)",
-            ], check=False)
             cert_result = run_quiet([
                 "gcloud", "beta", "run", "domain-mappings", "describe",
                 "--domain", domain,
