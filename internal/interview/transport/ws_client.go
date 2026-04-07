@@ -26,10 +26,6 @@ func (c *WSClient) send(v any) {
 	}
 }
 
-func (c *WSClient) StateChange(state string) {
-	c.send(map[string]string{"type": "state_change", "state": state})
-}
-
 func (c *WSClient) Ack(action string) {
 	c.send(map[string]string{"type": "ack", "action": action})
 }
@@ -89,7 +85,7 @@ func (c *WSClient) SessionLoaded(s SessionLoaded) {
 }
 
 func (c *WSClient) ReconnectState(r ReconnectState) {
-	c.send(map[string]any{"type": "reconnect_state", "messages": r.Missed()})
+	c.send(map[string]any{"type": "reconnect_state", "messages": r.Missed(), "state": r.State})
 }
 
 func (c *WSClient) TTSChunk(chunk TTSChunk) {

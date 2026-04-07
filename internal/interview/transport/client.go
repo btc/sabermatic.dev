@@ -14,7 +14,6 @@ import (
 // main goroutine, audio upload goroutine, readLoop goroutine, and
 // TTS goroutine all call Client methods.
 type Client interface {
-	StateChange(state string)
 	Ack(action string)
 	TranscriptionResult(text string)
 	TimerWarning(minutesRemaining int)
@@ -48,6 +47,7 @@ type SessionLoaded struct {
 type ReconnectState struct {
 	LastSeq  int
 	Messages []db.Message
+	State    string
 }
 
 // Missed returns only messages with seq > LastSeq.
