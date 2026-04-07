@@ -91,10 +91,10 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	// Should redirect to dashboard.
+	// Should redirect to home.
 	assert.Equal(t, http.StatusFound, w.Code)
 	location := w.Header().Get("Location")
-	assert.Contains(t, location, "/dashboard")
+	assert.Equal(t, "http://localhost:3000/", location)
 
 	// Should set session cookie.
 	var sessionCookie *http.Cookie
@@ -136,7 +136,7 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	mux.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusFound, w2.Code)
-	assert.Contains(t, w2.Header().Get("Location"), "/dashboard")
+	assert.Equal(t, "http://localhost:3000/", w2.Header().Get("Location"))
 
 	// Both should set session cookies.
 	for _, rec := range []*httptest.ResponseRecorder{w, w2} {

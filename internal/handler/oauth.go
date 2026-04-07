@@ -74,7 +74,7 @@ func OAuthCallback(b *backend.Backend) http.HandlerFunc {
 			b.Config().Auth.SecureCookies(),
 		))
 
-		redirectURL := b.Config().Auth.BaseURL + "/dashboard"
+		redirectURL := b.Config().Auth.BaseURL + "/"
 		if result.NeedsProfile {
 			redirectURL = b.Config().Auth.BaseURL + "/complete-profile"
 		}
