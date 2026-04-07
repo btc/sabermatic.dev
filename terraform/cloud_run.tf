@@ -193,29 +193,30 @@ resource "google_cloud_run_v2_service" "sabermatic" {
       # ---- Stripe price IDs (non-secret) ----
       env {
         name  = "STRIPE_PRO_PRICE_ID"
-        value = ""
+        value = var.stripe_pro_price_id
       }
       env {
         name  = "STRIPE_PACK_120_PRICE_ID"
-        value = ""
+        value = var.stripe_pack_120_price_id
       }
       env {
         name  = "STRIPE_PACK_300_PRICE_ID"
-        value = ""
+        value = var.stripe_pack_300_price_id
       }
       env {
         name  = "STRIPE_PACK_600_PRICE_ID"
-        value = ""
+        value = var.stripe_pack_600_price_id
       }
     }
   }
 
   lifecycle {
     ignore_changes = [
+      # CI/gcloud stamps client metadata after every deploy — don't fight it.
+      client,
+      client_version,
       # CI updates the image via gcloud run deploy — don't fight it.
       template[0].containers[0].image,
-      # Bootstrap script sets Stripe price IDs via gcloud run services update.
-      template[0].containers[0].env,
       # Provider bug: GCP always returns manual_instance_count=0 causing spurious drift.
       scaling,
     ]

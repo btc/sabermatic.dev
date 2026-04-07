@@ -34,3 +34,27 @@ variable "oauth_github_client_id" {
   description = "GitHub OAuth client ID (public)"
   type        = string
 }
+
+variable "stripe_pro_price_id" {
+  description = "Stripe price ID for the Pro plan"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_pack_120_price_id" {
+  description = "Stripe price ID for the 120-minute pack"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_pack_300_price_id" {
+  description = "Stripe price ID for the 300-minute pack"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_pack_600_price_id" {
+  description = "Stripe price ID for the 600-minute pack"
+  type        = string
+  default     = ""
+}
