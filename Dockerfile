@@ -13,9 +13,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /app/web/dist ./web/dist
-RUN go build -o drill ./cmd/drill
+RUN go build -o sabermatic ./cmd/drill
 
 # Stage 3: Runtime
 FROM gcr.io/distroless/static-debian12
-COPY --from=backend /app/drill /drill
-ENTRYPOINT ["/drill"]
+COPY --from=backend /app/sabermatic /sabermatic
+ENTRYPOINT ["/sabermatic"]
