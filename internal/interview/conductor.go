@@ -312,6 +312,9 @@ func (c *Conductor) Run(serverCtx context.Context) {
 			}
 
 		case <-serverCtx.Done():
+			if pendingAction == "" {
+				c.client.ReconnectPlease()
+			}
 			shouldExit = true
 		}
 

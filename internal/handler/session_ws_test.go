@@ -1969,9 +1969,8 @@ func TestWS_ConcurrentTurnRejected(t *testing.T) {
 
 // TestWS_EndSessionDuringCandidatePersist verifies that a candidate message is
 // persisted even when end_session arrives while the pipeline is processing the
-// candidate turn. The conductor calls cancelTurn() on end_session, which cancels
-// the pipeline context. If persistMessage uses the raw (cancellable) ctx, the
-// DB write may be aborted and the candidate answer silently lost.
+// candidate turn. The conductor sets pendingAction on end_session and the
+// pipeline completes naturally. The session ends after the pipeline finishes.
 func TestWS_EndSessionDuringCandidatePersist(t *testing.T) {
 	t.Parallel()
 

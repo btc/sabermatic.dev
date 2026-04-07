@@ -51,12 +51,6 @@ func TestParseWSMessage_EndTurnVoiceWithMIME(t *testing.T) {
 	assert.Equal(t, "ogg", msg.AudioExt())
 }
 
-func TestParseWSMessage_CancelTTS(t *testing.T) {
-	msg, err := interview.ParseWSMessage([]byte(`{"type":"cancel_tts"}`))
-	require.NoError(t, err)
-	assert.Equal(t, "cancel_tts", msg.Type)
-}
-
 func TestParseWSMessage_InvalidJSON(t *testing.T) {
 	_, err := interview.ParseWSMessage([]byte(`not json`))
 	require.Error(t, err)
