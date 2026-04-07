@@ -169,7 +169,7 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 
 		// Fire background audio upload goroutine.
 		go func() {
-			uploadCtx, uploadSpan := tracer.Start(context.Background(), "Backend.ExecuteTurn.uploadAudio")
+			uploadCtx, uploadSpan := tracer.Start(context.WithoutCancel(ctx), "Backend.ExecuteTurn.uploadAudio")
 			defer uploadSpan.End()
 
 			key := fmt.Sprintf("%s/%s.%s", sessionID, messageID, ext)
@@ -347,7 +347,7 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 	go fanOut.Close()
 
 	// Persist interviewer message and LLM call atomically.
-	// Use context.Background() to survive client disconnect.
+	// Use context.WithoutCancel to survive client disconnect while preserving trace.
 	persistCtx := context.WithoutCancel(ctx)
 	sp.sequence++
 	_, err = b.PersistInterviewerTurn(persistCtx, stream, PersistMessageParams{
