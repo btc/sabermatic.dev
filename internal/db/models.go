@@ -94,6 +94,7 @@ type InterviewSession struct {
 	UpdatedAt             time.Time          `json:"updated_at"`
 	ReservedMinutes       pgtype.Int4        `json:"reserved_minutes"`
 	ArchivedAt            pgtype.Timestamptz `json:"archived_at"`
+	GeneratingSince       pgtype.Timestamptz `json:"generating_since"`
 }
 
 type LedgerEntry struct {
