@@ -37,7 +37,18 @@ Secondary issues found during investigation:
 
 The select cases record what happened. The code after the select decides what to do.
 
+Three distinct concepts govern the loop:
+- **`pendingAction`** (end / cancel / reconnect) — what to do after the pipeline finishes, then return.
+- **`shouldExit`** (disconnect / shutdown) — the loop's input sources are exhausted and it cannot continue. Wait for pipeline, process any pending action, return.
+- **`turnResultCh == nil`** — gate for processing pending actions.
+
 ```
+const (
+    actionEnd       = "end"
+    actionCancel    = "cancel"
+    actionReconnect = "reconnect"
+)
+
 for {
     shouldExit := false
 
@@ -67,7 +78,7 @@ for {
 
     case <-turnResultCh:
         turnResultCh = nil
-        // handle pipeline error (log, ForceState, send error to client)
+        // handle pipeline error (log, ForceState, send error to client if no pendingAction)
 
     case <-warningTimer:
         client.TimerWarning(...)
@@ -79,7 +90,8 @@ for {
             return
         pendingAction = actionEnd
     case <-reconnectTimer:
-        reconnectPending = true
+        if pendingAction == "":
+            pendingAction = actionReconnect
     case <-serverCtx.Done():
         shouldExit = true
     }
@@ -94,15 +106,12 @@ for {
         action := pendingAction
         pendingAction = ""
         switch action:
-            actionCancel → cancelSession(workCtx)
-            actionEnd   → endSession(workCtx)
+            actionCancel  → cancelSession(workCtx)
+            actionEnd     → endSession(workCtx)
+            actionReconnect → client.ReconnectPlease()
         return
 
     if shouldExit:
-        return
-
-    if reconnectPending:
-        client.ReconnectPlease()
         return
 }
 ```
