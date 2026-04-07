@@ -25,7 +25,22 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	}
 	mux.Handle("/", SPAHandler(spaFS))
 
-	otelHandler := otelhttp.NewMiddleware(drilotel.AppName)(mux)
+	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			if r.Pattern != "" {
+				return r.Pattern
+			}
+			return r.Method + " " + r.URL.Path
+		}),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			for _, prefix := range rpc.ConnectPathPrefixes() {
+				if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
+					return false
+				}
+			}
+			return true
+		}),
+	)(mux)
 
 	return csrfMiddleware(otelHandler, csrfKey, secureCookies), nil
 }
