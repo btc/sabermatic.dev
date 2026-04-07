@@ -1035,17 +1035,64 @@ def phase_domain(state: dict) -> None:
         state["phases"]["domain"] = domain_state
         save_state(state)
 
-    # ── 10d: Confirm live ──
+    # ── 10d: Wait for SSL cert and verify health ──
     if not domain_state.get("live"):
-        print(textwrap.dedent(f"""
-          Check certificate status:
-            gcloud beta run domain-mappings describe --domain={domain} --region={region}
+        print("\nWaiting for SSL certificate to become ACTIVE...")
+        deadline = time.time() + 60 * 45  # 45 min max
+        cert_active = False
+        while time.time() < deadline:
+            result = run_quiet([
+                "gcloud", "beta", "run", "domain-mappings", "describe",
+                "--domain", domain,
+                "--region", region,
+                "--format=value(status.resourceRecords[0].rrdata,status.conditions[0].message)",
+            ], check=False)
+            status = run_quiet([
+                "gcloud", "beta", "run", "domain-mappings", "describe",
+                "--domain", domain,
+                "--region", region,
+                "--format=value(status.conditions)",
+            ], check=False)
+            cert_result = run_quiet([
+                "gcloud", "beta", "run", "domain-mappings", "describe",
+                "--domain", domain,
+                "--region", region,
+                "--format=json",
+            ], check=False)
+            try:
+                mapping_json = json.loads(cert_result.stdout)
+                conditions = mapping_json.get("status", {}).get("conditions", [])
+                cert_cond = next(
+                    (c for c in conditions if c.get("type") == "CertificateProvisioned"),
+                    None,
+                )
+                if cert_cond and cert_cond.get("status") == "True":
+                    cert_active = True
+                    break
+                msg = cert_cond.get("message", "provisioning...") if cert_cond else "provisioning..."
+            except (json.JSONDecodeError, KeyError):
+                msg = "checking..."
+            print(f"  Certificate status: {msg} (checking again in 30s)")
+            time.sleep(30)
 
-          Wait until certificateStatus shows ACTIVE, then verify:
-            curl -I https://{domain}/api/health
-        """))
-        if not prompt_yes_no(f"  https://{domain} is live with a valid SSL certificate?"):
-            prompt_continue("  Wait for SSL to provision, then press Enter to continue...")
+        if not cert_active:
+            print(f"{YELLOW}Certificate did not become active within 45 minutes.{RESET}")
+            print(f"  Check manually: gcloud beta run domain-mappings describe --domain={domain} --region={region}")
+        else:
+            info("SSL certificate is ACTIVE")
+
+        # Health check
+        print(f"\nVerifying https://{domain}/api/health ...")
+        health = run_quiet(
+            ["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", f"https://{domain}/api/health"],
+            check=False,
+        )
+        if health.stdout.strip() == "200":
+            info(f"https://{domain}/api/health → 200 OK")
+        else:
+            print(f"{YELLOW}Health check returned: {health.stdout.strip() or 'no response'}{RESET}")
+            print("  The domain may still be propagating — you can re-run to retry.")
+
         domain_state["live"] = True
         state["phases"]["domain"] = domain_state
         save_state(state)
