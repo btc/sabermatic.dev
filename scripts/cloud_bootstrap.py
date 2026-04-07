@@ -1046,7 +1046,7 @@ def phase_domain(state: dict) -> None:
                 "--domain", domain,
                 "--region", region,
                 "--format=json",
-            ], check=False)
+            ])
             try:
                 mapping_json = json.loads(cert_result.stdout)
                 conditions = mapping_json.get("status", {}).get("conditions", [])
