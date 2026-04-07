@@ -462,6 +462,11 @@ export enum SessionStatus {
    * @generated from enum value: SESSION_STATUS_CANCELLED = 7;
    */
   CANCELLED = 7,
+
+  /**
+   * @generated from enum value: SESSION_STATUS_GENERATING = 8;
+   */
+  GENERATING = 8,
 }
 
 /**
