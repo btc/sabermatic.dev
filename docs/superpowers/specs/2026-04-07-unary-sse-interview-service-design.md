@@ -12,35 +12,39 @@ The industry has converged on SSE over HTTP POST for LLM token streaming (Claude
 
 ## RPCs
 
-All RPCs require authentication. The handler verifies session ownership via the authenticated user before proceeding.
+All RPCs require authentication. The handler verifies session ownership via the authenticated user before proceeding. Field naming follows Google AIP conventions.
 
 ### SubmitTurn (server-streaming)
 
 ```protobuf
 rpc SubmitTurn(SubmitTurnRequest) returns (stream TurnEvent);
 
-enum InputMethod {
-  INPUT_METHOD_UNSPECIFIED = 0;
-  TEXT = 1;
-  VOICE = 2;
-}
-
 message SubmitTurnRequest {
   string session_id = 1;
-  InputMethod input_method = 2;
-  string content = 3;              // text content (when input_method = TEXT)
-  bytes audio = 4;                 // audio bytes (when input_method = VOICE)
-  string traceparent = 5;          // OpenTelemetry traceparent header
-  string audio_mime = 6;           // MIME type of audio (e.g. "audio/webm")
+  string traceparent = 2;          // OpenTelemetry traceparent header
+
+  oneof input {
+    TextInput text_input = 3;
+    VoiceInput voice_input = 4;
+  }
+}
+
+message TextInput {
+  string content = 1;
+}
+
+message VoiceInput {
+  bytes audio = 1;
+  string audio_mime_type = 2;      // e.g. "audio/webm"
 }
 
 message TurnEvent {
   oneof event {
     TranscriptionResult transcription_result = 1;
-    InterviewerToken token = 2;
-    InterviewerDone done = 3;
-    TTSChunk tts_chunk = 4;
-    TTSDone tts_done = 5;
+    InterviewerToken interviewer_token = 2;
+    InterviewerDone interviewer_done = 3;
+    TtsChunk tts_chunk = 4;
+    TtsDone tts_done = 5;
     TurnError error = 6;
   }
 }
@@ -48,9 +52,12 @@ message TurnEvent {
 
 Behavior:
 - Sets session status to `"generating"` at start via `UPDATE sessions SET status = 'generating', generating_since = now() WHERE id = $1 AND status = 'active' RETURNING id`. If no row returned, reject with error (session not active or already generating).
-- Loads question, messages, coach briefing from DB (full reload each turn, no accumulated state).
-- Validates `audio_mime` against supported formats (e.g. `audio/webm`, `audio/mp4`) when `input_method = VOICE`. Rejects with a descriptive error if unsupported.
-- Check if this is an opening question (zero messages, `input_method = TEXT`, empty content) or crash recovery (last message from candidate with no interviewer response). If either, skip transcription and candidate persistence, proceed directly to interviewer response generation.
+- Loads session, question, messages, coach briefing from DB in a single query where feasible (full reload each turn, no accumulated state).
+- Validates `audio_mime_type` against supported formats (e.g. `audio/webm`, `audio/mp4`) when `voice_input` is set. Rejects with a descriptive error if unsupported.
+- Determines turn type:
+  - **Opening question**: zero messages and `text_input` with empty content → skip transcription and candidate persistence, proceed directly to interviewer response generation.
+  - **Crash recovery**: last message from candidate with no interviewer response → skip transcription and candidate persistence, proceed directly to interviewer response generation.
+  - **Normal turn**: proceed with transcription (if voice) and candidate persistence.
 - If voice: transcribe with single retry (500ms delay), stream `transcription_result`.
 - Persist candidate message.
 - Fire background goroutine to upload raw audio to object storage and set `audio_url` on the persisted message. This runs independently of the pipeline and must not block turn progression.
@@ -67,13 +74,14 @@ rpc GetSessionState(GetSessionStateRequest) returns (GetSessionStateResponse);
 
 message GetSessionStateRequest {
   string session_id = 1;
-  optional int32 after_seq = 2;   // last message seq the client has seen
+  string page_token = 2;          // opaque cursor; omit for full state
 }
 
 message GetSessionStateResponse {
-  SessionInfo session_info = 1;    // question, duration_minutes, tts_enabled, started_at
+  SessionInfo session_info = 1;
   repeated Message messages = 2;   // messages after cursor, or all if no cursor
   SessionStatus status = 3;
+  string next_page_token = 4;     // cursor representing the last message returned
 }
 
 enum SessionStatus {
@@ -88,8 +96,9 @@ enum SessionStatus {
 
 Behavior:
 - Always returns immediately, never blocks.
-- If `after_seq` provided, returns only messages with seq greater than the given value.
-- Client polls with exponential backoff when status is `"generating"` (see Polling Backoff below).
+- If `page_token` provided, returns only messages after that cursor. The cursor is opaque to the client (server encodes/decodes it internally — initially backed by message count or created_at, but the opacity allows changing the implementation).
+- `next_page_token` is set to a cursor representing the last message returned, so the client can pass it back on the next call.
+- Client polls with exponential backoff when status is `GENERATING` (see Polling Backoff below).
 
 ### EndSession (unary)
 
@@ -104,10 +113,9 @@ message EndSessionResponse {}
 ```
 
 Behavior:
-- Blocks until any in-flight turn completes (polls status every 500ms until not `"generating"`, timeout after 60 seconds).
+- Blocks until any in-flight turn completes (polls status every 500ms until not `GENERATING`, timeout after 60 seconds).
 - If `generating_since` exceeds the crash recovery threshold (5 minutes) during the polling loop, performs inline crash recovery via `UPDATE sessions SET status = 'active', generating_since = NULL WHERE id = $1 AND status = 'generating' AND generating_since < now() - interval '5 minutes'`. The conditional WHERE clause makes this idempotent and race-free across instances.
-- Derives turn count from `SELECT COUNT(*) FROM messages WHERE session_id = $1 AND role = 'interviewer'` (counts completed interviewer turns, matching the current state machine's `TurnCount()` semantics which counts the opening question as turn 1).
-- Sets status `"completed"`, records turn count, refunds unused minutes, enqueues `evaluate_session` job. All in one transaction.
+- Completes the session in a single transaction: counts interviewer messages as turn count, sets status `"completed"`, refunds unused minutes, enqueues `evaluate_session` job. Prefer a combined SQL query over multiple round trips.
 - Returns success/error.
 
 ### CancelSession (unary)
@@ -123,17 +131,16 @@ message CancelSessionResponse {}
 ```
 
 Behavior:
-- Blocks until any in-flight turn completes (polls status every 500ms until not `"generating"`, timeout after 60 seconds).
+- Blocks until any in-flight turn completes (polls status every 500ms until not `GENERATING`, timeout after 60 seconds).
 - If `generating_since` exceeds the crash recovery threshold (5 minutes) during the polling loop, performs inline crash recovery via the same conditional UPDATE as EndSession (idempotent, race-free).
-- Derives turn count from `SELECT COUNT(*) FROM messages WHERE session_id = $1 AND role = 'interviewer'`.
-- Sets status `"cancelled"` + archived, full refund, no evaluation. All in one transaction.
+- Cancels the session in a single transaction: counts interviewer messages as turn count, sets status `"cancelled"` + archived, full refund. No evaluation enqueued.
 - Returns success/error.
 
 ## Opening Question
 
-The first turn in a new session triggers the opening interviewer question. The client calls `SubmitTurn` with `input_method = TEXT` and empty `content`. `ExecuteTurn` acquires generating status, loads session state, detects zero existing messages with empty text content, and skips transcription and candidate persistence — proceeding directly to interviewer response generation.
+The first turn in a new session triggers the opening interviewer question. The ready page fires `SubmitTurn` with `text_input` containing empty content in the background as soon as the page loads. The stream delivers the interviewer's opening message and TTS audio. By the time the user clicks "Ready" (or equivalent), the opening message and audio are already available for instant playback.
 
-This reuses the same pipeline for all turns — no special "start session" RPC. The opening question is just a turn with no candidate input. Normal empty-text validation does not apply to the opening question case (explicitly bypassed in step 3 of `ExecuteTurn`).
+This reuses the same pipeline for all turns — no special "start session" RPC. The opening question is just a turn with no candidate input. Normal empty-text validation does not apply to the opening question case (explicitly bypassed when zero messages are detected).
 
 ## Backend ExecuteTurn
 
@@ -144,8 +151,8 @@ type TurnEventSink interface {
     TranscriptionResult(e *pb.TranscriptionResult)
     InterviewerToken(e *pb.InterviewerToken)
     InterviewerDone(e *pb.InterviewerDone)
-    TTSChunk(e *pb.TTSChunk)
-    TTSDone(e *pb.TTSDone)
+    TtsChunk(e *pb.TtsChunk)
+    TtsDone(e *pb.TtsDone)
     Error(e *pb.TurnError)
 }
 
@@ -165,16 +172,16 @@ func (s *InterviewServer) SubmitTurn(
 }
 ```
 
-The `connectTurnSink` must silently drop writes that fail due to client disconnect. The pipeline must not abort on sink write errors — only on LLM/STT/TTS/DB errors. This matches the current `WSClient.send` pattern which logs and continues on write failure.
+The `connectTurnSink` must silently drop writes that fail due to client disconnect (log at debug level, matching current `WSClient.send` behavior). The pipeline must not abort on sink write errors — only on LLM/STT/TTS/DB errors.
 
 Internally, `ExecuteTurn`:
 1. Acquires generating status (atomic UPDATE, rejects if not active).
-2. Loads session, question, messages, coach briefing from DB.
+2. Loads session, question, messages, coach briefing from DB. Prefer a single combined query where feasible to reduce round trips.
 3. Determines turn type:
-   - **Opening question**: zero messages, `input_method = TEXT`, empty content → skip to step 6.
+   - **Opening question**: zero messages, `text_input` with empty content → skip to step 6.
    - **Crash recovery**: last message from candidate with no interviewer response → skip to step 6.
    - **Normal turn**: proceed to step 4.
-4. If voice: validates `audio_mime`, transcribes audio (single retry), sinks `TranscriptionResult`.
+4. If voice: validates `audio_mime_type`, transcribes audio (single retry), sinks `TranscriptionResult`.
 5. Persists candidate message. Fires background goroutine to upload audio to object storage.
 6. Builds LLM prompt from loaded messages + question + coach briefing + remaining duration.
 7. Streams LLM response with fan-out to token sink + TTS accumulator (existing observer pattern).
@@ -182,9 +189,18 @@ Internally, `ExecuteTurn`:
 9. Sets status back to `"active"`.
 10. On any error: reverts status to `"active"`, sinks error, returns.
 
-The `connectTurnSink` logs at debug level on write failure, matching the current `WSClient.send` behavior. Sink write failures must not abort the pipeline.
-
 The observer/fan-out pattern (`TokenFanOut`, `TTSAccumulator`, `MessageAccumulator`) carries over from the current conductor. The `TokenWriter` and `TTSSink` adapters will be substantially rewritten to emit events via `TurnEventSink` instead of the WebSocket `Client` interface.
+
+## SQL Query Strategy
+
+Prefer new combined sqlc queries over multiple round trips where semantics are unambiguous:
+
+- **Load turn context**: single query joining session + question + coach briefing. Messages loaded separately (they're a collection).
+- **Acquire generating status**: single conditional UPDATE returning the row (avoids SELECT + UPDATE race).
+- **Complete/cancel session**: single query that counts interviewer messages, updates status, and inserts refund ledger entries. Enqueue evaluation job in the same transaction.
+- **Crash recovery cleanup**: single UPDATE with WHERE clause on status + generating_since.
+
+Write new sqlc queries rather than reusing existing ones that are slightly wrong for the new semantics.
 
 ## Concurrency Control
 
@@ -229,16 +245,16 @@ The existing `CleanupAbandonedSessionsWorker` handles sessions stuck in `"active
 ### Normal turn
 
 1. Page load: `GetSessionState()` — render conversation, start client-side timer.
-2. For a new session (0 messages): `SubmitTurn(TEXT, "")` — triggers opening interviewer question.
+2. For a new session (0 messages): fire `SubmitTurn(text_input: "")` in background on ready page. Stream delivers opening question tokens + TTS. Audio and text are cached so playback is instant when user clicks "Ready."
 3. User records/types, submits.
 4. `SubmitTurn()` — stream renders tokens, plays TTS chunks as they arrive.
 5. Stream closes on `interviewer_done` + `tts_done` — update local messages, ready for next turn.
 
 ### Page refresh mid-turn
 
-1. `GetSessionState()` — returns prior messages + status `"generating"`.
+1. `GetSessionState()` — returns prior messages + status `GENERATING`.
 2. Client renders full conversation history + loading indicator.
-3. Poll `GetSessionState()` with exponential backoff until status is `"active"`.
+3. Poll `GetSessionState()` with exponential backoff until status is `ACTIVE`.
 4. New message appears in response, render it.
 
 ### End session
@@ -259,11 +275,11 @@ The existing `CleanupAbandonedSessionsWorker` handles sessions stuck in `"active
 2. Server stops accepting new requests.
 3. In-flight `SubmitTurn` pipelines continue on `context.Background()`.
 4. If pipeline completes within graceful shutdown period: stream closes cleanly, status set to `"active"`.
-5. If instance killed before pipeline finishes: pipeline is lost. `generating_since` timeout triggers crash recovery (either periodic or inline via EndSession/CancelSession). Client polls `GetSessionState`, eventually sees `"active"` (with or without the completed message depending on how far the pipeline got).
+5. If instance killed before pipeline finishes: pipeline is lost. `generating_since` timeout triggers crash recovery (either periodic or inline via EndSession/CancelSession). Client polls `GetSessionState`, eventually sees `ACTIVE` (with or without the completed message depending on how far the pipeline got).
 
 ## Polling Backoff
 
-When `GetSessionState` returns status `"generating"`, the client polls with exponential backoff tuned for ~4 second average pipeline duration. These are inter-poll delays; actual wall-clock time includes network round-trip and server processing.
+When `GetSessionState` returns status `GENERATING`, the client polls with exponential backoff tuned for ~4 second average pipeline duration. These are inter-poll delays; actual wall-clock time includes network round-trip and server processing.
 
 ```
 delay = min(300 * 2^attempt, 2000) ms
@@ -313,7 +329,7 @@ The stream event sequence for a typical turn:
 
 ## Audio Upload
 
-Inline in the `SubmitTurn` request body. Client joins recorded segments locally and includes the audio as a `bytes` field in the proto message with `audio_mime` specifying the format. The server receives the full audio before transcription begins.
+Inline in the `SubmitTurn` request body via the `voice_input` oneof. Client joins recorded segments locally and includes the audio as a `bytes` field with `audio_mime_type` specifying the format. The server receives the full audio before transcription begins.
 
 Latency sequence: user stops recording → join segments → upload blob → transcribe → LLM → first token.
 
@@ -330,10 +346,15 @@ Proto definitions in `pb/`. Generated code via `buf generate` into `internal/pb/
 ## What Gets Deleted
 
 - `internal/handler/session_ws.go` — WebSocket upgrade handler.
+- `internal/handler/session_ws_test.go` — WebSocket handler tests.
 - `internal/interview/conductor.go` — event loop, read loop, pending actions, reconnection protocol.
+- `internal/interview/conductor_test.go` — conductor tests.
 - `internal/interview/state_machine.go` — conductor state machine.
+- `internal/interview/state_machine_test.go` — state machine tests.
 - `internal/interview/transport/ws_client.go` — WebSocket JSON send layer.
+- `internal/interview/transport/ws_message.go` — WebSocket message parsing.
 - `internal/backend/session_lock.go` — Postgres advisory lock.
+- `internal/backend/session_lock_test.go` — advisory lock tests.
 - `web/src/ws/connection.ts` — WebSocket connection manager, retry logic, keepalive.
 - `web/src/ws/protocol.ts` — WebSocket message type definitions.
 - `web/src/ws/hooks.ts` — WebSocket React hooks for interview state.
