@@ -29,6 +29,7 @@ var (
 	ErrDurationExceedsPlan    = fmt.Errorf("duration exceeds plan maximum")
 	ErrNoPaidBalance          = fmt.Errorf("paid minute balance required")
 	ErrNoStripeAccount        = fmt.Errorf("no billing account")
+	ErrTurnNotAcquired        = fmt.Errorf("session is not active or a turn is already in progress")
 )
 
 // ValidatePasswordLength returns ErrPasswordLength if the password is too short or too long.
