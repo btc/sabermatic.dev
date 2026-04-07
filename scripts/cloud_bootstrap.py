@@ -109,7 +109,9 @@ def save_state(state: dict) -> None:
 def phase_done(state: dict, phase: str) -> bool:
     val = state["phases"].get(phase)
     if isinstance(val, dict):
-        return bool(val) and all(val.values())
+        # A dict-tracked phase is complete only when mark_phase has set it to True.
+        # Intermediate sub-step dicts are never considered fully done.
+        return False
     return val is True
 
 
