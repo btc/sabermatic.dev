@@ -281,9 +281,9 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   // ------ Derived state (hoisted above effects that reference it) ------
   const isStreaming = state === "streaming";
-  const isProcessing = state === "transcribing" || state === "processing";
+  const isTranscribing = state === "transcribing";
   const isEnded = state === "ended" || state === "cancelled";
-  const inputDisabled = isStreaming || isEnded;
+  const inputDisabled = isStreaming || isEnded || isTranscribing || state === "processing";
 
   // ------ Auto-end: call endSession 2 minutes after overtime begins ------
   useEffect(() => {
@@ -449,8 +449,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
             {/* Streaming text */}
             <StreamingMessage text={streamingText} />
 
-            {/* Processing shimmer */}
-            {isProcessing && <ProcessingIndicator />}
+            {/* Processing shimmer — only shown during voice transcription, not text submit */}
+            {isTranscribing && <ProcessingIndicator />}
           </div>
           <div ref={chatEndRef} />
         </div>

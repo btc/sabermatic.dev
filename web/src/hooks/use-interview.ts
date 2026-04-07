@@ -187,6 +187,7 @@ export function useInterview(sessionId: string) {
       // Map server status to InterviewState.
       if (
         resp.status === SessionStatus.COMPLETED ||
+        resp.status === SessionStatus.FAILED ||
         resp.status === SessionStatus.EVALUATING ||
         resp.status === SessionStatus.REVIEWED ||
         resp.status === SessionStatus.EVALUATION_FAILED
@@ -265,6 +266,8 @@ export function useInterview(sessionId: string) {
           { id: `local-${displaySeq}`, seq: displaySeq, role: "candidate", content },
         ];
       });
+
+      setState("processing");
 
       const abort = new AbortController();
       streamAbortRef.current = abort;
