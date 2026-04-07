@@ -217,7 +217,7 @@ resource "google_cloud_run_v2_service" "sabermatic" {
       client_version,
       # CI updates the image via gcloud run deploy — don't fight it.
       template[0].containers[0].image,
-      # Provider bug: GCP always returns manual_instance_count=0 causing spurious drift.
+      # Provider bug: GCP always returns top-level scaling with manual_instance_count=0.
       scaling,
     ]
   }
