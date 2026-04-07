@@ -1,3 +1,14 @@
+# Code Organization
+
+Docs: ./docs
+Protos: ./pb
+SQL: ./sql
+Backend: ./internal
+Frontend: ./web
+Local deploys: ./scripts/deploy.sh
+Bootstrap: ./scripts/cloud_bootstrap.py
+Prototype: ./v0
+
 # Code Conventions
 
 Backend list endpoints must never return nil slices. Go's `json.Marshal(nil)` produces `null`, not `[]`. Coerce in the backend method for REST, in db-to-proto converters for ConnectRPC.
