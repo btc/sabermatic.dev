@@ -14,6 +14,7 @@ import getpass
 import json
 import logging
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -136,7 +137,7 @@ def run(
     capture=True: output is logged but not printed to the terminal.
     capture=False: output is logged AND streamed to the terminal.
     """
-    cmd_str = " ".join(cmd)
+    cmd_str = shlex.join(cmd)
     log.debug("$ %s", cmd_str)
 
     proc = subprocess.Popen(
@@ -165,7 +166,8 @@ def run(
     t_err.start()
 
     if input_data is not None:
-        assert proc.stdin is not None
+        if proc.stdin is None:
+            raise RuntimeError("proc.stdin is None despite stdin=PIPE")
         proc.stdin.write(input_data)
         proc.stdin.close()
 
@@ -434,6 +436,9 @@ def phase_bootstrap(state: dict) -> None:
         "--location=global", "--format=value(name)",
     ])
     wif_pool_id = result.stdout.strip()
+    if result.returncode != 0 or not wif_pool_id:
+        error(f"Could not retrieve WIF pool ID:\n{result.stderr}")
+        sys.exit(1)
 
     for sa in [deployer_sa, terraform_sa]:
         run_quiet([
@@ -470,28 +475,26 @@ def phase_terraform(state: dict) -> None:
     mailgun_domain = state["mailgun_domain"]
 
     if not state.get("oauth_google_client_id"):
-        base_url = f"https://sabermatic-{state.get('region', 'us-central1')}.run.app"
+        redirect_base = state["outputs"].get("cloud_run_url") or "https://sabermatic.dev"
         print(textwrap.dedent(f"""
           Google OAuth setup:
             {link(f"https://console.cloud.google.com/apis/credentials?project={project_id}")}
             → Create credentials → OAuth 2.0 Client ID
             → Application type: Web application
-            → Authorized redirect URI: {base_url}/api/auth/oauth/google/callback
-            (Update the redirect URI after you have the real Cloud Run URL.)
+            → Authorized redirect URI: {redirect_base}/api/auth/oauth/google/callback
         """))
         state["oauth_google_client_id"] = prompt_value("Google OAuth client ID")
         save_state(state)
     oauth_google_client_id = state["oauth_google_client_id"]
 
     if not state.get("oauth_github_client_id"):
-        base_url = f"https://sabermatic-{state.get('region', 'us-central1')}.run.app"
+        redirect_base = state["outputs"].get("cloud_run_url") or "https://sabermatic.dev"
         print(textwrap.dedent(f"""
           GitHub OAuth setup:
             {link("https://github.com/settings/developers")}
             → OAuth Apps → New OAuth App
             → Homepage URL: https://sabermatic.dev
-            → Authorization callback URL: {base_url}/api/auth/oauth/github/callback
-            (Update the callback URL after you have the real Cloud Run URL.)
+            → Authorization callback URL: {redirect_base}/api/auth/oauth/github/callback
         """))
         state["oauth_github_client_id"] = prompt_value("GitHub OAuth client ID")
         save_state(state)
@@ -499,7 +502,11 @@ def phase_terraform(state: dict) -> None:
 
     # Write terraform.tfvars — sanitize values to prevent HCL injection
     def hcl_escape(s: str) -> str:
-        return s.replace("\\", "\\\\").replace('"', '\\"')
+        # Escape backslash and double-quote for HCL string literals.
+        # Also escape ${ and %{ which trigger HCL template interpolation.
+        s = s.replace("\\", "\\\\").replace('"', '\\"')
+        s = s.replace("${", "$${").replace("%{", "%%{")
+        return s.replace("\n", " ").replace("\r", "")
 
     tfvars_content = textwrap.dedent(f"""\
         project_id             = "{hcl_escape(project_id)}"
@@ -528,6 +535,7 @@ def phase_terraform(state: dict) -> None:
     state_bucket = f"{project_id}-tfstate"
     print("\nRunning terraform init...")
     attempt = 0
+    max_billing_attempts = 10  # ~40 min total with exponential backoff
     while True:
         result = run_quiet(
             ["terraform", "init", f"-backend-config=bucket={state_bucket}"],
@@ -537,8 +545,11 @@ def phase_terraform(state: dict) -> None:
             break
         if "billing" in (result.stderr or "").lower():
             attempt += 1
+            if attempt > max_billing_attempts:
+                error("Billing failed to propagate after 10 attempts. Check billing account linkage and retry.")
+                sys.exit(1)
             delay = min(30 * (2 ** (attempt - 1)), 300)  # 30s, 60s, 120s, 240s, 300s cap
-            warn(f"Billing not yet propagated. Retrying in {delay}s... (attempt {attempt})")
+            warn(f"Billing not yet propagated. Retrying in {delay}s... (attempt {attempt}/{max_billing_attempts})")
             time.sleep(delay)
         elif "Backend configuration changed" in (result.stderr or ""):
             # Backend bucket changed (e.g. new project) — reconfigure without migrating
@@ -604,6 +615,10 @@ def phase_terraform(state: dict) -> None:
 
 SECRETS = [
     # (secret_id, method, help_text, help_url)
+    # Note: "database-url" is intentionally excluded — Terraform populates it
+    # automatically from the Cloud SQL instance (see terraform/secrets.tf).
+    # Note: "stripe-webhook-secret" is set in Phase 7 after the webhook endpoint
+    # is created, so it is excluded here too.
     ("auth-token-secret", "auto", None, None),
     ("anthropic-api-key", "prompt", "Paste your Anthropic API key",
      "https://console.anthropic.com/settings/keys"),
@@ -674,6 +689,7 @@ def phase_secrets(state: dict) -> None:
 
     if all_done:
         info("All secrets populated")
+        mark_phase(state, "secrets")
     else:
         warn("Some secrets were skipped. Re-run the script to set them later.")
 
@@ -875,6 +891,8 @@ def phase_stripe(state: dict) -> None:
         state["phases"]["stripe"] = stripe_state
         save_state(state)
 
+    mark_phase(state, "stripe")
+
 
 # ── Phase 8 + 9: Build & Deploy ───────────────────────────────────────────
 
@@ -901,20 +919,29 @@ def phase_build(state: dict) -> None:
 def phase_deploy(state: dict) -> None:
     header(9, TOTAL_PHASES, "Deploy to Cloud Run")
 
-    deploy_script = str(Path(__file__).resolve().parent / "deploy.sh")
-    project_root = str(Path(__file__).resolve().parent.parent)
+    image = state["outputs"].get("image", "")
+    if not image:
+        error("No image found in state. Run Phase 8 first.")
+        sys.exit(1)
 
-    print("Running deploy.sh...")
-    run(["bash", deploy_script], cwd=project_root)
+    print(f"Deploying {image} to Cloud Run...")
+    run([
+        "gcloud", "run", "deploy", "sabermatic",
+        "--image", image,
+        "--region", state["region"],
+        "--project", state["project_id"],
+    ])
 
     # Fetch the live URL
     result = run_quiet([
         "gcloud", "run", "services", "describe", "sabermatic",
-        "--region", "us-central1",
-        "--project", "sabermatic-production",
+        "--region", state["region"],
+        "--project", state["project_id"],
         "--format=value(status.url)",
     ])
     live_url = result.stdout.strip()
+    if not live_url:
+        warn("Could not fetch Cloud Run URL — check the service manually.")
     state["outputs"]["cloud_run_url"] = live_url
 
     # Print summary
@@ -979,15 +1006,12 @@ def phase_domain(state: dict) -> None:
     # ── 10b: Create Cloud Run domain mapping ──
     if not domain_state.get("mapping"):
         print(f"\nCreating Cloud Run domain mapping for {domain}...")
-        result = run(
-            [
-                "gcloud", "beta", "run", "domain-mappings", "create",
-                "--service", service,
-                "--domain", domain,
-                "--region", region,
-            ],
-            check=False,
-        )
+        result = run_quiet([
+            "gcloud", "beta", "run", "domain-mappings", "create",
+            "--service", service,
+            "--domain", domain,
+            "--region", region,
+        ])
 
         # Mapping may already exist — that's fine
         already = result.returncode != 0 and (
@@ -1073,7 +1097,6 @@ def phase_domain(state: dict) -> None:
         print(f"\nVerifying https://{domain}/api/health ...")
         health = run_quiet(
             ["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", f"https://{domain}/api/health"],
-            check=False,
         )
         if health.stdout.strip() == "200":
             info(f"https://{domain}/api/health → 200 OK")
