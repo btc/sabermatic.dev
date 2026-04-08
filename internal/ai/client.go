@@ -170,50 +170,48 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 		return nil, fmt.Errorf("no tool_use block in response")
 	}
 
-	// Persist if we have a transaction.
-	if tx != nil {
-		respJSON, marshalErr := json.Marshal(resp)
-		if marshalErr != nil {
-			return toolInput, fmt.Errorf("marshal response: %w", marshalErr)
-		}
+	// Persist within the caller's transaction.
+	respJSON, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		return toolInput, fmt.Errorf("marshal response: %w", marshalErr)
+	}
 
-		cost := EstimateCost(p.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens)
-		sessionID := pgtype.UUID{}
-		if p.SessionID != uuid.Nil {
-			sessionID = pgtype.UUID{Bytes: p.SessionID, Valid: true}
-		}
-		userID := pgtype.UUID{}
-		if p.UserID != uuid.Nil {
-			userID = pgtype.UUID{Bytes: p.UserID, Valid: true}
-		}
+	cost := EstimateCost(p.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	sessionID := pgtype.UUID{}
+	if p.SessionID != uuid.Nil {
+		sessionID = pgtype.UUID{Bytes: p.SessionID, Valid: true}
+	}
+	userID := pgtype.UUID{}
+	if p.UserID != uuid.Nil {
+		userID = pgtype.UUID{Bytes: p.UserID, Valid: true}
+	}
 
-		callID, insertErr := db.New(tx).InsertLLMCall(ctx, db.InsertLLMCallParams{
-			SessionID:     sessionID,
-			UserID:        userID,
-			Role:          p.Role,
-			Model:         p.Model,
-			InputTokens:   int32(resp.Usage.InputTokens),
-			OutputTokens:  int32(resp.Usage.OutputTokens),
-			EstimatedCost: NumericFromFloat(cost),
-			LatencyMs:     int32(latency.Milliseconds()),
-		})
-		if insertErr != nil {
-			return toolInput, fmt.Errorf("insert llm_call: %w", insertErr)
-		}
+	callID, insertErr := db.New(tx).InsertLLMCall(ctx, db.InsertLLMCallParams{
+		SessionID:     sessionID,
+		UserID:        userID,
+		Role:          p.Role,
+		Model:         p.Model,
+		InputTokens:   int32(resp.Usage.InputTokens),
+		OutputTokens:  int32(resp.Usage.OutputTokens),
+		EstimatedCost: NumericFromFloat(cost),
+		LatencyMs:     int32(latency.Milliseconds()),
+	})
+	if insertErr != nil {
+		return toolInput, fmt.Errorf("insert llm_call: %w", insertErr)
+	}
 
-		promptJSON, marshalErr := json.Marshal(params)
-		if marshalErr != nil {
-			return toolInput, fmt.Errorf("marshal prompt: %w", marshalErr)
-		}
+	promptJSON, marshalErr := json.Marshal(params)
+	if marshalErr != nil {
+		return toolInput, fmt.Errorf("marshal prompt: %w", marshalErr)
+	}
 
-		insertErr = db.New(tx).InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
-			LlmCallID: callID,
-			Prompt:    promptJSON,
-			Response:  respJSON,
-		})
-		if insertErr != nil {
-			return toolInput, fmt.Errorf("insert llm_call_content: %w", insertErr)
-		}
+	insertErr = db.New(tx).InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
+		LlmCallID: callID,
+		Prompt:    promptJSON,
+		Response:  respJSON,
+	})
+	if insertErr != nil {
+		return toolInput, fmt.Errorf("insert llm_call_content: %w", insertErr)
 	}
 
 	return toolInput, nil
@@ -307,22 +305,20 @@ func (c *Client) CallAndLog(ctx context.Context, tx pgx.Tx, p CallParams) (_ str
 	}
 	text := b.String()
 
-	// Persist if we have a transaction.
-	if tx != nil {
-		err = persistCall(ctx, db.New(tx), persistParams{
-			model:        p.Model,
-			userID:       p.UserID,
-			role:         p.Role,
-			sessionID:    p.SessionID,
-			inputTokens:  resp.Usage.InputTokens,
-			outputTokens: resp.Usage.OutputTokens,
-			latency:      latency,
-			prompt:       params,
-			response:     text,
-		})
-		if err != nil {
-			return text, fmt.Errorf("persist llm call: %w", err)
-		}
+	// Persist within the caller's transaction.
+	err = persistCall(ctx, db.New(tx), persistParams{
+		model:        p.Model,
+		userID:       p.UserID,
+		role:         p.Role,
+		sessionID:    p.SessionID,
+		inputTokens:  resp.Usage.InputTokens,
+		outputTokens: resp.Usage.OutputTokens,
+		latency:      latency,
+		prompt:       params,
+		response:     text,
+	})
+	if err != nil {
+		return text, fmt.Errorf("persist llm call: %w", err)
 	}
 
 	return text, nil

@@ -14,7 +14,7 @@ terraform {
 
   backend "gcs" {
     # Bucket name set via -backend-config or terraform init.
-    # e.g.: terraform init -backend-config="bucket=sabermatic-prod-tfstate"
+    # e.g.: terraform init -backend-config="bucket=sabermatic-production-tfstate"
     prefix = "terraform/state"
   }
 }

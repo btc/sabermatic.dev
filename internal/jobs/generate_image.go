@@ -16,9 +16,12 @@ import (
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/imagegen"
 	"github.com/btc/drill/internal/storage"
 )
+
+var imagegenTracer = drilotel.Tracer("imagegen")
 
 // geminiImageCostUSD is the estimated cost per Gemini native image generation call.
 const geminiImageCostUSD = 0.067
@@ -47,7 +50,7 @@ type GenerateQuestionImageWorker struct {
 	Pool   *pgxpool.Pool
 	LLM    *ai.Client
 	Gemini *ai.GeminiClient
-	Store  storage.ObjectStore
+	Store  storage.Store
 	Cfg    *config.Config
 }
 
@@ -55,7 +58,10 @@ func (w *GenerateQuestionImageWorker) Timeout(job *river.Job[GenerateQuestionIma
 	return 5 * time.Minute
 }
 
-func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[GenerateQuestionImageArgs]) error {
+func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[GenerateQuestionImageArgs]) (err error) {
+	ctx, span := imagegenTracer.Start(ctx, "GenerateQuestionImageWorker.Work")
+	defer func() { drilotel.End(span, err) }()
+
 	questionID := job.Args.QuestionID
 	q := db.New(w.Pool)
 
@@ -97,10 +103,9 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return fmt.Errorf("gemini generate image: %w", err)
 	}
 
-	// 6. Upload to public bucket. ForBucket reuses the existing GCS client.
-	publicStore := w.Store.(*storage.GCSStore).ForBucket(w.Cfg.Storage.PublicBucket)
+	// 6. Upload to public bucket.
 	key := "questions/" + questionID.String() + "/card.png"
-	_, err = publicStore.Put(ctx, key, imageBytes, mimeType)
+	_, err = w.Store.Public().Put(ctx, key, imageBytes, mimeType)
 	if err != nil {
 		return fmt.Errorf("upload image: %w", err)
 	}
@@ -124,8 +129,14 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	}
 
 	// Log Sonnet call.
-	sonnetPromptJSON, _ := json.Marshal(map[string]string{"system": meta.System, "user": meta.User})
-	sonnetRespJSON, _ := json.Marshal(map[string]string{"text": sonnetResult.Text})
+	sonnetPromptJSON, err := json.Marshal(map[string]string{"system": meta.System, "user": meta.User})
+	if err != nil {
+		return fmt.Errorf("marshal sonnet prompt: %w", err)
+	}
+	sonnetRespJSON, err := json.Marshal(map[string]string{"text": sonnetResult.Text})
+	if err != nil {
+		return fmt.Errorf("marshal sonnet response: %w", err)
+	}
 
 	sonnetCost := ai.EstimateCost(w.Cfg.LLM.ImagePromptModel, sonnetResult.InputTokens, sonnetResult.OutputTokens)
 	sonnetCallID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
@@ -150,8 +161,14 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	}
 
 	// Log Gemini call.
-	geminiPromptJSON, _ := json.Marshal(map[string]string{"prompt": fullPrompt})
-	geminiRespJSON, _ := json.Marshal(map[string]string{"image_url": imageURL, "mime_type": mimeType})
+	geminiPromptJSON, err := json.Marshal(map[string]string{"prompt": fullPrompt})
+	if err != nil {
+		return fmt.Errorf("marshal gemini prompt: %w", err)
+	}
+	geminiRespJSON, err := json.Marshal(map[string]string{"image_url": imageURL, "mime_type": mimeType})
+	if err != nil {
+		return fmt.Errorf("marshal gemini response: %w", err)
+	}
 
 	geminiCallID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
 		SessionID:     pgtype.UUID{},

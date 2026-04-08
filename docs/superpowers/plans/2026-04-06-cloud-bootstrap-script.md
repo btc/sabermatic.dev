@@ -384,7 +384,7 @@ def phase_auth(state: dict) -> None:
 def phase_project(state: dict) -> None:
     header(3, TOTAL_PHASES, "Create GCP Project + Enable Billing")
 
-    project_id = prompt_value("GCP project ID", state.get("project_id", "sabermatic-prod"))
+    project_id = prompt_value("GCP project ID", state.get("project_id", "sabermatic-production"))
     state["project_id"] = project_id
     save_state(state)
 

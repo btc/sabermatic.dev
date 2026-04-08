@@ -106,7 +106,7 @@ type Querier interface {
 	LinkOAuthAccount(ctx context.Context, arg LinkOAuthAccountParams) (OauthAccount, error)
 	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
-	ListQuestionsWithoutImages(ctx context.Context, limit int32) ([]uuid.UUID, error)
+	ListQuestionsWithoutImages(ctx context.Context) ([]uuid.UUID, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error

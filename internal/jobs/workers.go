@@ -24,7 +24,7 @@ type WorkerRefs struct {
 
 // RegisterWorkers creates a Workers bundle with all job workers registered.
 // Returns WorkerRefs so callers can set the Jobs field after river.NewClient.
-func RegisterWorkers(cfg *config.Config, sender email.Sender, pool *pgxpool.Pool, llm *ai.Client, gemini *ai.GeminiClient, store storage.ObjectStore) (*river.Workers, WorkerRefs) {
+func RegisterWorkers(cfg *config.Config, sender email.Sender, pool *pgxpool.Pool, llm *ai.Client, gemini *ai.GeminiClient, store storage.Store) (*river.Workers, WorkerRefs) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, NewSendEmailWorker(&cfg.Email, sender))
 	eval := &EvaluateSessionWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM}
