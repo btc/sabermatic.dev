@@ -3,16 +3,14 @@
     "id": "27",
     "user_id": "sample",
     "question_id": "3",
-    "status": "reviewed",
+    "status": "SESSION_STATUS_REVIEWED",
     "config_duration_minutes": 15,
     "config_tts_enabled": true,
     "config_coach_briefing": false,
-    "started_at": "2026-03-31T18:48:17-04:00",
-    "ended_at": null,
+    "start_time": "2026-03-31T18:48:17-04:00",
     "turn_count": 33,
-    "archived": false,
-    "created_at": "2026-03-31T18:48:17-04:00",
-    "updated_at": "2026-03-31T18:48:17-04:00",
+    "create_time": "2026-03-31T18:48:17-04:00",
+    "update_time": "2026-03-31T18:48:17-04:00",
     "question_title": "Chat System"
   },
   "messages": [
@@ -22,9 +20,7 @@
       "seq": 1,
       "role": "interviewer",
       "content": "I'd like you to design a real-time chat application. Take it wherever you'd like.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:48:19-04:00"
+      "create_time": "2026-03-31T18:48:19-04:00"
     },
     {
       "id": "141",
@@ -32,9 +28,7 @@
       "seq": 2,
       "role": "candidate",
       "content": "Okay, so first I'd like to start with functional requirements. Real-time chat. Are we talking about an app like WhatsApp, one-to-one chats, and maybe group chats? Are we talking about something like Slack, where there are channels and large numbers of users and channels, with DMs also there on the side?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:48:59-04:00"
+      "create_time": "2026-03-31T18:48:59-04:00"
     },
     {
       "id": "142",
@@ -42,9 +36,7 @@
       "seq": 3,
       "role": "interviewer",
       "content": "Good question \u2014 that's yours to define. What use case do you think leads to the most interesting design tradeoffs?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:49:01-04:00"
+      "create_time": "2026-03-31T18:49:01-04:00"
     },
     {
       "id": "143",
@@ -52,9 +44,7 @@
       "seq": 4,
       "role": "candidate",
       "content": "That's a good question. I think they both lead to interesting design trade-offs, but maybe the one that's more interesting to me in this moment is the WhatsApp case.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:49:25-04:00"
+      "create_time": "2026-03-31T18:49:25-04:00"
     },
     {
       "id": "144",
@@ -62,9 +52,7 @@
       "seq": 5,
       "role": "interviewer",
       "content": "Got it. So we're focusing on a WhatsApp-style messaging app with one-on-one and group chats. What kind of scale are we thinking about here?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:49:28-04:00"
+      "create_time": "2026-03-31T18:49:28-04:00"
     },
     {
       "id": "145",
@@ -72,9 +60,7 @@
       "seq": 6,
       "role": "candidate",
       "content": "Maybe we're thinking about 1 billion users and maybe we're thinking about 100 messages sent per day per user.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:49:57-04:00"
+      "create_time": "2026-03-31T18:49:57-04:00"
     },
     {
       "id": "146",
@@ -82,9 +68,7 @@
       "seq": 7,
       "role": "interviewer",
       "content": "That's 100 billion messages per day. What about other requirements - what latency expectations do you have for message delivery?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:49:58-04:00"
+      "create_time": "2026-03-31T18:49:58-04:00"
     },
     {
       "id": "147",
@@ -92,9 +76,7 @@
       "seq": 8,
       "role": "candidate",
       "content": "I think for a chat to remain responsive for users, if two users are sitting with each other remotely, sending messages back and forth, I think it could be reasonable for there to be about one second or two seconds of latency between a message being sent and a message being received on the receiving device.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:50:46-04:00"
+      "create_time": "2026-03-31T18:50:46-04:00"
     },
     {
       "id": "148",
@@ -102,9 +84,7 @@
       "seq": 9,
       "role": "interviewer",
       "content": "Makes sense. Any other functional requirements you want to establish before diving into the design?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:50:48-04:00"
+      "create_time": "2026-03-31T18:50:48-04:00"
     },
     {
       "id": "149",
@@ -112,9 +92,7 @@
       "seq": 10,
       "role": "candidate",
       "content": "Let's say that groups are capped at 200 users.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:51:12-04:00"
+      "create_time": "2026-03-31T18:51:12-04:00"
     },
     {
       "id": "150",
@@ -122,9 +100,7 @@
       "seq": 11,
       "role": "interviewer",
       "content": "Alright, so 1B users, 100 messages per user per day, 1-2 second delivery latency, groups up to 200 users. How are you thinking about approaching the high-level architecture?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:51:14-04:00"
+      "create_time": "2026-03-31T18:51:14-04:00"
     },
     {
       "id": "151",
@@ -132,9 +108,7 @@
       "seq": 12,
       "role": "candidate",
       "content": "So, maybe I'll start with doing some back-of-the-envelope calculations on what this will mean for writes per second, and also what this will mean for data storage per month. One billion users sending 100 messages per day with 500 bytes per message would accumulate about 50 terabytes per month in storage. In terms of throughput, we'd be looking at about one million messages per second. One million messages per second takes us out of the Postgres territory, or single write architecture, so we already need to look beyond that database. We're going to want a database that will allow multiple servers to accept writes.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:54:01-04:00"
+      "create_time": "2026-03-31T18:54:01-04:00"
     },
     {
       "id": "152",
@@ -142,9 +116,7 @@
       "seq": 13,
       "role": "interviewer",
       "content": "You said one million writes per second takes you out of Postgres territory. What specific bottleneck are you hitting there, and why does that lead you toward distributed writes?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:54:03-04:00"
+      "create_time": "2026-03-31T18:54:03-04:00"
     },
     {
       "id": "153",
@@ -152,9 +124,7 @@
       "seq": 14,
       "role": "candidate",
       "content": "So, Postgres will suffer from many problems which will combine and compound. So the first one is simply committing to the write-ahead log. Postgres allows you to write to a single server. You can have one server that accepts writes and many read replicas. But since you're limited to scaling one machine, you're going to hit these issues. First, writing to the write-ahead log. There are locks on the write-ahead log and you need to share across many cores on your Postgres instance access to the write-ahead log. You're going to hit lock contention issues trying to do that. Second, you're going to run into problems with connections. Postgres creates a process for every client connection. So you're going to need pgBouncer to mitigate that with connection pooling. But even that at a certain point is going to be a challenge based on the number of API servers connecting to Postgres to issue writes. Actually, I take that back. At a million writes per second and 50,000 concurrent clients on API tier, that's 23 API servers. You'd have 23 API servers connecting to Postgres. So connections won't be the bottleneck there. But you will have write amplification from the inserts on Postgres. If you have indices on your messages table, you're going to have to update multiple structures, B-tree indexes, for example, for the columns that are indexed. You're probably going to want to index on the user who sent the message. You're probably going to want to index on the recipient of the message or the group, at least. And then you've got your primary key. Second, you've got 50 terabytes of storage per month in messages alone. Postgres has maximum table sizes. You're going to hit that. I need to double-check what the maximum table size is, but that's going to be something we need to look at.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:57:55-04:00"
+      "create_time": "2026-03-31T18:57:55-04:00"
     },
     {
       "id": "154",
@@ -162,9 +132,7 @@
       "seq": 15,
       "role": "interviewer",
       "content": "You've identified several Postgres bottlenecks. Given those constraints, what distributed database approach are you considering, and why that over alternatives?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T18:57:57-04:00"
+      "create_time": "2026-03-31T18:57:57-04:00"
     },
     {
       "id": "155",
@@ -172,9 +140,7 @@
       "seq": 16,
       "role": "candidate",
       "content": "So, I'm looking for a database that has the architectural property that we can send writes to multiple servers, and they can accept writes without coordination. And we want them to also have storage engines that are optimized for heavy writes. So we're looking at something like LSM tree architectures, storage engines. I wouldn't go to a distributed SQL database necessarily, because accepting writes in a distributed SQL database requires coordination. For example, CockroachDB or Spanner will require a quorum for writes. Well, actually I should double back there. I might be speaking out of my ass on that one. Because if we go with Cassandra, I guess I should have just went up front, we would go with something like Cassandra. Cassandra is good because multiple servers can accept writes. They form a ring, and any server can accept writes. And messages are going to be sharded so that they're partitioned so that the large number of writes can be spread out and accepted in a way that is horizontally scalable. You just add more Cassandra nodes to scale up, and you can scale up horizontally, which is cheap and easy. And if you don't want Cassandra, there's ScillaDB, which will have better properties for operational cost and scalability because of the internal architecture. It's not on the JVM, and it's written in C++, and each core gets its own sharded data. So Cassandra is great. It can accept writes quickly and easily.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:01:05-04:00"
+      "create_time": "2026-03-31T19:01:05-04:00"
     },
     {
       "id": "156",
@@ -182,9 +148,7 @@
       "seq": 17,
       "role": "interviewer",
       "content": "You mentioned sharding messages in Cassandra. What's your partition key going to be, and how does that affect your query patterns?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:01:07-04:00"
+      "create_time": "2026-03-31T19:01:07-04:00"
     },
     {
       "id": "157",
@@ -192,9 +156,7 @@
       "seq": 18,
       "role": "candidate",
       "content": "So, for DMs, for one-on-one messages, the partition key will be something deterministically hashed from the sender and receiver's IDs, and for group DMs, for group messages, the partition key will be the name of the ID of the group. And we'd also use the time as a clustering key so that messages are sorted by time, and we can query for ranges. In order to avoid issues of partitions growing in an unbounded way, we could make the partition key that hashed ID or the group ID, and also the month, so that we have them split apart by month and they don't grow unbounded. This means that it's easy to query for the messages for a particular pair of users or for a group DM, and we can get a range of messages, which is what we want.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:02:44-04:00"
+      "create_time": "2026-03-31T19:02:44-04:00"
     },
     {
       "id": "158",
@@ -202,9 +164,7 @@
       "seq": 19,
       "role": "interviewer",
       "content": "How does that partitioning strategy affect fetching message history across month boundaries? And what about the write distribution - are you concerned about hot partitions?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:02:47-04:00"
+      "create_time": "2026-03-31T19:02:47-04:00"
     },
     {
       "id": "159",
@@ -212,9 +172,7 @@
       "seq": 20,
       "role": "candidate",
       "content": "For fetching across month boundaries, you've got to fetch both boundaries, so you'll have two reads there for both ranges. I don't think we need to be worried about hot partitions, because we'll use consistent hashing. Cassandra uses consistent hashing, so users and groups are uniformly distributed across partitions. There is no pattern which could cause individual partitions to be excessively hot in this scheme. We do need to think about geographic distribution, but that's another topic.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:04:03-04:00"
+      "create_time": "2026-03-31T19:04:03-04:00"
     },
     {
       "id": "160",
@@ -222,9 +180,7 @@
       "seq": 21,
       "role": "interviewer",
       "content": "Now let's talk about the real-time delivery aspect. You've designed storage for messages, but how are you actually getting messages to recipients in real-time?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:04:06-04:00"
+      "create_time": "2026-03-31T19:04:06-04:00"
     },
     {
       "id": "161",
@@ -232,9 +188,7 @@
       "seq": 22,
       "role": "candidate",
       "content": "Let's say that our app will have WebSocket connections held to a PubSub tier in our back-end, and our PubSub tier handlers will subscribe to topics, and those topics will be from Redis PubSub or from NATS. And we'll have this PubSub layer, which will receive notifications of messages and route them through WebSockets back to clients who are holding connections open.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:05:12-04:00"
+      "create_time": "2026-03-31T19:05:12-04:00"
     },
     {
       "id": "162",
@@ -242,9 +196,7 @@
       "seq": 23,
       "role": "interviewer",
       "content": "You mentioned Redis pub/sub or NATS. Which are you choosing and why? Also, what happens when a user is offline - how do you handle message delivery guarantees?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:05:14-04:00"
+      "create_time": "2026-03-31T19:05:14-04:00"
     },
     {
       "id": "163",
@@ -252,9 +204,7 @@
       "seq": 24,
       "role": "candidate",
       "content": "When a user is offline we simply don't need to deliver the message. When a user comes back online their client will show, will request, will have a timestamp like a watermark of the most recently received message and then we will take that watermark, figure out what they need by calculating their conversations from that watermark up until real-time, up until the current moment. Redis and NATs are best effort. They're not at least once acknowledgement. Well actually I don't know I'm making that up, I don't know, but what we want is a best effort delivery. No that's not true. Maybe what we want is Kafka. Kafka will give us at least once delivery. I guess I'm going to see this in the evaluation, I'm probably not going to get this right, but let's say we have at least once in the PubSub layer. Then the messages will be held for users who are offline and we probably need an expiry where we'll expire the Kafka data after a certain time if it hasn't been picked up by a consumer within say a week. Then when users come back offline from cold they'll need to do a more sophisticated reconciliation process on their chats.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:08:16-04:00"
+      "create_time": "2026-03-31T19:08:16-04:00"
     },
     {
       "id": "164",
@@ -262,9 +212,7 @@
       "seq": 25,
       "role": "interviewer",
       "content": "You mentioned the reconciliation process for offline users coming back. Walk me through that - how does the client determine what messages they've missed, and how does this interact with your Cassandra storage?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:08:18-04:00"
+      "create_time": "2026-03-31T19:08:18-04:00"
     },
     {
       "id": "165",
@@ -272,9 +220,7 @@
       "seq": 26,
       "role": "candidate",
       "content": "So we'll need a separate database for our users and the list of conversations that they have. This source of truth. Now, just another Cassandra table, perhaps, of users partitioned by the partition key being the user and and that partition containing the chats that they have open. So we do a first query to get the user's chat data, or metadata, on what chats they have. And then we'll issue queries on Cassandra for their chats.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:10:21-04:00"
+      "create_time": "2026-03-31T19:10:21-04:00"
     },
     {
       "id": "166",
@@ -282,9 +228,7 @@
       "seq": 27,
       "role": "interviewer",
       "content": "You now have 40% of users in Asia, 30% in Americas, and 30% in Europe. Cross-region latency is 150-300ms. What changes in your design?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:10:23-04:00"
+      "create_time": "2026-03-31T19:10:23-04:00"
     },
     {
       "id": "167",
@@ -292,9 +236,7 @@
       "seq": 28,
       "role": "candidate",
       "content": "So, here we would have Cassandra presence in multiple regions. We would have different key spaces for the different regions so that our Asia data, Asia users are hitting Asia, our EU users are hitting EU. We would have to make a decision about chats that are crossing these boundaries, possibly storing them in both places, but we would make attempts to localize in intelligent ways. We could do data analysis, we could perform data analysis to see where there are users who are interacting within a particular geographic region and target the ones with the highest cost-benefit ratio. So if there's a lot of internal traffic in the EU, EU is a good place to put a presence.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:12:27-04:00"
+      "create_time": "2026-03-31T19:12:27-04:00"
     },
     {
       "id": "168",
@@ -302,9 +244,7 @@
       "seq": 29,
       "role": "interviewer",
       "content": "What about cross-region chats between an Asia user and a Europe user? Where do you store those messages and how do you handle the real-time delivery?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:12:29-04:00"
+      "create_time": "2026-03-31T19:12:29-04:00"
     },
     {
       "id": "169",
@@ -312,9 +252,7 @@
       "seq": 30,
       "role": "candidate",
       "content": "For cross-region chats between an Asia user and a Europe user, we would store those in both locations, potentially. Or, we could have a convention that the chat is stored in the location of the user. Yeah, it would be replicated to both locations.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:13:26-04:00"
+      "create_time": "2026-03-31T19:13:26-04:00"
     },
     {
       "id": "170",
@@ -322,9 +260,7 @@
       "seq": 31,
       "role": "interviewer",
       "content": "We're out of time. Before we wrap up - what's the one thing you'd improve about your design if you had another hour?",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:13:28-04:00"
+      "create_time": "2026-03-31T19:13:28-04:00"
     },
     {
       "id": "171",
@@ -332,9 +268,7 @@
       "seq": 32,
       "role": "candidate",
       "content": "I would, I would find a cleaner story around the PubSub. I would find a cleaner story around cross-region replication or cross-region chats. I would clarify how we're storing the chat metadata about what chats a user has, and I would discuss media handling in the messages.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:14:41-04:00"
+      "create_time": "2026-03-31T19:14:41-04:00"
     },
     {
       "id": "172",
@@ -342,9 +276,7 @@
       "seq": 33,
       "role": "interviewer",
       "content": "Thank you for your time today. The interview is complete.",
-      "input_method": null,
-      "audio_url": null,
-      "created_at": "2026-03-31T19:14:42-04:00"
+      "create_time": "2026-03-31T19:14:42-04:00"
     }
   ]
 }
