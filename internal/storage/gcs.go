@@ -74,6 +74,13 @@ func (s *GCSStore) DeletePrefix(ctx context.Context, prefix string) (err error) 
 	return nil
 }
 
+// ForBucket returns a new GCSStore sharing the same client but targeting a
+// different bucket. This avoids constructing multiple clients when the
+// application writes to more than one bucket.
+func (s *GCSStore) ForBucket(bucket string) *GCSStore {
+	return &GCSStore{client: s.client, bucket: bucket}
+}
+
 // Close closes the underlying GCS client.
 func (s *GCSStore) Close() error {
 	return s.client.Close()

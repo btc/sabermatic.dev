@@ -30,10 +30,12 @@ func (w *SweepMissingImagesWorker) Timeout(job *river.Job[SweepMissingImagesArgs
 	return 1 * time.Minute
 }
 
+const sweepBatchSize = 50
+
 func (w *SweepMissingImagesWorker) Work(ctx context.Context, job *river.Job[SweepMissingImagesArgs]) error {
 	q := db.New(w.Pool)
 
-	ids, err := q.ListQuestionsWithoutImages(ctx, 50)
+	ids, err := q.ListQuestionsWithoutImages(ctx, sweepBatchSize)
 	if err != nil {
 		return fmt.Errorf("list questions without images: %w", err)
 	}

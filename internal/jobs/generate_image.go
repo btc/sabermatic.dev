@@ -21,7 +21,6 @@ import (
 )
 
 // geminiImageCostUSD is the estimated cost per Gemini native image generation call.
-// Based on Vertex AI pricing for gemini-2.0-flash-preview-image-generation.
 const geminiImageCostUSD = 0.067
 
 // GenerateQuestionImageArgs are the arguments for the image generation job.
@@ -45,11 +44,11 @@ func GenerateQuestionImageInsertOpts() *river.InsertOpts {
 // GenerateQuestionImageWorker generates a cubist illustration for a question.
 type GenerateQuestionImageWorker struct {
 	river.WorkerDefaults[GenerateQuestionImageArgs]
-	Pool        *pgxpool.Pool
-	LLM         *ai.Client
-	Gemini      *ai.GeminiClient
-	PublicStore storage.ObjectStore
-	Cfg         *config.Config
+	Pool   *pgxpool.Pool
+	LLM    *ai.Client
+	Gemini *ai.GeminiClient
+	Store  storage.ObjectStore
+	Cfg    *config.Config
 }
 
 func (w *GenerateQuestionImageWorker) Timeout(job *river.Job[GenerateQuestionImageArgs]) time.Duration {
@@ -73,62 +72,42 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return nil
 	}
 
-	// 3. Build meta-prompt for topic fragment generation.
+	// 3. Call Sonnet to generate topic-specific prompt fragment.
+	//    Uses Call (not CallAndLog) — no transaction needed. We log everything
+	//    together in the final transaction below.
 	meta := imagegen.MetaPrompt(question.Title)
-
-	// 4. Call Sonnet to generate topic-specific prompt fragment.
-	// For seed questions (user_id IS NULL), pass uuid.Nil — the column is nullable.
-	userID := uuid.Nil
-	if question.UserID.Valid {
-		userID = question.UserID.Bytes
-	}
-
-	// Use a short-lived transaction for the Sonnet call logging only.
-	sonnetTx, err := w.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin sonnet tx: %w", err)
-	}
-	topicFragment, err := w.LLM.CallAndLog(ctx, sonnetTx, ai.CallParams{
+	sonnetResult, err := w.LLM.Call(ctx, ai.CallParams{
 		Model:     w.Cfg.LLM.ImagePromptModel,
 		System:    meta.System,
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(meta.User))},
 		MaxTokens: w.Cfg.LLM.ImagePromptMaxTokens,
-		UserID:    userID,
-		Role:      "image_prompt_generator",
-		SessionID: uuid.Nil,
 	})
 	if err != nil {
-		_ = sonnetTx.Rollback(ctx)
 		return fmt.Errorf("call image prompt LLM: %w", err)
 	}
-	if err := sonnetTx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit sonnet tx: %w", err)
-	}
 
-	// 5. Assemble full image prompt.
-	fullPrompt := imagegen.AssemblePrompt(topicFragment)
+	// 4. Assemble full image prompt.
+	fullPrompt := imagegen.AssemblePrompt(sonnetResult.Text)
 
-	// 6. Generate image via Gemini.
-	// NOTE: Token counts could be extracted from result.UsageMetadata in a
-	// future improvement. The current GenerateImage API returns only bytes.
-	start := time.Now()
+	// 5. Generate image via Gemini.
+	geminiStart := time.Now()
 	imageBytes, mimeType, err := w.Gemini.GenerateImage(ctx, fullPrompt)
-	geminiLatency := time.Since(start)
+	geminiLatency := time.Since(geminiStart)
 	if err != nil {
 		return fmt.Errorf("gemini generate image: %w", err)
 	}
 
-	// 7. Upload to public storage.
+	// 6. Upload to public bucket. ForBucket reuses the existing GCS client.
+	publicStore := w.Store.(*storage.GCSStore).ForBucket(w.Cfg.Storage.PublicBucket)
 	key := "questions/" + questionID.String() + "/card.png"
-	_, err = w.PublicStore.Put(ctx, key, imageBytes, mimeType)
+	_, err = publicStore.Put(ctx, key, imageBytes, mimeType)
 	if err != nil {
 		return fmt.Errorf("upload image: %w", err)
 	}
 
-	// 8. Construct public URL.
 	imageURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", w.Cfg.Storage.PublicBucket, key)
 
-	// 9. Open transaction only for the final DB writes.
+	// 7. Single transaction: update image URL + log both LLM calls.
 	tx, err := w.Pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -144,22 +123,39 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return fmt.Errorf("set question image url: %w", err)
 	}
 
-	// Log the Gemini LLM call.
-	promptJSON, err := json.Marshal(map[string]string{"prompt": fullPrompt})
-	if err != nil {
-		return fmt.Errorf("marshal gemini prompt: %w", err)
-	}
-	responseJSON, err := json.Marshal(map[string]string{
-		"image_url": imageURL,
-		"mime_type": mimeType,
+	// Log Sonnet call.
+	sonnetPromptJSON, _ := json.Marshal(map[string]string{"system": meta.System, "user": meta.User})
+	sonnetRespJSON, _ := json.Marshal(map[string]string{"text": sonnetResult.Text})
+
+	sonnetCost := ai.EstimateCost(w.Cfg.LLM.ImagePromptModel, sonnetResult.InputTokens, sonnetResult.OutputTokens)
+	sonnetCallID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
+		SessionID:     pgtype.UUID{},
+		UserID:        question.UserID,
+		Role:          "image_prompt_generator",
+		Model:         w.Cfg.LLM.ImagePromptModel,
+		InputTokens:   int32(sonnetResult.InputTokens),
+		OutputTokens:  int32(sonnetResult.OutputTokens),
+		EstimatedCost: ai.NumericFromFloat(sonnetCost),
+		LatencyMs:     int32(sonnetResult.Latency.Milliseconds()),
 	})
 	if err != nil {
-		return fmt.Errorf("marshal gemini response: %w", err)
+		return fmt.Errorf("insert sonnet llm_call: %w", err)
+	}
+	if err := txq.InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
+		LlmCallID: sonnetCallID,
+		Prompt:    sonnetPromptJSON,
+		Response:  sonnetRespJSON,
+	}); err != nil {
+		return fmt.Errorf("insert sonnet llm_call_content: %w", err)
 	}
 
-	callID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
+	// Log Gemini call.
+	geminiPromptJSON, _ := json.Marshal(map[string]string{"prompt": fullPrompt})
+	geminiRespJSON, _ := json.Marshal(map[string]string{"image_url": imageURL, "mime_type": mimeType})
+
+	geminiCallID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
 		SessionID:     pgtype.UUID{},
-		UserID:        question.UserID, // pgtype.UUID — null for seed questions
+		UserID:        question.UserID,
 		Role:          "image_generator",
 		Model:         w.Cfg.Gemini.Model,
 		InputTokens:   0,
@@ -170,16 +166,14 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	if err != nil {
 		return fmt.Errorf("insert gemini llm_call: %w", err)
 	}
-
 	if err := txq.InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
-		LlmCallID: callID,
-		Prompt:    promptJSON,
-		Response:  responseJSON,
+		LlmCallID: geminiCallID,
+		Prompt:    geminiPromptJSON,
+		Response:  geminiRespJSON,
 	}); err != nil {
 		return fmt.Errorf("insert gemini llm_call_content: %w", err)
 	}
 
-	// 10. Commit.
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
