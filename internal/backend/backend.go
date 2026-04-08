@@ -61,6 +61,25 @@ func New(cfg *config.Config) (*Backend, error) {
 		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
 	}
 
+	// Public object storage (for question images).
+	var publicStore storage.ObjectStore
+	switch cfg.Storage.Backend {
+	case "gcs":
+		if cfg.Storage.PublicBucket != "" {
+			publicStore, err = storage.NewGCS(context.Background(), cfg.Storage.PublicBucket)
+			if err != nil {
+				return nil, fmt.Errorf("public gcs storage: %w", err)
+			}
+			slog.Info("public storage: gcs", "bucket", cfg.Storage.PublicBucket)
+		}
+	case "local":
+		publicStore, err = storage.NewLocal(cfg.Storage.LocalDir + "/public")
+		if err != nil {
+			return nil, fmt.Errorf("public local storage: %w", err)
+		}
+		slog.Info("public storage: local")
+	}
+
 	// Pool uses background context -- must outlive any request or signal context.
 	poolCfg, err := pgxpool.ParseConfig(cfg.Database.URL)
 	if err != nil {
@@ -98,9 +117,25 @@ func New(cfg *config.Config) (*Backend, error) {
 	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.WhisperModel)
 	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
 
+	// Gemini client for image generation.
+	var geminiClient *ai.GeminiClient
+	if cfg.Otel.GCPProjectID != "" && cfg.Gemini.Model != "" {
+		geminiClient, err = ai.NewGeminiClient(
+			context.Background(),
+			cfg.Otel.GCPProjectID,
+			cfg.Gemini.Location,
+			cfg.Gemini.Model,
+		)
+		if err != nil {
+			slog.Warn("gemini client creation failed, image generation disabled", "error", err)
+		} else {
+			slog.Info("gemini client initialized", "model", cfg.Gemini.Model)
+		}
+	}
+
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
-	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient)
+	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, publicStore)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:      {MaxWorkers: cfg.River.NumDefaultWorkers},
@@ -126,6 +161,13 @@ func New(cfg *config.Config) (*Backend, error) {
 				},
 				nil,
 			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(5*time.Minute),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return jobs.SweepMissingImagesArgs{}, nil
+				},
+				nil,
+			),
 		},
 	})
 	if err != nil {
@@ -134,6 +176,7 @@ func New(cfg *config.Config) (*Backend, error) {
 	}
 	workerRefs.Evaluate.Jobs = riverClient
 	workerRefs.Cleanup.Jobs = riverClient
+	workerRefs.SweepImages.Jobs = riverClient
 	if err := riverClient.Start(context.Background()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start river: %w", err)
