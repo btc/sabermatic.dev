@@ -157,13 +157,13 @@ func TestStreamAndLog_CloseWithTxNil(t *testing.T) {
 }
 
 func TestEstimateCost(t *testing.T) {
-	cost := estimateCost("claude-sonnet-4-20250514", 1000, 500)
+	cost := EstimateCost("claude-sonnet-4-20250514", 1000, 500)
 	// 1000 * 3.0/1M + 500 * 15.0/1M = 0.003 + 0.0075 = 0.0105
 	assert.InDelta(t, 0.0105, cost, 1e-9)
 }
 
 func TestEstimateCost_UnknownModel(t *testing.T) {
-	cost := estimateCost("unknown-model", 1000, 500)
+	cost := EstimateCost("unknown-model", 1000, 500)
 	assert.Equal(t, 0.0, cost)
 }
 

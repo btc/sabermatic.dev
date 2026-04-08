@@ -177,7 +177,7 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 			return toolInput, fmt.Errorf("marshal response: %w", marshalErr)
 		}
 
-		cost := estimateCost(p.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+		cost := EstimateCost(p.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens)
 		sessionID := pgtype.UUID{}
 		if p.SessionID != uuid.Nil {
 			sessionID = pgtype.UUID{Bytes: p.SessionID, Valid: true}
@@ -217,6 +217,58 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 	}
 
 	return toolInput, nil
+}
+
+// CallResult holds the response and usage metadata from a blocking LLM call.
+type CallResult struct {
+	Text         string
+	InputTokens  int64
+	OutputTokens int64
+	Latency      time.Duration
+}
+
+// Call makes a blocking Anthropic request without logging. Returns the text
+// response and usage metadata. The caller is responsible for persisting the
+// call if desired — use this for background/system-level work where logging
+// happens in a separate transaction.
+func (c *Client) Call(ctx context.Context, p CallParams) (_ CallResult, err error) {
+	ctx, span := tracer.Start(ctx, "Client.Call")
+	defer func() { drilotel.End(span, err) }()
+
+	maxTokens := p.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = 4096
+	}
+
+	params := anthropic.MessageNewParams{
+		Model:     anthropic.Model(p.Model),
+		MaxTokens: maxTokens,
+		Messages:  p.Messages,
+	}
+	if p.System != "" {
+		params.System = []anthropic.TextBlockParam{{Text: p.System}}
+	}
+
+	start := time.Now()
+	resp, err := c.anthropic.Messages.New(ctx, params)
+	latency := time.Since(start)
+	if err != nil {
+		return CallResult{}, fmt.Errorf("anthropic messages.new: %w", err)
+	}
+
+	var b strings.Builder
+	for _, block := range resp.Content {
+		if block.Type == "text" {
+			b.WriteString(block.Text)
+		}
+	}
+
+	return CallResult{
+		Text:         b.String(),
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+		Latency:      latency,
+	}, nil
 }
 
 // CallAndLog makes a blocking Anthropic request and persists the call within
@@ -404,7 +456,7 @@ type persistParams struct {
 
 // persistCall inserts into llm_calls and llm_call_content.
 func persistCall(ctx context.Context, q *db.Queries, p persistParams) error {
-	cost := estimateCost(p.model, p.inputTokens, p.outputTokens)
+	cost := EstimateCost(p.model, p.inputTokens, p.outputTokens)
 
 	sessionID := pgtype.UUID{}
 	if p.sessionID != uuid.Nil {
@@ -450,8 +502,8 @@ func persistCall(ctx context.Context, q *db.Queries, p persistParams) error {
 	return nil
 }
 
-// estimateCost returns the estimated cost in USD.
-func estimateCost(model string, inputTokens, outputTokens int64) float64 {
+// EstimateCost returns the estimated cost in USD.
+func EstimateCost(model string, inputTokens, outputTokens int64) float64 {
 	p, ok := pricing[model]
 	if !ok {
 		return 0
