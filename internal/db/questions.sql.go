@@ -14,7 +14,7 @@ import (
 )
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url
 FROM questions
 WHERE id = $1
 `
@@ -34,12 +34,13 @@ func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (Question, erro
 		&i.CoachRationale,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ImageUrl,
 	)
 	return i, err
 }
 
 const getQuestionsForUser = `-- name: GetQuestionsForUser :many
-SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at FROM questions
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url FROM questions
 WHERE user_id IS NULL OR user_id = $1
 ORDER BY created_at
 `
@@ -65,6 +66,7 @@ func (q *Queries) GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) (
 			&i.CoachRationale,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ImageUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -108,7 +110,7 @@ func (q *Queries) InsertQuestion(ctx context.Context, arg InsertQuestionParams) 
 }
 
 const listQuestionsForUser = `-- name: ListQuestionsForUser :many
-SELECT id, user_id, title, prompt, difficulty, tags, hints, source, created_at
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, image_url, created_at
 FROM questions
 WHERE (source = 'seed' AND user_id IS NULL) OR user_id = $1
 ORDER BY created_at
@@ -123,6 +125,7 @@ type ListQuestionsForUserRow struct {
 	Tags       []string    `json:"tags"`
 	Hints      pgtype.Text `json:"hints"`
 	Source     string      `json:"source"`
+	ImageUrl   pgtype.Text `json:"image_url"`
 	CreatedAt  time.Time   `json:"created_at"`
 }
 
@@ -144,6 +147,7 @@ func (q *Queries) ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) 
 			&i.Tags,
 			&i.Hints,
 			&i.Source,
+			&i.ImageUrl,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -156,8 +160,34 @@ func (q *Queries) ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) 
 	return items, nil
 }
 
+const listQuestionsWithoutImages = `-- name: ListQuestionsWithoutImages :many
+SELECT id FROM questions
+WHERE image_url IS NULL
+LIMIT $1
+`
+
+func (q *Queries) ListQuestionsWithoutImages(ctx context.Context, limit int32) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listQuestionsWithoutImages, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSeedQuestions = `-- name: ListSeedQuestions :many
-SELECT id, title, prompt, difficulty, tags, hints, source, created_at
+SELECT id, title, prompt, difficulty, tags, hints, source, image_url, created_at
 FROM questions
 WHERE source = 'seed' AND user_id IS NULL
 ORDER BY created_at
@@ -171,6 +201,7 @@ type ListSeedQuestionsRow struct {
 	Tags       []string    `json:"tags"`
 	Hints      pgtype.Text `json:"hints"`
 	Source     string      `json:"source"`
+	ImageUrl   pgtype.Text `json:"image_url"`
 	CreatedAt  time.Time   `json:"created_at"`
 }
 
@@ -191,6 +222,7 @@ func (q *Queries) ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow
 			&i.Tags,
 			&i.Hints,
 			&i.Source,
+			&i.ImageUrl,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -201,4 +233,19 @@ func (q *Queries) ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow
 		return nil, err
 	}
 	return items, nil
+}
+
+const setQuestionImageURL = `-- name: SetQuestionImageURL :exec
+UPDATE questions SET image_url = $2, updated_at = NOW()
+WHERE id = $1
+`
+
+type SetQuestionImageURLParams struct {
+	ID       uuid.UUID   `json:"id"`
+	ImageUrl pgtype.Text `json:"image_url"`
+}
+
+func (q *Queries) SetQuestionImageURL(ctx context.Context, arg SetQuestionImageURLParams) error {
+	_, err := q.db.Exec(ctx, setQuestionImageURL, arg.ID, arg.ImageUrl)
+	return err
 }

@@ -157,6 +157,7 @@ type Question struct {
 	CoachRationale pgtype.Text `json:"coach_rationale"`
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`
+	ImageUrl       pgtype.Text `json:"image_url"`
 }
 
 type User struct {
