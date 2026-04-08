@@ -101,6 +101,11 @@ export declare type Question = Message<"drill.v1.Question"> & {
    * @generated from field: google.protobuf.Timestamp create_time = 9;
    */
   createTime?: Timestamp;
+
+  /**
+   * @generated from field: optional string image_url = 10;
+   */
+  imageUrl?: string;
 };
 
 /**

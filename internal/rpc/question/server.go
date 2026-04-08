@@ -130,6 +130,10 @@ func questionToProto(row db.ListQuestionsForUserRow) *drillv1.Question {
 		q.Hints = &row.Hints.String
 	}
 
+	if row.ImageUrl.Valid {
+		q.ImageUrl = &row.ImageUrl.String
+	}
+
 	return q
 }
 

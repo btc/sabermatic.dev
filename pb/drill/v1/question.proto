@@ -42,4 +42,5 @@ message Question {
   optional string hints = 7;
   QuestionSource source = 8;
   google.protobuf.Timestamp create_time = 9;
+  optional string image_url = 10;
 }
