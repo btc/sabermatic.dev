@@ -5,7 +5,8 @@ import { useSessionDetail } from "./layout";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { EvaluationScores } from "@/api/types";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import type { EvaluationScores } from "@/pb/drill/v1/evaluation_pb";
 
 // ---------------------------------------------------------------------------
 // Score bar
@@ -57,10 +58,10 @@ function ScoreBar({ label, score, large = false }: ScoreBarProps) {
 // Scores section
 // ---------------------------------------------------------------------------
 
-const DIMENSION_LABELS: Record<keyof Omit<EvaluationScores, "overall">, string> = {
+const DIMENSION_LABELS: Record<string, string> = {
   requirements: "Requirements",
   architecture: "Architecture",
-  deep_dive: "Deep Dive",
+  deepDive: "Deep Dive",
   scalability: "Scalability",
   communication: "Communication",
 };
@@ -80,7 +81,7 @@ function ScoresSection({ scores }: ScoresSectionProps) {
 
       <div className="space-y-3">
         {dimensions.map(([key, label]) => (
-          <ScoreBar key={key} label={label} score={scores[key]} />
+          <ScoreBar key={key} label={label} score={scores[key as keyof EvaluationScores] as number} />
         ))}
       </div>
 
@@ -137,8 +138,8 @@ function OverviewInner() {
   const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
   const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
 
-  const session = dataSource === "api" ? authSession.data : sampleSession.data?.session;
-  const evaluation = dataSource === "api" ? authEval.data : sampleEval.data;
+  const session = dataSource === "api" ? authSession.data?.session : sampleSession.data?.session;
+  const evaluation = dataSource === "api" ? authEval.data?.evaluation : sampleEval.data?.evaluation;
   const retryEvaluation = useRetryEvaluation(sessionId);
 
   if (!session || !evaluation) {
@@ -157,13 +158,13 @@ function OverviewInner() {
   }
 
   // Evaluation failed state
-  if (session.status === "evaluation_failed") {
+  if (session.status === SessionStatus.EVALUATION_FAILED) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
         <p className="text-sm text-muted-foreground">Evaluation could not be completed.</p>
         <Button
           variant="outline"
-          onClick={() => retryEvaluation.mutate()}
+          onClick={() => retryEvaluation.mutate({ sessionId })}
           disabled={retryEvaluation.isPending}
         >
           {retryEvaluation.isPending ? "Retrying..." : "Retry evaluation"}
@@ -173,7 +174,7 @@ function OverviewInner() {
   }
 
   // Not yet reviewed — nothing to show in this tab
-  if (session.status !== "reviewed") {
+  if (session.status !== SessionStatus.REVIEWED) {
     return null;
   }
 

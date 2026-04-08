@@ -8,6 +8,8 @@ import { useSessionDetail } from "./layout";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GENERATING_MESSAGES } from "@/lib/constants";
+import { EducatorStatus } from "@/pb/drill/v1/educator_pb";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
 
 // ---------------------------------------------------------------------------
 // Heading extraction + slugify
@@ -164,15 +166,15 @@ function DeepDiveInner() {
   const authEducator = useEducator(sessionId, dataSource === "api");
   const sampleEducator = useSampleEducator({ enabled: dataSource === "sample" });
 
-  const educator = dataSource === "api" ? authEducator.data : sampleEducator.data;
+  const educator = dataSource === "api" ? authEducator.data?.analysis : sampleEducator.data?.analysis;
   const isError = dataSource === "api" ? authEducator.isError : sampleEducator.isError;
 
   const requestEducator = useRequestEducator(sessionId);
   // Only fetch user data in authenticated mode — sample visitors are unauthenticated
-  const { data: me } = useMe({ enabled: dataSource === "api" });
+  const meQuery = useMe({ enabled: dataSource === "api" });
 
   const isSample = dataSource === "sample";
-  const isPro = !isSample && me?.plan === "pro";
+  const isPro = !isSample && meQuery.data?.user?.plan === UserPlan.PRO;
 
   // Error state — separate from "not requested"
   if (isError) {
@@ -183,7 +185,7 @@ function DeepDiveInner() {
         </p>
         <Button
           variant="outline"
-          onClick={() => requestEducator.mutate()}
+          onClick={() => requestEducator.mutate({ sessionId })}
           disabled={isSample || requestEducator.isPending}
         >
           {requestEducator.isPending ? "Requesting..." : "Retry"}
@@ -213,7 +215,7 @@ function DeepDiveInner() {
         </p>
         {isPro ? (
           <Button
-            onClick={() => requestEducator.mutate()}
+            onClick={() => requestEducator.mutate({ sessionId })}
             disabled={isSample || requestEducator.isPending}
           >
             {requestEducator.isPending ? "Requesting..." : "Generate"}
@@ -221,7 +223,7 @@ function DeepDiveInner() {
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Button
-              onClick={() => requestEducator.mutate()}
+              onClick={() => requestEducator.mutate({ sessionId })}
               disabled={isSample || requestEducator.isPending}
             >
               {requestEducator.isPending ? "Requesting..." : "Generate"}
@@ -239,12 +241,12 @@ function DeepDiveInner() {
   }
 
   // Generating
-  if (educator.status === "generating") {
+  if (educator.status === EducatorStatus.GENERATING) {
     return <GeneratingView />;
   }
 
   // Failed
-  if (educator.status === "failed") {
+  if (educator.status === EducatorStatus.FAILED) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
         <p className="text-sm text-muted-foreground">
@@ -252,7 +254,7 @@ function DeepDiveInner() {
         </p>
         <Button
           variant="outline"
-          onClick={() => requestEducator.mutate()}
+          onClick={() => requestEducator.mutate({ sessionId })}
           disabled={isSample || requestEducator.isPending}
         >
           {requestEducator.isPending ? "Retrying..." : "Retry"}
@@ -262,7 +264,7 @@ function DeepDiveInner() {
   }
 
   // Completed — render content with sticky TOC
-  const fullContent = [educator.model_answer ?? "", educator.gap_deep_dives ?? ""]
+  const fullContent = [educator.modelAnswer ?? "", educator.gapDeepDives ?? ""]
     .filter(Boolean)
     .join("\n\n");
 
@@ -272,14 +274,14 @@ function DeepDiveInner() {
     <div className="flex gap-10 max-w-5xl">
       <TOC headings={headings} />
       <div className="flex-1 min-w-0 prose-sm">
-        {educator.model_answer && (
+        {educator.modelAnswer && (
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {educator.model_answer}
+            {educator.modelAnswer}
           </ReactMarkdown>
         )}
-        {educator.gap_deep_dives && (
+        {educator.gapDeepDives && (
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {educator.gap_deep_dives}
+            {educator.gapDeepDives}
           </ReactMarkdown>
         )}
       </div>
