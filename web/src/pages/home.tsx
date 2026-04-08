@@ -26,14 +26,13 @@ import {
 } from "@/api/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { scoreColor } from "@/lib/score-utils";
 
@@ -321,54 +320,89 @@ function QuestionFilters({
   );
 }
 
-// QuestionCard
-function QuestionCard({
+// HeroQuestionCard — full-width recommended question
+function HeroQuestionCard({
   question,
-  suggestedId,
   startDisabled,
 }: {
   question: ProtoQuestion;
-  suggestedId: string | null;
   startDisabled: boolean;
 }) {
-  const isRecommended = suggestedId === question.id;
+  const href = startDisabled ? undefined : `/sessions/new?question=${question.id}`;
 
-  const cardContent = (
+  const image = question.imageUrl ? (
+    <img
+      src={question.imageUrl}
+      alt={question.title}
+      className="w-[55%] aspect-[4/3] object-cover rounded-l-[14px] flex-shrink-0"
+    />
+  ) : (
     <div
-      className={`relative flex items-start justify-between gap-4 rounded-lg border px-4 py-3 ${
-        isRecommended ? "border-amber-400/50 bg-amber-50/40 dark:bg-amber-900/10" : "border-border bg-card"
-      } ${startDisabled ? "opacity-60 cursor-pointer" : ""}`}
-      onClick={
-        startDisabled
-          ? () => {
-              document
-                .getElementById("active-session-banner")
-                ?.scrollIntoView({ behavior: "smooth" });
-            }
-          : undefined
-      }
-      {...(startDisabled
-        ? {
-            role: "button",
-            tabIndex: 0,
-            onKeyDown: (e: React.KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") {
-                document.getElementById("active-session-banner")?.scrollIntoView({ behavior: "smooth" });
-              }
-            },
-          }
-        : {})}
-    >
-      {startDisabled && (
-        <div className="absolute inset-0 rounded-lg flex items-center justify-center z-10 bg-card/70 backdrop-blur-sm cursor-pointer">
-          <p className="text-xs text-muted-foreground text-center px-4">
-            Resume or end your active session to start a new one
-          </p>
+      className="w-[55%] aspect-[4/3] rounded-l-[14px] flex-shrink-0"
+      style={{ background: "linear-gradient(135deg, hsl(32 40% 85%), hsl(24 30% 75%))" }}
+    />
+  );
+
+  const content = (
+    <div className="flex rounded-[14px] border border-border bg-card overflow-hidden transition-shadow hover:shadow-lg">
+      {image}
+      <div className="flex flex-col justify-center px-7 py-6 flex-1">
+        <span className="text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400 mb-2">
+          Recommended by Coach
+        </span>
+        <span className="text-xl font-bold mb-2">{question.title}</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Badge variant={difficultyVariant(question.difficulty)}>
+            {difficultyLabel(question.difficulty)}
+          </Badge>
+          {question.tags.map((tag) => (
+            <span key={tag} className="text-xs text-muted-foreground">{tag}</span>
+          ))}
         </div>
-      )}
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium">{question.title}</span>
+      </div>
+    </div>
+  );
+
+  if (startDisabled) {
+    return <div className="opacity-60 cursor-not-allowed col-span-full">{content}</div>;
+  }
+
+  return (
+    <Link to={href!} className="no-underline text-inherit col-span-full">
+      {content}
+    </Link>
+  );
+}
+
+// QuestionCard — borderless image grid card
+function QuestionCard({
+  question,
+  startDisabled,
+}: {
+  question: ProtoQuestion;
+  startDisabled: boolean;
+}) {
+  const href = startDisabled ? undefined : `/sessions/new?question=${question.id}`;
+
+  const image = question.imageUrl ? (
+    <img
+      src={question.imageUrl}
+      alt={question.title}
+      className="w-full aspect-[4/3] object-cover rounded-[14px] transition-transform duration-250 ease-out group-hover:scale-[1.02]"
+    />
+  ) : (
+    <div
+      className="w-full aspect-[4/3] rounded-[14px]"
+      style={{ background: "linear-gradient(135deg, hsl(32 40% 85%), hsl(24 30% 75%))" }}
+    />
+  );
+
+  const content = (
+    <>
+      {image}
+      <div className="pt-2.5 px-0.5 space-y-1">
+        <span className="text-sm font-semibold">{question.title}</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
           <Badge variant={difficultyVariant(question.difficulty)}>
             {difficultyLabel(question.difficulty)}
           </Badge>
@@ -376,62 +410,31 @@ function QuestionCard({
             <Badge variant="outline">Custom</Badge>
           )}
           {question.source === QuestionSource.COACH_GENERATED && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger render={<span />}>
-                  <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-400/50">
-                    Coach
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Generated by coach analysis
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-400/50">
+              Coach
+            </Badge>
           )}
-          {isRecommended && (
-            <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
-              Recommended by coach
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
           {question.tags.map((tag) => (
-            <span key={tag} className="text-xs text-muted-foreground">
-              {tag}
-            </span>
+            <span key={tag} className="text-xs text-muted-foreground">{tag}</span>
           ))}
         </div>
       </div>
-      {startDisabled ? (
-        <Button variant="outline" size="sm" disabled>
-          Start
-        </Button>
-      ) : (
-        <Link
-          to={`/sessions/new?question=${question.id}`}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          Start
-        </Link>
-      )}
-    </div>
+    </>
   );
 
   if (startDisabled) {
     return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger render={<div />} className="w-full text-left">
-            {cardContent}
-          </TooltipTrigger>
-          <TooltipContent>Active session in progress</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <div className="group opacity-60 cursor-not-allowed">
+        {content}
+      </div>
     );
   }
 
-  return cardContent;
+  return (
+    <Link to={href!} className="group no-underline text-inherit">
+      {content}
+    </Link>
+  );
 }
 
 // CreateQuestionDialog
@@ -621,10 +624,10 @@ export default function Home() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-5 w-64" />
-        <div className="space-y-2">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-8">
+          <Skeleton className="aspect-[4/3] rounded-[14px]" />
+          <Skeleton className="aspect-[4/3] rounded-[14px]" />
+          <Skeleton className="aspect-[4/3] rounded-[14px]" />
         </div>
       </div>
     );
@@ -671,18 +674,25 @@ export default function Home() {
         />
       )}
 
-      {/* Question list */}
-      <div className="space-y-2">
-        {sorted.map((q) => (
-          <QuestionCard
-            key={q.id}
-            question={q}
-            suggestedId={suggestedId}
+      {/* Question grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-8">
+        {suggestedId && sorted.find((q) => q.id === suggestedId) && (
+          <HeroQuestionCard
+            question={sorted.find((q) => q.id === suggestedId)!}
             startDisabled={atConcurrentLimit}
           />
-        ))}
+        )}
+        {sorted
+          .filter((q) => q.id !== suggestedId)
+          .map((q) => (
+            <QuestionCard
+              key={q.id}
+              question={q}
+              startDisabled={atConcurrentLimit}
+            />
+          ))}
         {sorted.length === 0 && (
-          <p className="text-sm text-muted-foreground py-8 text-center">
+          <p className="text-sm text-muted-foreground py-8 text-center col-span-full">
             No questions match your filters.
           </p>
         )}
