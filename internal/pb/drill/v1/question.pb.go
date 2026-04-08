@@ -238,6 +238,7 @@ type Question struct {
 	Hints         *string                `protobuf:"bytes,7,opt,name=hints,proto3,oneof" json:"hints,omitempty"`
 	Source        QuestionSource         `protobuf:"varint,8,opt,name=source,proto3,enum=drill.v1.QuestionSource" json:"source,omitempty"`
 	CreateTime    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	ImageUrl      *string                `protobuf:"bytes,10,opt,name=image_url,json=imageUrl,proto3,oneof" json:"image_url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -335,6 +336,13 @@ func (x *Question) GetCreateTime() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Question) GetImageUrl() string {
+	if x != nil && x.ImageUrl != nil {
+		return *x.ImageUrl
+	}
+	return ""
+}
+
 var File_drill_v1_question_proto protoreflect.FileDescriptor
 
 const file_drill_v1_question_proto_rawDesc = "" +
@@ -346,7 +354,7 @@ const file_drill_v1_question_proto_rawDesc = "" +
 	"page_token\x18\x02 \x01(\tR\tpageToken\"q\n" +
 	"\x15ListQuestionsResponse\x120\n" +
 	"\tquestions\x18\x01 \x03(\v2\x12.drill.v1.QuestionR\tquestions\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xd0\x02\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x80\x03\n" +
 	"\bQuestion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n" +
 	"\auser_id\x18\x02 \x01(\tH\x00R\x06userId\x88\x01\x01\x12\x14\n" +
@@ -359,10 +367,14 @@ const file_drill_v1_question_proto_rawDesc = "" +
 	"\x05hints\x18\a \x01(\tH\x01R\x05hints\x88\x01\x01\x120\n" +
 	"\x06source\x18\b \x01(\x0e2\x18.drill.v1.QuestionSourceR\x06source\x12;\n" +
 	"\vcreate_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"createTimeB\n" +
+	"createTime\x12 \n" +
+	"\timage_url\x18\n" +
+	" \x01(\tH\x02R\bimageUrl\x88\x01\x01B\n" +
 	"\n" +
 	"\b_user_idB\b\n" +
-	"\x06_hints*T\n" +
+	"\x06_hintsB\f\n" +
+	"\n" +
+	"_image_url*T\n" +
 	"\n" +
 	"Difficulty\x12\x1a\n" +
 	"\x16DIFFICULTY_UNSPECIFIED\x10\x00\x12\x15\n" +
