@@ -20,6 +20,7 @@ import (
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
+	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/storage"
 )
 
@@ -38,6 +39,10 @@ type Backend struct {
 	stt   ai.Transcriber
 	tts   ai.Synthesizer
 	store storage.ObjectStore
+
+	// SampleService holds pre-parsed sample data for the public sample
+	// endpoints. Exported because the RPC layer reads it directly.
+	SampleService *samplesvc.SampleService
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
@@ -140,14 +145,21 @@ func New(cfg *config.Config) (*Backend, error) {
 	}
 	slog.Info("river started")
 
+	ss, err := samplesvc.NewSampleService()
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("create sample service: %w", err)
+	}
+
 	return &Backend{
-		pool:  pool,
-		jobs:  riverClient,
-		cfg:   cfg,
-		llm:   llmClient,
-		stt:   stt,
-		tts:   tts,
-		store: store,
+		pool:          pool,
+		jobs:          riverClient,
+		cfg:           cfg,
+		llm:           llmClient,
+		stt:           stt,
+		tts:           tts,
+		store:         store,
+		SampleService: ss,
 	}, nil
 }
 

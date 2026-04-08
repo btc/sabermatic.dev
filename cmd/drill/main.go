@@ -20,7 +20,6 @@ import (
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/migrate"
-	samplesvc "github.com/btc/drill/internal/rpc/sample"
 )
 
 func main() {
@@ -78,16 +77,10 @@ func runWithContext(ctx context.Context) error {
 	}
 	defer b.Close()
 
-	ss, err := samplesvc.NewSampleService()
-	if err != nil {
-		return fmt.Errorf("create sample service: %w", err)
-	}
-
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
-	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
-	h, err := handler.NewHandler(b, ss, drill.WebFS, cfg.Auth.BaseURL, csrfKey, cfg.Auth.SecureCookies())
+	h, err := handler.NewHandler(b, drill.WebFS, cfg)
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
 	}

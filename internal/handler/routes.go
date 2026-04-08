@@ -13,18 +13,23 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/rpc"
-	samplesvc "github.com/btc/drill/internal/rpc/sample"
 )
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
-func NewHandler(b *backend.Backend, ss *samplesvc.SampleService, spaFS embed.FS, baseURL string, csrfKey []byte, secureCookies bool) (http.Handler, error) {
+func NewHandler(b *backend.Backend, spaFS embed.FS, cfg *config.Config) (http.Handler, error) {
 	mux := http.NewServeMux()
-	if err := RegisterRoutes(mux, b, ss); err != nil {
+	if err := RegisterRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
+
+	baseURL := cfg.Auth.BaseURL
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	secureCookies := cfg.Auth.SecureCookies()
+
 	mux.Handle("/", SPAHandler(spaFS, baseURL))
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
@@ -49,8 +54,8 @@ func NewHandler(b *backend.Backend, ss *samplesvc.SampleService, spaFS embed.FS,
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
-func RegisterRoutes(mux *http.ServeMux, b *backend.Backend, ss *samplesvc.SampleService) error {
-	if err := rpc.Register(mux, b, ss); err != nil {
+func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
+	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
 	}
 

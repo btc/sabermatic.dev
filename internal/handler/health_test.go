@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/btc/drill/internal/handler"
-	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,10 +14,8 @@ func TestHealthCheck_Healthy(t *testing.T) {
 	t.Parallel()
 
 	b := pg.NewBackend(t)
-	ss, err := samplesvc.NewSampleService()
-	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b, ss))
+	require.NoError(t, handler.RegisterRoutes(mux, b))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
@@ -27,7 +24,7 @@ func TestHealthCheck_Healthy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var body map[string]any
-	err = json.Unmarshal(w.Body.Bytes(), &body)
+	err := json.Unmarshal(w.Body.Bytes(), &body)
 	require.NoError(t, err)
 	require.Equal(t, "ok", body["status"])
 	require.Equal(t, true, body["db"])
