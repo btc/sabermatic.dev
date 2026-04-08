@@ -177,6 +177,7 @@ func New(cfg *config.Config) (*Backend, error) {
 	workerRefs.Evaluate.Jobs = riverClient
 	workerRefs.Cleanup.Jobs = riverClient
 	workerRefs.SweepImages.Jobs = riverClient
+	workerRefs.Coach.Jobs = riverClient
 	if err := riverClient.Start(context.Background()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start river: %w", err)

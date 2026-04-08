@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
@@ -42,6 +43,7 @@ type RunCoachAnalysisWorker struct {
 	Pool *pgxpool.Pool
 	LLM  *ai.Client
 	Cfg  *config.LLM
+	Jobs *river.Client[pgx.Tx] // set after river.NewClient returns
 }
 
 func (w *RunCoachAnalysisWorker) Timeout(job *river.Job[RunCoachAnalysisArgs]) time.Duration {
@@ -137,6 +139,14 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 			return fmt.Errorf("insert coach-generated question: %w", err)
 		}
 		suggestedQuestionID = pgtype.UUID{Bytes: qID, Valid: true}
+
+		// Enqueue image generation for the new question.
+		_, err = w.Jobs.InsertTx(ctx, tx, GenerateQuestionImageArgs{
+			QuestionID: qID,
+		}, GenerateQuestionImageInsertOpts())
+		if err != nil {
+			return fmt.Errorf("enqueue image generation for coach question: %w", err)
+		}
 	}
 
 	// 10. Insert coach analysis.
