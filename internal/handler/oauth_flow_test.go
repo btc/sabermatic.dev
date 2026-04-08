@@ -15,6 +15,7 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/handler"
+	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -53,7 +54,9 @@ func setupGothForTest(t *testing.T, user goth.User) {
 func TestOAuthStart_UnknownProvider(t *testing.T) {
 	b := pg.NewBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	ss, err := samplesvc.NewSampleService()
+	require.NoError(t, err)
+	require.NoError(t, handler.RegisterRoutes(mux, b, ss))
 
 	// No providers registered → any provider returns 404.
 	goth.ClearProviders()
@@ -77,7 +80,9 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	b := testutil.NewBackend(t, cfg)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	ss, err := samplesvc.NewSampleService()
+	require.NoError(t, err)
+	require.NoError(t, handler.RegisterRoutes(mux, b, ss))
 
 	setupGothForTest(t, goth.User{
 		Provider: "faux",
@@ -115,7 +120,9 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 	b := testutil.NewBackend(t, cfg)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	ss, err := samplesvc.NewSampleService()
+	require.NoError(t, err)
+	require.NoError(t, handler.RegisterRoutes(mux, b, ss))
 
 	oauthUser := goth.User{
 		Provider: "faux",
@@ -158,7 +165,9 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 	b := testutil.NewBackend(t, cfg)
 
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	ss, err := samplesvc.NewSampleService()
+	require.NoError(t, err)
+	require.NoError(t, handler.RegisterRoutes(mux, b, ss))
 
 	// GitHub sometimes has empty Name but non-empty NickName.
 	setupGothForTest(t, goth.User{
@@ -185,7 +194,9 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 func TestOAuthCallback_UnknownProvider(t *testing.T) {
 	b := pg.NewBackend(t)
 	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	ss, err := samplesvc.NewSampleService()
+	require.NoError(t, err)
+	require.NoError(t, handler.RegisterRoutes(mux, b, ss))
 
 	goth.ClearProviders()
 	t.Cleanup(goth.ClearProviders)

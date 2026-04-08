@@ -16,6 +16,7 @@ import (
 	"github.com/btc/drill/internal/rpc/evaluation"
 	interviewsvc "github.com/btc/drill/internal/rpc/interview"
 	"github.com/btc/drill/internal/rpc/question"
+	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/rpc/session"
 	"github.com/btc/drill/internal/rpc/user"
 )
@@ -31,13 +32,14 @@ func ConnectPathPrefixes() []string {
 		drillv1connect.CoachServiceName,
 		drillv1connect.EvaluationServiceName,
 		drillv1connect.InterviewServiceName,
+		drillv1connect.SampleServiceName,
 		drillv1connect.SessionServiceName,
 		drillv1connect.UserServiceName,
 	}
 }
 
 // Register mounts all ConnectRPC services on the given mux.
-func Register(mux *http.ServeMux, b *backend.Backend) error {
+func Register(mux *http.ServeMux, b *backend.Backend, ss *samplesvc.SampleService) error {
 	otelInterceptor, err := otelconnect.NewInterceptor()
 	if err != nil {
 		return fmt.Errorf("otelconnect: %w", err)
@@ -51,6 +53,7 @@ func Register(mux *http.ServeMux, b *backend.Backend) error {
 	// Public endpoints (no auth interceptor).
 	publicOpts := connect.WithInterceptors(otelInterceptor)
 	mux.Handle(drillv1connect.NewAuthServiceHandler(authsvc.NewServer(b), publicOpts))
+	mux.Handle(drillv1connect.NewSampleServiceHandler(samplesvc.NewServer(ss), publicOpts))
 
 	mux.Handle(drillv1connect.NewBillingServiceHandler(billing.NewServer(b), opts))
 	mux.Handle(drillv1connect.NewEducatorServiceHandler(educator.NewServer(b), opts))
