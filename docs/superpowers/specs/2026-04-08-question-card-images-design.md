@@ -91,6 +91,23 @@ ALTER TABLE questions ADD COLUMN image_url TEXT;
 
 Single nullable column. No default — questions without images have `NULL`.
 
+### sqlc Queries
+
+Add to `sql/queries/questions.sql`:
+
+```sql
+-- name: ListQuestionsWithoutImages :many
+SELECT id FROM questions
+WHERE image_url IS NULL
+LIMIT $1;
+
+-- name: SetQuestionImageURL :exec
+UPDATE questions SET image_url = $2, updated_at = NOW()
+WHERE id = $1;
+```
+
+Existing queries (`ListQuestionsForUser`, `GetQuestion`, `GetQuestionsForUser`, `ListSeedQuestions`) must be updated to include `image_url` in their SELECT column lists.
+
 ### Proto
 
 ```protobuf
@@ -120,20 +137,25 @@ message Question {
 - **Queue:** `QueueAI`
 - **Unique constraint:** keyed on question ID (prevents duplicate generation)
 - **Max attempts:** 3
+- **Transactional:** The final write (image URL update + LLM call log) executes in a single database transaction. If any part fails, nothing is committed. The external side effects (Sonnet call, Nano Banana call, GCS upload) are idempotent — on retry, the job checks `image_url IS NOT NULL` and skips if already set.
 
 **Steps:**
 
-1. Load question from DB by ID.
+1. Load question via `GetQuestion` sqlc query.
 2. If `image_url` is already set, return success (idempotent).
-3. Call Claude Sonnet with the meta-prompt + question title → get topic fragment.
+3. Call Claude Sonnet via `ai.Client` with the meta-prompt + question title → get topic fragment. (Sonnet call is auto-logged by `ai.Client`.)
 4. Assemble full image prompt: prefix + topic fragment + suffix.
 5. Call `gemini-3.1-flash-image-preview` via `GenerateContent` with:
    - `response_modalities: ["IMAGE"]`
    - `aspect_ratio: "4:3"`
    - `image_size: "1K"`
 6. Extract image bytes from `InlineData` response part.
-7. Upload to GCS via `ObjectStore.Put()` with key `questions/{question_id}/card.png`, content type `image/png`.
-8. Update question row: `SET image_url = <returned_url>, updated_at = NOW()`.
+7. Upload to public GCS bucket via `ObjectStore.Put()` with key `questions/{question_id}/card.png`, content type `image/png`.
+8. **In a single transaction:**
+   - `SetQuestionImageURL` — update question row with the HTTPS URL.
+   - `InsertLLMCall` + `InsertLLMCallContent` — log the Nano Banana call (model, tokens, cost, latency, prompt, image URL as response).
+
+If step 8 fails, the GCS object is orphaned but harmless — the next retry will overwrite it and try the transaction again.
 
 ### Job B — `SweepMissingImagesWorker`
 
@@ -142,12 +164,12 @@ message Question {
 
 **Steps:**
 
-1. `SELECT id FROM questions WHERE image_url IS NULL LIMIT 50`.
+1. `ListQuestionsWithoutImages` sqlc query (limit 50).
 2. For each, enqueue Job A with unique constraint (duplicates are no-ops).
 
 ### Transactional Enqueue
 
-When `CreateQuestion` RPC inserts a new question, Job A is enqueued in the same database transaction. This gives immediate image generation for new questions. Job B serves as the safety net for seeds, failed jobs, and any missed enqueues.
+When `CreateQuestion` RPC inserts a new question, Job A is enqueued in the same database transaction (River's transactional enqueue). This gives immediate image generation for new questions. Job B serves as the safety net for seeds, failed jobs, and any missed enqueues.
 
 ## Dependencies
 
