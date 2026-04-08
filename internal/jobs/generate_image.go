@@ -20,6 +20,10 @@ import (
 	"github.com/btc/drill/internal/storage"
 )
 
+// geminiImageCostUSD is the estimated cost per Gemini native image generation call.
+// Based on Vertex AI pricing for gemini-2.0-flash-preview-image-generation.
+const geminiImageCostUSD = 0.067
+
 // GenerateQuestionImageArgs are the arguments for the image generation job.
 type GenerateQuestionImageArgs struct {
 	QuestionID uuid.UUID `json:"question_id" river:"unique"`
@@ -72,21 +76,19 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	// 3. Build meta-prompt for topic fragment generation.
 	meta := imagegen.MetaPrompt(question.Title)
 
-	// 4. Begin transaction.
-	tx, err := w.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	// 5. Call Sonnet to generate topic-specific prompt fragment.
-	// For seed questions (user_id IS NULL), use uuid.Nil.
+	// 4. Call Sonnet to generate topic-specific prompt fragment.
+	// For seed questions (user_id IS NULL), pass uuid.Nil — the column is nullable.
 	userID := uuid.Nil
 	if question.UserID.Valid {
 		userID = question.UserID.Bytes
 	}
 
-	topicFragment, err := w.LLM.CallAndLog(ctx, tx, ai.CallParams{
+	// Use a short-lived transaction for the Sonnet call logging only.
+	sonnetTx, err := w.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin sonnet tx: %w", err)
+	}
+	topicFragment, err := w.LLM.CallAndLog(ctx, sonnetTx, ai.CallParams{
 		Model:     w.Cfg.LLM.ImagePromptModel,
 		System:    meta.System,
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(meta.User))},
@@ -96,13 +98,19 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		SessionID: uuid.Nil,
 	})
 	if err != nil {
+		_ = sonnetTx.Rollback(ctx)
 		return fmt.Errorf("call image prompt LLM: %w", err)
 	}
+	if err := sonnetTx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit sonnet tx: %w", err)
+	}
 
-	// 6. Assemble full image prompt.
+	// 5. Assemble full image prompt.
 	fullPrompt := imagegen.AssemblePrompt(topicFragment)
 
-	// 7. Generate image via Gemini.
+	// 6. Generate image via Gemini.
+	// NOTE: Token counts could be extracted from result.UsageMetadata in a
+	// future improvement. The current GenerateImage API returns only bytes.
 	start := time.Now()
 	imageBytes, mimeType, err := w.Gemini.GenerateImage(ctx, fullPrompt)
 	geminiLatency := time.Since(start)
@@ -110,17 +118,23 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return fmt.Errorf("gemini generate image: %w", err)
 	}
 
-	// 8. Upload to public storage.
+	// 7. Upload to public storage.
 	key := "questions/" + questionID.String() + "/card.png"
 	_, err = w.PublicStore.Put(ctx, key, imageBytes, mimeType)
 	if err != nil {
 		return fmt.Errorf("upload image: %w", err)
 	}
 
-	// 9. Construct public URL.
+	// 8. Construct public URL.
 	imageURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", w.Cfg.Storage.PublicBucket, key)
 
-	// 10. In the same transaction: update question image_url + log Gemini call.
+	// 9. Open transaction only for the final DB writes.
+	tx, err := w.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	txq := db.New(tx)
 
 	if err := txq.SetQuestionImageURL(ctx, db.SetQuestionImageURLParams{
@@ -145,12 +159,12 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 
 	callID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
 		SessionID:     pgtype.UUID{},
-		UserID:        userID,
+		UserID:        question.UserID, // pgtype.UUID — null for seed questions
 		Role:          "image_generator",
 		Model:         w.Cfg.Gemini.Model,
 		InputTokens:   0,
 		OutputTokens:  0,
-		EstimatedCost: ai.NumericFromFloat(0.067),
+		EstimatedCost: ai.NumericFromFloat(geminiImageCostUSD),
 		LatencyMs:     int32(geminiLatency.Milliseconds()),
 	})
 	if err != nil {
@@ -165,7 +179,7 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return fmt.Errorf("insert gemini llm_call_content: %w", err)
 	}
 
-	// 11. Commit.
+	// 10. Commit.
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

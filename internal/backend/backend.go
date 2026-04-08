@@ -31,13 +31,14 @@ var tracer = drilotel.Tracer("backend")
 // The fields below are intentionally unexported. Do not add accessor methods
 // that expose them -- consumers should call Backend methods instead.
 type Backend struct {
-	pool  *pgxpool.Pool
-	jobs  Jobs
-	cfg   *config.Config
-	llm   *ai.Client
-	stt   ai.Transcriber
-	tts   ai.Synthesizer
-	store storage.ObjectStore
+	pool        *pgxpool.Pool
+	jobs        Jobs
+	cfg         *config.Config
+	llm         *ai.Client
+	stt         ai.Transcriber
+	tts         ai.Synthesizer
+	store       storage.ObjectStore
+	publicStore storage.ObjectStore
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
@@ -185,13 +186,14 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	return &Backend{
-		pool:  pool,
-		jobs:  riverClient,
-		cfg:   cfg,
-		llm:   llmClient,
-		stt:   stt,
-		tts:   tts,
-		store: store,
+		pool:        pool,
+		jobs:        riverClient,
+		cfg:         cfg,
+		llm:         llmClient,
+		stt:         stt,
+		tts:         tts,
+		store:       store,
+		publicStore: publicStore,
 	}, nil
 }
 
@@ -281,6 +283,12 @@ func (b *Backend) Close() error {
 
 	if err := b.store.Close(); err != nil {
 		slog.Warn("storage close error", "error", err)
+	}
+
+	if b.publicStore != nil {
+		if err := b.publicStore.Close(); err != nil {
+			slog.Warn("public storage close error", "error", err)
+		}
 	}
 
 	b.pool.Close()

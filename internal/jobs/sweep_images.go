@@ -42,6 +42,9 @@ func (w *SweepMissingImagesWorker) Work(ctx context.Context, job *river.Job[Swee
 		return nil
 	}
 
+	// Enqueue individually without a transaction. This is intentional:
+	// the unique constraint on job args prevents duplicates, and any
+	// missed items will be picked up by the next sweep cycle.
 	enqueued := 0
 	for _, id := range ids {
 		_, err := w.Jobs.Insert(ctx, GenerateQuestionImageArgs{

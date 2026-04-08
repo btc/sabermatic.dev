@@ -388,18 +388,20 @@ function QuestionCard({
     <img
       src={question.imageUrl}
       alt={question.title}
-      className="w-full aspect-[4/3] object-cover rounded-[14px] transition-transform duration-250 ease-out group-hover:scale-[1.02]"
+      className="w-full aspect-[4/3] object-cover transition-transform duration-250 ease-out group-hover:scale-[1.02]"
     />
   ) : (
     <div
-      className="w-full aspect-[4/3] rounded-[14px]"
+      className="w-full aspect-[4/3]"
       style={{ background: "linear-gradient(135deg, hsl(32 40% 85%), hsl(24 30% 75%))" }}
     />
   );
 
   const content = (
     <>
-      {image}
+      <div className="overflow-hidden rounded-[14px]">
+        {image}
+      </div>
       <div className="pt-2.5 px-0.5 space-y-1">
         <span className="text-sm font-semibold">{question.title}</span>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -586,16 +588,8 @@ export default function Home() {
     return list;
   }, [questions, difficultyEnum, selectedTags]);
 
-  // Sort: recommended first if coach suggests one
   const suggestedId = coach?.suggestedQuestionId ?? null;
-  const sorted = useMemo(() => {
-    if (!suggestedId) return filtered;
-    return [...filtered].sort((a, b) => {
-      if (a.id === suggestedId) return -1;
-      if (b.id === suggestedId) return 1;
-      return 0;
-    });
-  }, [filtered, suggestedId]);
+  const heroQuestion = suggestedId ? filtered.find((q) => q.id === suggestedId) : undefined;
 
   function setDifficulty(v: string) {
     setSearchParams((prev) => {
@@ -676,13 +670,13 @@ export default function Home() {
 
       {/* Question grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-8">
-        {suggestedId && sorted.find((q) => q.id === suggestedId) && (
+        {heroQuestion && (
           <HeroQuestionCard
-            question={sorted.find((q) => q.id === suggestedId)!}
+            question={heroQuestion}
             startDisabled={atConcurrentLimit}
           />
         )}
-        {sorted
+        {filtered
           .filter((q) => q.id !== suggestedId)
           .map((q) => (
             <QuestionCard
@@ -691,7 +685,7 @@ export default function Home() {
               startDisabled={atConcurrentLimit}
             />
           ))}
-        {sorted.length === 0 && (
+        {filtered.length === 0 && (
           <p className="text-sm text-muted-foreground py-8 text-center col-span-full">
             No questions match your filters.
           </p>

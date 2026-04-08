@@ -182,10 +182,14 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 		if p.SessionID != uuid.Nil {
 			sessionID = pgtype.UUID{Bytes: p.SessionID, Valid: true}
 		}
+		userID := pgtype.UUID{}
+		if p.UserID != uuid.Nil {
+			userID = pgtype.UUID{Bytes: p.UserID, Valid: true}
+		}
 
 		callID, insertErr := db.New(tx).InsertLLMCall(ctx, db.InsertLLMCallParams{
 			SessionID:     sessionID,
-			UserID:        p.UserID,
+			UserID:        userID,
 			Role:          p.Role,
 			Model:         p.Model,
 			InputTokens:   int32(resp.Usage.InputTokens),
@@ -406,10 +410,14 @@ func persistCall(ctx context.Context, q *db.Queries, p persistParams) error {
 	if p.sessionID != uuid.Nil {
 		sessionID = pgtype.UUID{Bytes: p.sessionID, Valid: true}
 	}
+	userID := pgtype.UUID{}
+	if p.userID != uuid.Nil {
+		userID = pgtype.UUID{Bytes: p.userID, Valid: true}
+	}
 
 	callID, err := q.InsertLLMCall(ctx, db.InsertLLMCallParams{
 		SessionID:     sessionID,
-		UserID:        p.userID,
+		UserID:        userID,
 		Role:          p.role,
 		Model:         p.model,
 		InputTokens:   int32(p.inputTokens),
