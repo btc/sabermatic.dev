@@ -23,6 +23,7 @@ type Config struct {
 	Otel     Otel
 	Storage  Storage
 	Stripe   Stripe
+	Gemini   Gemini
 }
 
 type Log struct {
@@ -50,8 +51,10 @@ type LLM struct {
 	EvaluatorMaxTokens int64  `env:"EVALUATOR_MAX_TOKENS,default=4096"`
 	EducatorModel      string `env:"EDUCATOR_MODEL,default=claude-opus-4-20250514"`
 	EducatorMaxTokens  int64  `env:"EDUCATOR_MAX_TOKENS,default=8192"`
-	CoachModel         string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
-	CoachMaxTokens     int64  `env:"COACH_MAX_TOKENS,default=4096"`
+	CoachModel           string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
+	CoachMaxTokens       int64  `env:"COACH_MAX_TOKENS,default=4096"`
+	ImagePromptModel     string `env:"IMAGE_PROMPT_MODEL,default=claude-sonnet-4-20250514"`
+	ImagePromptMaxTokens int64  `env:"IMAGE_PROMPT_MAX_TOKENS,default=1024"`
 }
 
 type Speech struct {
@@ -103,9 +106,10 @@ type Otel struct {
 }
 
 type Storage struct {
-	Backend  string `env:"STORAGE_BACKEND,default=local"`
-	Bucket   string `env:"STORAGE_BUCKET"`
-	LocalDir string `env:"STORAGE_LOCAL_DIR,default=data/audio"`
+	Backend      string `env:"STORAGE_BACKEND,default=local"`
+	Bucket       string `env:"STORAGE_BUCKET"`
+	PublicBucket string `env:"PUBLIC_STORAGE_BUCKET"`
+	LocalDir     string `env:"STORAGE_LOCAL_DIR,default=data/audio"`
 }
 
 type Stripe struct {
@@ -115,6 +119,11 @@ type Stripe struct {
 	Pack120PriceID string `env:"STRIPE_PACK_120_PRICE_ID"`
 	Pack300PriceID string `env:"STRIPE_PACK_300_PRICE_ID"`
 	Pack600PriceID string `env:"STRIPE_PACK_600_PRICE_ID"`
+}
+
+type Gemini struct {
+	Model    string `env:"GEMINI_MODEL,default=gemini-3.1-flash-image-preview"`
+	Location string `env:"GEMINI_LOCATION,default=us-central1"`
 }
 
 // Configured reports whether Stripe credentials are present.
