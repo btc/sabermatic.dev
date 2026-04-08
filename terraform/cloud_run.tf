@@ -94,6 +94,22 @@ resource "google_cloud_run_v2_service" "sabermatic" {
         name  = "STORAGE_BUCKET"
         value = "${var.project_id}-audio"
       }
+      env {
+        name  = "PUBLIC_STORAGE_BUCKET"
+        value = google_storage_bucket.public.name
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "GEMINI_MODEL"
+        value = "gemini-3.1-flash-image-preview"
+      }
+      env {
+        name  = "GEMINI_LOCATION"
+        value = var.region
+      }
 
       # ---- Secret env vars ----
       env {

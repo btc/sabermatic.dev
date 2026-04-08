@@ -45,3 +45,10 @@ resource "google_storage_bucket_iam_member" "app_audio" {
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.sabermatic_app.email}"
 }
+
+# Vertex AI — image generation via Nano Banana 2
+resource "google_project_iam_member" "app_vertex_ai" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.sabermatic_app.email}"
+}
