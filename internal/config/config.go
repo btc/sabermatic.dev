@@ -109,7 +109,7 @@ type Storage struct {
 	Backend      string `env:"STORAGE_BACKEND,default=local"`
 	Bucket       string `env:"STORAGE_BUCKET"`
 	PublicBucket string `env:"PUBLIC_STORAGE_BUCKET"`
-	LocalDir     string `env:"STORAGE_LOCAL_DIR,default=data/audio"`
+	LocalDir     string `env:"STORAGE_LOCAL_DIR,default=data/storage"`
 }
 
 type Stripe struct {
