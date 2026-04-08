@@ -99,20 +99,17 @@ func New(cfg *config.Config) (*Backend, error) {
 	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
 
 	// Gemini client for image generation.
-	var geminiClient *ai.GeminiClient
-	if cfg.Otel.GCPProjectID != "" && cfg.Gemini.Model != "" {
-		geminiClient, err = ai.NewGeminiClient(
-			context.Background(),
-			cfg.Otel.GCPProjectID,
-			cfg.Gemini.Location,
-			cfg.Gemini.Model,
-		)
-		if err != nil {
-			slog.Warn("gemini client creation failed, image generation disabled", "error", err)
-		} else {
-			slog.Info("gemini client initialized", "model", cfg.Gemini.Model)
-		}
+	geminiClient, err := ai.NewGeminiClient(
+		context.Background(),
+		cfg.Otel.GCPProjectID,
+		cfg.Gemini.Location,
+		cfg.Gemini.Model,
+	)
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("gemini client: %w", err)
 	}
+	slog.Info("gemini client initialized", "model", cfg.Gemini.Model)
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
@@ -157,8 +154,8 @@ func New(cfg *config.Config) (*Backend, error) {
 	}
 	workerRefs.Evaluate.Jobs = riverClient
 	workerRefs.Cleanup.Jobs = riverClient
-	workerRefs.SweepImages.Jobs = riverClient
 	workerRefs.Coach.Jobs = riverClient
+	workerRefs.SweepImages.Jobs = riverClient
 	if err := riverClient.Start(context.Background()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start river: %w", err)
