@@ -51,7 +51,7 @@ func runWithContext(ctx context.Context) error {
 	jsonHandler := slog.NewJSONHandler(logWriter, &slog.HandlerOptions{
 		Level: logLevel,
 	})
-	logger := slog.New(drilotel.NewTraceHandler(jsonHandler, cfg.Otel.GCPProjectID))
+	logger := slog.New(drilotel.NewTraceHandler(jsonHandler, cfg.GCP.ProjectID))
 	slog.SetDefault(logger)
 
 	if err := migrate.Run(cfg.Database.URL); err != nil {
