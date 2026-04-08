@@ -203,5 +203,8 @@ func validate(cfg *Config) error {
 	if cfg.Storage.Backend == "gcs" && cfg.Storage.PublicBucket == "" {
 		return fmt.Errorf("PUBLIC_STORAGE_BUCKET is required when STORAGE_BACKEND=gcs")
 	}
+	if cfg.Otel.GCPProjectID == "" {
+		return fmt.Errorf("GOOGLE_CLOUD_PROJECT is required")
+	}
 	return nil
 }

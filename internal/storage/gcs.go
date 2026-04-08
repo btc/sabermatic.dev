@@ -53,7 +53,7 @@ func (b *gcsBucket) Put(ctx context.Context, key string, data []byte, contentTyp
 	if err := w.Close(); err != nil {
 		return "", fmt.Errorf("gcs close writer %s: %w", key, err)
 	}
-	return fmt.Sprintf("gs://%s/%s", b.bucket, key), nil
+	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", b.bucket, key), nil
 }
 
 func (b *gcsBucket) Delete(ctx context.Context, key string) (err error) {

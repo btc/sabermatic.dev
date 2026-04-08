@@ -62,10 +62,6 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	ctx, span := imagegenTracer.Start(ctx, "GenerateQuestionImageWorker.Work")
 	defer func() { drilotel.End(span, err) }()
 
-	if w.Gemini == nil {
-		return fmt.Errorf("image generation not configured (Gemini client is nil)")
-	}
-
 	questionID := job.Args.QuestionID
 	q := db.New(w.Pool)
 
@@ -109,12 +105,10 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 
 	// 6. Upload to public bucket.
 	key := "questions/" + questionID.String() + "/card.png"
-	_, err = w.Store.Public().Put(ctx, key, imageBytes, mimeType)
+	imageURL, err := w.Store.Public().Put(ctx, key, imageBytes, mimeType)
 	if err != nil {
 		return fmt.Errorf("upload image: %w", err)
 	}
-
-	imageURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", w.Cfg.Storage.PublicBucket, key)
 
 	// 7. Single transaction: update image URL + log both LLM calls.
 	tx, err := w.Pool.Begin(ctx)

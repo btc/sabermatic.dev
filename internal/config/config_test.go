@@ -13,6 +13,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -46,6 +47,7 @@ func TestLoadConfig_Override(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 	t.Setenv("SERVER_PORT", "9090")
 	t.Setenv("INTERVIEWER_MODEL", "claude-opus-4-6")
 
@@ -79,6 +81,7 @@ func TestValidate_ShortTokenSecret(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("AUTH_TOKEN_SECRET", "too-short")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 
 	_, err := config.Load()
 	require.Error(t, err)
@@ -88,10 +91,11 @@ func TestValidate_ShortTokenSecret(t *testing.T) {
 func TestValidate_EachRequiredFieldEmpty(t *testing.T) {
 	// Base valid env that passes all validation.
 	base := map[string]string{
-		"DATABASE_URL":      "postgres://localhost:5432/drill",
-		"ANTHROPIC_API_KEY": "sk-ant-test",
-		"OPENAI_API_KEY":    "sk-test",
-		"AUTH_TOKEN_SECRET":  "test-secret-at-least-32-bytes-long",
+		"DATABASE_URL":         "postgres://localhost:5432/drill",
+		"ANTHROPIC_API_KEY":    "sk-ant-test",
+		"OPENAI_API_KEY":       "sk-test",
+		"AUTH_TOKEN_SECRET":    "test-secret-at-least-32-bytes-long",
+		"GOOGLE_CLOUD_PROJECT": "test-project",
 	}
 
 	tests := []struct {
@@ -102,6 +106,7 @@ func TestValidate_EachRequiredFieldEmpty(t *testing.T) {
 		{name: "missing DATABASE_URL", unsetKey: "DATABASE_URL", wantMsg: "DATABASE_URL"},
 		{name: "missing ANTHROPIC_API_KEY", unsetKey: "ANTHROPIC_API_KEY", wantMsg: "ANTHROPIC_API_KEY"},
 		{name: "missing OPENAI_API_KEY", unsetKey: "OPENAI_API_KEY", wantMsg: "OPENAI_API_KEY"},
+		{name: "missing GOOGLE_CLOUD_PROJECT", unsetKey: "GOOGLE_CLOUD_PROJECT", wantMsg: "GOOGLE_CLOUD_PROJECT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
