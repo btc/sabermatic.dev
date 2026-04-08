@@ -168,7 +168,7 @@ func TestEstimateCost_UnknownModel(t *testing.T) {
 }
 
 func TestNumericFromFloat(t *testing.T) {
-	n := numericFromFloat(0.0105)
+	n := NumericFromFloat(0.0105)
 	assert.True(t, n.Valid)
 	assert.Equal(t, int32(-10), n.Exp)
 
@@ -179,7 +179,7 @@ func TestNumericFromFloat(t *testing.T) {
 }
 
 func TestNumericFromFloat_Zero(t *testing.T) {
-	n := numericFromFloat(0)
+	n := NumericFromFloat(0)
 	assert.True(t, n.Valid)
 	assert.Equal(t, int32(-10), n.Exp)
 	assert.Equal(t, 0, big.NewInt(0).Cmp(n.Int))

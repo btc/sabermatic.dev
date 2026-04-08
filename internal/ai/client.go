@@ -190,7 +190,7 @@ func (c *Client) CallToolAndLog(ctx context.Context, tx pgx.Tx, p CallToolParams
 			Model:         p.Model,
 			InputTokens:   int32(resp.Usage.InputTokens),
 			OutputTokens:  int32(resp.Usage.OutputTokens),
-			EstimatedCost: numericFromFloat(cost),
+			EstimatedCost: NumericFromFloat(cost),
 			LatencyMs:     int32(latency.Milliseconds()),
 		})
 		if insertErr != nil {
@@ -414,7 +414,7 @@ func persistCall(ctx context.Context, q *db.Queries, p persistParams) error {
 		Model:         p.model,
 		InputTokens:   int32(p.inputTokens),
 		OutputTokens:  int32(p.outputTokens),
-		EstimatedCost: numericFromFloat(cost),
+		EstimatedCost: NumericFromFloat(cost),
 		LatencyMs:     int32(p.latency.Milliseconds()),
 	})
 	if err != nil {
@@ -451,8 +451,8 @@ func estimateCost(model string, inputTokens, outputTokens int64) float64 {
 	return float64(inputTokens)*p.Input + float64(outputTokens)*p.Output
 }
 
-// numericFromFloat converts a float64 to pgtype.Numeric.
-func numericFromFloat(f float64) pgtype.Numeric {
+// NumericFromFloat converts a float64 to pgtype.Numeric.
+func NumericFromFloat(f float64) pgtype.Numeric {
 	// Use big.Float for precise conversion to big.Int with exponent.
 	// We store with 10 decimal places of precision.
 	const scale = 10
