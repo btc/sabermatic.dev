@@ -120,8 +120,8 @@ message Question {
   repeated string tags = 6;
   optional string hints = 7;
   QuestionSource source = 8;
-  google.protobuf.Timestamp create_time = 10;
-  optional string image_url = 9;
+  google.protobuf.Timestamp create_time = 9;
+  optional string image_url = 10;
 }
 ```
 

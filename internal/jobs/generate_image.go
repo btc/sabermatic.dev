@@ -62,6 +62,10 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	ctx, span := imagegenTracer.Start(ctx, "GenerateQuestionImageWorker.Work")
 	defer func() { drilotel.End(span, err) }()
 
+	if w.Gemini == nil {
+		return fmt.Errorf("image generation not configured (Gemini client is nil)")
+	}
+
 	questionID := job.Args.QuestionID
 	q := db.New(w.Pool)
 

@@ -200,5 +200,8 @@ func validate(cfg *Config) error {
 	if cfg.Storage.Backend == "gcs" && cfg.Storage.Bucket == "" {
 		return fmt.Errorf("STORAGE_BUCKET is required when STORAGE_BACKEND=gcs")
 	}
+	if cfg.Storage.Backend == "gcs" && cfg.Storage.PublicBucket == "" {
+		return fmt.Errorf("PUBLIC_STORAGE_BUCKET is required when STORAGE_BACKEND=gcs")
+	}
 	return nil
 }
