@@ -8,6 +8,11 @@ deps:
 lint:
   use:
     - STANDARD
+  except:
+    # SubmitTurn is server-streaming; TurnEvent is the correct convention for
+    # stream messages. RPC_RESPONSE_STANDARD_NAME enforces *Response suffix
+    # but doesn't account for streaming event types.
+    - RPC_RESPONSE_STANDARD_NAME
 breaking:
   use:
     - FILE

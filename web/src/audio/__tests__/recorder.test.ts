@@ -82,11 +82,11 @@ describe("AudioRecorder", () => {
     expect(recorder.segmentCount).toBe(0);
   });
 
-  it("submit returns base64 and clears segments", async () => {
+  it("submit returns Uint8Array and clears segments", async () => {
     const recorder = new AudioRecorder();
     (recorder as unknown as { segments: Blob[] }).segments = [new Blob(["hello"])];
     const result = await recorder.submit();
-    expect(typeof result).toBe("string");
+    expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBeGreaterThan(0);
     expect(recorder.segmentCount).toBe(0);
   });
