@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	GCP      GCP
 	Server   Server
 	Database Database
 	Log      Log
@@ -26,6 +27,13 @@ type Config struct {
 	Gemini   Gemini
 }
 
+// GCP holds Google Cloud Platform settings shared across subsystems
+// (observability, Vertex AI, etc.). GOOGLE_CLOUD_PROJECT is auto-set
+// by Cloud Run; locally it must be set explicitly.
+type GCP struct {
+	ProjectID string `env:"GOOGLE_CLOUD_PROJECT,required"`
+}
+
 type Log struct {
 	Level string `env:"LOG_LEVEL,default=debug"`
 	File  string `env:"LOG_FILE,default=data/logs/drill.log"`
@@ -37,7 +45,7 @@ type Server struct {
 }
 
 type Database struct {
-	URL         string `env:"DATABASE_URL,required"`
+	URL string `env:"DATABASE_URL,required"`
 	// 80 leaves ~20 connections for superuser, psql, migrations under the
 	// Postgres default of 100 max_connections. Each active session holds a
 	// dedicated connection for its advisory lock, so this caps concurrent sessions.
@@ -45,12 +53,12 @@ type Database struct {
 }
 
 type LLM struct {
-	APIKey             string `env:"ANTHROPIC_API_KEY,required"`
-	InterviewerModel   string `env:"INTERVIEWER_MODEL,default=claude-sonnet-4-20250514"`
-	EvaluatorModel     string `env:"EVALUATOR_MODEL,default=claude-opus-4-20250514"`
-	EvaluatorMaxTokens int64  `env:"EVALUATOR_MAX_TOKENS,default=4096"`
-	EducatorModel      string `env:"EDUCATOR_MODEL,default=claude-opus-4-20250514"`
-	EducatorMaxTokens  int64  `env:"EDUCATOR_MAX_TOKENS,default=8192"`
+	APIKey               string `env:"ANTHROPIC_API_KEY,required"`
+	InterviewerModel     string `env:"INTERVIEWER_MODEL,default=claude-sonnet-4-20250514"`
+	EvaluatorModel       string `env:"EVALUATOR_MODEL,default=claude-opus-4-20250514"`
+	EvaluatorMaxTokens   int64  `env:"EVALUATOR_MAX_TOKENS,default=4096"`
+	EducatorModel        string `env:"EDUCATOR_MODEL,default=claude-opus-4-20250514"`
+	EducatorMaxTokens    int64  `env:"EDUCATOR_MAX_TOKENS,default=8192"`
 	CoachModel           string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
 	CoachMaxTokens       int64  `env:"COACH_MAX_TOKENS,default=4096"`
 	ImagePromptModel     string `env:"IMAGE_PROMPT_MODEL,default=claude-sonnet-4-20250514"`
@@ -74,11 +82,11 @@ type Email struct {
 }
 
 type River struct {
-	ShutdownTimeoutSec   int `env:"RIVER_SHUTDOWN_TIMEOUT_SEC,default=15"`
-	NumDefaultWorkers    int `env:"RIVER_DEFAULT_WORKERS,default=5"`
-	NumNotifyWorkers     int `env:"RIVER_NOTIFY_WORKERS,default=5"`
-	NumAIWorkers         int `env:"RIVER_AI_WORKERS,default=10"`
-	NumMaintWorkers      int `env:"RIVER_MAINT_WORKERS,default=2"`
+	ShutdownTimeoutSec int `env:"RIVER_SHUTDOWN_TIMEOUT_SEC,default=15"`
+	NumDefaultWorkers  int `env:"RIVER_DEFAULT_WORKERS,default=5"`
+	NumNotifyWorkers   int `env:"RIVER_NOTIFY_WORKERS,default=5"`
+	NumAIWorkers       int `env:"RIVER_AI_WORKERS,default=10"`
+	NumMaintWorkers    int `env:"RIVER_MAINT_WORKERS,default=2"`
 }
 
 type Auth struct {
@@ -98,11 +106,10 @@ type OAuth struct {
 }
 
 type Otel struct {
-	Enabled      bool    `env:"OTEL_ENABLED,default=false"`
-	Exporter     string  `env:"OTEL_EXPORTER,default=stdout"`
-	SampleRate   float64 `env:"OTEL_SAMPLE_RATE,default=1.0"`
-	ServiceName  string  `env:"OTEL_SERVICE_NAME,default=drill"`
-	GCPProjectID string  `env:"GOOGLE_CLOUD_PROJECT"`
+	Enabled     bool    `env:"OTEL_ENABLED,default=false"`
+	Exporter    string  `env:"OTEL_EXPORTER,default=stdout"`
+	SampleRate  float64 `env:"OTEL_SAMPLE_RATE,default=1.0"`
+	ServiceName string  `env:"OTEL_SERVICE_NAME,default=drill"`
 }
 
 type Storage struct {
@@ -203,7 +210,7 @@ func validate(cfg *Config) error {
 	if cfg.Storage.Backend == "gcs" && cfg.Storage.PublicBucket == "" {
 		return fmt.Errorf("PUBLIC_STORAGE_BUCKET is required when STORAGE_BACKEND=gcs")
 	}
-	if cfg.Otel.GCPProjectID == "" {
+	if cfg.GCP.ProjectID == "" {
 		return fmt.Errorf("GOOGLE_CLOUD_PROJECT is required")
 	}
 	return nil

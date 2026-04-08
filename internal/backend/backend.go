@@ -61,6 +61,16 @@ func New(cfg *config.Config) (*Backend, error) {
 		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
 	}
 
+	// Gemini client for image generation.
+	geminiClient, err := ai.NewGeminiClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("gemini client: %w", err)
+	}
+	slog.Info("gemini client initialized", "model", cfg.Gemini.Model)
+
+	// NB(btc): if an object doesn't depend on the pool, initialize it
+	// before so we don't need to clean up pool in case of error
+
 	// Pool uses background context -- must outlive any request or signal context.
 	poolCfg, err := pgxpool.ParseConfig(cfg.Database.URL)
 	if err != nil {
@@ -97,19 +107,6 @@ func New(cfg *config.Config) (*Backend, error) {
 	llmClient := ai.NewClient(cfg.LLM.APIKey, pool)
 	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.WhisperModel)
 	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
-
-	// Gemini client for image generation.
-	geminiClient, err := ai.NewGeminiClient(
-		context.Background(),
-		cfg.Otel.GCPProjectID,
-		cfg.Gemini.Location,
-		cfg.Gemini.Model,
-	)
-	if err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("gemini client: %w", err)
-	}
-	slog.Info("gemini client initialized", "model", cfg.Gemini.Model)
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
@@ -163,13 +160,13 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	return &Backend{
-		pool:        pool,
-		jobs:        riverClient,
-		cfg:         cfg,
-		llm:         llmClient,
-		stt:         stt,
-		tts:         tts,
-		store:       store,
+		pool:  pool,
+		jobs:  riverClient,
+		cfg:   cfg,
+		llm:   llmClient,
+		stt:   stt,
+		tts:   tts,
+		store: store,
 	}, nil
 }
 
@@ -260,7 +257,6 @@ func (b *Backend) Close() error {
 	if err := b.store.Close(); err != nil {
 		slog.Warn("storage close error", "error", err)
 	}
-
 
 	b.pool.Close()
 	slog.Info("database pool closed")

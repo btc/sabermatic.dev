@@ -14,11 +14,12 @@ import (
 // required fields, with sensible test defaults.
 func baseEnv(databaseURL string) map[string]string {
 	return map[string]string{
-		"DATABASE_URL":       databaseURL,
-		"ANTHROPIC_API_KEY":  "sk-ant-test",
-		"OPENAI_API_KEY":     "sk-test",
-		"AUTH_TOKEN_SECRET":  "test-secret-at-least-32-bytes-long",
-		"AUTH_BCRYPT_COST":   "4",
+		"DATABASE_URL":          databaseURL,
+		"ANTHROPIC_API_KEY":     "sk-ant-test",
+		"OPENAI_API_KEY":        "sk-test",
+		"AUTH_TOKEN_SECRET":     "test-secret-at-least-32-bytes-long",
+		"AUTH_BCRYPT_COST":      "4",
+		"GOOGLE_CLOUD_PROJECT":  "test-project",
 	}
 }
 

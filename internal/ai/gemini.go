@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
 )
 
@@ -19,16 +20,16 @@ type GeminiClient struct {
 }
 
 // NewGeminiClient creates a GeminiClient using Vertex AI with ADC.
-func NewGeminiClient(ctx context.Context, project, location, model string) (*GeminiClient, error) {
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		Project:  project,
-		Location: location,
+func NewGeminiClient(cfg *config.Config) (*GeminiClient, error) {
+	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+		Project:  cfg.GCP.ProjectID,
+		Location: cfg.Gemini.Location,
 		Backend:  genai.BackendVertexAI,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create gemini client: %w", err)
 	}
-	return &GeminiClient{client: client, model: model}, nil
+	return &GeminiClient{client: client, model: cfg.Gemini.Model}, nil
 }
 
 // GenerateImage generates an image from a text prompt using Gemini's native
