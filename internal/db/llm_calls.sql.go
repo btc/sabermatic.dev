@@ -20,7 +20,7 @@ RETURNING id
 
 type InsertLLMCallParams struct {
 	SessionID     pgtype.UUID    `json:"session_id"`
-	UserID        uuid.UUID      `json:"user_id"`
+	UserID        pgtype.UUID    `json:"user_id"`
 	Role          string         `json:"role"`
 	Model         string         `json:"model"`
 	InputTokens   int32          `json:"input_tokens"`

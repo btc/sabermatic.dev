@@ -1,0 +1,1 @@
+ALTER TABLE llm_calls ALTER COLUMN user_id SET NOT NULL;
