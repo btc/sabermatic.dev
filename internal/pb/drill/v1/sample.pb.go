@@ -145,6 +145,50 @@ func (*GetSampleEvaluationRequest) Descriptor() ([]byte, []int) {
 	return file_drill_v1_sample_proto_rawDescGZIP(), []int{2}
 }
 
+type GetSampleEvaluationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Evaluation    *EvaluationResult      `protobuf:"bytes,1,opt,name=evaluation,proto3" json:"evaluation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSampleEvaluationResponse) Reset() {
+	*x = GetSampleEvaluationResponse{}
+	mi := &file_drill_v1_sample_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSampleEvaluationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSampleEvaluationResponse) ProtoMessage() {}
+
+func (x *GetSampleEvaluationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_drill_v1_sample_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSampleEvaluationResponse.ProtoReflect.Descriptor instead.
+func (*GetSampleEvaluationResponse) Descriptor() ([]byte, []int) {
+	return file_drill_v1_sample_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetSampleEvaluationResponse) GetEvaluation() *EvaluationResult {
+	if x != nil {
+		return x.Evaluation
+	}
+	return nil
+}
+
 type GetSampleEducatorRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -153,7 +197,7 @@ type GetSampleEducatorRequest struct {
 
 func (x *GetSampleEducatorRequest) Reset() {
 	*x = GetSampleEducatorRequest{}
-	mi := &file_drill_v1_sample_proto_msgTypes[3]
+	mi := &file_drill_v1_sample_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -165,7 +209,7 @@ func (x *GetSampleEducatorRequest) String() string {
 func (*GetSampleEducatorRequest) ProtoMessage() {}
 
 func (x *GetSampleEducatorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_sample_proto_msgTypes[3]
+	mi := &file_drill_v1_sample_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -178,7 +222,51 @@ func (x *GetSampleEducatorRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSampleEducatorRequest.ProtoReflect.Descriptor instead.
 func (*GetSampleEducatorRequest) Descriptor() ([]byte, []int) {
-	return file_drill_v1_sample_proto_rawDescGZIP(), []int{3}
+	return file_drill_v1_sample_proto_rawDescGZIP(), []int{4}
+}
+
+type GetSampleEducatorResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Analysis      *EducatorAnalysis      `protobuf:"bytes,1,opt,name=analysis,proto3" json:"analysis,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSampleEducatorResponse) Reset() {
+	*x = GetSampleEducatorResponse{}
+	mi := &file_drill_v1_sample_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSampleEducatorResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSampleEducatorResponse) ProtoMessage() {}
+
+func (x *GetSampleEducatorResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_drill_v1_sample_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSampleEducatorResponse.ProtoReflect.Descriptor instead.
+func (*GetSampleEducatorResponse) Descriptor() ([]byte, []int) {
+	return file_drill_v1_sample_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetSampleEducatorResponse) GetAnalysis() *EducatorAnalysis {
+	if x != nil {
+		return x.Analysis
+	}
+	return nil
 }
 
 type GetSampleCoachRequest struct {
@@ -189,7 +277,7 @@ type GetSampleCoachRequest struct {
 
 func (x *GetSampleCoachRequest) Reset() {
 	*x = GetSampleCoachRequest{}
-	mi := &file_drill_v1_sample_proto_msgTypes[4]
+	mi := &file_drill_v1_sample_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -201,7 +289,7 @@ func (x *GetSampleCoachRequest) String() string {
 func (*GetSampleCoachRequest) ProtoMessage() {}
 
 func (x *GetSampleCoachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_sample_proto_msgTypes[4]
+	mi := &file_drill_v1_sample_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -214,7 +302,7 @@ func (x *GetSampleCoachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSampleCoachRequest.ProtoReflect.Descriptor instead.
 func (*GetSampleCoachRequest) Descriptor() ([]byte, []int) {
-	return file_drill_v1_sample_proto_rawDescGZIP(), []int{4}
+	return file_drill_v1_sample_proto_rawDescGZIP(), []int{6}
 }
 
 type GetSampleCoachResponse struct {
@@ -227,7 +315,7 @@ type GetSampleCoachResponse struct {
 
 func (x *GetSampleCoachResponse) Reset() {
 	*x = GetSampleCoachResponse{}
-	mi := &file_drill_v1_sample_proto_msgTypes[5]
+	mi := &file_drill_v1_sample_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -239,7 +327,7 @@ func (x *GetSampleCoachResponse) String() string {
 func (*GetSampleCoachResponse) ProtoMessage() {}
 
 func (x *GetSampleCoachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_sample_proto_msgTypes[5]
+	mi := &file_drill_v1_sample_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -252,7 +340,7 @@ func (x *GetSampleCoachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSampleCoachResponse.ProtoReflect.Descriptor instead.
 func (*GetSampleCoachResponse) Descriptor() ([]byte, []int) {
-	return file_drill_v1_sample_proto_rawDescGZIP(), []int{5}
+	return file_drill_v1_sample_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetSampleCoachResponse) GetAnalysis() *CoachAnalysis {
@@ -279,7 +367,7 @@ type ScoreTrendPoint struct {
 
 func (x *ScoreTrendPoint) Reset() {
 	*x = ScoreTrendPoint{}
-	mi := &file_drill_v1_sample_proto_msgTypes[6]
+	mi := &file_drill_v1_sample_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -291,7 +379,7 @@ func (x *ScoreTrendPoint) String() string {
 func (*ScoreTrendPoint) ProtoMessage() {}
 
 func (x *ScoreTrendPoint) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_sample_proto_msgTypes[6]
+	mi := &file_drill_v1_sample_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -304,7 +392,7 @@ func (x *ScoreTrendPoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScoreTrendPoint.ProtoReflect.Descriptor instead.
 func (*ScoreTrendPoint) Descriptor() ([]byte, []int) {
-	return file_drill_v1_sample_proto_rawDescGZIP(), []int{6}
+	return file_drill_v1_sample_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ScoreTrendPoint) GetDate() string {
@@ -330,8 +418,14 @@ const file_drill_v1_sample_proto_rawDesc = "" +
 	"\x18GetSampleSessionResponse\x12+\n" +
 	"\asession\x18\x01 \x01(\v2\x11.drill.v1.SessionR\asession\x12-\n" +
 	"\bmessages\x18\x02 \x03(\v2\x11.drill.v1.MessageR\bmessages\"\x1c\n" +
-	"\x1aGetSampleEvaluationRequest\"\x1a\n" +
-	"\x18GetSampleEducatorRequest\"\x17\n" +
+	"\x1aGetSampleEvaluationRequest\"Y\n" +
+	"\x1bGetSampleEvaluationResponse\x12:\n" +
+	"\n" +
+	"evaluation\x18\x01 \x01(\v2\x1a.drill.v1.EvaluationResultR\n" +
+	"evaluation\"\x1a\n" +
+	"\x18GetSampleEducatorRequest\"S\n" +
+	"\x19GetSampleEducatorResponse\x126\n" +
+	"\banalysis\x18\x01 \x01(\v2\x1a.drill.v1.EducatorAnalysisR\banalysis\"\x17\n" +
 	"\x15GetSampleCoachRequest\"\x89\x01\n" +
 	"\x16GetSampleCoachResponse\x123\n" +
 	"\banalysis\x18\x01 \x01(\v2\x17.drill.v1.CoachAnalysisR\banalysis\x12:\n" +
@@ -339,11 +433,11 @@ const file_drill_v1_sample_proto_rawDesc = "" +
 	"scoreTrend\"J\n" +
 	"\x0fScoreTrendPoint\x12\x12\n" +
 	"\x04date\x18\x01 \x01(\tR\x04date\x12#\n" +
-	"\roverall_score\x18\x02 \x01(\x05R\foverallScore2\xfd\x02\n" +
+	"\roverall_score\x18\x02 \x01(\x05R\foverallScore2\x81\x03\n" +
 	"\rSampleService\x12Y\n" +
-	"\x10GetSampleSession\x12!.drill.v1.GetSampleSessionRequest\x1a\".drill.v1.GetSampleSessionResponse\x12\\\n" +
-	"\x13GetSampleEvaluation\x12$.drill.v1.GetSampleEvaluationRequest\x1a\x1f.drill.v1.GetEvaluationResponse\x12^\n" +
-	"\x11GetSampleEducator\x12\".drill.v1.GetSampleEducatorRequest\x1a%.drill.v1.GetEducatorAnalysisResponse\x12S\n" +
+	"\x10GetSampleSession\x12!.drill.v1.GetSampleSessionRequest\x1a\".drill.v1.GetSampleSessionResponse\x12b\n" +
+	"\x13GetSampleEvaluation\x12$.drill.v1.GetSampleEvaluationRequest\x1a%.drill.v1.GetSampleEvaluationResponse\x12\\\n" +
+	"\x11GetSampleEducator\x12\".drill.v1.GetSampleEducatorRequest\x1a#.drill.v1.GetSampleEducatorResponse\x12S\n" +
 	"\x0eGetSampleCoach\x12\x1f.drill.v1.GetSampleCoachRequest\x1a .drill.v1.GetSampleCoachResponseB3Z1github.com/btc/drill/internal/pb/drill/v1;drillv1b\x06proto3"
 
 var (
@@ -358,39 +452,43 @@ func file_drill_v1_sample_proto_rawDescGZIP() []byte {
 	return file_drill_v1_sample_proto_rawDescData
 }
 
-var file_drill_v1_sample_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_drill_v1_sample_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_drill_v1_sample_proto_goTypes = []any{
 	(*GetSampleSessionRequest)(nil),     // 0: drill.v1.GetSampleSessionRequest
 	(*GetSampleSessionResponse)(nil),    // 1: drill.v1.GetSampleSessionResponse
 	(*GetSampleEvaluationRequest)(nil),  // 2: drill.v1.GetSampleEvaluationRequest
-	(*GetSampleEducatorRequest)(nil),    // 3: drill.v1.GetSampleEducatorRequest
-	(*GetSampleCoachRequest)(nil),       // 4: drill.v1.GetSampleCoachRequest
-	(*GetSampleCoachResponse)(nil),      // 5: drill.v1.GetSampleCoachResponse
-	(*ScoreTrendPoint)(nil),             // 6: drill.v1.ScoreTrendPoint
-	(*Session)(nil),                     // 7: drill.v1.Session
-	(*Message)(nil),                     // 8: drill.v1.Message
-	(*CoachAnalysis)(nil),               // 9: drill.v1.CoachAnalysis
-	(*GetEvaluationResponse)(nil),       // 10: drill.v1.GetEvaluationResponse
-	(*GetEducatorAnalysisResponse)(nil), // 11: drill.v1.GetEducatorAnalysisResponse
+	(*GetSampleEvaluationResponse)(nil), // 3: drill.v1.GetSampleEvaluationResponse
+	(*GetSampleEducatorRequest)(nil),    // 4: drill.v1.GetSampleEducatorRequest
+	(*GetSampleEducatorResponse)(nil),   // 5: drill.v1.GetSampleEducatorResponse
+	(*GetSampleCoachRequest)(nil),       // 6: drill.v1.GetSampleCoachRequest
+	(*GetSampleCoachResponse)(nil),      // 7: drill.v1.GetSampleCoachResponse
+	(*ScoreTrendPoint)(nil),             // 8: drill.v1.ScoreTrendPoint
+	(*Session)(nil),                     // 9: drill.v1.Session
+	(*Message)(nil),                     // 10: drill.v1.Message
+	(*EvaluationResult)(nil),            // 11: drill.v1.EvaluationResult
+	(*EducatorAnalysis)(nil),            // 12: drill.v1.EducatorAnalysis
+	(*CoachAnalysis)(nil),               // 13: drill.v1.CoachAnalysis
 }
 var file_drill_v1_sample_proto_depIdxs = []int32{
-	7,  // 0: drill.v1.GetSampleSessionResponse.session:type_name -> drill.v1.Session
-	8,  // 1: drill.v1.GetSampleSessionResponse.messages:type_name -> drill.v1.Message
-	9,  // 2: drill.v1.GetSampleCoachResponse.analysis:type_name -> drill.v1.CoachAnalysis
-	6,  // 3: drill.v1.GetSampleCoachResponse.score_trend:type_name -> drill.v1.ScoreTrendPoint
-	0,  // 4: drill.v1.SampleService.GetSampleSession:input_type -> drill.v1.GetSampleSessionRequest
-	2,  // 5: drill.v1.SampleService.GetSampleEvaluation:input_type -> drill.v1.GetSampleEvaluationRequest
-	3,  // 6: drill.v1.SampleService.GetSampleEducator:input_type -> drill.v1.GetSampleEducatorRequest
-	4,  // 7: drill.v1.SampleService.GetSampleCoach:input_type -> drill.v1.GetSampleCoachRequest
-	1,  // 8: drill.v1.SampleService.GetSampleSession:output_type -> drill.v1.GetSampleSessionResponse
-	10, // 9: drill.v1.SampleService.GetSampleEvaluation:output_type -> drill.v1.GetEvaluationResponse
-	11, // 10: drill.v1.SampleService.GetSampleEducator:output_type -> drill.v1.GetEducatorAnalysisResponse
-	5,  // 11: drill.v1.SampleService.GetSampleCoach:output_type -> drill.v1.GetSampleCoachResponse
-	8,  // [8:12] is the sub-list for method output_type
-	4,  // [4:8] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	9,  // 0: drill.v1.GetSampleSessionResponse.session:type_name -> drill.v1.Session
+	10, // 1: drill.v1.GetSampleSessionResponse.messages:type_name -> drill.v1.Message
+	11, // 2: drill.v1.GetSampleEvaluationResponse.evaluation:type_name -> drill.v1.EvaluationResult
+	12, // 3: drill.v1.GetSampleEducatorResponse.analysis:type_name -> drill.v1.EducatorAnalysis
+	13, // 4: drill.v1.GetSampleCoachResponse.analysis:type_name -> drill.v1.CoachAnalysis
+	8,  // 5: drill.v1.GetSampleCoachResponse.score_trend:type_name -> drill.v1.ScoreTrendPoint
+	0,  // 6: drill.v1.SampleService.GetSampleSession:input_type -> drill.v1.GetSampleSessionRequest
+	2,  // 7: drill.v1.SampleService.GetSampleEvaluation:input_type -> drill.v1.GetSampleEvaluationRequest
+	4,  // 8: drill.v1.SampleService.GetSampleEducator:input_type -> drill.v1.GetSampleEducatorRequest
+	6,  // 9: drill.v1.SampleService.GetSampleCoach:input_type -> drill.v1.GetSampleCoachRequest
+	1,  // 10: drill.v1.SampleService.GetSampleSession:output_type -> drill.v1.GetSampleSessionResponse
+	3,  // 11: drill.v1.SampleService.GetSampleEvaluation:output_type -> drill.v1.GetSampleEvaluationResponse
+	5,  // 12: drill.v1.SampleService.GetSampleEducator:output_type -> drill.v1.GetSampleEducatorResponse
+	7,  // 13: drill.v1.SampleService.GetSampleCoach:output_type -> drill.v1.GetSampleCoachResponse
+	10, // [10:14] is the sub-list for method output_type
+	6,  // [6:10] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_drill_v1_sample_proto_init() }
@@ -408,7 +506,7 @@ func file_drill_v1_sample_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_drill_v1_sample_proto_rawDesc), len(file_drill_v1_sample_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

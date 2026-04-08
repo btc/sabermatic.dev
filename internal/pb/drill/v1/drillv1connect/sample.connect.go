@@ -50,8 +50,8 @@ const (
 // SampleServiceClient is a client for the drill.v1.SampleService service.
 type SampleServiceClient interface {
 	GetSampleSession(context.Context, *connect.Request[v1.GetSampleSessionRequest]) (*connect.Response[v1.GetSampleSessionResponse], error)
-	GetSampleEvaluation(context.Context, *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetEvaluationResponse], error)
-	GetSampleEducator(context.Context, *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetEducatorAnalysisResponse], error)
+	GetSampleEvaluation(context.Context, *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetSampleEvaluationResponse], error)
+	GetSampleEducator(context.Context, *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetSampleEducatorResponse], error)
 	GetSampleCoach(context.Context, *connect.Request[v1.GetSampleCoachRequest]) (*connect.Response[v1.GetSampleCoachResponse], error)
 }
 
@@ -72,13 +72,13 @@ func NewSampleServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(sampleServiceMethods.ByName("GetSampleSession")),
 			connect.WithClientOptions(opts...),
 		),
-		getSampleEvaluation: connect.NewClient[v1.GetSampleEvaluationRequest, v1.GetEvaluationResponse](
+		getSampleEvaluation: connect.NewClient[v1.GetSampleEvaluationRequest, v1.GetSampleEvaluationResponse](
 			httpClient,
 			baseURL+SampleServiceGetSampleEvaluationProcedure,
 			connect.WithSchema(sampleServiceMethods.ByName("GetSampleEvaluation")),
 			connect.WithClientOptions(opts...),
 		),
-		getSampleEducator: connect.NewClient[v1.GetSampleEducatorRequest, v1.GetEducatorAnalysisResponse](
+		getSampleEducator: connect.NewClient[v1.GetSampleEducatorRequest, v1.GetSampleEducatorResponse](
 			httpClient,
 			baseURL+SampleServiceGetSampleEducatorProcedure,
 			connect.WithSchema(sampleServiceMethods.ByName("GetSampleEducator")),
@@ -96,8 +96,8 @@ func NewSampleServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 // sampleServiceClient implements SampleServiceClient.
 type sampleServiceClient struct {
 	getSampleSession    *connect.Client[v1.GetSampleSessionRequest, v1.GetSampleSessionResponse]
-	getSampleEvaluation *connect.Client[v1.GetSampleEvaluationRequest, v1.GetEvaluationResponse]
-	getSampleEducator   *connect.Client[v1.GetSampleEducatorRequest, v1.GetEducatorAnalysisResponse]
+	getSampleEvaluation *connect.Client[v1.GetSampleEvaluationRequest, v1.GetSampleEvaluationResponse]
+	getSampleEducator   *connect.Client[v1.GetSampleEducatorRequest, v1.GetSampleEducatorResponse]
 	getSampleCoach      *connect.Client[v1.GetSampleCoachRequest, v1.GetSampleCoachResponse]
 }
 
@@ -107,12 +107,12 @@ func (c *sampleServiceClient) GetSampleSession(ctx context.Context, req *connect
 }
 
 // GetSampleEvaluation calls drill.v1.SampleService.GetSampleEvaluation.
-func (c *sampleServiceClient) GetSampleEvaluation(ctx context.Context, req *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetEvaluationResponse], error) {
+func (c *sampleServiceClient) GetSampleEvaluation(ctx context.Context, req *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetSampleEvaluationResponse], error) {
 	return c.getSampleEvaluation.CallUnary(ctx, req)
 }
 
 // GetSampleEducator calls drill.v1.SampleService.GetSampleEducator.
-func (c *sampleServiceClient) GetSampleEducator(ctx context.Context, req *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetEducatorAnalysisResponse], error) {
+func (c *sampleServiceClient) GetSampleEducator(ctx context.Context, req *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetSampleEducatorResponse], error) {
 	return c.getSampleEducator.CallUnary(ctx, req)
 }
 
@@ -124,8 +124,8 @@ func (c *sampleServiceClient) GetSampleCoach(ctx context.Context, req *connect.R
 // SampleServiceHandler is an implementation of the drill.v1.SampleService service.
 type SampleServiceHandler interface {
 	GetSampleSession(context.Context, *connect.Request[v1.GetSampleSessionRequest]) (*connect.Response[v1.GetSampleSessionResponse], error)
-	GetSampleEvaluation(context.Context, *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetEvaluationResponse], error)
-	GetSampleEducator(context.Context, *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetEducatorAnalysisResponse], error)
+	GetSampleEvaluation(context.Context, *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetSampleEvaluationResponse], error)
+	GetSampleEducator(context.Context, *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetSampleEducatorResponse], error)
 	GetSampleCoach(context.Context, *connect.Request[v1.GetSampleCoachRequest]) (*connect.Response[v1.GetSampleCoachResponse], error)
 }
 
@@ -183,11 +183,11 @@ func (UnimplementedSampleServiceHandler) GetSampleSession(context.Context, *conn
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.SampleService.GetSampleSession is not implemented"))
 }
 
-func (UnimplementedSampleServiceHandler) GetSampleEvaluation(context.Context, *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetEvaluationResponse], error) {
+func (UnimplementedSampleServiceHandler) GetSampleEvaluation(context.Context, *connect.Request[v1.GetSampleEvaluationRequest]) (*connect.Response[v1.GetSampleEvaluationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.SampleService.GetSampleEvaluation is not implemented"))
 }
 
-func (UnimplementedSampleServiceHandler) GetSampleEducator(context.Context, *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetEducatorAnalysisResponse], error) {
+func (UnimplementedSampleServiceHandler) GetSampleEducator(context.Context, *connect.Request[v1.GetSampleEducatorRequest]) (*connect.Response[v1.GetSampleEducatorResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.SampleService.GetSampleEducator is not implemented"))
 }
 

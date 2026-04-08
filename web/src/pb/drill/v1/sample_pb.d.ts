@@ -5,9 +5,9 @@
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 import type { Message as Message$1, Session } from "./session_pb";
+import type { EvaluationResult } from "./evaluation_pb";
+import type { EducatorAnalysis } from "./educator_pb";
 import type { CoachAnalysis } from "./coach_pb";
-import type { GetEvaluationResponseSchema } from "./evaluation_pb";
-import type { GetEducatorAnalysisResponseSchema } from "./educator_pb";
 
 /**
  * Describes the file drill/v1/sample.proto.
@@ -60,6 +60,22 @@ export declare type GetSampleEvaluationRequest = Message<"drill.v1.GetSampleEval
 export declare const GetSampleEvaluationRequestSchema: GenMessage<GetSampleEvaluationRequest>;
 
 /**
+ * @generated from message drill.v1.GetSampleEvaluationResponse
+ */
+export declare type GetSampleEvaluationResponse = Message<"drill.v1.GetSampleEvaluationResponse"> & {
+  /**
+   * @generated from field: drill.v1.EvaluationResult evaluation = 1;
+   */
+  evaluation?: EvaluationResult;
+};
+
+/**
+ * Describes the message drill.v1.GetSampleEvaluationResponse.
+ * Use `create(GetSampleEvaluationResponseSchema)` to create a new message.
+ */
+export declare const GetSampleEvaluationResponseSchema: GenMessage<GetSampleEvaluationResponse>;
+
+/**
  * @generated from message drill.v1.GetSampleEducatorRequest
  */
 export declare type GetSampleEducatorRequest = Message<"drill.v1.GetSampleEducatorRequest"> & {
@@ -70,6 +86,22 @@ export declare type GetSampleEducatorRequest = Message<"drill.v1.GetSampleEducat
  * Use `create(GetSampleEducatorRequestSchema)` to create a new message.
  */
 export declare const GetSampleEducatorRequestSchema: GenMessage<GetSampleEducatorRequest>;
+
+/**
+ * @generated from message drill.v1.GetSampleEducatorResponse
+ */
+export declare type GetSampleEducatorResponse = Message<"drill.v1.GetSampleEducatorResponse"> & {
+  /**
+   * @generated from field: drill.v1.EducatorAnalysis analysis = 1;
+   */
+  analysis?: EducatorAnalysis;
+};
+
+/**
+ * Describes the message drill.v1.GetSampleEducatorResponse.
+ * Use `create(GetSampleEducatorResponseSchema)` to create a new message.
+ */
+export declare const GetSampleEducatorResponseSchema: GenMessage<GetSampleEducatorResponse>;
 
 /**
  * @generated from message drill.v1.GetSampleCoachRequest
@@ -143,7 +175,7 @@ export declare const SampleService: GenService<{
   getSampleEvaluation: {
     methodKind: "unary";
     input: typeof GetSampleEvaluationRequestSchema;
-    output: typeof GetEvaluationResponseSchema;
+    output: typeof GetSampleEvaluationResponseSchema;
   },
   /**
    * @generated from rpc drill.v1.SampleService.GetSampleEducator
@@ -151,7 +183,7 @@ export declare const SampleService: GenService<{
   getSampleEducator: {
     methodKind: "unary";
     input: typeof GetSampleEducatorRequestSchema;
-    output: typeof GetEducatorAnalysisResponseSchema;
+    output: typeof GetSampleEducatorResponseSchema;
   },
   /**
    * @generated from rpc drill.v1.SampleService.GetSampleCoach

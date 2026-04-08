@@ -10,8 +10,8 @@ import "drill/v1/coach.proto";
 
 service SampleService {
   rpc GetSampleSession(GetSampleSessionRequest) returns (GetSampleSessionResponse);
-  rpc GetSampleEvaluation(GetSampleEvaluationRequest) returns (GetEvaluationResponse);
-  rpc GetSampleEducator(GetSampleEducatorRequest) returns (GetEducatorAnalysisResponse);
+  rpc GetSampleEvaluation(GetSampleEvaluationRequest) returns (GetSampleEvaluationResponse);
+  rpc GetSampleEducator(GetSampleEducatorRequest) returns (GetSampleEducatorResponse);
   rpc GetSampleCoach(GetSampleCoachRequest) returns (GetSampleCoachResponse);
 }
 
@@ -24,11 +24,15 @@ message GetSampleSessionResponse {
 
 message GetSampleEvaluationRequest {}
 
-// Reuses GetEvaluationResponse from evaluation.proto
+message GetSampleEvaluationResponse {
+  EvaluationResult evaluation = 1;
+}
 
 message GetSampleEducatorRequest {}
 
-// Reuses GetEducatorAnalysisResponse from educator.proto
+message GetSampleEducatorResponse {
+  EducatorAnalysis analysis = 1;
+}
 
 message GetSampleCoachRequest {}
 

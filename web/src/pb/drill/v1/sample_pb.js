@@ -12,7 +12,7 @@ import { file_drill_v1_coach } from "./coach_pb";
  * Describes the file drill/v1/sample.proto.
  */
 export const file_drill_v1_sample = /*@__PURE__*/
-  fileDesc("ChVkcmlsbC92MS9zYW1wbGUucHJvdG8SCGRyaWxsLnYxIhkKF0dldFNhbXBsZVNlc3Npb25SZXF1ZXN0ImMKGEdldFNhbXBsZVNlc3Npb25SZXNwb25zZRIiCgdzZXNzaW9uGAEgASgLMhEuZHJpbGwudjEuU2Vzc2lvbhIjCghtZXNzYWdlcxgCIAMoCzIRLmRyaWxsLnYxLk1lc3NhZ2UiHAoaR2V0U2FtcGxlRXZhbHVhdGlvblJlcXVlc3QiGgoYR2V0U2FtcGxlRWR1Y2F0b3JSZXF1ZXN0IhcKFUdldFNhbXBsZUNvYWNoUmVxdWVzdCJzChZHZXRTYW1wbGVDb2FjaFJlc3BvbnNlEikKCGFuYWx5c2lzGAEgASgLMhcuZHJpbGwudjEuQ29hY2hBbmFseXNpcxIuCgtzY29yZV90cmVuZBgCIAMoCzIZLmRyaWxsLnYxLlNjb3JlVHJlbmRQb2ludCI2Cg9TY29yZVRyZW5kUG9pbnQSDAoEZGF0ZRgBIAEoCRIVCg1vdmVyYWxsX3Njb3JlGAIgASgFMv0CCg1TYW1wbGVTZXJ2aWNlElkKEEdldFNhbXBsZVNlc3Npb24SIS5kcmlsbC52MS5HZXRTYW1wbGVTZXNzaW9uUmVxdWVzdBoiLmRyaWxsLnYxLkdldFNhbXBsZVNlc3Npb25SZXNwb25zZRJcChNHZXRTYW1wbGVFdmFsdWF0aW9uEiQuZHJpbGwudjEuR2V0U2FtcGxlRXZhbHVhdGlvblJlcXVlc3QaHy5kcmlsbC52MS5HZXRFdmFsdWF0aW9uUmVzcG9uc2USXgoRR2V0U2FtcGxlRWR1Y2F0b3ISIi5kcmlsbC52MS5HZXRTYW1wbGVFZHVjYXRvclJlcXVlc3QaJS5kcmlsbC52MS5HZXRFZHVjYXRvckFuYWx5c2lzUmVzcG9uc2USUwoOR2V0U2FtcGxlQ29hY2gSHy5kcmlsbC52MS5HZXRTYW1wbGVDb2FjaFJlcXVlc3QaIC5kcmlsbC52MS5HZXRTYW1wbGVDb2FjaFJlc3BvbnNlQjNaMWdpdGh1Yi5jb20vYnRjL2RyaWxsL2ludGVybmFsL3BiL2RyaWxsL3YxO2RyaWxsdjFiBnByb3RvMw", [file_drill_v1_session, file_drill_v1_evaluation, file_drill_v1_educator, file_drill_v1_coach]);
+  fileDesc("ChVkcmlsbC92MS9zYW1wbGUucHJvdG8SCGRyaWxsLnYxIhkKF0dldFNhbXBsZVNlc3Npb25SZXF1ZXN0ImMKGEdldFNhbXBsZVNlc3Npb25SZXNwb25zZRIiCgdzZXNzaW9uGAEgASgLMhEuZHJpbGwudjEuU2Vzc2lvbhIjCghtZXNzYWdlcxgCIAMoCzIRLmRyaWxsLnYxLk1lc3NhZ2UiHAoaR2V0U2FtcGxlRXZhbHVhdGlvblJlcXVlc3QiTQobR2V0U2FtcGxlRXZhbHVhdGlvblJlc3BvbnNlEi4KCmV2YWx1YXRpb24YASABKAsyGi5kcmlsbC52MS5FdmFsdWF0aW9uUmVzdWx0IhoKGEdldFNhbXBsZUVkdWNhdG9yUmVxdWVzdCJJChlHZXRTYW1wbGVFZHVjYXRvclJlc3BvbnNlEiwKCGFuYWx5c2lzGAEgASgLMhouZHJpbGwudjEuRWR1Y2F0b3JBbmFseXNpcyIXChVHZXRTYW1wbGVDb2FjaFJlcXVlc3QicwoWR2V0U2FtcGxlQ29hY2hSZXNwb25zZRIpCghhbmFseXNpcxgBIAEoCzIXLmRyaWxsLnYxLkNvYWNoQW5hbHlzaXMSLgoLc2NvcmVfdHJlbmQYAiADKAsyGS5kcmlsbC52MS5TY29yZVRyZW5kUG9pbnQiNgoPU2NvcmVUcmVuZFBvaW50EgwKBGRhdGUYASABKAkSFQoNb3ZlcmFsbF9zY29yZRgCIAEoBTKBAwoNU2FtcGxlU2VydmljZRJZChBHZXRTYW1wbGVTZXNzaW9uEiEuZHJpbGwudjEuR2V0U2FtcGxlU2Vzc2lvblJlcXVlc3QaIi5kcmlsbC52MS5HZXRTYW1wbGVTZXNzaW9uUmVzcG9uc2USYgoTR2V0U2FtcGxlRXZhbHVhdGlvbhIkLmRyaWxsLnYxLkdldFNhbXBsZUV2YWx1YXRpb25SZXF1ZXN0GiUuZHJpbGwudjEuR2V0U2FtcGxlRXZhbHVhdGlvblJlc3BvbnNlElwKEUdldFNhbXBsZUVkdWNhdG9yEiIuZHJpbGwudjEuR2V0U2FtcGxlRWR1Y2F0b3JSZXF1ZXN0GiMuZHJpbGwudjEuR2V0U2FtcGxlRWR1Y2F0b3JSZXNwb25zZRJTCg5HZXRTYW1wbGVDb2FjaBIfLmRyaWxsLnYxLkdldFNhbXBsZUNvYWNoUmVxdWVzdBogLmRyaWxsLnYxLkdldFNhbXBsZUNvYWNoUmVzcG9uc2VCM1oxZ2l0aHViLmNvbS9idGMvZHJpbGwvaW50ZXJuYWwvcGIvZHJpbGwvdjE7ZHJpbGx2MWIGcHJvdG8z", [file_drill_v1_session, file_drill_v1_evaluation, file_drill_v1_educator, file_drill_v1_coach]);
 
 /**
  * Describes the message drill.v1.GetSampleSessionRequest.
@@ -36,32 +36,46 @@ export const GetSampleEvaluationRequestSchema = /*@__PURE__*/
   messageDesc(file_drill_v1_sample, 2);
 
 /**
+ * Describes the message drill.v1.GetSampleEvaluationResponse.
+ * Use `create(GetSampleEvaluationResponseSchema)` to create a new message.
+ */
+export const GetSampleEvaluationResponseSchema = /*@__PURE__*/
+  messageDesc(file_drill_v1_sample, 3);
+
+/**
  * Describes the message drill.v1.GetSampleEducatorRequest.
  * Use `create(GetSampleEducatorRequestSchema)` to create a new message.
  */
 export const GetSampleEducatorRequestSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_sample, 3);
+  messageDesc(file_drill_v1_sample, 4);
+
+/**
+ * Describes the message drill.v1.GetSampleEducatorResponse.
+ * Use `create(GetSampleEducatorResponseSchema)` to create a new message.
+ */
+export const GetSampleEducatorResponseSchema = /*@__PURE__*/
+  messageDesc(file_drill_v1_sample, 5);
 
 /**
  * Describes the message drill.v1.GetSampleCoachRequest.
  * Use `create(GetSampleCoachRequestSchema)` to create a new message.
  */
 export const GetSampleCoachRequestSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_sample, 4);
+  messageDesc(file_drill_v1_sample, 6);
 
 /**
  * Describes the message drill.v1.GetSampleCoachResponse.
  * Use `create(GetSampleCoachResponseSchema)` to create a new message.
  */
 export const GetSampleCoachResponseSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_sample, 5);
+  messageDesc(file_drill_v1_sample, 7);
 
 /**
  * Describes the message drill.v1.ScoreTrendPoint.
  * Use `create(ScoreTrendPointSchema)` to create a new message.
  */
 export const ScoreTrendPointSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_sample, 6);
+  messageDesc(file_drill_v1_sample, 8);
 
 /**
  * @generated from service drill.v1.SampleService

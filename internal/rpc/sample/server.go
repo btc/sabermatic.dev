@@ -17,8 +17,8 @@ import (
 // It reads embedded fixture JSON at construction time and serves them directly.
 type SampleService struct {
 	session    *drillv1.GetSampleSessionResponse
-	evaluation *drillv1.GetEvaluationResponse
-	educator   *drillv1.GetEducatorAnalysisResponse
+	evaluation *drillv1.GetSampleEvaluationResponse
+	educator   *drillv1.GetSampleEducatorResponse
 	coach      *drillv1.GetSampleCoachResponse
 }
 
@@ -51,12 +51,12 @@ func NewSampleService() (*SampleService, error) {
 		return nil, fmt.Errorf("unmarshal session fixture: %w", err)
 	}
 
-	ss.evaluation = &drillv1.GetEvaluationResponse{}
+	ss.evaluation = &drillv1.GetSampleEvaluationResponse{}
 	if err := protojson.Unmarshal(evalData, ss.evaluation); err != nil {
 		return nil, fmt.Errorf("unmarshal evaluation fixture: %w", err)
 	}
 
-	ss.educator = &drillv1.GetEducatorAnalysisResponse{}
+	ss.educator = &drillv1.GetSampleEducatorResponse{}
 	if err := protojson.Unmarshal(educatorData, ss.educator); err != nil {
 		return nil, fmt.Errorf("unmarshal educator fixture: %w", err)
 	}
@@ -94,7 +94,7 @@ func (s *Server) GetSampleSession(
 func (s *Server) GetSampleEvaluation(
 	_ context.Context,
 	_ *connect.Request[drillv1.GetSampleEvaluationRequest],
-) (*connect.Response[drillv1.GetEvaluationResponse], error) {
+) (*connect.Response[drillv1.GetSampleEvaluationResponse], error) {
 	return connect.NewResponse(s.ss.evaluation), nil
 }
 
@@ -102,7 +102,7 @@ func (s *Server) GetSampleEvaluation(
 func (s *Server) GetSampleEducator(
 	_ context.Context,
 	_ *connect.Request[drillv1.GetSampleEducatorRequest],
-) (*connect.Response[drillv1.GetEducatorAnalysisResponse], error) {
+) (*connect.Response[drillv1.GetSampleEducatorResponse], error) {
 	return connect.NewResponse(s.ss.educator), nil
 }
 
