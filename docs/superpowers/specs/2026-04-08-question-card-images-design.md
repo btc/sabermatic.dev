@@ -34,7 +34,8 @@ overlapping shapes.
 Bold dark outlines on flat color planes. Warm palette: cream, amber,
 terracotta, burnt orange with accents of cerulean blue and sage green.
 Painterly brushwork. Playful and warm, Apple corporate illustration energy.
-No text. Horizontal 4:3 aspect ratio.
+Edge-to-edge composition filling the entire canvas, no border, no margin,
+no frame. No text. Horizontal 4:3 aspect ratio.
 ```
 
 Full prompt = prefix + topic fragment + ". " + suffix.
@@ -162,13 +163,13 @@ When `CreateQuestion` RPC inserts a new question, Job A is enqueued in the same 
 
 ### Config
 
-New fields in the application config:
+One new env var:
 
-```go
-GeminiModel  string // default: "gemini-3.1-flash-image-preview"
-GeminiProject string // default: from existing GCP project config
-GeminiLocation string // default: "us-central1"
 ```
+GEMINI_MODEL=gemini-3.1-flash-image-preview  # default
+```
+
+GCP project reuses the existing `GOOGLE_CLOUD_PROJECT` env var. Vertex AI location (`us-central1`) is a constant — no config field needed.
 
 ## Frontend UX
 
@@ -178,7 +179,7 @@ GeminiLocation string // default: "us-central1"
 
 - 3-column responsive grid (2 on tablet, 1 on mobile).
 - Each card is borderless — no card container, no border.
-- Image with rounded corners (`border-radius: 14px`), 4:3 aspect ratio, `object-fit: cover`.
+- Image with rounded corners (`border-radius: 14px`), 4:3 aspect ratio, `object-fit: cover` with slight overflow crop to eat any inconsistent borders from generation.
 - Title and metadata (difficulty badge, tags) sit freely below the image, left-aligned.
 - Entire card is the link/tap target.
 - Hover animation: subtle scale-up on the image (`transform: scale(1.02)`, `transition: 0.25s ease`).
@@ -219,19 +220,35 @@ GeminiLocation string // default: "us-central1"
 - Job A max attempts (3) prevents infinite retry on bad prompts.
 - All Nano Banana images include SynthID watermarking (automatic).
 
-## Image Serving
+## Storage
 
-`GCSStore.Put()` currently returns `gs://bucket/key` format URLs. The frontend needs HTTPS URLs for `<img>` tags.
+### Separate public bucket
 
-**Approach:** Store public HTTPS URLs instead. After uploading to GCS, construct the URL as `https://storage.googleapis.com/{bucket}/questions/{question_id}/card.png`. This requires setting public read access on the image objects (or the `questions/` prefix in the bucket).
+The existing `STORAGE_BUCKET` is used for audio (private). Question card images are public content. Use a **separate GCS bucket** (e.g., `sabermatic-prod-public`) with default public read ACL. This provides a clean security boundary — private audio stays private, public images are explicitly public.
 
-Question card images are non-sensitive, publicly viewable content — public read is appropriate. The `ObjectStore` interface returns whatever URL the implementation provides; Job A constructs the HTTPS URL from the known bucket and key rather than using the `gs://` return value.
+Job A receives a second `ObjectStore` instance pointed at the public bucket (injected via DI, same as the audio store). Config:
 
-Future optimization: put a CDN (Cloud CDN or Cloudflare) in front of the bucket for caching and faster global delivery. Out of scope for initial implementation.
+```
+PUBLIC_STORAGE_BUCKET=sabermatic-prod-public
+```
+
+### Image URLs
+
+Store public HTTPS URLs: `https://storage.googleapis.com/{public_bucket}/questions/{question_id}/card.png`. Job A constructs this from the known bucket and key after upload.
+
+Future optimization: CDN in front of the public bucket. Out of scope for v1.
+
+## Observability
+
+### LLM call logging
+
+**Claude Sonnet call (prompt generation):** Goes through the existing `ai.Client` which automatically logs to `llm_calls` table (model, tokens, cost, latency) and `llm_call_content` (prompt, response). No new code needed — use the existing client.
+
+**Nano Banana 2 call (image generation):** Goes through the Google SDK, not `ai.Client`. Log to `llm_calls` after the call completes with: model name, input/output token counts (from response metadata), estimated cost, latency. The "response" content logged is the resulting image URL (not the bytes). This is a thin insert in Job A, not a new wrapper — image gen is only called from one place.
 
 ## Out of Scope
 
 - Image editing/regeneration UI (user can't request a different image).
 - Multiple image variants per question.
 - Style B (abstractly representational) images for secondary surfaces — noted for future.
-- Dark mode image treatment (images are warm-palette and work in both modes as-is).
+- Dark mode image adjustment — warm-palette images work naturally against dark backgrounds (gallery effect). If too bright in practice, a subtle `filter: brightness(0.9)` in CSS can be added post-implementation. Do not invert colors — it would destroy the palette.
