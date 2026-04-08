@@ -298,6 +298,8 @@ import (
 	"fmt"
 
 	"google.golang.org/genai"
+
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // GeminiClient wraps the Google Gen AI SDK for image generation.
@@ -319,9 +321,14 @@ func NewGeminiClient(ctx context.Context, project, location, model string) (*Gem
 	return &GeminiClient{client: client, model: model}, nil
 }
 
+var geminiTracer = drilotel.Tracer("gemini")
+
 // GenerateImage generates an image from a text prompt.
 // Returns image bytes and MIME type.
-func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) ([]byte, string, error) {
+func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) (_ []byte, _ string, err error) {
+	ctx, span := geminiTracer.Start(ctx, "GeminiClient.GenerateImage")
+	defer func() { drilotel.End(span, err) }()
+
 	if prompt == "" {
 		return nil, "", errors.New("empty prompt")
 	}
