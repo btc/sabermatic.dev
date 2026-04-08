@@ -1,262 +1,128 @@
-import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import { useQuery, useMutation, createConnectQueryKey } from "@connectrpc/connect-query";
+import { useMutation as useTanStackMutation, useQueryClient } from "@tanstack/react-query";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+import {
+  login as loginMethod,
+  signup as signupMethod,
+  logout as logoutMethod,
+  forgotPassword as forgotPasswordMethod,
+  resetPassword as resetPasswordMethod,
+  verifyEmail as verifyEmailMethod,
+  deleteAccount as deleteAccountMethod,
+} from "@/pb/drill/v1/auth-AuthService_connectquery";
+import {
+  getSession,
+  getTranscript,
+} from "@/pb/drill/v1/session-SessionService_connectquery";
+import {
+  getEvaluation,
+  retryEvaluation as retryEvaluationMethod,
+} from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
+import {
+  getEducatorAnalysis,
+  requestEducatorAnalysis as requestEducatorMethod,
+} from "@/pb/drill/v1/educator-EducatorService_connectquery";
+import { EducatorStatus } from "@/pb/drill/v1/educator_pb";
 import { apiClient } from "./client";
-import type {
-  User, Question, Session, CreateSessionRequest,
-  EvaluationResponse, EducatorAnalysis, CoachAnalysis, Usage,
-  Message,
-} from "./types";
+import type { Question } from "./types";
 
-// --- Auth ---
-
-export function useMe(options?: { enabled?: boolean }) {
-  return useQuery({
-    queryKey: ["me"],
-    queryFn: () => apiClient.get<User>("/api/me"),
-    retry: false,
-    enabled: options?.enabled,
-  });
-}
-
-export function useUsage() {
-  return useQuery({
-    queryKey: ["usage"],
-    queryFn: () => apiClient.get<Usage>("/api/me/usage"),
-  });
-}
-
-// --- Questions ---
-
-export function useQuestions(params?: { difficulty?: string; tags?: string }) {
-  const searchParams = new URLSearchParams();
-  if (params?.difficulty) searchParams.set("difficulty", params.difficulty);
-  if (params?.tags) searchParams.set("tags", params.tags);
-  const qs = searchParams.toString();
-  const url = `/api/questions${qs ? `?${qs}` : ""}`;
-
-  return useQuery({
-    queryKey: ["questions", params],
-    queryFn: () => apiClient.get<Question[]>(url),
-  });
-}
+// --- Questions (still REST until QuestionService gets CreateQuestion) ---
 
 export function useCreateQuestion() {
   const qc = useQueryClient();
-  return useMutation({
+  return useTanStackMutation({
     mutationFn: (data: { title: string; prompt: string; difficulty: string; tags: string[] }) =>
       apiClient.post<Question>("/api/questions", data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["questions"] }),
   });
 }
 
-// --- Sessions ---
+// --- User ---
 
-export function useSessions(params?: { archived?: boolean; status?: string; sort?: string }) {
-  const searchParams = new URLSearchParams();
-  if (params?.archived !== undefined) searchParams.set("archived", String(params.archived));
-  if (params?.status) searchParams.set("status", params.status);
-  if (params?.sort) searchParams.set("sort", params.sort);
-  const qs = searchParams.toString();
-  const url = `/api/sessions${qs ? `?${qs}` : ""}`;
-
-  return useQuery({
-    queryKey: ["sessions", params],
-    queryFn: () => apiClient.get<Session[]>(url),
+export function useMe(options?: { enabled?: boolean }) {
+  return useQuery(getMe, {}, {
+    retry: false,
+    enabled: options?.enabled,
   });
 }
 
-export function useSession(
-  id: string,
-  options?: Partial<Pick<UseQueryOptions<Session>, "refetchInterval" | "enabled">>,
-) {
-  return useQuery({
-    queryKey: ["sessions", id],
-    queryFn: () => apiClient.get<Session>(`/api/sessions/${id}`),
+// --- Session detail queries ---
+
+export function useSession(id: string, options?: { enabled?: boolean }) {
+  return useQuery(getSession, { id }, {
     enabled: options?.enabled ?? !!id,
-    refetchInterval: options?.refetchInterval,
   });
 }
-
-export function useCreateSession() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: CreateSessionRequest) =>
-      apiClient.post<Session>("/api/sessions", data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["sessions"] });
-      qc.invalidateQueries({ queryKey: ["usage"] });
-    },
-  });
-}
-
-export function useArchiveSessions() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { session_ids: string[]; archive: boolean }) =>
-      apiClient.post("/api/sessions/archive-bulk", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
-  });
-}
-
-export function useRetryEvaluation(sessionId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post(`/api/sessions/${sessionId}/evaluate`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions", sessionId] }),
-  });
-}
-
-// --- Evaluation ---
-
-export function useEvaluation(sessionId: string, enabled = true) {
-  return useQuery({
-    queryKey: ["evaluation", sessionId],
-    queryFn: () => apiClient.get<EvaluationResponse>(`/api/sessions/${sessionId}/evaluation`),
-    enabled,
-  });
-}
-
-// --- Transcript ---
 
 export function useTranscript(sessionId: string, enabled?: boolean) {
-  return useQuery({
-    queryKey: ["transcript", sessionId],
-    queryFn: () => apiClient.get<Message[]>(`/api/sessions/${sessionId}/transcript`),
-    enabled,
-  });
+  return useQuery(getTranscript, { sessionId }, { enabled });
 }
 
-// --- Educator ---
+export function useEvaluation(sessionId: string, enabled?: boolean) {
+  return useQuery(getEvaluation, { sessionId }, { enabled });
+}
 
-export function useEducator(sessionId: string, enabled = true) {
-  return useQuery({
-    queryKey: ["educator", sessionId],
-    queryFn: () => apiClient.get<EducatorAnalysis>(`/api/sessions/${sessionId}/educator`),
+export function useEducator(sessionId: string, enabled?: boolean) {
+  return useQuery(getEducatorAnalysis, { sessionId }, {
     enabled,
     refetchInterval: (query) => {
-      const data = query.state.data as EducatorAnalysis | undefined;
-      if (data?.status === "generating") return 3000;
+      const data = query.state.data;
+      if (data?.analysis?.status === EducatorStatus.GENERATING) return 3000;
       return false;
     },
   });
 }
 
+export function useRetryEvaluation(sessionId: string) {
+  const qc = useQueryClient();
+  return useMutation(retryEvaluationMethod, {
+    onSuccess: () => qc.invalidateQueries({
+      queryKey: createConnectQueryKey({ schema: getEvaluation, input: { sessionId }, cardinality: undefined }),
+    }),
+  });
+}
+
 export function useRequestEducator(sessionId: string) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post(`/api/sessions/${sessionId}/educator`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["educator", sessionId] }),
+  return useMutation(requestEducatorMethod, {
+    onSuccess: () => qc.invalidateQueries({
+      queryKey: createConnectQueryKey({ schema: getEducatorAnalysis, input: { sessionId }, cardinality: undefined }),
+    }),
   });
 }
 
-// --- Coach ---
-
-export function useCoachLatest() {
-  return useQuery({
-    queryKey: ["coach"],
-    queryFn: () => apiClient.get<CoachAnalysis | null>("/api/coach/latest"),
-  });
-}
-
-export function useRequestCoachAnalysis() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/coach/analyze"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["coach"] }),
-  });
-}
-
-// --- Auth mutations ---
+// --- Auth ---
 
 export function useLogin() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { email: string; password: string }) =>
-      apiClient.post<User>("/api/auth/login", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  return useMutation(loginMethod, {
+    onSuccess: () => qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getMe, input: {}, cardinality: undefined }) }),
   });
 }
 
 export function useSignup() {
-  return useMutation({
-    mutationFn: (data: { email: string; password: string; display_name: string }) =>
-      apiClient.post<User>("/api/auth/signup", data),
-  });
+  return useMutation(signupMethod);
 }
 
 export function useLogout() {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/auth/logout"),
+  return useMutation(logoutMethod, {
     onSuccess: () => qc.clear(),
   });
 }
 
-// --- Auth mutations (password, email verification) ---
-
 export function useForgotPassword() {
-  return useMutation({
-    mutationFn: (data: { email: string }) =>
-      apiClient.post("/api/auth/forgot-password", data),
-  });
+  return useMutation(forgotPasswordMethod);
 }
 
 export function useResetPassword() {
-  return useMutation({
-    mutationFn: (data: { token: string; password: string }) =>
-      apiClient.post("/api/auth/reset-password", data),
-  });
+  return useMutation(resetPasswordMethod);
 }
 
 export function useVerifyEmail() {
-  return useMutation({
-    mutationFn: (data: { token: string }) =>
-      apiClient.post("/api/auth/verify-email", data),
-  });
+  return useMutation(verifyEmailMethod);
 }
-
-// --- Profile ---
-
-export function useUpdateProfile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { display_name: string }) =>
-      apiClient.patch("/api/me", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
-  });
-}
-
-// --- Data export ---
-
-export function useExportData() {
-  // POST because the backend queues an async export job (side effect, not idempotent read)
-  return useMutation({
-    mutationFn: () => apiClient.post("/api/me/export"),
-  });
-}
-
-// --- Account deletion ---
 
 export function useDeleteAccount() {
-  return useMutation({
-    mutationFn: () => apiClient.delete("/api/auth/account"),
-  });
-}
-
-// --- Billing ---
-
-export type CheckoutRequest =
-  | { type: "subscription"; plan: "pro" }
-  | { type: "pack"; minutes: number };
-
-export function useCheckout() {
-  return useMutation({
-    mutationFn: (body: CheckoutRequest) =>
-      apiClient.post<{ url: string }>("/api/billing/checkout", body),
-  });
-}
-
-export function usePortal() {
-  return useMutation({
-    mutationFn: () => apiClient.post<{ url: string }>("/api/billing/portal"),
-  });
+  return useMutation(deleteAccountMethod);
 }

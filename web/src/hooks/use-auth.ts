@@ -1,18 +1,18 @@
 import { useQuery } from "@connectrpc/connect-query";
+import { ConnectError, Code } from "@connectrpc/connect";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
-import { useMe } from "@/api/queries";
-import { ApiError } from "@/api/client";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 
 /**
  * Checks auth state without redirecting. For routes that render
  * different content based on auth (e.g., landing page vs dashboard).
- * Distinguishes 401 (not authenticated) from 5xx (server error).
+ * Distinguishes unauthenticated from server error.
  */
 export function useOptionalAuth() {
-  const { data: user, isLoading, error } = useMe();
-  const isAuthError = error instanceof ApiError && error.status === 401;
+  const { data, isLoading, error } = useQuery(getMe, {}, { retry: false });
+  const user = data?.user;
+  const isAuthError = error instanceof ConnectError && error.code === Code.Unauthenticated;
   return { user, isLoading, isAuthenticated: !!user, isAuthError };
 }
 
