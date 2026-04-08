@@ -426,7 +426,7 @@ func (b *Backend) StreamLLM(ctx context.Context, p ai.StreamParams) (_ *ai.Token
 func (b *Backend) StoreAudio(ctx context.Context, key string, data []byte, contentType string) (_ string, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.StoreAudio")
 	defer func() { drilotel.End(span, err) }()
-	return b.store.Put(ctx, key, data, contentType)
+	return b.store.Audio().Put(ctx, key, data, contentType)
 }
 
 // SetAudioURL updates the audio_url column for a message.

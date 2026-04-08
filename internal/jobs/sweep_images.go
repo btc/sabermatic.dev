@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/drilotel"
 )
 
 // SweepMissingImagesArgs are the arguments for the sweep missing images job.
@@ -30,12 +31,13 @@ func (w *SweepMissingImagesWorker) Timeout(job *river.Job[SweepMissingImagesArgs
 	return 1 * time.Minute
 }
 
-const sweepBatchSize = 50
+func (w *SweepMissingImagesWorker) Work(ctx context.Context, job *river.Job[SweepMissingImagesArgs]) (err error) {
+	ctx, span := imagegenTracer.Start(ctx, "SweepMissingImagesWorker.Work")
+	defer func() { drilotel.End(span, err) }()
 
-func (w *SweepMissingImagesWorker) Work(ctx context.Context, job *river.Job[SweepMissingImagesArgs]) error {
 	q := db.New(w.Pool)
 
-	ids, err := q.ListQuestionsWithoutImages(ctx, sweepBatchSize)
+	ids, err := q.ListQuestionsWithoutImages(ctx)
 	if err != nil {
 		return fmt.Errorf("list questions without images: %w", err)
 	}

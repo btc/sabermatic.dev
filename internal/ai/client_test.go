@@ -185,7 +185,7 @@ func TestNumericFromFloat_Zero(t *testing.T) {
 	assert.Equal(t, 0, big.NewInt(0).Cmp(n.Int))
 }
 
-func TestCallAndLog_NilTx(t *testing.T) {
+func TestCall_ReturnsText(t *testing.T) {
 	// Fake server that returns a non-streaming message response.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -205,7 +205,7 @@ func TestCallAndLog_NilTx(t *testing.T) {
 
 	client := NewTestClient(srv.URL, nil)
 
-	text, err := client.CallAndLog(context.Background(), nil, CallParams{
+	result, err := client.Call(context.Background(), CallParams{
 		Model:     "claude-sonnet-4-20250514",
 		System:    "Be helpful.",
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Hi"))},
@@ -214,7 +214,7 @@ func TestCallAndLog_NilTx(t *testing.T) {
 		Role:      "evaluator",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "Hello from Claude!", text)
+	assert.Equal(t, "Hello from Claude!", result.Text)
 }
 
 func TestPricing_AllModelsHaveCosts(t *testing.T) {

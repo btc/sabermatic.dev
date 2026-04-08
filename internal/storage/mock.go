@@ -7,18 +7,35 @@ import (
 	"sync"
 )
 
-// MockStore records all calls for test assertions.
+// MockStore implements Store with separate mock buckets for testing.
 type MockStore struct {
+	AudioStore  *MockBucket
+	PublicStore *MockBucket
+}
+
+func NewMockStore() *MockStore {
+	return &MockStore{
+		AudioStore:  NewMockBucket(),
+		PublicStore: NewMockBucket(),
+	}
+}
+
+func (m *MockStore) Audio() Bucket  { return m.AudioStore }
+func (m *MockStore) Public() Bucket { return m.PublicStore }
+func (m *MockStore) Close() error   { return nil }
+
+// MockBucket records all calls for test assertions.
+type MockBucket struct {
 	mu      sync.Mutex
 	Objects map[string][]byte
 	PutErr  error // if set, Put returns this error
 }
 
-func NewMockStore() *MockStore {
-	return &MockStore{Objects: make(map[string][]byte)}
+func NewMockBucket() *MockBucket {
+	return &MockBucket{Objects: make(map[string][]byte)}
 }
 
-func (m *MockStore) Put(_ context.Context, key string, data []byte, _ string) (string, error) {
+func (m *MockBucket) Put(_ context.Context, key string, data []byte, _ string) (string, error) {
 	if m.PutErr != nil {
 		return "", m.PutErr
 	}
@@ -28,14 +45,14 @@ func (m *MockStore) Put(_ context.Context, key string, data []byte, _ string) (s
 	return fmt.Sprintf("mock://%s", key), nil
 }
 
-func (m *MockStore) Delete(_ context.Context, key string) error {
+func (m *MockBucket) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.Objects, key)
 	return nil
 }
 
-func (m *MockStore) DeletePrefix(_ context.Context, prefix string) error {
+func (m *MockBucket) DeletePrefix(_ context.Context, prefix string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for k := range m.Objects {
@@ -46,8 +63,8 @@ func (m *MockStore) DeletePrefix(_ context.Context, prefix string) error {
 	return nil
 }
 
-// HasKey returns true if the given key exists in the store.
-func (m *MockStore) HasKey(key string) bool {
+// HasKey returns true if the given key exists in the bucket.
+func (m *MockBucket) HasKey(key string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, ok := m.Objects[key]
@@ -55,11 +72,8 @@ func (m *MockStore) HasKey(key string) bool {
 }
 
 // Count returns the number of stored objects.
-func (m *MockStore) Count() int {
+func (m *MockBucket) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.Objects)
 }
-
-// Close is a no-op for the mock store.
-func (m *MockStore) Close() error { return nil }

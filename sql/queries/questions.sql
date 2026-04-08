@@ -27,8 +27,7 @@ RETURNING id;
 
 -- name: ListQuestionsWithoutImages :many
 SELECT id FROM questions
-WHERE image_url IS NULL
-LIMIT $1;
+WHERE image_url IS NULL;
 
 -- name: SetQuestionImageURL :exec
 UPDATE questions SET image_url = $2, updated_at = NOW()

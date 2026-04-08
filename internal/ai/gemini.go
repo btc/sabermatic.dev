@@ -33,11 +33,7 @@ func NewGeminiClient(ctx context.Context, project, location, model string) (*Gem
 
 // GenerateImage generates an image from a text prompt using Gemini's native
 // image generation API (GenerateContent with IMAGE response modality).
-// Returns image bytes and MIME type.
-//
-// Note: The native GenerateContent API does not support aspect_ratio or
-// image_size parameters — those are only available in the dedicated Imagen API.
-// Aspect ratio is controlled via the prompt text (e.g. "wide landscape format").
+// Returns image bytes and MIME type. Uses 4:3 aspect ratio for card images.
 func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) (_ []byte, _ string, err error) {
 	ctx, span := geminiTracer.Start(ctx, "GeminiClient.GenerateImage")
 	defer func() { drilotel.End(span, err) }()
@@ -53,6 +49,9 @@ func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) (_ []by
 		genai.Text(prompt),
 		&genai.GenerateContentConfig{
 			ResponseModalities: []string{"IMAGE"},
+			ImageConfig: &genai.ImageConfig{
+				AspectRatio: "4:3",
+			},
 		},
 	)
 	if err != nil {

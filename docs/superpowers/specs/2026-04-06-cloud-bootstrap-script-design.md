@@ -22,7 +22,7 @@ The script is designed for a solo operator deploying from a laptop. It is not a 
 | Language | Python 3 (stdlib only) | Better error handling, state management, and prompting than bash. No pip deps needed. |
 | State tracking | `.cloud_bootstrap_state` JSON file | Enables resume. Tracks completed phases and sub-steps (e.g. individual secrets). |
 | Replaces | `scripts/bootstrap.sh` | New script covers the full flow (deps through first deploy). No reason to maintain both. |
-| Project ID | Configurable, defaults to `sabermatic-prod` | User is prompted at start. Stored in state for resume. |
+| Project ID | Configurable, defaults to `sabermatic-production` | User is prompted at start. Stored in state for resume. |
 | Region | Configurable, defaults to `us-central1` | Prompted once, stored in state. |
 | Secret handling | Interactive prompts with helper links | Secrets are pasted at the terminal, piped directly to `gcloud secrets versions add --data-file=-`. Never written to disk. |
 | Docker build | Local `docker build` + push to Artifact Registry | Simplest first deploy. CI/CD handles subsequent deploys. |
@@ -69,7 +69,7 @@ No auto-install. The user runs the commands themselves.
 
 ### Phase 3 — Create GCP Project + Enable Billing
 
-1. Prompt for project ID (default: `sabermatic-prod`).
+1. Prompt for project ID (default: `sabermatic-production`).
 2. Run `gcloud projects create <project-id> --name="Sabermatic"`.
    - If project already exists, note it and continue.
 3. Run `gcloud config set project <project-id>`.
@@ -78,7 +78,7 @@ No auto-install. The user runs the commands themselves.
    Billing must be enabled before we can create resources.
 
    Open this URL and link a billing account:
-     https://console.cloud.google.com/billing/linkedaccount?project=sabermatic-prod
+     https://console.cloud.google.com/billing/linkedaccount?project=sabermatic-production
 
    Press Enter when billing is enabled...
    ```
@@ -112,7 +112,7 @@ All commands use `2>/dev/null || echo "already exists"` pattern for idempotency.
 
 1. Write `terraform/terraform.tfvars` from state values:
    ```hcl
-   project_id  = "sabermatic-prod"
+   project_id  = "sabermatic-production"
    region      = "us-central1"
    environment = "prod"
    github_repo = "btc/drill"
@@ -236,8 +236,8 @@ Each sub-step is tracked individually in state for resume.
    Deploy complete!
 
    Cloud Run URL:  https://drill-xxxxx.a.run.app
-   Cloud SQL:      sabermatic-prod:us-central1:drill-prod
-   Artifact Reg:   us-central1-docker.pkg.dev/sabermatic-prod/drill
+   Cloud SQL:      sabermatic-production:us-central1:drill-prod
+   Artifact Reg:   us-central1-docker.pkg.dev/sabermatic-production/drill
 
    Stripe:
      Pro monthly:  price_xxx ($39.00/mo → $0.065/min)
@@ -260,7 +260,7 @@ Each sub-step is tracked individually in state for resume.
 
 ```json
 {
-  "project_id": "sabermatic-prod",
+  "project_id": "sabermatic-production",
   "region": "us-central1",
   "github_repo": "btc/drill",
   "phases": {
@@ -284,8 +284,8 @@ Each sub-step is tracked individually in state for resume.
   },
   "outputs": {
     "cloud_run_url": "https://drill-xxxxx.a.run.app",
-    "sql_connection_name": "sabermatic-prod:us-central1:drill-prod",
-    "artifact_registry_url": "us-central1-docker.pkg.dev/sabermatic-prod/drill"
+    "sql_connection_name": "sabermatic-production:us-central1:drill-prod",
+    "artifact_registry_url": "us-central1-docker.pkg.dev/sabermatic-production/drill"
   }
 }
 ```

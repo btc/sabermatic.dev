@@ -3,7 +3,7 @@
 #   terraform plan
 #   terraform apply
 
-project_id             = "sabermatic-prod"
+project_id             = "sabermatic-production"
 region                 = "us-central1"
 environment            = "prod"
 github_repo            = "btc/drill"

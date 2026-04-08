@@ -181,7 +181,7 @@ When `CreateQuestion` RPC inserts a new question, Job A is enqueued in the same 
 
 - Add `roles/aiplatform.user` IAM role to the existing service account.
 - No new API key — Application Default Credentials (ADC) handle auth, same as GCS.
-- Vertex AI backend: project `sabermatic-prod`, location `us-central1`.
+- Vertex AI backend: project `sabermatic-production`, location `us-central1`.
 
 ### Config
 
@@ -246,12 +246,12 @@ GCP project reuses the existing `GOOGLE_CLOUD_PROJECT` env var. Vertex AI locati
 
 ### Separate public bucket
 
-The existing `STORAGE_BUCKET` is used for audio (private). Question card images are public content. Use a **separate GCS bucket** (e.g., `sabermatic-prod-public`) with default public read ACL. This provides a clean security boundary — private audio stays private, public images are explicitly public.
+The existing `STORAGE_BUCKET` is used for audio (private). Question card images are public content. Use a **separate GCS bucket** (e.g., `sabermatic-production-public`) with default public read ACL. This provides a clean security boundary — private audio stays private, public images are explicitly public.
 
 Job A receives a second `ObjectStore` instance pointed at the public bucket (injected via DI, same as the audio store). Config:
 
 ```
-PUBLIC_STORAGE_BUCKET=sabermatic-prod-public
+PUBLIC_STORAGE_BUCKET=sabermatic-production-public
 ```
 
 ### Image URLs

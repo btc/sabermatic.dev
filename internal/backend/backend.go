@@ -37,22 +37,22 @@ type Backend struct {
 	llm   *ai.Client
 	stt   ai.Transcriber
 	tts   ai.Synthesizer
-	store storage.ObjectStore
+	store storage.Store
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
 // App migrations must be run before calling this (schema must exist).
 func New(cfg *config.Config) (*Backend, error) {
 	// Object storage (no pool dependency -- initialize first).
-	var store storage.ObjectStore
+	var store storage.Store
 	var err error
 	switch cfg.Storage.Backend {
 	case "gcs":
-		store, err = storage.NewGCS(context.Background(), cfg.Storage.Bucket)
+		store, err = storage.NewGCS(context.Background(), cfg.Storage.Bucket, cfg.Storage.PublicBucket)
 		if err != nil {
 			return nil, fmt.Errorf("gcs storage: %w", err)
 		}
-		slog.Info("storage: gcs", "bucket", cfg.Storage.Bucket)
+		slog.Info("storage: gcs", "audio_bucket", cfg.Storage.Bucket, "public_bucket", cfg.Storage.PublicBucket)
 	case "local":
 		store, err = storage.NewLocal(cfg.Storage.LocalDir)
 		if err != nil {
@@ -185,7 +185,7 @@ type TestOverrides struct {
 	LLM   *ai.Client
 	STT   ai.Transcriber
 	TTS   ai.Synthesizer
-	Store storage.ObjectStore
+	Store storage.Store
 }
 
 // ApplyTestOverrides replaces AI dependencies for testing. Only call from tests.

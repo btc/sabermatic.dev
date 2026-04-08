@@ -163,11 +163,10 @@ func (q *Queries) ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) 
 const listQuestionsWithoutImages = `-- name: ListQuestionsWithoutImages :many
 SELECT id FROM questions
 WHERE image_url IS NULL
-LIMIT $1
 `
 
-func (q *Queries) ListQuestionsWithoutImages(ctx context.Context, limit int32) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listQuestionsWithoutImages, limit)
+func (q *Queries) ListQuestionsWithoutImages(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listQuestionsWithoutImages)
 	if err != nil {
 		return nil, err
 	}
