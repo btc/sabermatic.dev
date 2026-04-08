@@ -3,13 +3,14 @@ import { useSampleEducator } from "@/api/sample-queries";
 
 export function DeepDivePreview() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
-  const { data: educator } = useSampleEducator();
+  const { data } = useSampleEducator();
 
-  if (!educator?.model_answer) return null;
+  const analysis = data?.analysis;
+  if (!analysis?.modelAnswer) return null;
 
   // Show first ~500 chars of model answer and first gap deep dive section
-  const modelPreview = educator.model_answer.slice(0, 500);
-  const gapPreview = educator.gap_deep_dives?.slice(0, 400) ?? "";
+  const modelPreview = analysis.modelAnswer.slice(0, 500);
+  const gapPreview = analysis.gapDeepDives?.slice(0, 400) ?? "";
 
   return (
     <section ref={ref} aria-labelledby="deep-dive-heading" className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
@@ -30,7 +31,7 @@ export function DeepDivePreview() {
           </h3>
           <div className="prose prose-sm prose-stone dark:prose-invert max-w-none">
             <p className="text-sm text-foreground leading-relaxed">
-              {modelPreview}{educator.model_answer.length > 500 ? "..." : ""}
+              {modelPreview}{analysis.modelAnswer.length > 500 ? "..." : ""}
             </p>
           </div>
         </div>
@@ -47,7 +48,7 @@ export function DeepDivePreview() {
             </h3>
             <div className="prose prose-sm prose-stone dark:prose-invert max-w-none">
               <p className="text-sm text-foreground leading-relaxed">
-                {gapPreview}{(educator.gap_deep_dives?.length ?? 0) > 400 ? "..." : ""}
+                {gapPreview}{(analysis.gapDeepDives?.length ?? 0) > 400 ? "..." : ""}
               </p>
             </div>
           </div>

@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { Message } from "@/api/types";
+import type { Message } from "@/pb/drill/v1/session_pb";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { timestampDate } from "@bufbuild/protobuf/wkt";
 
 export interface ReplayState {
   isPlaying: boolean;
@@ -12,8 +14,8 @@ export interface ReplayState {
 
 export interface ReplayOptions {
   messages: Message[];
-  sessionStartedAt: string;
-  sessionEndedAt: string | null;
+  sessionStartedAt: Timestamp;
+  sessionEndedAt: Timestamp | undefined;
   annotationSeqs: number[];
 }
 
@@ -40,17 +42,17 @@ export function useReplayEngine(options: ReplayOptions | null) {
 
   useEffect(() => {
     if (!options) return;
-    const start = new Date(options.sessionStartedAt).getTime();
+    const start = timestampDate(options.sessionStartedAt).getTime();
     // Use ended_at if available; otherwise fall back to last message + 30s buffer
     const lastMsg = options.messages.length > 0
-      ? new Date(options.messages[options.messages.length - 1].created_at).getTime()
+      ? timestampDate(options.messages[options.messages.length - 1].createTime!).getTime()
       : start;
     const end = options.sessionEndedAt
-      ? new Date(options.sessionEndedAt).getTime()
+      ? timestampDate(options.sessionEndedAt).getTime()
       : lastMsg + 30 * 1000;
 
     messageOffsets.current = options.messages.map(
-      (m) => (new Date(m.created_at).getTime() - start) / 1000,
+      (m) => (timestampDate(m.createTime!).getTime() - start) / 1000,
     );
 
     const map = new Map<number, number>();

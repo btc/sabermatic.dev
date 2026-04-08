@@ -1,34 +1,37 @@
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
-import type { AnnotationType } from "@/api/types";
+import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
 import { cn } from "@/lib/utils";
 
 const ANNOTATION_COLORS: Record<AnnotationType, string> = {
-  strength: "border-strength text-strength",
-  gap: "border-gap text-gap",
-  missed_opportunity: "border-missed text-missed",
-  note: "border-note text-note",
+  [AnnotationType.UNSPECIFIED]: "border-muted text-muted",
+  [AnnotationType.STRENGTH]: "border-strength text-strength",
+  [AnnotationType.GAP]: "border-gap text-gap",
+  [AnnotationType.MISSED_OPPORTUNITY]: "border-missed text-missed",
+  [AnnotationType.NOTE]: "border-note text-note",
 };
 
 const ANNOTATION_LABELS: Record<AnnotationType, string> = {
-  strength: "Strength",
-  gap: "Gap",
-  missed_opportunity: "Missed opportunity",
-  note: "Note",
+  [AnnotationType.UNSPECIFIED]: "Unspecified",
+  [AnnotationType.STRENGTH]: "Strength",
+  [AnnotationType.GAP]: "Gap",
+  [AnnotationType.MISSED_OPPORTUNITY]: "Missed opportunity",
+  [AnnotationType.NOTE]: "Note",
 };
 
 export function Annotations() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
   const { data: sessionData } = useSampleSession();
-  const { data: evaluation } = useSampleEvaluation();
+  const { data: evalData } = useSampleEvaluation();
 
+  const evaluation = evalData?.evaluation;
   if (!sessionData?.messages || !evaluation?.annotations) return null;
 
   // Sort messages by seq to ensure correct window selection
   const sorted = [...sessionData.messages].sort((a, b) => a.seq - b.seq);
 
   // Pick a 3-5 message window that has annotations
-  const annotatedSeqs = new Set(evaluation.annotations.map((a) => a.message_seq));
+  const annotatedSeqs = new Set(evaluation.annotations.map((a) => a.messageSeq));
   const firstAnnotated = sorted.find((m) => annotatedSeqs.has(m.seq));
   if (!firstAnnotated) return null;
 
@@ -37,7 +40,7 @@ export function Annotations() {
     (m) => m.seq >= startSeq && m.seq < startSeq + 5,
   );
   const windowAnnotations = evaluation.annotations.filter(
-    (a) => a.message_seq >= startSeq && a.message_seq < startSeq + 5,
+    (a) => a.messageSeq >= startSeq && a.messageSeq < startSeq + 5,
   );
 
   return (
@@ -50,7 +53,7 @@ export function Annotations() {
       <div className="w-full max-w-2xl space-y-4">
         {window.map((msg, msgIdx) => {
           const msgAnnotations = windowAnnotations.filter(
-            (a) => a.message_seq === msg.seq,
+            (a) => a.messageSeq === msg.seq,
           );
           return (
             <div key={msg.seq} className="space-y-2">
@@ -69,7 +72,7 @@ export function Annotations() {
               </div>
               {msgAnnotations.map((ann, annIdx) => (
                 <div
-                  key={`${ann.message_seq}-${ann.type}-${annIdx}`}
+                  key={`${ann.messageSeq}-${ann.type}-${annIdx}`}
                   className={cn(
                     "ml-8 border-l-2 pl-3 py-1 text-xs transition-all duration-500 motion-reduce:transition-none",
                     ANNOTATION_COLORS[ann.type],

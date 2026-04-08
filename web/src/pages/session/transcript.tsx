@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
 import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
 import type { Message } from "@/pb/drill/v1/session_pb";
-import { timestampDate } from "@bufbuild/protobuf/wkt";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -299,11 +298,11 @@ function TranscriptInner() {
   const [replayMode, setReplayMode] = useState(false);
 
   const replay = useReplayEngine(
-    replayMode && messages && session
+    replayMode && messages && session?.startTime
       ? {
           messages,
-          sessionStartedAt: session.startTime ? timestampDate(session.startTime).toISOString() : "",
-          sessionEndedAt: session.endTime ? timestampDate(session.endTime).toISOString() : null,
+          sessionStartedAt: session.startTime,
+          sessionEndedAt: session.endTime,
           annotationSeqs: (evaluation?.annotations ?? []).map(
             (a) => a.messageSeq,
           ),

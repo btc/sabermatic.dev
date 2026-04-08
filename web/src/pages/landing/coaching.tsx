@@ -1,7 +1,7 @@
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 import { useSampleCoach } from "@/api/sample-queries";
 
-function Sparkline({ data, animate }: { data: { date: string; overall_score: number }[]; animate: boolean }) {
+function Sparkline({ data, animate }: { data: { date: string; overallScore: number }[]; animate: boolean }) {
   if (data.length < 2) return null;
 
   const width = 280;
@@ -10,7 +10,7 @@ function Sparkline({ data, animate }: { data: { date: string; overall_score: num
   const maxScore = 5;
 
   const points = data.map((d, i) => {
-    const score = Math.min(Math.max(d.overall_score, 0), maxScore);
+    const score = Math.min(Math.max(d.overallScore, 0), maxScore);
     return {
       x: padding + (i / (data.length - 1)) * (width - padding * 2),
       y: padding + ((maxScore - score) / maxScore) * (height - padding * 2),
@@ -53,9 +53,9 @@ function Sparkline({ data, animate }: { data: { date: string; overall_score: num
 
 export function Coaching() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
-  const { data: coach } = useSampleCoach();
+  const { data } = useSampleCoach();
 
-  if (!coach || !coach.narrative) return null;
+  if (!data?.analysis?.narrative) return null;
 
   return (
     <section ref={ref} aria-labelledby="coaching-heading" className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
@@ -65,21 +65,20 @@ export function Coaching() {
         </h2>
       </div>
       <div className="w-full max-w-lg space-y-6">
-        {/* Score trend sparkline — score_trend is only available because
-            useSampleCoach returns CoachFixture (not CoachAnalysis). */}
-        {coach.score_trend && coach.score_trend.length > 1 && (
+        {/* Score trend sparkline */}
+        {data.scoreTrend && data.scoreTrend.length > 1 && (
           <div
             className={`flex flex-col items-center gap-2 transition-all duration-500 motion-reduce:transition-none ${
               isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
-            <Sparkline data={coach.score_trend} animate={isVisible} />
+            <Sparkline data={data.scoreTrend} animate={isVisible} />
             <span className="text-xs text-muted-foreground">Score trend over sessions</span>
           </div>
         )}
 
         {/* Weakest dimension badge */}
-        {coach.weakest_dimension && (
+        {data.analysis.weakestDimension && (
           <div
             className={`flex items-center justify-center gap-2 transition-all duration-500 motion-reduce:transition-none ${
               isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
@@ -87,7 +86,7 @@ export function Coaching() {
             style={{ transitionDelay: "300ms" }}
           >
             <span className="rounded-full bg-gap/10 px-3 py-1 text-xs font-medium text-gap">
-              Focus area: {coach.weakest_dimension}
+              Focus area: {data.analysis.weakestDimension}
             </span>
           </div>
         )}
@@ -100,7 +99,7 @@ export function Coaching() {
           style={{ transitionDelay: "500ms" }}
         >
           <p className="text-sm text-foreground leading-relaxed">
-            {coach.narrative.slice(0, 300)}{coach.narrative.length > 300 ? "..." : ""}
+            {data.analysis.narrative.slice(0, 300)}{data.analysis.narrative.length > 300 ? "..." : ""}
           </p>
         </div>
       </div>

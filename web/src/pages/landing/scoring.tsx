@@ -5,7 +5,7 @@ import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
 const DIMENSIONS = [
   { key: "requirements", label: "Requirements" },
   { key: "architecture", label: "Architecture" },
-  { key: "deep_dive", label: "Deep Dive" },
+  { key: "deepDive", label: "Deep Dive" },
   { key: "scalability", label: "Scalability" },
   { key: "communication", label: "Communication" },
 ] as const;
@@ -35,11 +35,11 @@ function AnimatedBar({ value, delay, animate }: { value: number; delay: number; 
 
 export function Scoring() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
-  const { data: evaluation } = useSampleEvaluation();
+  const { data: evalData } = useSampleEvaluation();
   const { data: sessionData } = useSampleSession();
 
-  if (!evaluation?.scores) return null;
-  const scores = evaluation.scores;
+  if (!evalData?.evaluation?.scores) return null;
+  const scores = evalData.evaluation.scores;
 
   return (
     <section ref={ref} aria-labelledby="scoring-heading" className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
@@ -47,9 +47,9 @@ export function Scoring() {
         <h2 id="scoring-heading" className="text-3xl font-light text-foreground sm:text-4xl">
           Scored across five dimensions
         </h2>
-        {sessionData?.session.question_title && (
+        {sessionData?.session?.questionTitle && (
           <p className="text-sm text-muted-foreground">
-            From a session on: {sessionData.session.question_title}
+            From a session on: {sessionData.session.questionTitle}
           </p>
         )}
       </div>

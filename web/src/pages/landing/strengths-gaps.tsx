@@ -29,8 +29,9 @@ function FadeInCard({
 
 export function StrengthsGaps() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
-  const { data: evaluation } = useSampleEvaluation();
+  const { data: evalData } = useSampleEvaluation();
 
+  const evaluation = evalData?.evaluation;
   if (!evaluation?.strengths) return null;
 
   // Show first 2 of each for the landing page

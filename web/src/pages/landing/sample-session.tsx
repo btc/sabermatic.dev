@@ -5,7 +5,9 @@ import { useSampleSession, useSampleEvaluation } from "@/api/sample-queries";
 export function SampleSessionLink() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
   const { data: sessionData } = useSampleSession();
-  const { data: evaluation } = useSampleEvaluation();
+  const { data: evalData } = useSampleEvaluation();
+  const session = sessionData?.session;
+  const evaluation = evalData?.evaluation;
 
   return (
     <section ref={ref} aria-labelledby="sample-heading" className="flex min-h-screen flex-col items-center justify-center gap-8 px-4">
@@ -19,11 +21,11 @@ export function SampleSessionLink() {
           isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
         }`}
       >
-        {sessionData?.session ? (
+        {session ? (
           <>
             <div className="space-y-2 text-sm text-muted-foreground">
-              <p className="text-foreground font-medium">{sessionData.session.question_title}</p>
-              <p>{sessionData.messages?.length ?? 0} turns · {sessionData.session.config_duration_minutes} min</p>
+              <p className="text-foreground font-medium">{session.questionTitle}</p>
+              <p>{sessionData?.messages?.length ?? 0} turns · {session.configDurationMinutes} min</p>
               {evaluation?.scores && (
                 <p className="text-primary font-medium">Overall score: {evaluation.scores.overall}/5</p>
               )}
