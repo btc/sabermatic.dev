@@ -20,6 +20,7 @@ message CoachAnalysis {
   optional string suggested_question_id = 7;
   repeated string sessions_analyzed = 8;
   google.protobuf.Timestamp create_time = 9;
+  optional string summary = 10;
 }
 
 message GetCoachAnalysisRequest {}
