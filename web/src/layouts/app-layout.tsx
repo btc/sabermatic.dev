@@ -6,6 +6,7 @@ import { useLogout } from "@/api/queries";
 import { useRequireAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { UserRole } from "@/pb/drill/v1/user_pb";
+import { BrandName } from "@/components/brand-name";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -30,8 +31,8 @@ export function AppLayout() {
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div className="flex h-screen items-center justify-center text-muted-foreground bg-background">
-        Loading...
+      <div className="flex h-screen items-center justify-center bg-background">
+        <BrandName className="text-sm font-semibold tracking-wider text-muted-foreground" />
       </div>
     );
   }
@@ -40,8 +41,8 @@ export function AppLayout() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-12 max-w-5xl items-center justify-between px-4">
-          <Link to="/" className="text-sm font-semibold tracking-wider text-muted-foreground hover:text-foreground transition-colors">
-            DRILL
+          <Link to="/" className="hover:text-foreground transition-colors">
+            <BrandName className="text-sm font-semibold tracking-wider text-muted-foreground" />
           </Link>
           <div className="flex items-center gap-4">
             <nav className="flex items-center gap-4 text-sm">
