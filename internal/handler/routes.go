@@ -129,9 +129,10 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 			return
 		}
 		// River UI — exempt from CSRF; uses application/json bodies which cannot be
-		// submitted cross-origin by a simple HTML form. Auth is enforced by the mux chain.
+		// submitted cross-origin by a simple HTML form. Unauthenticated requests to
+		// this prefix are rejected by requireAuth in the mux before reaching the handler.
 		// TODO: flip csrfMiddleware to opt-in model — exempt list is growing.
-		if strings.HasPrefix(r.URL.Path, "/admin/jobs/") {
+		if strings.HasPrefix(r.URL.Path, "/admin/jobs/") || r.URL.Path == "/admin/jobs" {
 			next.ServeHTTP(w, r)
 			return
 		}
