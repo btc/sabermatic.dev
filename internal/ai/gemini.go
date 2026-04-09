@@ -42,9 +42,6 @@ func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) (_ []by
 	if prompt == "" {
 		return nil, "", errors.New("empty prompt")
 	}
-	if g.client == nil {
-		return nil, "", errors.New("gemini client not initialized")
-	}
 
 	result, err := g.client.Models.GenerateContent(ctx, g.model,
 		genai.Text(prompt),

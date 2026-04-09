@@ -28,8 +28,8 @@ type Config struct {
 }
 
 // GCP holds Google Cloud Platform settings shared across subsystems
-// (observability, Vertex AI, etc.). GOOGLE_CLOUD_PROJECT is auto-set
-// by Cloud Run; locally it must be set explicitly.
+// (observability, Vertex AI, etc.). GOOGLE_CLOUD_PROJECT must be set
+// explicitly — in Terraform for production, in the environment for local dev.
 type GCP struct {
 	ProjectID string `env:"GOOGLE_CLOUD_PROJECT,required"`
 }

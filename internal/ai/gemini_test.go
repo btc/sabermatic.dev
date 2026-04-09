@@ -15,10 +15,3 @@ func TestGeminiClient_GenerateImage_EmptyPrompt(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "empty prompt")
 }
-
-func TestGeminiClient_GenerateImage_NilClient(t *testing.T) {
-	client := &ai.GeminiClient{}
-	_, _, err := client.GenerateImage(context.Background(), "test prompt")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not initialized")
-}
