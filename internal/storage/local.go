@@ -7,30 +7,48 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/btc/drill/internal/config"
 )
 
 // LocalStore stores objects on the local filesystem with separate audio and public directories.
 type LocalStore struct {
 	baseDir string
+	baseURL string // e.g., "http://localhost:8080"
 }
 
-// NewLocal creates a LocalStore rooted at baseDir, creating it if needed.
-func NewLocal(baseDir string) (*LocalStore, error) {
+// NewLocal creates a LocalStore rooted at cfg.Storage.LocalDir, creating it if needed.
+// URLs returned by Put use HTTP paths served by the local file server in main.go.
+func NewLocal(cfg *config.Config) (*LocalStore, error) {
+	baseDir := cfg.Storage.LocalDir
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create storage dir: %w", err)
 	}
-	return &LocalStore{baseDir: baseDir}, nil
+	baseURL := fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+	return &LocalStore{baseDir: baseDir, baseURL: baseURL}, nil
 }
 
-func (s *LocalStore) Audio() Bucket  { return &localBucket{dir: filepath.Join(s.baseDir, "audio")} }
-func (s *LocalStore) Public() Bucket { return &localBucket{dir: filepath.Join(s.baseDir, "public")} }
+func (s *LocalStore) Audio() Bucket {
+	return &localBucket{
+		dir:       filepath.Join(s.baseDir, "audio"),
+		urlPrefix: s.baseURL + "/storage/audio",
+	}
+}
+
+func (s *LocalStore) Public() Bucket {
+	return &localBucket{
+		dir:       filepath.Join(s.baseDir, "public"),
+		urlPrefix: s.baseURL + "/storage/public",
+	}
+}
 
 // Close is a no-op for local filesystem storage.
 func (s *LocalStore) Close() error { return nil }
 
 // localBucket operates on a single directory within the local filesystem.
 type localBucket struct {
-	dir string
+	dir       string
+	urlPrefix string // e.g., "http://localhost:8080/storage/audio"
 }
 
 // guard validates that key does not escape the bucket root and returns the
@@ -58,7 +76,7 @@ func (b *localBucket) Put(_ context.Context, key string, data []byte, _ string) 
 	if err := os.WriteFile(p, data, 0o644); err != nil {
 		return "", fmt.Errorf("write file: %w", err)
 	}
-	return "file://" + p, nil
+	return b.urlPrefix + "/" + key, nil
 }
 
 func (b *localBucket) Delete(_ context.Context, key string) error {

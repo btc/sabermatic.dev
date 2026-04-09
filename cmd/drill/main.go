@@ -85,6 +85,17 @@ func runWithContext(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
 	}
+
+	// Local dev: serve storage files via HTTP so browser can load them.
+	if cfg.Storage.Backend == "local" {
+		inner := h
+		storageMux := http.NewServeMux()
+		storageMux.Handle("/storage/", http.StripPrefix("/storage/",
+			http.FileServer(http.Dir(cfg.Storage.LocalDir))))
+		storageMux.Handle("/", inner)
+		h = storageMux
+	}
+
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: h,
