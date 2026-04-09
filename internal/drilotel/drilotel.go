@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"runtime/debug"
 	"time"
@@ -135,7 +136,7 @@ func buildExporters(name string) (sdktrace.SpanExporter, sdkmetric.Exporter, err
 	case "dev":
 		// One-line-per-span exporter for local development.
 		te := &devTraceExporter{}
-		me, err := stdoutmetric.New()
+		me, err := stdoutmetric.New(stdoutmetric.WithWriter(io.Discard))
 		if err != nil {
 			return nil, nil, fmt.Errorf("stdout metric exporter: %w", err)
 		}
