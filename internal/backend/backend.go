@@ -123,21 +123,21 @@ func New(cfg *config.Config) (*Backend, error) {
 		Middleware:   []rivertype.Middleware{&drilotel.JobTracer{}},
 		PeriodicJobs: []*river.PeriodicJob{
 			river.NewPeriodicJob(
-				river.PeriodicInterval(3*time.Minute),
+				river.PeriodicInterval(3*time.Minute), // TODO extract to config
 				func() (river.JobArgs, *river.InsertOpts) {
 					return jobs.CleanupAbandonedSessionsArgs{}, nil
 				},
 				nil,
 			),
 			river.NewPeriodicJob(
-				river.PeriodicInterval(60*time.Second),
+				river.PeriodicInterval(60*time.Second), // TODO extract to config
 				func() (river.JobArgs, *river.InsertOpts) {
 					return jobs.CleanupStaleGeneratingArgs{}, nil
 				},
 				nil,
 			),
 			river.NewPeriodicJob(
-				river.PeriodicInterval(5*time.Minute),
+				river.PeriodicInterval(1*time.Minute), // TODO extract to config
 				func() (river.JobArgs, *river.InsertOpts) {
 					return jobs.SweepMissingImagesArgs{}, nil
 				},
