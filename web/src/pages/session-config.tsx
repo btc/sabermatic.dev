@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate, Link, Navigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery, useMutation } from "@connectrpc/connect-query";
@@ -85,6 +85,18 @@ export default function SessionConfig() {
   const [coachBriefing, setCoachBriefing] = useState(true);
   const [micState, setMicState] = useState<MicState>("idle");
 
+  // Check mic permission on mount (non-prompting)
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await navigator.permissions.query({ name: "microphone" as PermissionName });
+        if (result.state === "granted") setMicState("granted");
+      } catch {
+        // Safari doesn't support microphone permission query — default to idle
+      }
+    })();
+  }, []);
+
   // Redirect if no question param.
   // NOTE: the hooks above fire before this guard runs (React rules of hooks).
   // The in-flight requests will be cancelled by React Query cleanup on unmount,
@@ -149,20 +161,32 @@ export default function SessionConfig() {
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
-      {/* Question */}
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            {question ? question.title : <span className="text-muted-foreground">Loading question...</span>}
-          </CardTitle>
-        </CardHeader>
-        {question && (
-          <CardContent>
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-              {question.prompt}
-            </p>
-          </CardContent>
-        )}
+      {/* Question — image beside text */}
+      <Card className="overflow-hidden">
+        <div className="flex">
+          {question?.imageUrl ? (
+            <img
+              src={question.imageUrl}
+              alt={question.title}
+              className="w-[45%] aspect-[4/3] object-cover flex-shrink-0"
+            />
+          ) : (
+            <div
+              className="w-[45%] aspect-[4/3] flex-shrink-0"
+              style={{ background: "linear-gradient(135deg, hsl(32 40% 85%), hsl(24 30% 75%))" }}
+            />
+          )}
+          <div className="flex flex-col justify-center px-6 py-5 flex-1">
+            <CardTitle className="mb-2">
+              {question ? question.title : <span className="text-muted-foreground">Loading question...</span>}
+            </CardTitle>
+            {question && (
+              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap line-clamp-6">
+                {question.prompt}
+              </p>
+            )}
+          </div>
+        </div>
       </Card>
 
       {/* Configuration */}
@@ -171,86 +195,98 @@ export default function SessionConfig() {
           <CardTitle>Configuration</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          {/* Duration */}
+          {/* Session group */}
           <div className="space-y-2">
-            <Label>Duration</Label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {DURATION_PRESETS.map((preset) => (
-                <Button
-                  key={preset}
-                  type="button"
-                  variant={durationMode === "preset" && durationPreset === preset ? "default" : "outline"}
-                  size="sm"
-                  disabled={preset > planMax}
-                  onClick={() => {
-                    setDurationMode("preset");
-                    setDurationPreset(preset);
-                  }}
-                >
-                  {preset} min
-                </Button>
-              ))}
-              <Button
-                type="button"
-                variant={durationMode === "custom" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setDurationMode("custom")}
-              >
-                Custom
-              </Button>
-            </div>
-            {durationMode === "custom" && (
-              <div className="flex items-center gap-2 mt-2">
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  value={customDuration}
-                  onChange={(e) => handleCustomDurationChange(e.target.value)}
-                  onBlur={handleCustomDurationBlur}
-                  className="w-20"
-                  aria-label="Custom duration in minutes"
-                />
-                <span className="text-sm text-muted-foreground">
-                  minutes (max {planMax})
-                </span>
-              </div>
-            )}
-            {me?.plan === UserPlan.FREE && (
-              <p className="text-xs text-muted-foreground">
-                Free plan: sessions capped at {FREE_PLAN_MAX} minutes.
-              </p>
-            )}
-          </div>
-
-          {/* TTS toggle */}
-          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Session</span>
             <div>
-              <Label htmlFor="tts-toggle">Interviewer voice responses</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Hear the interviewer speak rather than read text.
-              </p>
+              <Label>Duration</Label>
+              <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                {DURATION_PRESETS.map((preset) => (
+                  <Button
+                    key={preset}
+                    type="button"
+                    variant={durationMode === "preset" && durationPreset === preset ? "default" : "outline"}
+                    size="sm"
+                    disabled={preset > planMax}
+                    onClick={() => { setDurationMode("preset"); setDurationPreset(preset); }}
+                  >
+                    {preset} min
+                  </Button>
+                ))}
+                <Button
+                  type="button"
+                  variant={durationMode === "custom" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setDurationMode("custom")}
+                >
+                  Custom
+                </Button>
+              </div>
+              {durationMode === "custom" && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={customDuration}
+                    onChange={(e) => handleCustomDurationChange(e.target.value)}
+                    onBlur={handleCustomDurationBlur}
+                    className="w-20"
+                    aria-label="Custom duration in minutes"
+                  />
+                  <span className="text-sm text-muted-foreground">minutes (max {planMax})</span>
+                </div>
+              )}
+              {me?.plan === UserPlan.FREE && (
+                <p className="text-xs text-muted-foreground mt-1">Free plan: sessions capped at {FREE_PLAN_MAX} minutes.</p>
+              )}
             </div>
-            <Toggle
-              id="tts-toggle"
-              checked={ttsEnabled}
-              onCheckedChange={setTtsEnabled}
-            />
           </div>
 
-          {/* Coach briefing toggle — only if coach data exists */}
+          {/* Audio group */}
+          <div className="space-y-3">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Audio</span>
+
+            {/* Mic toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="mic-toggle">Microphone</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {micState === "denied"
+                    ? "Permission denied. You can still use text input."
+                    : "Use your voice — it's faster and more natural."}
+                </p>
+              </div>
+              <Toggle
+                id="mic-toggle"
+                checked={micState === "granted"}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    handleEnableMic();
+                  } else {
+                    setMicState("idle");
+                  }
+                }}
+              />
+            </div>
+
+            {/* TTS toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="tts-toggle">Interviewer voice responses</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">Hear the interviewer speak rather than read text.</p>
+              </div>
+              <Toggle id="tts-toggle" checked={ttsEnabled} onCheckedChange={setTtsEnabled} />
+            </div>
+          </div>
+
+          {/* Coach briefing — ungrouped, conditional */}
           {hasCoach && (
             <div className="flex items-center justify-between">
               <div>
                 <Label htmlFor="coach-briefing-toggle">Brief interviewer on your weak areas</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  The interviewer will focus on dimensions where you need practice.
-                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">The interviewer will focus on dimensions where you need practice.</p>
               </div>
-              <Toggle
-                id="coach-briefing-toggle"
-                checked={coachBriefing}
-                onCheckedChange={setCoachBriefing}
-              />
+              <Toggle id="coach-briefing-toggle" checked={coachBriefing} onCheckedChange={setCoachBriefing} />
             </div>
           )}
         </CardContent>
@@ -277,46 +313,6 @@ export default function SessionConfig() {
           </ul>
         </CardContent>
       </Card>
-
-      {/* Microphone */}
-      <div className="rounded-xl border border-border bg-card px-4 py-4 space-y-3">
-        <p className="text-sm text-foreground">
-          For the best experience, use your voice. It is faster and more natural.
-        </p>
-        {micState === "idle" && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleEnableMic}
-          >
-            Enable microphone
-          </Button>
-        )}
-        {micState === "granted" && (
-          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Microphone enabled
-          </div>
-        )}
-        {micState === "denied" && (
-          <p className="text-sm text-muted-foreground">
-            You can still use text input.
-          </p>
-        )}
-      </div>
 
       {/* Entitlement warning */}
       {entitlementExceeded && (
