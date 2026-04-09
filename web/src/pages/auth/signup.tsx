@@ -42,7 +42,7 @@ export default function Signup() {
     <AuthLayout>
       <Card>
         <form onSubmit={handleSubmit}>
-          <CardContent className="pt-6 space-y-4">
+          <CardContent className="pt-6 pb-2 space-y-4">
             <a
               href="/api/auth/oauth/google"
               className={buttonVariants({ variant: "outline", className: "w-full" })}
