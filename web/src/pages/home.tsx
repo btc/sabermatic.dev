@@ -1,14 +1,8 @@
 import { useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-} from "recharts";
 import { useQuery, useMutation, createConnectQueryKey } from "@connectrpc/connect-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
@@ -34,7 +28,6 @@ import {
   DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { scoreColor } from "@/lib/score-utils";
 
 // DB constraint enforces difficulty IN ('medium', 'hard'), so UNSPECIFIED
 // should never appear in ListQuestions responses. Defaults are defensive.
@@ -52,90 +45,11 @@ function difficultyLabel(d: Difficulty): string {
 
 // Derived data helpers
 function reviewedSessions(sessions: SessionSummary[]): SessionSummary[] {
-  return sessions.filter((s) => s.status === SessionStatus.REVIEWED);
+  return sessions.filter((s) => s.status === SessionStatus.REVIEWED && !s.archiveTime);
 }
 
 function activeSessions(sessions: SessionSummary[]): SessionSummary[] {
   return sessions.filter((s) => s.status === SessionStatus.ACTIVE);
-}
-
-function allTags(questions: ProtoQuestion[]): string[] {
-  const set = new Set<string>();
-  for (const q of questions) {
-    for (const t of q.tags) set.add(t);
-  }
-  return Array.from(set).sort();
-}
-
-
-function ScoreSparkline({ sessions }: { sessions: SessionSummary[] }) {
-  const points = useMemo(() => {
-    return sessions
-      .filter((s) => s.scoreOverall != null)
-      .sort((a, b) => {
-        const ta = a.createTime ? Number(a.createTime.seconds) : 0;
-        const tb = b.createTime ? Number(b.createTime.seconds) : 0;
-        return ta - tb;
-      })
-      .map((s) => ({
-        score: s.scoreOverall!,
-        label: s.questionTitle || "Session",
-      }));
-  }, [sessions]);
-
-  if (points.length < 2) return null;
-
-  const lastScore = points[points.length - 1]!.score;
-
-  return (
-    <div className="flex items-center gap-3">
-      <div className="h-8 w-24">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={points}>
-            <Line
-              type="monotone"
-              dataKey="score"
-              stroke="hsl(32 95% 44%)"
-              strokeWidth={1.5}
-              dot={{ r: 2, fill: "hsl(32 95% 44%)", strokeWidth: 0 }}
-              isAnimationActive={false}
-            />
-            <RechartsTooltip
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null;
-                const p = payload[0]!.payload as { score: number; label: string };
-                return (
-                  <div className="rounded border border-border bg-popover px-2 py-1 text-xs shadow">
-                    <p className="font-medium">{p.label}</p>
-                    <p style={{ color: scoreColor(p.score) }}>{p.score}/5</p>
-                  </div>
-                );
-              }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <span className="text-sm font-medium" style={{ color: scoreColor(lastScore) }}>
-        {lastScore}/5
-      </span>
-    </div>
-  );
-}
-
-// SummaryStrip
-function SummaryStrip({ sessions }: { sessions: SessionSummary[] }) {
-  const reviewed = reviewedSessions(sessions);
-  if (reviewed.length === 0) return null;
-
-  return (
-    <div className="flex items-center gap-6 text-sm">
-      <div>
-        <span className="text-muted-foreground">Sessions completed</span>{" "}
-        <span className="font-medium">{reviewed.length}</span>
-      </div>
-      <ScoreSparkline sessions={reviewed} />
-    </div>
-  );
 }
 
 // CoachCard
@@ -273,49 +187,6 @@ function ActiveSessionBanner({
           Resume or end your active session to start a new one.
         </p>
       )}
-    </div>
-  );
-}
-
-// QuestionFilters
-function QuestionFilters({
-  allTagList,
-  difficulty,
-  selectedTags,
-  onDifficultyChange,
-  onTagToggle,
-}: {
-  allTagList: string[];
-  difficulty: string;
-  selectedTags: Set<string>;
-  onDifficultyChange: (v: string) => void;
-  onTagToggle: (tag: string) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <select
-        value={difficulty}
-        onChange={(e) => onDifficultyChange(e.target.value)}
-        className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/50"
-      >
-        <option value="">All difficulties</option>
-        <option value="medium">Medium</option>
-        <option value="hard">Hard</option>
-      </select>
-      {allTagList.map((tag) => (
-        <button
-          key={tag}
-          type="button"
-          onClick={() => onTagToggle(tag)}
-          className={`inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-medium transition-colors cursor-pointer ${
-            selectedTags.has(tag)
-              ? "border-primary bg-primary/10 text-primary"
-              : "border-border text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {tag}
-        </button>
-      ))}
     </div>
   );
 }
@@ -546,15 +417,6 @@ export default function Home() {
   const { data: coachResp } = useQuery(getCoachAnalysis, {});
   const coach = coachResp?.analysis;
 
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const difficulty = searchParams.get("difficulty") ?? "";
-  const tagsParam = searchParams.get("tags") ?? "";
-  const selectedTags = useMemo(
-    () => new Set(tagsParam ? tagsParam.split(",") : []),
-    [tagsParam],
-  );
-
   const reviewed = reviewedSessions(sessions);
   const active = activeSessions(sessions);
   const reviewedCount = reviewed.length;
@@ -562,57 +424,12 @@ export default function Home() {
   // Hardcoded until the backend exposes per-plan limits via the /api/me or /api/usage response.
   const concurrentLimit = user?.plan === UserPlan.PRO ? 2 : 1;
   const atConcurrentLimit = active.length >= concurrentLimit;
-  const tagList = useMemo(() => allTags(questions), [questions]);
-
   // Tier
   const isNew = reviewedCount === 0;
-  const isReturning = reviewedCount >= 1 && reviewedCount <= 2;
   const isActive = reviewedCount >= 3;
 
-  // Map URL param string to proto enum for filtering
-  const difficultyEnum = useMemo(() => {
-    if (difficulty === "medium") return Difficulty.MEDIUM;
-    if (difficulty === "hard") return Difficulty.HARD;
-    return undefined;
-  }, [difficulty]);
-
-  // Filter questions
-  const filtered = useMemo(() => {
-    let list = questions;
-    if (difficultyEnum !== undefined) {
-      list = list.filter((q) => q.difficulty === difficultyEnum);
-    }
-    if (selectedTags.size > 0) {
-      list = list.filter((q) => q.tags.some((t) => selectedTags.has(t)));
-    }
-    return list;
-  }, [questions, difficultyEnum, selectedTags]);
-
   const suggestedId = coach?.suggestedQuestionId ?? null;
-  const heroQuestion = suggestedId ? filtered.find((q) => q.id === suggestedId) : undefined;
-
-  function setDifficulty(v: string) {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (v) next.set("difficulty", v);
-      else next.delete("difficulty");
-      return next;
-    });
-  }
-
-  function toggleTag(tag: string) {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      const current = new Set(
-        (next.get("tags") ?? "").split(",").filter(Boolean),
-      );
-      if (current.has(tag)) current.delete(tag);
-      else current.add(tag);
-      if (current.size > 0) next.set("tags", Array.from(current).join(","));
-      else next.delete("tags");
-      return next;
-    });
-  }
+  const heroQuestion = suggestedId ? questions.find((q) => q.id === suggestedId) : undefined;
 
   if (!user) {
     return (
@@ -636,11 +453,7 @@ export default function Home() {
         </p>
       )}
 
-      {(isReturning || isActive) && (
-        <div className="flex items-center gap-6">
-          <SummaryStrip sessions={sessions} />
-        </div>
-      )}
+      {/* Session bar chart — added in Task 7 */}
 
       {/* Coach card — only for active users */}
       {isActive && <CoachCard coach={coach} isActive={isActive} />}
@@ -657,17 +470,6 @@ export default function Home() {
         <CreateQuestionDialog />
       </div>
 
-      {/* Filters */}
-      {tagList.length > 0 && (
-        <QuestionFilters
-          allTagList={tagList}
-          difficulty={difficulty}
-          selectedTags={selectedTags}
-          onDifficultyChange={setDifficulty}
-          onTagToggle={toggleTag}
-        />
-      )}
-
       {/* Question grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-8">
         {heroQuestion && (
@@ -676,7 +478,7 @@ export default function Home() {
             startDisabled={atConcurrentLimit}
           />
         )}
-        {filtered
+        {questions
           .filter((q) => q.id !== suggestedId)
           .map((q) => (
             <QuestionCard
@@ -685,11 +487,6 @@ export default function Home() {
               startDisabled={atConcurrentLimit}
             />
           ))}
-        {filtered.length === 0 && (
-          <p className="text-sm text-muted-foreground py-8 text-center col-span-full">
-            No questions match your filters.
-          </p>
-        )}
       </div>
     </div>
   );
