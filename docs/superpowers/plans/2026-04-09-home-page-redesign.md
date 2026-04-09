@@ -13,22 +13,22 @@
 ### Task 1: DB migration — add `summary` column
 
 **Files:**
-- Create: `sql/migrations/011_coach_summary.up.sql`
-- Create: `sql/migrations/011_coach_summary.down.sql`
+- Create: `sql/migrations/012_coach_summary.up.sql`
+- Create: `sql/migrations/012_coach_summary.down.sql`
 - Modify: `sql/queries/coach_analyses.sql`
 - Regenerate: `internal/db/coach_analyses.sql.go`, `internal/db/models.go`
 
 - [ ] **Step 1: Create up migration**
 
 ```sql
--- sql/migrations/011_coach_summary.up.sql
+-- sql/migrations/012_coach_summary.up.sql
 ALTER TABLE coach_analyses ADD COLUMN summary TEXT;
 ```
 
 - [ ] **Step 2: Create down migration**
 
 ```sql
--- sql/migrations/011_coach_summary.down.sql
+-- sql/migrations/012_coach_summary.down.sql
 ALTER TABLE coach_analyses DROP COLUMN summary;
 ```
 
@@ -61,7 +61,7 @@ Expected: regenerates `internal/db/coach_analyses.sql.go` and `internal/db/model
 
 - [ ] **Step 5: Run migration locally**
 
-Run: `psql drill_v0 -f sql/migrations/011_coach_summary.up.sql`
+Run: `psql drill_v0 -f sql/migrations/012_coach_summary.up.sql`
 Expected: `ALTER TABLE` success.
 
 - [ ] **Step 6: Verify Go compiles**
@@ -72,7 +72,7 @@ Expected: clean build. The new `Summary` field on `InsertCoachAnalysisParams` de
 - [ ] **Step 7: Commit**
 
 ```bash
-git add sql/migrations/011_coach_summary.up.sql sql/migrations/011_coach_summary.down.sql sql/queries/coach_analyses.sql internal/db/
+git add sql/migrations/012_coach_summary.up.sql sql/migrations/012_coach_summary.down.sql sql/queries/coach_analyses.sql internal/db/
 git commit -m "feat: add summary column to coach_analyses"
 ```
 
@@ -432,7 +432,13 @@ With:
 <h1 className="text-base font-medium">Sessions</h1>
 ```
 
-- [ ] **Step 3: Load the app in the browser and verify**
+- [ ] **Step 3: Search for other "History" text references**
+
+Run: `grep -rn "History" web/src/ --include="*.tsx" --include="*.ts" | grep -v node_modules | grep -v ".pb."`
+
+Check the results for any user-facing text that says "History" (e.g. in empty states, toast messages, link labels). Update any matches to say "Sessions". Skip non-user-facing references like variable names or comments.
+
+- [ ] **Step 4: Load the app in the browser and verify**
 
 Open `http://localhost:5173` (or the dev server URL). Verify:
 - DRILL logo links to home
@@ -441,12 +447,14 @@ Open `http://localhost:5173` (or the dev server URL). Verify:
 - Avatar dropdown is next to nav links on the right
 - Clicking "Sessions" navigates to the history page with "Sessions" heading
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add web/src/layouts/app-layout.tsx web/src/pages/history.tsx
 git commit -m "feat: nav bar — logo as home link, History renamed to Sessions, right-aligned"
 ```
+
+(Include any other files changed in Step 3.)
 
 ---
 
@@ -657,11 +665,14 @@ function SessionBarChart({ sessions }: { sessions: SessionSummary[] }) {
   const reviewed = reviewedSessions(sessions);
   if (reviewed.length === 0) return null;
 
-  const sorted = [...reviewed].sort((a, b) => {
-    const ta = a.createTime ? Number(a.createTime.seconds) : 0;
-    const tb = b.createTime ? Number(b.createTime.seconds) : 0;
-    return ta - tb;
-  });
+  const sorted = [...reviewed]
+    .filter((s) => s.scoreOverall != null)
+    .sort((a, b) => {
+      const ta = a.createTime ? Number(a.createTime.seconds) : 0;
+      const tb = b.createTime ? Number(b.createTime.seconds) : 0;
+      return ta - tb;
+    });
+  if (sorted.length === 0) return null;
 
   const latest = sorted[sorted.length - 1]!;
   const previous = sorted.length >= 2 ? sorted[sorted.length - 2]! : undefined;
@@ -898,10 +909,16 @@ function CoachAnalysisModal({
 }
 ```
 
-- [ ] **Step 3: Clean up unused imports**
+- [ ] **Step 3: Remove unused imports**
 
-After the CoachCard rewrite, check if these are still needed:
-- `Card`, `CardContent`, `CardHeader`, `CardTitle` — remove if no longer used anywhere in `home.tsx`. (`Card`/`CardContent` may still be used elsewhere — check.)
+After the CoachCard rewrite, these are no longer used anywhere in `home.tsx` — remove them:
+
+Remove from imports:
+```tsx
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+```
+
+The `ActiveSessionBanner`, `HeroQuestionCard`, `QuestionCard`, and `CreateQuestionDialog` components don't use Card components.
 
 - [ ] **Step 4: Verify build**
 
