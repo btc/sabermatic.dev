@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-04-09-ux-polish-pass-design.md`
 
+**Boy Scout Rule:** When your awareness shines on tech debt while working on a task — unused imports, dead code, inconsistent patterns, missing types, stale comments — clean it up. Either integrate the cleanup into the current commit if it's related, or make a separate small commit. Don't leave code worse than you found it.
+
 ---
 
 ### Task 1: Branding Constants and BrandName Component
