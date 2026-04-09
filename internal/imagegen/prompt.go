@@ -11,8 +11,6 @@ const promptSuffix = ". Figures seen through a true cubist refraction — faces 
 	"Objects and forms are subject to the same refraction — edges split, volumes seen " +
 	"from contradictory angles simultaneously, shapes that are geometrically impossible " +
 	"yet immediately legible. " +
-	"Figures attend to their work with quiet reverence, as if performing a sacred act of creation. " +
-	"Warmth radiates from the work itself. " +
 	"Bold dark outlines on flat color planes. Warm palette: cream, amber, " +
 	"terracotta, burnt orange with accents of cerulean blue and sage green. " +
 	"Painterly brushwork. Playful and warm, Apple corporate illustration energy. " +
