@@ -59,6 +59,11 @@ export declare type CoachAnalysis = Message<"drill.v1.CoachAnalysis"> & {
    * @generated from field: google.protobuf.Timestamp create_time = 9;
    */
   createTime?: Timestamp;
+
+  /**
+   * @generated from field: optional string summary = 10;
+   */
+  summary?: string;
 };
 
 /**

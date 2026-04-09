@@ -33,6 +33,7 @@ type CoachAnalysis struct {
 	SuggestedQuestionId *string                `protobuf:"bytes,7,opt,name=suggested_question_id,json=suggestedQuestionId,proto3,oneof" json:"suggested_question_id,omitempty"`
 	SessionsAnalyzed    []string               `protobuf:"bytes,8,rep,name=sessions_analyzed,json=sessionsAnalyzed,proto3" json:"sessions_analyzed,omitempty"`
 	CreateTime          *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	Summary             *string                `protobuf:"bytes,10,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -128,6 +129,13 @@ func (x *CoachAnalysis) GetCreateTime() *timestamppb.Timestamp {
 		return x.CreateTime
 	}
 	return nil
+}
+
+func (x *CoachAnalysis) GetSummary() string {
+	if x != nil && x.Summary != nil {
+		return *x.Summary
+	}
+	return ""
 }
 
 type GetCoachAnalysisRequest struct {
@@ -294,7 +302,7 @@ var File_drill_v1_coach_proto protoreflect.FileDescriptor
 
 const file_drill_v1_coach_proto_rawDesc = "" +
 	"\n" +
-	"\x14drill/v1/coach.proto\x12\bdrill.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x03\n" +
+	"\x14drill/v1/coach.proto\x12\bdrill.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd8\x03\n" +
 	"\rCoachAnalysis\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1c\n" +
@@ -306,9 +314,13 @@ const file_drill_v1_coach_proto_rawDesc = "" +
 	"\x15suggested_question_id\x18\a \x01(\tH\x01R\x13suggestedQuestionId\x88\x01\x01\x12+\n" +
 	"\x11sessions_analyzed\x18\b \x03(\tR\x10sessionsAnalyzed\x12;\n" +
 	"\vcreate_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"createTimeB\x14\n" +
+	"createTime\x12\x1d\n" +
+	"\asummary\x18\n" +
+	" \x01(\tH\x02R\asummary\x88\x01\x01B\x14\n" +
 	"\x12_weakest_dimensionB\x18\n" +
-	"\x16_suggested_question_id\"\x19\n" +
+	"\x16_suggested_question_idB\n" +
+	"\n" +
+	"\b_summary\"\x19\n" +
 	"\x17GetCoachAnalysisRequest\"a\n" +
 	"\x18GetCoachAnalysisResponse\x128\n" +
 	"\banalysis\x18\x01 \x01(\v2\x17.drill.v1.CoachAnalysisH\x00R\banalysis\x88\x01\x01B\v\n" +
