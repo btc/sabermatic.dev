@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/stretchr/testify/require"
 
+	"github.com/btc/drill/internal/branding"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
 	"github.com/btc/drill/internal/testutil"
@@ -59,7 +60,7 @@ func TestSendEmail_Integration(t *testing.T) {
 	// Enqueue a SendEmail job
 	_, err = riverClient.Insert(ctx, jobs.SendEmailArgs{
 		To:      "user@example.com",
-		Subject: "Welcome to Drill",
+		Subject: branding.AppName + " test subject",
 		Text:    "Welcome!",
 		HTML:    "<h1>Welcome!</h1>",
 	}, jobs.SendEmailInsertOpts(&cfg.Email))
@@ -73,5 +74,5 @@ func TestSendEmail_Integration(t *testing.T) {
 	// Verify the email was "sent"
 	msg := logSender.Last()
 	require.Equal(t, "user@example.com", msg.To)
-	require.Equal(t, "Welcome to Drill", msg.Subject)
+	require.Equal(t, branding.AppName+" test subject", msg.Subject)
 }

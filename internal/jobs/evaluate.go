@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"html/template"
 	"log/slog"
 	"time"
 
@@ -16,8 +17,10 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/branding"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/evaluation"
 )
 
@@ -42,10 +45,11 @@ func EvaluateSessionInsertOpts() *river.InsertOpts {
 // EvaluateSessionWorker processes EvaluateSession jobs.
 type EvaluateSessionWorker struct {
 	river.WorkerDefaults[EvaluateSessionArgs]
-	Pool *pgxpool.Pool
-	LLM  *ai.Client
-	Cfg  *config.LLM
-	Jobs *river.Client[pgx.Tx] // set after river.NewClient returns
+	Pool    *pgxpool.Pool
+	LLM     *ai.Client
+	Cfg     *config.LLM
+	BaseURL string
+	Jobs    *river.Client[pgx.Tx] // set after river.NewClient returns
 }
 
 func (w *EvaluateSessionWorker) Timeout(job *river.Job[EvaluateSessionArgs]) time.Duration {
@@ -203,7 +207,7 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 		return fmt.Errorf("get user: %w", err)
 	}
 
-	htmlBody := renderEvaluationEmail(row.QuestionTitle, result)
+	htmlBody := renderEvaluationEmail(w.BaseURL, row.QuestionTitle, result)
 	_, err = w.Jobs.InsertTx(ctx, tx, SendEmailArgs{
 		To:      user.Email,
 		Subject: fmt.Sprintf("Evaluation: %s", row.QuestionTitle),
@@ -230,8 +234,9 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	return nil
 }
 
-// renderEvaluationEmail builds an HTML email summarizing the evaluation results.
-func renderEvaluationEmail(questionTitle string, result *evaluation.EvaluationResult) string {
+// renderEvaluationEmail builds an HTML email summarizing the evaluation results,
+// wrapped in the shared email template.
+func renderEvaluationEmail(baseURL, questionTitle string, result *evaluation.EvaluationResult) string {
 	var strengthItems, gapItems string
 	for _, s := range result.Strengths {
 		strengthItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", html.EscapeString(s))
@@ -240,36 +245,31 @@ func renderEvaluationEmail(questionTitle string, result *evaluation.EvaluationRe
 		gapItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", html.EscapeString(g))
 	}
 
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333;">
-  <h1 style="color:#1a1a2e;border-bottom:2px solid #e0e0e0;padding-bottom:12px;">Evaluation: %s</h1>
+	sessionsURL := baseURL + "/sessions"
 
-  <h2 style="color:#16213e;margin-top:24px;">Scores</h2>
+	innerHTML := fmt.Sprintf(
+		`<h2 style="margin:0 0 16px 0;font-size:18px;color:#333;">Evaluation: %s</h2>
+
+  <h3 style="margin:20px 0 8px 0;font-size:15px;color:#555;">Scores</h3>
   <table style="border-collapse:collapse;width:100%%;margin-bottom:20px;">
-    <tr style="background:#f5f5f5;"><td style="padding:8px 12px;border:1px solid #ddd;">Requirements</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:center;">%d/5</td></tr>
-    <tr><td style="padding:8px 12px;border:1px solid #ddd;">Architecture</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:center;">%d/5</td></tr>
-    <tr style="background:#f5f5f5;"><td style="padding:8px 12px;border:1px solid #ddd;">Deep Dive</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:center;">%d/5</td></tr>
-    <tr><td style="padding:8px 12px;border:1px solid #ddd;">Scalability</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:center;">%d/5</td></tr>
-    <tr style="background:#f5f5f5;"><td style="padding:8px 12px;border:1px solid #ddd;">Communication</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:center;">%d/5</td></tr>
-    <tr style="background:#e8f5e9;font-weight:bold;"><td style="padding:8px 12px;border:1px solid #ddd;">Overall</td><td style="padding:8px 12px;border:1px solid #ddd;text-align:center;">%d/5</td></tr>
+    <tr style="background:#fef3c7;"><td style="padding:8px 12px;border:1px solid #e5e7eb;">Requirements</td><td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">%d/5</td></tr>
+    <tr><td style="padding:8px 12px;border:1px solid #e5e7eb;">Architecture</td><td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">%d/5</td></tr>
+    <tr style="background:#fef3c7;"><td style="padding:8px 12px;border:1px solid #e5e7eb;">Deep Dive</td><td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">%d/5</td></tr>
+    <tr><td style="padding:8px 12px;border:1px solid #e5e7eb;">Scalability</td><td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">%d/5</td></tr>
+    <tr style="background:#fef3c7;"><td style="padding:8px 12px;border:1px solid #e5e7eb;">Communication</td><td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">%d/5</td></tr>
+    <tr style="background:#d9f99d;font-weight:bold;"><td style="padding:8px 12px;border:1px solid #e5e7eb;">Overall</td><td style="padding:8px 12px;border:1px solid #e5e7eb;text-align:center;">%d/5</td></tr>
   </table>
 
-  <h2 style="color:#16213e;">Strengths</h2>
+  <h3 style="margin:20px 0 8px 0;font-size:15px;color:#555;">Strengths</h3>
   <ul style="padding-left:20px;">%s</ul>
 
-  <h2 style="color:#16213e;">Areas for Growth</h2>
+  <h3 style="margin:20px 0 8px 0;font-size:15px;color:#555;">Areas for Growth</h3>
   <ul style="padding-left:20px;">%s</ul>
 
-  <h2 style="color:#16213e;">Advice</h2>
+  <h3 style="margin:20px 0 8px 0;font-size:15px;color:#555;">Advice</h3>
   <p style="line-height:1.6;">%s</p>
 
-  <p style="margin-top:32px;padding-top:16px;border-top:1px solid #e0e0e0;color:#666;font-size:14px;">
-    <a href="https://drill.dev/sessions" style="color:#1a73e8;">View full evaluation in the app</a>
-  </p>
-</body>
-</html>`,
+  <p style="margin:24px 0 0 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-weight:500;">View full evaluation</a></p>`,
 		html.EscapeString(questionTitle),
 		result.ScoreRequirements,
 		result.ScoreArchitecture,
@@ -280,5 +280,14 @@ func renderEvaluationEmail(questionTitle string, result *evaluation.EvaluationRe
 		strengthItems,
 		gapItems,
 		html.EscapeString(result.Advice),
+		sessionsURL,
 	)
+
+	rendered, err := email.RenderEmail(template.HTML(innerHTML), fmt.Sprintf("You received this email because you use %s.", branding.AppName))
+	if err != nil {
+		// Fall back to inner HTML if template rendering fails.
+		slog.Error("render evaluation email template", "error", err)
+		return innerHTML
+	}
+	return rendered
 }
