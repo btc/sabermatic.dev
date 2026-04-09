@@ -169,7 +169,7 @@ function CoachCard({ coach, isActive }: {
 
   return (
     <>
-      <div className="rounded-xl border border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20 px-5 py-4 space-y-3">
+      <div className="rounded-xl border border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20 px-5 py-4 space-y-3 cursor-pointer" onClick={() => setModalOpen(true)}>
         <span className="text-[10px] font-bold tracking-wider uppercase text-muted-foreground">
           Coach
         </span>
@@ -192,13 +192,9 @@ function CoachCard({ coach, isActive }: {
               &uarr; {dim}
             </span>
           ))}
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          >
+          <span className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
             Read full analysis &rarr;
-          </button>
+          </span>
         </div>
       </div>
 
@@ -224,7 +220,7 @@ function CoachAnalysisModal({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Coach Analysis</DialogTitle>
         </DialogHeader>
@@ -232,10 +228,15 @@ function CoachAnalysisModal({
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              p: ({ children, ...props }) => <p {...props} className="mb-3 last:mb-0">{children}</p>,
-              ul: ({ children, ...props }) => <ul {...props} className="list-disc pl-5 mb-3 space-y-1">{children}</ul>,
-              ol: ({ children, ...props }) => <ol {...props} className="list-decimal pl-5 mb-3 space-y-1">{children}</ol>,
+              h2: ({ children, ...props }) => <h2 {...props} className="text-sm font-semibold tracking-wide uppercase text-muted-foreground mt-6 mb-2 first:mt-0">{children}</h2>,
+              h3: ({ children, ...props }) => <h3 {...props} className="text-sm font-semibold text-muted-foreground mt-6 mb-2 first:mt-0">{children}</h3>,
+              h4: ({ children, ...props }) => <h4 {...props} className="text-sm font-semibold text-muted-foreground mt-6 mb-2 first:mt-0">{children}</h4>,
+              p: ({ children, ...props }) => <p {...props} className="mb-3 last:mb-0 text-sm leading-relaxed text-foreground/90">{children}</p>,
+              ul: ({ children, ...props }) => <ul {...props} className="list-disc pl-5 mb-3 space-y-1 text-sm text-foreground/90">{children}</ul>,
+              ol: ({ children, ...props }) => <ol {...props} className="list-decimal pl-5 mb-3 space-y-1 text-sm text-foreground/90">{children}</ol>,
+              li: ({ children, ...props }) => <li {...props} className="leading-relaxed">{children}</li>,
               strong: ({ children, ...props }) => <strong {...props} className="font-semibold">{children}</strong>,
+              hr: ({ ...props }) => <hr {...props} className="my-4 border-border" />,
             }}
           >
             {narrative}
@@ -380,9 +381,9 @@ function QuestionCard({
       <div className="overflow-hidden rounded-[14px]">
         {image}
       </div>
-      <div className="pt-2.5 px-0.5 space-y-1">
-        <span className="text-sm font-semibold">{question.title}</span>
-        <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="pt-3 px-0.5">
+        <p className="text-base font-semibold leading-snug">{question.title}</p>
+        <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
           <Badge variant={difficultyVariant(question.difficulty)}>
             {difficultyLabel(question.difficulty)}
           </Badge>
@@ -474,12 +475,13 @@ function CreateQuestionDialog() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cq-prompt">Prompt</Label>
-              <Input
+              <textarea
                 id="cq-prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe the full problem..."
                 required
+                className="flex min-h-[120px] w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/50 resize-y"
               />
             </div>
             <div className="space-y-1.5">
