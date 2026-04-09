@@ -86,6 +86,7 @@ type River struct {
 	NumDefaultWorkers  int `env:"RIVER_DEFAULT_WORKERS,default=5"`
 	NumNotifyWorkers   int `env:"RIVER_NOTIFY_WORKERS,default=5"`
 	NumAIWorkers       int `env:"RIVER_AI_WORKERS,default=10"`
+	NumGeminiWorkers   int `env:"RIVER_GEMINI_WORKERS,default=2"`
 	NumMaintWorkers    int `env:"RIVER_MAINT_WORKERS,default=2"`
 }
 
