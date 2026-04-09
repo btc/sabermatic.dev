@@ -14,15 +14,36 @@ The current home page buries the question grid — the most visually compelling 
 - Remove the filter bar entirely
 - Improve the session progress visualization
 - Make "Create question" a secondary, discoverable action
+- Clean up nav: logo as home link, nav links right-aligned, rename "History" → "Sessions"
 
 ---
 
 ## Layout Structure (top to bottom)
 
-1. **Nav bar** — unchanged
+1. **Nav bar** — see changes below
 2. **Session bar chart** — hidden if no reviewed sessions
 3. **Coach card** — compact, shown only for active users with a coach analysis
 4. **Questions section** — label, hero card, grid
+
+---
+
+## 0. Nav Bar
+
+**Layout:** logo left, all navigation right.
+
+```
+DRILL                              Sessions  [avatar]
+```
+
+**Changes:**
+- `DRILL` logo becomes a `<Link to="/">` — clicking it navigates home. Remove the separate "Home" link.
+- Rename the "History" link to **"Sessions"** and update the route label (the `/history` route itself can be renamed `/sessions` or kept as-is — see frontend changes).
+- Move remaining nav links flush right, before the avatar.
+
+**Frontend changes:**
+- `app-layout.tsx` (or wherever the nav lives): reorder elements, make logo a link, rename History → Sessions.
+- Update the page `<title>` on the history page from "History" to "Sessions".
+- Update any internal `<Link>` labels that say "History" (e.g. in empty states, coach card copy).
 
 ---
 
@@ -146,6 +167,8 @@ All changes are in `web/src/pages/home.tsx` unless noted.
 
 | Component | Change |
 |---|---|
+| Nav bar (`app-layout.tsx`) | Logo → `<Link to="/">`, remove "Home" link, move links right, rename "History" → "Sessions" |
+| History page | Update `<title>` and any self-referential "History" labels to "Sessions" |
 | `reviewedSessions()` | Also filter out `status === SessionStatus.ARCHIVED` |
 | `SummaryStrip` | Replace with `SessionBarChart` (bar-per-session, linked, color-coded, hidden if empty) |
 | `CoachCard` | Condensed layout: summary quote + dimension chips + modal trigger. Remove refresh button. |
