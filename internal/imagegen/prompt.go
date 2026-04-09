@@ -4,7 +4,14 @@ import "fmt"
 
 const promptPrefix = "Cubist editorial illustration of "
 
-const promptSuffix = ". Bold dark outlines on flat color planes. Warm palette: cream, amber, " +
+const promptSuffix = ". Figures seen through a true cubist refraction — faces reveal front and profile " +
+	"at the same moment, an eye where the cheekbone sits, noses split across two viewpoints. " +
+	"Bodies dismantled and reassembled across the picture plane: anatomically wrong in the " +
+	"parts, compositionally right in the whole. " +
+	"Objects and forms are subject to the same refraction — edges split, volumes seen " +
+	"from contradictory angles simultaneously, shapes that are geometrically impossible " +
+	"yet immediately legible. " +
+	"Bold dark outlines on flat color planes. Warm palette: cream, amber, " +
 	"terracotta, burnt orange with accents of cerulean blue and sage green. " +
 	"Painterly brushwork. Playful and warm, Apple corporate illustration energy. " +
 	"Edge-to-edge composition filling the entire canvas, no border, no margin, no frame. " +
