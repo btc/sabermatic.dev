@@ -245,7 +245,7 @@ func renderEvaluationEmail(baseURL, questionTitle string, result *evaluation.Eva
 		gapItems += fmt.Sprintf("<li style=\"margin-bottom:4px;\">%s</li>", html.EscapeString(g))
 	}
 
-	sessionsURL := baseURL + "/sessions"
+	sessionsURL := html.EscapeString(baseURL + "/sessions")
 
 	innerHTML := fmt.Sprintf(
 		`<h2 style="margin:0 0 16px 0;font-size:18px;color:#333;">Evaluation: %s</h2>
