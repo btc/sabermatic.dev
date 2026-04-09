@@ -17,33 +17,30 @@ interface ThemeContextValue {
   setTheme: (t: Theme) => void;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     return (localStorage.getItem("theme") as Theme) || "system";
   });
-  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">(() => {
-    const t = (localStorage.getItem("theme") as Theme) || "system";
-    return t === "system" ? getSystemTheme() : t;
-  });
+  // Track OS preference so resolvedTheme updates when system theme changes
+  const [systemTheme, setSystemTheme] = useState<"light" | "dark">(getSystemTheme);
+
+  const resolvedTheme = theme === "system" ? systemTheme : theme;
 
   const setTheme = useCallback((t: Theme) => {
     localStorage.setItem("theme", t);
     setThemeState(t);
     applyTheme(t);
-    setResolvedTheme(t === "system" ? getSystemTheme() : t);
   }, []);
 
   useEffect(() => {
     applyTheme(theme);
-    setResolvedTheme(theme === "system" ? getSystemTheme() : theme);
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
-      if (theme === "system") {
-        applyTheme("system");
-        setResolvedTheme(getSystemTheme());
-      }
+      setSystemTheme(getSystemTheme());
+      if (theme === "system") applyTheme("system");
     };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
