@@ -34,6 +34,7 @@ test:
 # Runs: npm build, vite watch, air (Go rebuild). One origin on :8080.
 dev:
 	@echo "Starting Sabermatic → http://localhost:8080"
+	@cd web && npm install --silent && npm run build --silent
 	overmind start -f Procfile.dev
 
 # Same as dev, but tee all output to tmp/dev.log for easy inspection.
