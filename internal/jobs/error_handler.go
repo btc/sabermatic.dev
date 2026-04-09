@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -14,7 +15,6 @@ import (
 )
 
 // ErrorHandler sets failure status when jobs exhaust all retries.
-// Handles evaluate_session and generate_educator_content.
 // Implements river.ErrorHandler.
 type ErrorHandler struct {
 	Pool *pgxpool.Pool
@@ -74,6 +74,21 @@ func (h *ErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRow, e
 		if statusErr != nil {
 			slog.Error("set educator failed status", "error", statusErr, "session_id", args.SessionID)
 		}
+
+	case "generate_question_image":
+		var args struct {
+			QuestionID uuid.UUID `json:"question_id"`
+		}
+		if unmarshalErr := json.Unmarshal(job.EncodedArgs, &args); unmarshalErr != nil {
+			slog.Error("unmarshal generate_question_image args in error handler", "error", unmarshalErr)
+			return nil
+		}
+
+		slog.Warn("image generation exhausted retries",
+			"question_id", args.QuestionID,
+			"attempts", job.Attempt,
+			"error", err,
+		)
 	}
 
 	return nil
@@ -82,7 +97,7 @@ func (h *ErrorHandler) HandleError(ctx context.Context, job *rivertype.JobRow, e
 func (h *ErrorHandler) HandlePanic(ctx context.Context, job *rivertype.JobRow, panicVal any, trace string) *river.ErrorHandlerResult {
 	if job.Attempt >= job.MaxAttempts {
 		switch job.Kind {
-		case "evaluate_session", "generate_educator_content":
+		case "evaluate_session", "generate_educator_content", "generate_question_image":
 			panicErr := fmt.Errorf("panic: %v", panicVal)
 			slog.Error("job panicked on final attempt", "kind", job.Kind, "panic", panicVal)
 			return h.HandleError(ctx, job, panicErr)
