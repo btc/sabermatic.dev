@@ -448,9 +448,14 @@ function CreateQuestionDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        Create question
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <div className="rounded-[14px] border-[1.5px] border-dashed border-border flex flex-col items-center justify-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors aspect-[4/3]">
+            <span className="text-2xl font-light leading-none">+</span>
+            <span className="text-xs">New question</span>
+          </div>
+        }
+      />
       <DialogContent>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
@@ -572,10 +577,7 @@ export default function Home() {
       />
 
       {/* Question list header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-medium">Questions</h2>
-        <CreateQuestionDialog />
-      </div>
+      <h2 className="text-base font-medium">Questions</h2>
 
       {/* Question grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-8">
@@ -594,6 +596,7 @@ export default function Home() {
               startDisabled={atConcurrentLimit}
             />
           ))}
+        <CreateQuestionDialog />
       </div>
     </div>
   );
