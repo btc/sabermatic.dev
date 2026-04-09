@@ -9,8 +9,8 @@
 
 ### Frontend
 
-- A `<BrandName />` React component renders the brand name with consistent typographic treatment. The `[.DEV]` portion may have distinct weight or opacity from `Sabermatic`, controlled via CSS within the component. All user-facing instances of the app name use this component rather than hardcoded strings.
-- A single string constant (e.g., `APP_NAME = "Sabermatic[.DEV]"`) for contexts where plain text is needed (page titles, `<title>` tags, alt text).
+- A `<BrandName />` React component renders the brand name with consistent typographic treatment. **The square brackets are literal** — the rendered text is exactly `Sabermatic[.DEV]`, including the brackets. This is an intentional design choice (developer-native aesthetic). The `[.DEV]` portion (brackets included) may have distinct weight or opacity from `Sabermatic`, controlled via CSS within the component. All user-facing instances of the app name use this component rather than hardcoded strings.
+- A single string constant (e.g., `APP_NAME = "Sabermatic[.DEV]"`) for contexts where plain text is needed (page titles, `<title>` tags, alt text). The brackets appear in plain text contexts too — this is the brand name, not template notation.
 
 ### Backend
 
@@ -18,7 +18,7 @@
 
 ### Scope
 
-- User-facing text only. No renaming of Go packages, module paths, proto package names (`pb.drill.v1`), observability spans/metrics, database names, internal variable names, or repository name.
+- User-facing text only. No renaming of Go packages, module paths, proto package names (`pb.drill.v1`), observability spans/metrics, database names, internal variable names, or repository name. Note: `internal/jobs/integration_test.go` has `"Welcome to Drill"` test subject strings (lines 62, 76) — these are test-only but should be updated to use `AppName` as a boy-scout cleanup to avoid confusion during search-and-replace.
 
 ### Locations to update
 
@@ -57,11 +57,11 @@ The microphone permission section moves from a standalone box into the configura
 - Duration selector (15/30/45/60 preset buttons + custom input, plan-aware max)
 
 **Audio**
-- Microphone — a toggle that triggers the browser permission prompt (`getUserMedia`) when switched on. If the user denies permission, the toggle reverts to off and a note appears: "You can still use text input." On mount, attempt to check existing permission state via `navigator.permissions.query({ name: 'microphone' })` — if already `granted`, initialize the toggle as on without re-prompting. **Safari fallback:** Safari does not support querying the `microphone` permission name. Wrap the query in a try/catch; if it throws, default the toggle to off (user will toggle it on manually, triggering `getUserMedia`).
+- Microphone — a toggle that triggers the browser permission prompt (`getUserMedia`) when switched on. If the user denies permission, the toggle reverts to off and a note appears: "You can still use text input." On mount, attempt to check existing permission state via `navigator.permissions.query({ name: 'microphone' })` — if already `granted`, initialize the toggle as on without re-prompting. This requires a new `useEffect` on mount (not present in the current code). Only initialize the toggle as on if the result is exactly `"granted"`; both `"prompt"` and `"denied"` default to off. **Safari fallback:** Safari does not support querying the `microphone` permission name. Wrap the query in a try/catch; if it throws, default the toggle to off (user will toggle it on manually, triggering `getUserMedia`).
 - Interviewer voice responses — TTS toggle (default: on)
 
 **Ungrouped (bottom)**
-- Coach briefing toggle — conditional on coach data existing. Label: "Brief interviewer on your weak areas."
+- Coach briefing toggle — conditional on coach data existing. Label: "Brief interviewer on your weak areas." **Note:** This toggle is a pre-existing UI element that is not currently wired to the backend (`createSession` does not send `coachBriefing`, and the `CreateSessionRequest` proto has no such field). Wiring it is out of scope for this polish pass — it is a feature gap, not a UX issue. No changes to this toggle beyond moving it into the configuration card.
 
 Group labels are subtle (small uppercase text or similar), not full card sub-headers.
 
@@ -89,7 +89,7 @@ The auth layout renders `<BrandName />` as the heading, with the tagline **"syst
 
 The login form is reordered:
 
-1. **Google button** — outline style with inline Google "G" SVG icon, text: "Sign in with Google"
+1. **Google button** — outline style with inline Google "G" SVG icon, text: "Sign in with Google" (Lucide, the project's icon library, does not include brand logos — inline SVGs are necessary)
 2. **GitHub button** — outline style with inline GitHub Mark SVG icon, text: "Sign in with GitHub"
 3. **"or" separator** (unchanged)
 4. **Email field**
@@ -124,7 +124,11 @@ Same treatment as login:
 
 ### Composition (top to bottom, vertically centered but biased toward upper viewport)
 
-1. **Question image** — the cubist illustration for the session's question. Subdued (opacity ~0.7), moderate size (~180-200px wide), rounded corners, subtle shadow. Positioned with less space above than below to sit higher in the viewport. **Data plumbing:** The `Session` proto does not currently include `image_url` — it only has `question_id`, `question_title`, `question_prompt`, etc. Add a `question_image_url` field to the `Session` proto message. Populate it from the question's `image_url` when creating the session in the backend. This avoids a separate question fetch from the session layout.
+1. **Question image** — the cubist illustration for the session's question. Subdued (opacity ~0.7), moderate size (~180-200px wide), rounded corners, subtle shadow. Positioned with less space above than below to sit higher in the viewport. **Data plumbing:** The `Session` proto does not currently include `image_url` — it only has `question_id`, `question_title`, `question_prompt`, etc. Full chain of changes:
+   - Add `question_image_url` field to the `Session` proto message.
+   - Update the SQL query for `GetSession` (used by `getSession` RPC) to add `q.image_url AS question_image_url` to the SELECT JOIN. Run `sqlc generate` to regenerate the Go struct.
+   - Update the `getSessionRowToProto` converter in `internal/rpc/session/server.go` to map the new field.
+   - The `SessionSummary` proto (used by `ListSessions`) does NOT need this field — the waiting page uses `getSession`, not `listSessions`.
 2. **WebGL shader orb** — the centerpiece loading indicator.
 3. **Rotating evaluation messages** — the existing 5 messages, fading in/out on a cycle.
 
@@ -132,7 +136,7 @@ No question title text — the image already provides context.
 
 ### WebGL shader orb
 
-**New dependency:** `three` (Three.js). Only the core WebGL renderer, `SphereGeometry`, and `ShaderMaterial` are needed — tree-shaking should keep the bundle impact well below the full ~600KB. Consider a dynamic `import()` so the shader code is only loaded on the waiting page, not in the main bundle.
+**New dependency:** `three` (Three.js). Only the core WebGL renderer, `SphereGeometry`, and `ShaderMaterial` are needed. The orb component **must** use a dynamic `import()` (React lazy or manual) so Three.js is loaded in a separate chunk — it must not bloat the main bundle. Verify the lazy chunk size after implementation; if it exceeds ~100KB gzipped, consider a raw WebGL approach without the Three.js abstraction layer. **Graceful degradation:** If `WebGLRenderingContext` is unavailable (some low-end devices), fall back to a CSS-based pulsing orb animation (similar to the mockup created during brainstorming).
 
 A Three.js scene with a single sphere:
 
@@ -145,6 +149,10 @@ A Three.js scene with a single sphere:
 - **Performance:** Single sphere, no shadows, no complex scene graph. Negligible GPU cost. Renders in a contained `<canvas>` element.
 
 The orb should feel alive — breathing, shifting, organic. Reference: Apple Siri orb aesthetic, but in the Sabermatic warm palette.
+
+### Dual waiting views
+
+Two waiting views exist: `EvaluatingView` in `session/layout.tsx` (the primary one, shown when navigating to a session that's still processing) and `WaitingView` in `interview.tsx` (shown immediately after the interview ends, before redirect). Both currently show the same 3px pulsing dot. The `interview.tsx` `WaitingView` is transient — it polls for session completion and redirects to the session layout once the status changes. The WebGL orb + question image treatment applies only to the `EvaluatingView` in `session/layout.tsx`. The `interview.tsx` `WaitingView` should show a simpler loading state (e.g., a larger pulsing dot or ring in brand colors) since the user only sees it briefly before the redirect. Do not duplicate the full WebGL orb there.
 
 ### Message transitions
 
@@ -163,7 +171,7 @@ Messages fade in (translate up + opacity) → hold → fade out (translate up + 
 **Files:**
 - New: `web/src/contexts/theme-context.tsx` (or similar)
 - Modified: `web/src/hooks/use-theme.ts` — becomes a thin wrapper around `useContext`
-- Modified: app entry point (`main.tsx`) to wrap with `<ThemeProvider>`
+- Modified: app entry point (`main.tsx`) — `<ThemeProvider>` must be the outermost wrapper, wrapping both `<ErrorBoundary>` and `<Toaster>`, since theme should work even when the app crashes. Currently `<Toaster>` is a sibling of `<ErrorBoundary>` outside any provider tree.
 - Modified: Sonner `<Toaster>` in `main.tsx` — currently hardcoded to `theme="dark"`. Wire it to the `ThemeContext` so it respects the user's theme selection.
 
 ### Ternary theme switcher
@@ -178,7 +186,7 @@ Replace the cycling `Theme: {theme}` dropdown menu item with an inline segmented
 
 The selected icon is visually highlighted (background fill or similar). This control is used in both:
 
-- The avatar dropdown menu in `app-layout.tsx`
+- The avatar dropdown menu in `app-layout.tsx` — render the `<ThemeSwitch />` as content within a single `DropdownMenuItem` (not three separate items) to avoid keyboard navigation conflicts between the dropdown and the segmented control
 - The settings page in `settings.tsx`
 
 Both render the same `<ThemeSwitch />` component backed by the shared `ThemeContext`. The settings page currently has a text-based segmented control (`ThemeToggle` with "Light" / "Dark" / "System" labels); this is replaced by the icon-based `<ThemeSwitch />` for consistency between the two surfaces.
@@ -203,7 +211,7 @@ Each step is minimal — icon + short label. Connected by a subtle line or arrow
 
 **Two CTAs below the steps:**
 
-- **Primary:** "Start a recommended question" — picks a random question from the easiest available difficulty (medium > hard fallback; the codebase only has `MEDIUM` and `HARD` difficulties). Links directly to `/sessions/new?question={id}`.
+- **Primary:** "Start a recommended question" — picks a random question from the easiest available difficulty (medium > hard fallback; the codebase only has `MEDIUM` and `HARD` difficulties). Selection should be stable within a component mount (use `useMemo` keyed on the question list identity so it doesn't change on re-renders, but varies between visits). Links directly to `/sessions/new?question={id}`.
 - **Secondary:** "Browse questions" — links to `/` (home page).
 
 ### Home page (new user)
@@ -234,13 +242,13 @@ Structure:
 **Verification email:**
 - Subject: `Verify your Sabermatic[.DEV] account`
 - Body: "Click the button below to verify your email address."
-- CTA button: amber background (`#f59e0b`), white text, "Verify email"
+- CTA button: dark amber background (`#b45309`), white text, "Verify email" (using darker amber for WCAG AA contrast compliance — `#f59e0b` against white is only ~2:1, below the 4.5:1 requirement)
 - Fallback text link below button for email clients that don't render buttons.
 
 **Password reset email:**
 - Subject: `Reset your Sabermatic[.DEV] password`
-- Body: "Click the button below to reset your password. This link expires in 1 hour." (The TTL is configurable via `AUTH_RESET_TOKEN_TTL`, default `1h`. The email template should read this value from config and format it, not hardcode "1 hour".)
-- CTA button: amber background, white text, "Reset password"
+- Body: "Click the button below to reset your password. This link expires in 1 hour." (The TTL is configurable via `AUTH_RESET_TOKEN_TTL`, default `1h`. The email template should read this value from config and format it via a `formatDurationHuman(d time.Duration) string` helper that produces user-friendly strings like "1 hour", "30 minutes", etc. — since `time.Duration.String()` produces awkward output like "1h0m0s".)
+- CTA button: dark amber background (`#b45309`), white text, "Reset password"
 - Fallback text link below button.
 
 ### Implementation
