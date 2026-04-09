@@ -73,7 +73,10 @@ export function AppLayout() {
                 <DropdownMenuItem onClick={() => navigate("/settings")}>
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                <DropdownMenuItem
+                  onSelect={(e) => e.preventDefault()}
+                  className="focus:bg-transparent data-[highlighted]:bg-transparent"
+                >
                   <ThemeSwitch />
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
