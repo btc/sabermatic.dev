@@ -11,7 +11,7 @@ import {
   useLogout, useDeleteAccount,
 } from "@/api/queries";
 import { ConnectError } from "@connectrpc/connect";
-import { useTheme } from "@/hooks/use-theme";
+import { ThemeSwitch } from "@/components/theme-switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -90,40 +90,6 @@ function NavTabs({ isBilling }: NavTabsProps) {
       >
         Billing
       </Link>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Theme toggle
-// ---------------------------------------------------------------------------
-
-type Theme = "light" | "dark" | "system";
-const THEME_OPTIONS: { value: Theme; label: string }[] = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "system", label: "System" },
-];
-
-function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  return (
-    <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5 gap-0.5 w-fit">
-      {THEME_OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => setTheme(opt.value)}
-          className={cn(
-            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
-            theme === opt.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -275,7 +241,7 @@ function PreferencesSection() {
             <p className="text-sm font-medium">Theme</p>
             <p className="text-xs text-muted-foreground">Choose how the interface appears.</p>
           </div>
-          <ThemeToggle />
+          <ThemeSwitch />
         </div>
       </CardContent>
     </Card>

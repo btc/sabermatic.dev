@@ -7,6 +7,8 @@ import { ErrorBoundary } from "react-error-boundary";
 import { Toaster } from "sonner";
 import { App } from "./app";
 import { ErrorFallback } from "./components/error-fallback";
+import { ThemeProvider } from "./contexts/theme-context";
+import { useTheme } from "./hooks/use-theme";
 import { initTelemetry } from "./telemetry/provider";
 import { transport } from "./api/transport";
 import "./index.css";
@@ -30,20 +32,30 @@ const queryClient = new QueryClient({
   },
 });
 
+function ThemedToaster() {
+  const { theme } = useTheme();
+  const resolved = theme === "system"
+    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : theme;
+  return <Toaster theme={resolved} position="bottom-right" richColors />;
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ErrorBoundary
-      FallbackComponent={ErrorFallback}
-      onReset={() => window.location.reload()}
-    >
-      <QueryClientProvider client={queryClient}>
-        <TransportProvider transport={transport}>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </TransportProvider>
-      </QueryClientProvider>
-    </ErrorBoundary>
-    <Toaster theme="dark" position="bottom-right" richColors />
+    <ThemeProvider>
+      <ErrorBoundary
+        FallbackComponent={ErrorFallback}
+        onReset={() => window.location.reload()}
+      >
+        <QueryClientProvider client={queryClient}>
+          <TransportProvider transport={transport}>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </TransportProvider>
+        </QueryClientProvider>
+      </ErrorBoundary>
+      <ThemedToaster />
+    </ThemeProvider>
   </StrictMode>,
 );

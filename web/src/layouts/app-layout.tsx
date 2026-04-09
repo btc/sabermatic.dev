@@ -4,9 +4,9 @@ import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { useLogout } from "@/api/queries";
 import { useRequireAuth } from "@/hooks/use-auth";
-import { useTheme } from "@/hooks/use-theme";
 import { UserRole } from "@/pb/drill/v1/user_pb";
 import { BrandName } from "@/components/brand-name";
+import { ThemeSwitch } from "@/components/theme-switch";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -20,8 +20,6 @@ export function AppLayout() {
   const logout = useLogout();
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, setTheme } = useTheme();
-
   const hasAnySessions = (sessionsResp?.sessions?.length ?? 0) > 0;
   const initials = user?.displayName?.slice(0, 2).toUpperCase() ?? "?";
 
@@ -75,11 +73,8 @@ export function AppLayout() {
                 <DropdownMenuItem onClick={() => navigate("/settings")}>
                   Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => {
-                  const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
-                  setTheme(next);
-                }}>
-                  Theme: {theme}
+                <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                  <ThemeSwitch />
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
