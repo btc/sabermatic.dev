@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"google.golang.org/genai"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/config"
@@ -100,6 +102,11 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	imageBytes, mimeType, err := w.Gemini.GenerateImage(ctx, fullPrompt)
 	geminiLatency := time.Since(geminiStart)
 	if err != nil {
+		var apiErr *genai.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == 429 {
+			slog.Info("gemini rate limit", "details", apiErr.Details)
+			return river.JobSnooze(60 * time.Second)
+		}
 		return fmt.Errorf("gemini generate image: %w", err)
 	}
 
