@@ -2,10 +2,13 @@ package backend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -175,8 +178,14 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 			uploadCtx, uploadSpan := tracer.Start(context.WithoutCancel(ctx), "Backend.ExecuteTurn.uploadAudio")
 			defer uploadSpan.End()
 
-			key := fmt.Sprintf("%s/%s.%s", sessionID, messageID, ext)
-			url, uploadErr := b.StoreAudio(uploadCtx, key, voice.GetAudio(), voice.GetAudioMimeType())
+			audioData := voice.GetAudio()
+			hash := sha256.Sum256(audioData)
+			key := path.Join(
+				sessionID.String(),
+				messageID.String(),
+				hex.EncodeToString(hash[:8])+"."+ext,
+			)
+			url, uploadErr := b.StoreAudio(uploadCtx, key, audioData, voice.GetAudioMimeType())
 			if uploadErr != nil {
 				uploadSpan.RecordError(uploadErr)
 				uploadSpan.SetStatus(codes.Error, "audio upload failed")
