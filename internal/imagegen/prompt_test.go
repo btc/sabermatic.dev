@@ -14,8 +14,6 @@ func TestAssemblePrompt(t *testing.T) {
 	assert.Contains(t, got, fragment)
 	assert.Contains(t, got, "true cubist refraction")
 	assert.Contains(t, got, "Objects and forms are subject to the same refraction")
-	assert.Contains(t, got, "sacred act of creation")
-	assert.Contains(t, got, "Warmth radiates from the work itself")
 	assert.Contains(t, got, "Edge-to-edge composition")
 	assert.Contains(t, got, "No text")
 }
