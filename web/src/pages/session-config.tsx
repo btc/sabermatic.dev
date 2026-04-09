@@ -163,7 +163,7 @@ export default function SessionConfig() {
   return (
     <div className="mx-auto max-w-xl space-y-6">
       {/* Question — image beside text */}
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden py-0">
         <div className="flex">
           {question?.imageUrl ? (
             <img
@@ -198,7 +198,7 @@ export default function SessionConfig() {
         <CardContent className="space-y-5">
           {/* Session group */}
           <div className="space-y-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Session</span>
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground pt-1">Session</span>
             <div>
               <Label>Duration</Label>
               <div className="flex items-center gap-2 flex-wrap mt-1.5">
@@ -245,11 +245,11 @@ export default function SessionConfig() {
 
           {/* Audio group */}
           <div className="space-y-3">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Audio</span>
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground pt-1">Audio</span>
 
             {/* Mic toggle */}
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center gap-4">
+              <div className="flex-1 min-w-0">
                 <Label htmlFor="mic-toggle">Microphone</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {micState === "denied"
@@ -271,8 +271,8 @@ export default function SessionConfig() {
             </div>
 
             {/* TTS toggle */}
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center gap-4">
+              <div className="flex-1 min-w-0">
                 <Label htmlFor="tts-toggle">Interviewer voice responses</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">Hear the interviewer speak rather than read text.</p>
               </div>
@@ -282,8 +282,8 @@ export default function SessionConfig() {
 
           {/* Coach briefing — ungrouped, conditional */}
           {hasCoach && (
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center gap-4">
+              <div className="flex-1 min-w-0">
                 <Label htmlFor="coach-briefing-toggle">Brief interviewer on your weak areas</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">The interviewer will focus on dimensions where you need practice.</p>
               </div>
@@ -307,7 +307,7 @@ export default function SessionConfig() {
               "Spacebar to record when not typing",
             ].map((tip) => (
               <li key={tip} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
+                <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
                 {tip}
               </li>
             ))}
