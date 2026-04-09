@@ -7,12 +7,13 @@ import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connec
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import { cn } from "@/lib/utils";
 import { WAITING_MESSAGES } from "@/lib/constants";
+import { ShaderOrb } from "@/components/shader-orb";
 
 // ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
 // ---------------------------------------------------------------------------
 
-function EvaluatingView() {
+function EvaluatingView({ imageUrl }: { imageUrl?: string }) {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -23,9 +24,21 @@ function EvaluatingView() {
   }, []);
 
   return (
-    <div className="flex flex-col items-center justify-center py-24 gap-6 px-4">
-      <div className="size-3 rounded-full bg-primary animate-pulse" />
-      <p className="text-sm text-muted-foreground text-center max-w-xs">
+    <div className="flex flex-col items-center justify-center pt-12 pb-24 gap-8 px-4">
+      {/* Question image — subdued */}
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt=""
+          className="w-[200px] aspect-[4/3] object-cover rounded-xl opacity-70 shadow-md"
+        />
+      )}
+
+      {/* WebGL shader orb */}
+      <ShaderOrb size={120} />
+
+      {/* Rotating evaluation message */}
+      <p className="text-sm text-muted-foreground text-center max-w-xs" key={index}>
         {WAITING_MESSAGES[index]}
       </p>
     </div>
@@ -133,7 +146,7 @@ function SessionLayoutInner({ id }: { id: string }) {
       {/* Content area */}
       <div className="pt-6">
         {showWaiting ? (
-          <EvaluatingView />
+          <EvaluatingView imageUrl={session?.questionImageUrl} />
         ) : (
           <Outlet />
         )}

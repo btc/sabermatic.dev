@@ -176,8 +176,8 @@ function WaitingView({ sessionId, questionTitle, messageCount, elapsed }: Waitin
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-8 px-4">
-      {/* Breathing pulse indicator */}
-      <div className="size-3 rounded-full bg-primary animate-pulse" />
+      {/* Larger pulsing ring in brand colors */}
+      <div className="size-8 rounded-full border-2 border-amber-500/60 animate-pulse" />
 
       {/* Cycling status message */}
       <p className="text-sm text-muted-foreground text-center max-w-xs">
