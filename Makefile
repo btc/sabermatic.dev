@@ -1,6 +1,8 @@
 .PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant
 
 test:
+	@echo "=== go mod tidy ==="
+	go mod tidy
 	@echo "=== buf lint ==="
 	buf lint
 	@echo ""
@@ -95,7 +97,10 @@ $(COVER_OUT):
 # Install project-level dev tools (CLIs, linters, codegen).
 # Run once after clone, or when tool versions change.
 deps:
-	brew install bufbuild/buf/buf overmind tmux
+	brew install \
+		bufbuild/buf/buf \
+		overmind \
+		tmux
 
 # Regenerate protobuf code from .proto sources.
 generate:
