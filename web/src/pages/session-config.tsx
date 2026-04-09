@@ -117,7 +117,8 @@ export default function SessionConfig() {
 
   async function handleEnableMic() {
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop()); // release mic immediately — we only need the permission grant
       setMicState("granted");
     } catch {
       setMicState("denied");

@@ -1,6 +1,7 @@
 package email
 
 import (
+	"html/template"
 	"testing"
 	"time"
 
@@ -25,8 +26,13 @@ func TestFormatDurationHuman(t *testing.T) {
 	}
 }
 
+func TestFormatDurationHuman_SubMinute(t *testing.T) {
+	require.Equal(t, "1 minute", FormatDurationHuman(0))
+	require.Equal(t, "1 minute", FormatDurationHuman(30*time.Second))
+}
+
 func TestRenderEmail(t *testing.T) {
-	html, err := RenderEmail("<p>Hello world</p>", "Test footer")
+	html, err := RenderEmail(template.HTML("<p>Hello world</p>"), "Test footer")
 	require.NoError(t, err)
 	require.Contains(t, html, "Sabermatic[.DEV]")
 	require.Contains(t, html, "Hello world")

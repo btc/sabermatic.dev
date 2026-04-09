@@ -19,13 +19,16 @@ function CssFallbackOrb({ size = 120 }: { size?: number }) {
   );
 }
 
+let _webgl: boolean | null = null;
 function hasWebGL(): boolean {
+  if (_webgl !== null) return _webgl;
   try {
     const canvas = document.createElement("canvas");
-    return !!(canvas.getContext("webgl") || canvas.getContext("webgl2"));
+    _webgl = !!(canvas.getContext("webgl") || canvas.getContext("webgl2"));
   } catch {
-    return false;
+    _webgl = false;
   }
+  return _webgl;
 }
 
 interface ShaderOrbProps {
