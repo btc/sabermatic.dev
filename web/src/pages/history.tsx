@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -396,15 +396,15 @@ function ActionBar({ selectedIds, sessions, onClear }: ActionBarProps) {
 function EmptyStateCTAs() {
   const { data: questionsResp } = useQuery(listQuestions, {});
   const questions = questionsResp?.questions ?? [];
-  const randomRef = useRef(Math.random());
+  const [randomSeed] = useState(() => Math.random());
 
   const recommendedId = useMemo(() => {
     const medium = questions.filter((q) => q.difficulty === Difficulty.MEDIUM);
     const pool = medium.length > 0 ? medium : questions;
     if (pool.length === 0) return null;
-    const pick = pool[Math.floor(randomRef.current * pool.length)];
+    const pick = pool[Math.floor(randomSeed * pool.length)];
     return pick?.id ?? null;
-  }, [questions]);
+  }, [questions, randomSeed]);
 
   return (
     <div className="flex items-center gap-3">
