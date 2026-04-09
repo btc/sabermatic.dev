@@ -18,7 +18,6 @@ import type { CoachAnalysis } from "@/pb/drill/v1/coach_pb";
 import {
   useCreateQuestion,
 } from "@/api/queries";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,6 +128,7 @@ function CoachCard({ coach, isActive }: {
   coach: CoachAnalysis | undefined;
   isActive: boolean;
 }) {
+  const [modalOpen, setModalOpen] = useState(false);
   const qc = useQueryClient();
   const coachAnalysisKey = createConnectQueryKey({ schema: getCoachAnalysis, input: {}, cardinality: "finite" });
   const requestCoach = useMutation(requestCoachAnalysis, {
@@ -142,72 +142,107 @@ function CoachCard({ coach, isActive }: {
 
   if (requestCoach.isPending) {
     return (
-      <Card>
-        <CardContent className="py-6">
-          <p className="text-sm text-muted-foreground animate-pulse">
-            Analyzing your progress...
-          </p>
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border bg-card px-5 py-4">
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Analyzing your progress...
+        </p>
+      </div>
     );
   }
 
   if (!coach) {
     return (
-      <Card>
-        <CardContent className="py-6 flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Get strategic coaching based on your sessions.
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => requestCoach.mutate({})}
-          >
-            Get strategic coaching
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border bg-card px-5 py-4 flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Get strategic coaching based on your sessions.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => requestCoach.mutate({})}
+        >
+          Get strategic coaching
+        </Button>
+      </div>
     );
   }
 
   return (
-    <Card className="border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Coach</CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => requestCoach.mutate({})}
-            disabled={requestCoach.isPending}
+    <>
+      <div className="rounded-xl border border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20 px-5 py-4 space-y-3">
+        <span className="text-[10px] font-bold tracking-wider uppercase text-muted-foreground">
+          Coach
+        </span>
+        {coach.summary && (
+          <p className="text-sm italic text-foreground/80 leading-relaxed border-l-[3px] border-amber-400/60 pl-3">
+            &ldquo;{coach.summary}&rdquo;
+          </p>
+        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {coach.weakestDimension && (
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+              &darr; {coach.weakestDimension}
+            </span>
+          )}
+          {coach.improvingDimensions.map((dim) => (
+            <span
+              key={dim}
+              className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+            >
+              &uarr; {dim}
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            Refresh
-          </Button>
+            Read full analysis &rarr;
+          </button>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+      </div>
+
+      <CoachAnalysisModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        narrative={coach.narrative}
+      />
+    </>
+  );
+}
+
+// TODO: Upgrade modal to dedicated /coach page.
+// Add session history, dimension trend charts over time.
+function CoachAnalysisModal({
+  open,
+  onOpenChange,
+  narrative,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  narrative: string;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Coach Analysis</DialogTitle>
+        </DialogHeader>
         <div className="text-sm text-foreground leading-relaxed">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              p: ({ children, ...props }) => <p {...props} className="mb-2 last:mb-0">{children}</p>,
-              ul: ({ children, ...props }) => <ul {...props} className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
-              ol: ({ children, ...props }) => <ol {...props} className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+              p: ({ children, ...props }) => <p {...props} className="mb-3 last:mb-0">{children}</p>,
+              ul: ({ children, ...props }) => <ul {...props} className="list-disc pl-5 mb-3 space-y-1">{children}</ul>,
+              ol: ({ children, ...props }) => <ol {...props} className="list-decimal pl-5 mb-3 space-y-1">{children}</ol>,
               strong: ({ children, ...props }) => <strong {...props} className="font-semibold">{children}</strong>,
             }}
           >
-            {coach.narrative}
+            {narrative}
           </ReactMarkdown>
         </div>
-        {coach.weakestDimension && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Focus area:</span>
-            <Badge variant="outline">{coach.weakestDimension}</Badge>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      </DialogContent>
+    </Dialog>
   );
 }
 
