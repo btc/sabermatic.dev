@@ -27,7 +27,7 @@ type WorkerRefs struct {
 func RegisterWorkers(cfg *config.Config, sender email.Sender, pool *pgxpool.Pool, llm *ai.Client, gemini *ai.GeminiClient, store storage.Store) (*river.Workers, WorkerRefs) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, NewSendEmailWorker(&cfg.Email, sender))
-	eval := &EvaluateSessionWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM}
+	eval := &EvaluateSessionWorker{Pool: pool, LLM: llm, Cfg: &cfg.LLM, BaseURL: cfg.Auth.BaseURL}
 	river.AddWorker(workers, eval)
 	cleanup := &CleanupAbandonedSessionsWorker{Pool: pool}
 	river.AddWorker(workers, cleanup)
