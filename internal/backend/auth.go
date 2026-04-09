@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"log/slog"
 	"net"
@@ -158,11 +159,12 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, 
 		return nil, fmt.Errorf("sign verification token: %w", err)
 	}
 	verifyURL := fmt.Sprintf("%s/verify-email?token=%s", b.cfg.Auth.BaseURL, token)
+	safeURL := html.EscapeString(verifyURL)
 	verifyBody := template.HTML(fmt.Sprintf(
 		`<p>Click the button below to verify your email address.</p>
 		<p style="margin:24px 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-weight:500;">Verify email</a></p>
 		<p style="font-size:13px;color:#666;">Or copy this link: %s</p>`,
-		verifyURL, verifyURL))
+		safeURL, safeURL))
 	verifyHTML, err := intemail.RenderEmail(verifyBody, fmt.Sprintf("You received this email because you signed up for %s.", branding.AppName))
 	if err != nil {
 		slog.Error("render verification email template", "error", err)
@@ -312,11 +314,12 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) (err error) 
 	resetURL := b.cfg.Auth.BaseURL + "/reset-password?token=" + token
 
 	ttlStr := intemail.FormatDurationHuman(b.cfg.Auth.ResetTokenTTL)
+	safeResetURL := html.EscapeString(resetURL)
 	resetBody := template.HTML(fmt.Sprintf(
 		`<p>Click the button below to reset your password. This link expires in %s.</p>
 		<p style="margin:24px 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-weight:500;">Reset password</a></p>
 		<p style="font-size:13px;color:#666;">Or copy this link: %s</p>`,
-		ttlStr, resetURL, resetURL))
+		ttlStr, safeResetURL, safeResetURL))
 	resetHTML, err := intemail.RenderEmail(resetBody, fmt.Sprintf("You received this email because you requested a password reset for %s.", branding.AppName))
 	if err != nil {
 		slog.Error("render reset email template", "error", err)
