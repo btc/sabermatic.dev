@@ -166,27 +166,27 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("river started")
 
 	uiCtx, closeRiverUI := context.WithCancel(context.Background())
+	cleanupUI := func() {
+		closeRiverUI()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Duration(cfg.River.ShutdownTimeoutSec)*time.Second)
+		defer stopCancel()
+		riverClient.Stop(stopCtx)
+		pool.Close()
+	}
 	endpoints := riverui.NewEndpoints(riverClient, nil)
-	// Note: riverui.NewHandler panics (library bug) if opts is nil — always pass a non-nil literal.
+	// Note: riverui.NewHandler dereferences opts.Endpoints before checking if opts is nil,
+	// so passing nil would panic. Always pass a non-nil literal.
 	uiHandler, err := riverui.NewHandler(&riverui.HandlerOpts{
 		Endpoints: endpoints,
 		Prefix:    "/admin/jobs",
 		Logger:    slog.Default(),
 	})
 	if err != nil {
-		closeRiverUI()
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Duration(cfg.River.ShutdownTimeoutSec)*time.Second)
-		defer stopCancel()
-		riverClient.Stop(stopCtx)
-		pool.Close()
+		cleanupUI()
 		return nil, fmt.Errorf("riverui handler: %w", err)
 	}
 	if err := uiHandler.Start(uiCtx); err != nil {
-		closeRiverUI()
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Duration(cfg.River.ShutdownTimeoutSec)*time.Second)
-		defer stopCancel()
-		riverClient.Stop(stopCtx)
-		pool.Close()
+		cleanupUI()
 		return nil, fmt.Errorf("start riverui: %w", err)
 	}
 	slog.Info("riverui started")
@@ -280,6 +280,8 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 // Close stops River (finishing in-flight jobs) then closes the database pool.
 // Implements io.Closer.
 func (b *Backend) Close() error {
+	// Cancel uiCtx first — the UI handler's background caching goroutines stop
+	// asynchronously; they only read data, so racing with River stop is safe.
 	b.closeRiverUI()
 
 	timeout := time.Duration(b.cfg.River.ShutdownTimeoutSec) * time.Second
