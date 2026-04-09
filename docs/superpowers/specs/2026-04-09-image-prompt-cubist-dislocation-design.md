@@ -36,6 +36,9 @@ Option A: strengthen the constant suffix only. The suffix currently says nothing
     "at the same moment, an eye where the cheekbone sits, noses split across two viewpoints. " +
     "Bodies dismantled and reassembled across the picture plane: anatomically wrong in the " +
     "parts, compositionally right in the whole. " +
+    "Objects and forms are subject to the same refraction — edges split, volumes seen " +
+    "from contradictory angles simultaneously, shapes that are geometrically impossible " +
+    "yet immediately legible. " +
     "Bold dark outlines on flat color planes. Warm palette: cream, amber, " +
     "terracotta, burnt orange with accents of cerulean blue and sage green. " +
     "Painterly brushwork. Playful and warm, Apple corporate illustration energy. " +
@@ -59,6 +62,7 @@ Manually null `image_url` on 2–3 questions with varied topic fragments and let
 - Faces showing front and profile simultaneously
 - Features (eyes, noses) displaced from anatomically expected positions
 - Figures that read as recognisably human overall but are genuinely disjointed in the parts
+- Objects and forms that share the same refraction — edges split, contradictory angles, impossible geometry that still reads clearly
 
 If results are still too naturalistic, escalate to Option B: rewrite the meta-prompt few-shot examples to lead with dislocation language so Sonnet-generated topic fragments carry the same energy.
 
