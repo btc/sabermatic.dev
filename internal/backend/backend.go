@@ -54,7 +54,7 @@ func New(cfg *config.Config) (*Backend, error) {
 		}
 		slog.Info("storage: gcs", "audio_bucket", cfg.Storage.Bucket, "public_bucket", cfg.Storage.PublicBucket)
 	case "local":
-		store, err = storage.NewLocal(cfg.Storage.LocalDir)
+		store, err = storage.NewLocal(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("local storage: %w", err)
 		}
