@@ -19,7 +19,7 @@ import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import type { SessionSummary } from "@/pb/drill/v1/session_pb";
 import { Search, MessageSquare, BarChart3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatRelativeDate } from "@/lib/utils";
 import { scoreColor } from "@/lib/score-utils";
@@ -408,21 +408,23 @@ function EmptyStateCTAs() {
     const medium = questions.filter((q) => q.difficulty === Difficulty.MEDIUM);
     const pool = medium.length > 0 ? medium : questions;
     if (pool.length === 0) return null;
-    return pool[Math.floor(randomRef.current * pool.length)].id;
+    const pick = pool[Math.floor(randomRef.current * pool.length)];
+    return pick?.id ?? null;
   }, [questions]);
 
   return (
     <div className="flex items-center gap-3">
       {recommendedId && (
-        <Button asChild>
-          <Link to={`/sessions/new?question=${recommendedId}`}>
-            Start a recommended question
-          </Link>
-        </Button>
+        <Link
+          to={`/sessions/new?question=${recommendedId}`}
+          className={buttonVariants({ className: "no-underline" })}
+        >
+          Start a recommended question
+        </Link>
       )}
-      <Button variant="outline" asChild>
-        <Link to="/">Browse questions</Link>
-      </Button>
+      <Link to="/" className={buttonVariants({ variant: "outline", className: "no-underline" })}>
+        Browse questions
+      </Link>
     </div>
   );
 }

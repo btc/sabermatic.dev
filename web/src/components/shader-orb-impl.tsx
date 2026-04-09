@@ -288,8 +288,8 @@ export function ShaderOrbImpl({ size = 120 }: ShaderOrbImplProps) {
       frameId = requestAnimationFrame(animate);
       const elapsed = clock.getElapsedTime();
 
-      material.uniforms.uTime.value = elapsed;
-      glowMaterial.uniforms.uTime.value = elapsed;
+      material.uniforms.uTime!.value = elapsed;
+      glowMaterial.uniforms.uTime!.value = elapsed;
 
       // Gentle tumble so the noise pattern drifts visually
       orb.rotation.y = elapsed * 0.1;
