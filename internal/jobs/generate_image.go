@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"google.golang.org/genai"
 
 	"github.com/btc/drill/internal/ai"
@@ -40,8 +41,17 @@ func GenerateQuestionImageInsertOpts() *river.InsertOpts {
 	return &river.InsertOpts{
 		Queue:       QueueGemini,
 		MaxAttempts: 3,
+		// Exclude completed from unique states so that nulling image_url and
+		// letting the sweep re-queue is sufficient to trigger a regen.
 		UniqueOpts: river.UniqueOpts{
 			ByArgs: true,
+			ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable,
+				rivertype.JobStatePending,
+				rivertype.JobStateRetryable,
+				rivertype.JobStateRunning,
+				rivertype.JobStateScheduled,
+			},
 		},
 	}
 }
