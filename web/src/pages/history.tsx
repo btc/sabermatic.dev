@@ -468,7 +468,7 @@ export default function History() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-base font-medium">History</h1>
+      <h1 className="text-base font-medium">Sessions</h1>
 
       {/* Score trend chart — only when there are reviewed sessions */}
       {reviewedSessions.length > 0 && (

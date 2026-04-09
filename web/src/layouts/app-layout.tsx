@@ -40,26 +40,20 @@ export function AppLayout() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto flex h-12 max-w-5xl items-center justify-between px-4">
-          <div className="flex items-center gap-6">
-            <Link to="/" className="text-sm font-semibold tracking-wider text-muted-foreground">
-              DRILL
-            </Link>
+          <Link to="/" className="text-sm font-semibold tracking-wider text-muted-foreground hover:text-foreground transition-colors">
+            DRILL
+          </Link>
+          <div className="flex items-center gap-4">
             <nav className="flex items-center gap-4 text-sm">
-              <Link
-                to="/"
-                className={location.pathname === "/" ? "text-foreground" : "text-muted-foreground hover:text-foreground"}
-              >
-                Home
-              </Link>
               {hasAnySessions ? (
                 <Link
                   to="/history"
                   className={location.pathname === "/history" ? "text-foreground" : "text-muted-foreground hover:text-foreground"}
                 >
-                  History
+                  Sessions
                 </Link>
               ) : (
-                <span className="cursor-default text-muted-foreground/50">History</span>
+                <span className="cursor-default text-muted-foreground/50">Sessions</span>
               )}
               {user?.role === UserRole.ADMIN && (
                 <a
@@ -72,27 +66,27 @@ export function AppLayout() {
                 </a>
               )}
             </nav>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="h-8 w-8 rounded-full bg-muted text-xs font-medium hover:bg-muted/80 cursor-pointer border-0 focus-visible:outline-none">
+                {initials}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => navigate("/settings")}>
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+                  setTheme(next);
+                }}>
+                  Theme: {theme}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout}>
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger className="h-8 w-8 rounded-full bg-muted text-xs font-medium hover:bg-muted/80 cursor-pointer border-0 focus-visible:outline-none">
-              {initials}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => navigate("/settings")}>
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                const next = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
-                setTheme(next);
-              }}>
-                Theme: {theme}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout}>
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-4 py-6">
