@@ -22,7 +22,7 @@ func TestMetaPrompt(t *testing.T) {
 	got := MetaPrompt("Rate Limiter")
 
 	assert.Contains(t, got.System, "cubist editorial illustration series")
-	assert.Contains(t, got.System, "consecrating a system design concept")
+	assert.Contains(t, got.System, "representing a system design concept")
 	assert.Contains(t, got.User, "Rate Limiter")
 	assert.Contains(t, got.User, "News Feed")
 	assert.Contains(t, got.User, "Chat System")

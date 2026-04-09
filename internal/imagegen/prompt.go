@@ -29,7 +29,7 @@ type MetaPromptParts struct {
 	User   string
 }
 
-const metaSystem = `You generate image prompt fragments for a cubist editorial illustration series. Each prompt describes a metaphorical scene with abstract figures consecrating a system design concept. Study the examples carefully — match their style, specificity, and structure. Output ONLY the prompt fragment, nothing else.`
+const metaSystem = `You generate image prompt fragments for a cubist editorial illustration series. Each prompt describes a metaphorical scene with abstract figures representing a system design concept. Study the examples carefully — match their style, specificity, and structure. Output ONLY the prompt fragment, nothing else.`
 
 const metaExamples = `Examples:
 
