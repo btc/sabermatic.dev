@@ -19,7 +19,7 @@ export function ThemeSwitch() {
           type="button"
           title={opt.label}
           onClick={(e) => {
-            e.stopPropagation();
+            e.stopPropagation(); // prevent Radix dropdown from closing
             setTheme(opt.value);
           }}
           className={cn(

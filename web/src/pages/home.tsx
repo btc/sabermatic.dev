@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Link } from "react-router-dom";
@@ -527,11 +527,12 @@ function NewUserHero({
   questions: ProtoQuestion[];
   startDisabled: boolean;
 }) {
+  const randomRef = useRef(Math.random());
   const suggested = useMemo(() => {
     const medium = questions.filter((q) => q.difficulty === Difficulty.MEDIUM);
     const pool = medium.length > 0 ? medium : questions;
     if (pool.length === 0) return null;
-    return pool[Math.floor(Math.random() * pool.length)];
+    return pool[Math.floor(randomRef.current * pool.length)];
   }, [questions]);
 
   if (!suggested) return null;

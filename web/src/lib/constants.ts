@@ -1,5 +1,3 @@
-export const APP_NAME = "Sabermatic[.DEV]";
-
 export const WAITING_MESSAGES = [
   "Reviewing your requirements gathering...",
   "Analyzing architecture decisions...",

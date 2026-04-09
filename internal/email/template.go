@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/btc/drill/internal/branding"
@@ -14,7 +15,18 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-var emailTmpl = template.Must(template.ParseFS(templateFS, "templates/wrapper.html"))
+var (
+	emailTmpl     *template.Template
+	emailTmplOnce sync.Once
+	emailTmplErr  error
+)
+
+func getTemplate() (*template.Template, error) {
+	emailTmplOnce.Do(func() {
+		emailTmpl, emailTmplErr = template.ParseFS(templateFS, "templates/wrapper.html")
+	})
+	return emailTmpl, emailTmplErr
+}
 
 // TemplateData holds the data for the shared email wrapper template.
 type TemplateData struct {
@@ -25,8 +37,12 @@ type TemplateData struct {
 
 // RenderEmail renders the shared email wrapper with the given body HTML and footer text.
 func RenderEmail(bodyHTML template.HTML, footer string) (string, error) {
+	tmpl, err := getTemplate()
+	if err != nil {
+		return "", fmt.Errorf("parse email template: %w", err)
+	}
 	var buf bytes.Buffer
-	err := emailTmpl.Execute(&buf, TemplateData{
+	err = tmpl.Execute(&buf, TemplateData{
 		AppName: branding.AppName,
 		Body:    bodyHTML,
 		Footer:  footer,
@@ -37,8 +53,12 @@ func RenderEmail(bodyHTML template.HTML, footer string) (string, error) {
 	return buf.String(), nil
 }
 
-// FormatDurationHuman formats a duration as a human-readable string.
+// FormatDurationHuman formats a duration as a human-readable string
+// like "1 hour", "30 minutes". For durations under 1 minute, returns "1 minute".
 func FormatDurationHuman(d time.Duration) string {
+	if d < time.Minute {
+		return "1 minute"
+	}
 	hours := d.Hours()
 	minutes := d.Minutes()
 

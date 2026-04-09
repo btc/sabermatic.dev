@@ -33,11 +33,8 @@ const queryClient = new QueryClient({
 });
 
 function ThemedToaster() {
-  const { theme } = useTheme();
-  const resolved = theme === "system"
-    ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-    : theme;
-  return <Toaster theme={resolved} position="bottom-right" richColors />;
+  const { resolvedTheme } = useTheme();
+  return <Toaster theme={resolvedTheme} position="bottom-right" richColors />;
 }
 
 createRoot(document.getElementById("root")!).render(

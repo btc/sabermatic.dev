@@ -16,7 +16,7 @@ func TestRenderEvaluationEmail_EscapesHTML(t *testing.T) {
 		Gaps:      []string{"normal gap"},
 		Advice:    "<img onerror=alert(1) src=x>",
 	}
-	html := renderEvaluationEmail("<b>evil title</b>", result)
+	html := renderEvaluationEmail("https://example.com", "<b>evil title</b>", result)
 
 	assert.NotContains(t, html, "<script>")
 	assert.NotContains(t, html, "<img onerror")
