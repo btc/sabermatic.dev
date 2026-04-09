@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/exaring/otelpgx"
@@ -12,6 +13,8 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/riverqueue/river/rivertype"
+
+	"riverqueue.com/riverui"
 
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/auth"
@@ -31,13 +34,15 @@ var tracer = drilotel.Tracer("backend")
 // The fields below are intentionally unexported. Do not add accessor methods
 // that expose them -- consumers should call Backend methods instead.
 type Backend struct {
-	pool  *pgxpool.Pool
-	jobs  Jobs
-	cfg   *config.Config
-	llm   *ai.Client
-	stt   ai.Transcriber
-	tts   ai.Synthesizer
-	store storage.Store
+	pool         *pgxpool.Pool
+	jobs         Jobs
+	riverUI      http.Handler
+	closeRiverUI context.CancelFunc
+	cfg          *config.Config
+	llm          *ai.Client
+	stt          ai.Transcriber
+	tts          ai.Synthesizer
+	store        storage.Store
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
@@ -160,14 +165,42 @@ func New(cfg *config.Config) (*Backend, error) {
 	}
 	slog.Info("river started")
 
+	uiCtx, closeRiverUI := context.WithCancel(context.Background())
+	endpoints := riverui.NewEndpoints(riverClient, nil)
+	// Note: riverui.NewHandler panics (library bug) if opts is nil — always pass a non-nil literal.
+	uiHandler, err := riverui.NewHandler(&riverui.HandlerOpts{
+		Endpoints: endpoints,
+		Prefix:    "/admin/jobs",
+		Logger:    slog.Default(),
+	})
+	if err != nil {
+		closeRiverUI()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Duration(cfg.River.ShutdownTimeoutSec)*time.Second)
+		defer stopCancel()
+		riverClient.Stop(stopCtx)
+		pool.Close()
+		return nil, fmt.Errorf("riverui handler: %w", err)
+	}
+	if err := uiHandler.Start(uiCtx); err != nil {
+		closeRiverUI()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Duration(cfg.River.ShutdownTimeoutSec)*time.Second)
+		defer stopCancel()
+		riverClient.Stop(stopCtx)
+		pool.Close()
+		return nil, fmt.Errorf("start riverui: %w", err)
+	}
+	slog.Info("riverui started")
+
 	return &Backend{
-		pool:  pool,
-		jobs:  riverClient,
-		cfg:   cfg,
-		llm:   llmClient,
-		stt:   stt,
-		tts:   tts,
-		store: store,
+		pool:         pool,
+		jobs:         riverClient,
+		riverUI:      uiHandler,
+		closeRiverUI: closeRiverUI,
+		cfg:          cfg,
+		llm:          llmClient,
+		stt:          stt,
+		tts:          tts,
+		store:        store,
 	}, nil
 }
 
@@ -247,6 +280,8 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 // Close stops River (finishing in-flight jobs) then closes the database pool.
 // Implements io.Closer.
 func (b *Backend) Close() error {
+	b.closeRiverUI()
+
 	timeout := time.Duration(b.cfg.River.ShutdownTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -263,3 +298,7 @@ func (b *Backend) Close() error {
 	slog.Info("database pool closed")
 	return nil
 }
+
+// RiverUIHandler returns the pre-built River UI http.Handler.
+// Mount it under /admin/jobs/ in the HTTP mux.
+func (b *Backend) RiverUIHandler() http.Handler { return b.riverUI }
