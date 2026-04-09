@@ -5,6 +5,7 @@ import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery"
 import { useLogout } from "@/api/queries";
 import { useRequireAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
+import { UserRole } from "@/pb/drill/v1/user_pb";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -59,6 +60,16 @@ export function AppLayout() {
                 </Link>
               ) : (
                 <span className="cursor-default text-muted-foreground/50">History</span>
+              )}
+              {user?.role === UserRole.ADMIN && (
+                <a
+                  href="/admin/jobs/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  Jobs
+                </a>
               )}
             </nav>
           </div>
