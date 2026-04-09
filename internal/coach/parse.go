@@ -9,6 +9,7 @@ import (
 
 // CoachResult holds the parsed coaching analysis ready for persistence.
 type CoachResult struct {
+	Summary             string
 	Narrative           string
 	WeakestDimension    string
 	ImprovingDimensions []string
@@ -49,6 +50,10 @@ func ToolSchema() anthropic.ToolParam {
 					"items":       map[string]any{"type": "string"},
 					"description": "System design topics the candidate hasn't practiced yet.",
 				},
+				"summary": map[string]any{
+					"type":        "string",
+					"description": "One sentence, action-oriented coaching insight. Example: 'Focus on architecture fundamentals — your requirements gathering is improving but needs to drive structural decisions.'",
+				},
 				"generated_question": map[string]any{
 					"type":        []any{"object", "null"},
 					"description": "An optional custom question targeting the candidate's weaknesses.",
@@ -67,6 +72,7 @@ func ToolSchema() anthropic.ToolParam {
 
 // rawToolInput is an intermediate struct for JSON unmarshaling.
 type rawToolInput struct {
+	Summary             string          `json:"summary"`
 	Narrative           string          `json:"narrative"`
 	WeakestDimension    string          `json:"weakest_dimension"`
 	ImprovingDimensions []string        `json:"improving_dimensions"`
@@ -98,6 +104,7 @@ func Parse(raw json.RawMessage) (*CoachResult, error) {
 		input.TopicGaps = []string{}
 	}
 	result := &CoachResult{
+		Summary:             input.Summary,
 		Narrative:           input.Narrative,
 		WeakestDimension:    input.WeakestDimension,
 		ImprovingDimensions: input.ImprovingDimensions,

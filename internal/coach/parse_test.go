@@ -146,6 +146,28 @@ func TestParse_GeneratedQuestionNullTagsBecomesEmpty(t *testing.T) {
 	assert.Empty(t, result.GeneratedQuestion.Tags)
 }
 
+func TestParse_SummaryField(t *testing.T) {
+	input := validToolInput()
+	input["summary"] = "Focus on architecture — requirements are improving."
+	raw, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	result, err := Parse(json.RawMessage(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "Focus on architecture — requirements are improving.", result.Summary)
+}
+
+func TestParse_MissingSummary(t *testing.T) {
+	input := validToolInput()
+	// no "summary" key
+	raw, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	result, err := Parse(json.RawMessage(raw))
+	require.NoError(t, err)
+	assert.Equal(t, "", result.Summary)
+}
+
 func TestToolSchema_Fields(t *testing.T) {
 	schema := ToolSchema()
 
@@ -158,7 +180,9 @@ func TestToolSchema_Fields(t *testing.T) {
 	assert.Contains(t, props, "improving_dimensions")
 	assert.Contains(t, props, "topic_gaps")
 	assert.Contains(t, props, "generated_question")
+	assert.Contains(t, props, "summary")
 
 	required := schema.InputSchema.Required
 	assert.Contains(t, required, "narrative")
+	assert.NotContains(t, required, "summary")
 }
