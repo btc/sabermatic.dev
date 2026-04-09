@@ -36,7 +36,7 @@ func (GenerateQuestionImageArgs) Kind() string { return "generate_question_image
 // GenerateQuestionImageInsertOpts returns River insert options for image generation jobs.
 func GenerateQuestionImageInsertOpts() *river.InsertOpts {
 	return &river.InsertOpts{
-		Queue:       QueueAI,
+		Queue:       QueueGemini,
 		MaxAttempts: 3,
 		UniqueOpts: river.UniqueOpts{
 			ByArgs: true,

@@ -116,6 +116,7 @@ func New(cfg *config.Config) (*Backend, error) {
 			river.QueueDefault:      {MaxWorkers: cfg.River.NumDefaultWorkers},
 			jobs.QueueNotifications: {MaxWorkers: cfg.River.NumNotifyWorkers},
 			jobs.QueueAI:            {MaxWorkers: cfg.River.NumAIWorkers},
+			jobs.QueueGemini:        {MaxWorkers: cfg.River.NumGeminiWorkers},
 			jobs.QueueMaintenance:   {MaxWorkers: cfg.River.NumMaintWorkers},
 		},
 		Workers:      workers,

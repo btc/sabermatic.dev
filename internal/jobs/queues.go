@@ -4,5 +4,6 @@ package jobs
 const (
 	QueueNotifications = "notifications"
 	QueueAI            = "ai"
+	QueueGemini        = "gemini"
 	QueueMaintenance   = "maintenance"
 )
