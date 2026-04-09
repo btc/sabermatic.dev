@@ -288,6 +288,9 @@ func getSessionRowToProto(row *db.GetSessionRow) *drillv1.Session {
 	if row.QuestionHints.Valid {
 		s.QuestionHints = &row.QuestionHints.String
 	}
+	if row.QuestionImageUrl.Valid {
+		s.QuestionImageUrl = &row.QuestionImageUrl.String
+	}
 
 	return s
 }

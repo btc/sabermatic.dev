@@ -282,6 +282,11 @@ export declare type Session = Message$1<"drill.v1.Session"> & {
    * @generated from field: optional string question_hints = 17;
    */
   questionHints?: string;
+
+  /**
+   * @generated from field: optional string question_image_url = 18;
+   */
+  questionImageUrl?: string;
 };
 
 /**

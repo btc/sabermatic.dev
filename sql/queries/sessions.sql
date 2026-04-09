@@ -9,7 +9,8 @@ SELECT s.id, s.user_id, s.question_id, s.status,
        s.config_coach_briefing, s.started_at, s.ended_at,
        s.turn_count, s.archived_at, s.created_at, s.updated_at,
        q.title AS question_title, q.prompt AS question_prompt,
-       q.difficulty AS question_difficulty, q.hints AS question_hints
+       q.difficulty AS question_difficulty, q.hints AS question_hints,
+       q.image_url AS question_image_url
 FROM interview_sessions s
 JOIN questions q ON q.id = s.question_id
 WHERE s.id = $1;
