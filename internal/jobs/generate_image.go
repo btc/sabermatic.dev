@@ -2,10 +2,13 @@ package jobs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -120,8 +123,13 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return fmt.Errorf("gemini generate image: %w", err)
 	}
 
-	// 6. Upload to public bucket.
-	key := "questions/" + questionID.String() + "/card.png"
+	// 6. Upload to public bucket (content-addressed so regenerations don't overwrite).
+	hash := sha256.Sum256(imageBytes)
+	key := path.Join(
+		"questions",
+		questionID.String(),
+		hex.EncodeToString(hash[:8])+".png",
+	)
 	imageURL, err := w.Store.Public().Put(ctx, key, imageBytes, mimeType)
 	if err != nil {
 		return fmt.Errorf("upload image: %w", err)
