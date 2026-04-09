@@ -130,7 +130,7 @@ type Stripe struct {
 
 type Gemini struct {
 	Model    string `env:"GEMINI_MODEL,default=gemini-3.1-flash-image-preview"`
-	Location string `env:"GEMINI_LOCATION,default=us-central1"`
+	Location string `env:"GEMINI_LOCATION,default=global"`
 }
 
 // Configured reports whether Stripe credentials are present.
