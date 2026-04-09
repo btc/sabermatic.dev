@@ -13,8 +13,11 @@ import { useQuery, useMutation } from "@connectrpc/connect-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { createConnectQueryKey } from "@connectrpc/connect-query";
 import { listSessions, archiveSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
+import { Difficulty } from "@/pb/drill/v1/question_pb";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import type { SessionSummary } from "@/pb/drill/v1/session_pb";
+import { Search, MessageSquare, BarChart3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -393,6 +396,37 @@ function ActionBar({ selectedIds, sessions, onClear }: ActionBarProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Empty state CTAs
+// ---------------------------------------------------------------------------
+
+function EmptyStateCTAs() {
+  const { data: questionsResp } = useQuery(listQuestions, {});
+  const questions = questionsResp?.questions ?? [];
+
+  const recommendedId = useMemo(() => {
+    const medium = questions.filter((q) => q.difficulty === Difficulty.MEDIUM);
+    const pool = medium.length > 0 ? medium : questions;
+    if (pool.length === 0) return null;
+    return pool[Math.floor(Math.random() * pool.length)].id;
+  }, [questions]);
+
+  return (
+    <div className="flex items-center gap-3">
+      {recommendedId && (
+        <Button asChild>
+          <Link to={`/sessions/new?question=${recommendedId}`}>
+            Start a recommended question
+          </Link>
+        </Button>
+      )}
+      <Button variant="outline" asChild>
+        <Link to="/">Browse questions</Link>
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // History page
 // ---------------------------------------------------------------------------
 
@@ -494,12 +528,34 @@ export default function History() {
       {sorted.length === 0 ? (
         <div className="py-16 text-center">
           {!hasAnySessions ? (
-            <p className="text-sm text-muted-foreground">
-              No sessions yet.{" "}
-              <Link to="/" className="text-foreground underline underline-offset-4 hover:text-muted-foreground">
-                Start your first practice from the home page.
-              </Link>
-            </p>
+            <div className="py-16 flex flex-col items-center gap-8">
+              {/* How it works steps */}
+              <div className="flex items-center gap-6 text-center">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                    <Search className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <span className="text-xs text-muted-foreground">Pick a question</span>
+                </div>
+                <div className="h-px w-8 bg-border" />
+                <div className="flex flex-col items-center gap-2">
+                  <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <span className="text-xs text-muted-foreground">Practice live</span>
+                </div>
+                <div className="h-px w-8 bg-border" />
+                <div className="flex flex-col items-center gap-2">
+                  <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                    <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <span className="text-xs text-muted-foreground">Get scored</span>
+                </div>
+              </div>
+
+              {/* CTAs */}
+              <EmptyStateCTAs />
+            </div>
           ) : (
             <p className="text-sm text-muted-foreground">
               No sessions match this filter.

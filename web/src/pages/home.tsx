@@ -303,9 +303,11 @@ function ActiveSessionBanner({
 function HeroQuestionCard({
   question,
   startDisabled,
+  labelOverride,
 }: {
   question: ProtoQuestion;
   startDisabled: boolean;
+  labelOverride?: string;
 }) {
   const href = startDisabled ? undefined : `/sessions/new?question=${question.id}`;
 
@@ -327,7 +329,7 @@ function HeroQuestionCard({
       {image}
       <div className="flex flex-col justify-center px-7 py-6 flex-1">
         <span className="text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400 mb-2">
-          Recommended by Coach
+          {labelOverride ?? "Recommended by Coach"}
         </span>
         <span className="text-xl font-bold mb-2">{question.title}</span>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -517,6 +519,32 @@ function CreateQuestionDialog() {
   );
 }
 
+// NewUserHero — hero-promoted question for brand-new users
+function NewUserHero({
+  questions,
+  startDisabled,
+}: {
+  questions: ProtoQuestion[];
+  startDisabled: boolean;
+}) {
+  const suggested = useMemo(() => {
+    const medium = questions.filter((q) => q.difficulty === Difficulty.MEDIUM);
+    const pool = medium.length > 0 ? medium : questions;
+    if (pool.length === 0) return null;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }, [questions]);
+
+  if (!suggested) return null;
+
+  return (
+    <HeroQuestionCard
+      question={suggested}
+      startDisabled={startDisabled}
+      labelOverride="Get started"
+    />
+  );
+}
+
 // Home
 export default function Home() {
   const { data: meData } = useQuery(getMe, {});
@@ -560,11 +588,9 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      {/* Welcome / Summary */}
-      {isNew && (
-        <p className="text-sm text-muted-foreground">
-          Pick a question to start practicing. 30 minutes is a good first session.
-        </p>
+      {/* Welcome / Summary — new user hero promotion */}
+      {isNew && !heroQuestion && (
+        <NewUserHero questions={questions} startDisabled={atConcurrentLimit} />
       )}
 
       <SessionBarChart sessions={sessions} />
