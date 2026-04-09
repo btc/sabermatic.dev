@@ -15,7 +15,7 @@ import (
 const getLatestCoachAnalysis = `-- name: GetLatestCoachAnalysis :one
 SELECT id, user_id, narrative, weakest_dimension,
        improving_dimensions, topic_gaps,
-       suggested_question_id, sessions_analyzed, created_at
+       suggested_question_id, sessions_analyzed, created_at, summary
 FROM coach_analyses
 WHERE user_id = $1
 ORDER BY created_at DESC LIMIT 1
@@ -34,22 +34,24 @@ func (q *Queries) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 		&i.SuggestedQuestionID,
 		&i.SessionsAnalyzed,
 		&i.CreatedAt,
+		&i.Summary,
 	)
 	return i, err
 }
 
 const insertCoachAnalysis = `-- name: InsertCoachAnalysis :one
 INSERT INTO coach_analyses (
-    user_id, narrative, weakest_dimension,
+    user_id, narrative, summary, weakest_dimension,
     improving_dimensions, topic_gaps,
     suggested_question_id, sessions_analyzed
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id
 `
 
 type InsertCoachAnalysisParams struct {
 	UserID              uuid.UUID   `json:"user_id"`
 	Narrative           string      `json:"narrative"`
+	Summary             pgtype.Text `json:"summary"`
 	WeakestDimension    pgtype.Text `json:"weakest_dimension"`
 	ImprovingDimensions []string    `json:"improving_dimensions"`
 	TopicGaps           []string    `json:"topic_gaps"`
@@ -61,6 +63,7 @@ func (q *Queries) InsertCoachAnalysis(ctx context.Context, arg InsertCoachAnalys
 	row := q.db.QueryRow(ctx, insertCoachAnalysis,
 		arg.UserID,
 		arg.Narrative,
+		arg.Summary,
 		arg.WeakestDimension,
 		arg.ImprovingDimensions,
 		arg.TopicGaps,
