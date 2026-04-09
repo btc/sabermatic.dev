@@ -31,7 +31,7 @@
 | Email subject: verify (`auth.go:162`) | `"Verify your Drill account"` | Use `AppName` constant |
 | Email subject: reset (`auth.go:305`) | `"Reset your Drill password"` | Use `AppName` constant |
 | Email body text | `"Drill"` references | Use `AppName` constant |
-| Evaluation email (`jobs/evaluate.go:269`) | Hardcoded `drill.dev` URL in "View full evaluation" link | Use `cfg.Auth.BaseURL` (already available via config) |
+| Evaluation email (`jobs/evaluate.go:269`) | Hardcoded `drill.dev` URL in "View full evaluation" link | The `EvaluateSessionWorker` currently only has `*config.LLM`. Add a `BaseURL string` field to the worker struct and wire it from `cfg.Auth.BaseURL` during worker registration. |
 | Email from address (`config.go:79`) | `noreply@drill.dev` default | Note: the sending domain remains `drill.dev` for now since DNS/SPF/DKIM records are tied to it. The display name can use `AppName`. Changing the sending domain is a separate infrastructure task. |
 | Error fallback (`components/error-fallback.tsx`) | No brand name | Add `<BrandName />` for consistency |
 
