@@ -11,6 +11,8 @@ const promptSuffix = ". Figures seen through a true cubist refraction — faces 
 	"Objects and forms are subject to the same refraction — edges split, volumes seen " +
 	"from contradictory angles simultaneously, shapes that are geometrically impossible " +
 	"yet immediately legible. " +
+	"Figures attend to their work with quiet reverence, as if performing a sacred act of creation. " +
+	"Warmth radiates from the work itself. " +
 	"Bold dark outlines on flat color planes. Warm palette: cream, amber, " +
 	"terracotta, burnt orange with accents of cerulean blue and sage green. " +
 	"Painterly brushwork. Playful and warm, Apple corporate illustration energy. " +
@@ -29,7 +31,7 @@ type MetaPromptParts struct {
 	User   string
 }
 
-const metaSystem = `You generate image prompt fragments for a cubist editorial illustration series. Each prompt describes a metaphorical scene with abstract figures representing a system design concept. Study the examples carefully — match their style, specificity, and structure. Output ONLY the prompt fragment, nothing else.`
+const metaSystem = `You generate image prompt fragments for a cubist editorial illustration series. Each prompt describes a metaphorical scene with abstract figures consecrating a system design concept. Study the examples carefully — match their style, specificity, and structure. Output ONLY the prompt fragment, nothing else.`
 
 const metaExamples = `Examples:
 

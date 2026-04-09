@@ -14,6 +14,7 @@ func TestAssemblePrompt(t *testing.T) {
 	assert.Contains(t, got, fragment)
 	assert.Contains(t, got, "true cubist refraction")
 	assert.Contains(t, got, "Objects and forms are subject to the same refraction")
+	assert.Contains(t, got, "sacred act of creation")
 	assert.Contains(t, got, "Edge-to-edge composition")
 	assert.Contains(t, got, "No text")
 }
@@ -22,6 +23,7 @@ func TestMetaPrompt(t *testing.T) {
 	got := MetaPrompt("Rate Limiter")
 
 	assert.Contains(t, got.System, "cubist editorial illustration series")
+	assert.Contains(t, got.System, "consecrating a system design concept")
 	assert.Contains(t, got.User, "Rate Limiter")
 	assert.Contains(t, got.User, "News Feed")
 	assert.Contains(t, got.User, "Chat System")
