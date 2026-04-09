@@ -57,7 +57,7 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	// Admin — requires both auth and admin role.
 	requireAuth := auth.RequireAuth(b)
 	requireAdmin := auth.RequireAdmin()
-	mux.Handle("GET /admin/jobs", requireAuth(requireAdmin(AdminJobsPlaceholder())))
+	mux.Handle("/admin/jobs/", requireAuth(requireAdmin(b.RiverUIHandler())))
 
 	// Auth (ConnectRPC AuthService handles signup/login/logout/etc.)
 
@@ -125,6 +125,13 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
 		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// River UI — exempt from CSRF; uses application/json bodies which cannot be
+		// submitted cross-origin by a simple HTML form. Auth is enforced by the mux chain.
+		// TODO: flip csrfMiddleware to opt-in model — exempt list is growing.
+		if strings.HasPrefix(r.URL.Path, "/admin/jobs/") {
 			next.ServeHTTP(w, r)
 			return
 		}
