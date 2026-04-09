@@ -103,12 +103,8 @@ resource "google_cloud_run_v2_service" "sabermatic" {
         value = var.project_id
       }
       env {
-        name  = "GEMINI_MODEL"
-        value = "gemini-3.1-flash-image-preview"
-      }
-      env {
         name  = "GEMINI_LOCATION"
-        value = var.region
+        value = "global"
       }
 
       # ---- Secret env vars ----

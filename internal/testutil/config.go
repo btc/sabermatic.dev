@@ -20,6 +20,7 @@ func baseEnv(databaseURL string) map[string]string {
 		"AUTH_TOKEN_SECRET":     "test-secret-at-least-32-bytes-long",
 		"AUTH_BCRYPT_COST":      "4",
 		"GOOGLE_CLOUD_PROJECT":  "test-project",
+		"GEMINI_LOCATION":       "us-central1",
 	}
 }
 
