@@ -14,7 +14,7 @@ func TestGenerateQuestionImageArgs_Kind(t *testing.T) {
 
 func TestGenerateQuestionImageInsertOpts(t *testing.T) {
 	opts := GenerateQuestionImageInsertOpts()
-	require.Equal(t, QueueAI, opts.Queue)
+	require.Equal(t, QueueGemini, opts.Queue)
 	require.Equal(t, 3, opts.MaxAttempts)
 	require.True(t, opts.UniqueOpts.ByArgs)
 }
