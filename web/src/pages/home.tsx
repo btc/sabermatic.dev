@@ -28,6 +28,10 @@ import {
   DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
+} from "@/components/ui/tooltip";
+import { scoreColor } from "@/lib/score-utils";
 
 // DB constraint enforces difficulty IN ('medium', 'hard'), so UNSPECIFIED
 // should never appear in ListQuestions responses. Defaults are defensive.
@@ -50,6 +54,74 @@ function reviewedSessions(sessions: SessionSummary[]): SessionSummary[] {
 
 function activeSessions(sessions: SessionSummary[]): SessionSummary[] {
   return sessions.filter((s) => s.status === SessionStatus.ACTIVE);
+}
+
+function SessionBarChart({ sessions }: { sessions: SessionSummary[] }) {
+  const reviewed = reviewedSessions(sessions);
+  if (reviewed.length === 0) return null;
+
+  const sorted = [...reviewed]
+    .filter((s) => s.scoreOverall != null)
+    .sort((a, b) => {
+      const ta = a.createTime ? Number(a.createTime.seconds) : 0;
+      const tb = b.createTime ? Number(b.createTime.seconds) : 0;
+      return ta - tb;
+    });
+  if (sorted.length === 0) return null;
+
+  const latest = sorted[sorted.length - 1]!;
+  const previous = sorted.length >= 2 ? sorted[sorted.length - 2]! : undefined;
+  const latestScore = latest.scoreOverall ?? 0;
+  const trendArrow =
+    previous?.scoreOverall != null && latest.scoreOverall != null
+      ? latest.scoreOverall > previous.scoreOverall
+        ? " \u2191"
+        : latest.scoreOverall < previous.scoreOverall
+          ? " \u2193"
+          : ""
+      : "";
+
+  return (
+    <div>
+      <TooltipProvider>
+        <div className="flex items-end gap-1 h-12">
+          {sorted.map((s, i) => {
+            const score = s.scoreOverall ?? 0;
+            const heightPct = Math.max((score / 5) * 100, 4);
+            const isLatest = i === sorted.length - 1;
+            return (
+              <Tooltip key={s.id}>
+                <TooltipTrigger
+                  render={
+                    <Link
+                      to={`/sessions/${s.id}/overview`}
+                      className="flex-1 rounded-t transition-opacity hover:opacity-75"
+                      style={{
+                        height: `${heightPct}%`,
+                        backgroundColor: scoreColor(score),
+                        outline: isLatest ? "2px solid rgba(0,0,0,0.15)" : undefined,
+                        outlineOffset: isLatest ? "1px" : undefined,
+                      }}
+                    />
+                  }
+                />
+                <TooltipContent>
+                  {s.questionTitle || "Session"} &middot; {score}/5
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </TooltipProvider>
+      <div className="h-px bg-border mt-0.5 mb-1.5" />
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{sorted.length} sessions</span>
+        <span style={{ color: scoreColor(latestScore) }} className="font-semibold">
+          Latest {latestScore}/5{trendArrow}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 // CoachCard
@@ -453,7 +525,7 @@ export default function Home() {
         </p>
       )}
 
-      {/* Session bar chart — added in Task 7 */}
+      <SessionBarChart sessions={sessions} />
 
       {/* Coach card — only for active users */}
       {isActive && <CoachCard coach={coach} isActive={isActive} />}
