@@ -26,10 +26,14 @@
 |---|---|---|
 | App header (`app-layout.tsx:44`) | `DRILL` | `<BrandName />` |
 | Auth layout (`auth-layout.tsx:8`) | `DRILL` | `<BrandName />` |
-| App loading screen (`app-layout.tsx:33`) | `Loading...` | `<BrandName />` |
-| Email subject: verify (`auth.go:162`) | `"Verify your Drill account"` | `"Verify your Sabermatic[.DEV] account"` |
-| Email subject: reset (`auth.go:305`) | `"Reset your Drill password"` | `"Reset your Sabermatic[.DEV] password"` |
+| App loading screen (`app-layout.tsx:34`) | `Loading...` | `<BrandName />` |
+| HTML page title (`web/index.html:7`) | `<title>Drill</title>` | `<title>Sabermatic[.DEV]</title>` (use `APP_NAME` constant if build tooling supports it, otherwise plain string) |
+| Email subject: verify (`auth.go:162`) | `"Verify your Drill account"` | Use `AppName` constant |
+| Email subject: reset (`auth.go:305`) | `"Reset your Drill password"` | Use `AppName` constant |
 | Email body text | `"Drill"` references | Use `AppName` constant |
+| Evaluation email (`jobs/evaluate.go:269`) | Hardcoded `drill.dev` URL in "View full evaluation" link | Use `cfg.Auth.BaseURL` (already available via config) |
+| Email from address (`config.go:79`) | `noreply@drill.dev` default | Note: the sending domain remains `drill.dev` for now since DNS/SPF/DKIM records are tied to it. The display name can use `AppName`. Changing the sending domain is a separate infrastructure task. |
+| Error fallback (`components/error-fallback.tsx`) | No brand name | Add `<BrandName />` for consistency |
 
 ---
 
@@ -39,7 +43,7 @@
 
 ### Image beside question text
 
-The first card combines the question image and text side-by-side, following the `HeroQuestionCard` pattern from the home page:
+The first card combines the question image and text side-by-side, following the `HeroQuestionCard` pattern from the home page. Note: `HeroQuestionCard` is currently a private function in `home.tsx`. Duplicate the image-beside-text layout inline in session-config rather than extracting a shared component — the two uses have different surrounding context (home page card is a link with hover effects; session config is static display).
 
 - Image (4:3 aspect ratio) on the left, ~45% width, rounded left corners.
 - Title and prompt text on the right.
@@ -53,7 +57,7 @@ The microphone permission section moves from a standalone box into the configura
 - Duration selector (15/30/45/60 preset buttons + custom input, plan-aware max)
 
 **Audio**
-- Microphone — a toggle that triggers the browser permission prompt (`getUserMedia`) when switched on. If the user denies permission, the toggle reverts to off and a note appears: "You can still use text input." On mount, check existing permission state via `navigator.permissions.query({ name: 'microphone' })` — if already `granted`, initialize the toggle as on without re-prompting.
+- Microphone — a toggle that triggers the browser permission prompt (`getUserMedia`) when switched on. If the user denies permission, the toggle reverts to off and a note appears: "You can still use text input." On mount, attempt to check existing permission state via `navigator.permissions.query({ name: 'microphone' })` — if already `granted`, initialize the toggle as on without re-prompting. **Safari fallback:** Safari does not support querying the `microphone` permission name. Wrap the query in a try/catch; if it throws, default the toggle to off (user will toggle it on manually, triggering `getUserMedia`).
 - Interviewer voice responses — TTS toggle (default: on)
 
 **Ungrouped (bottom)**
@@ -66,7 +70,8 @@ Group labels are subtle (small uppercase text or similar), not full card sub-hea
 1. Question card (image beside title + prompt)
 2. Configuration card (Session group → Audio group → coach briefing)
 3. "Before you begin" tips card (unchanged)
-4. Begin session button (unchanged)
+4. Entitlement warning (unchanged, conditional)
+5. Begin session button (unchanged)
 
 The standalone microphone box is removed.
 
@@ -85,7 +90,7 @@ The auth layout renders `<BrandName />` as the heading, with the tagline **"syst
 The login form is reordered:
 
 1. **Google button** — outline style with inline Google "G" SVG icon, text: "Sign in with Google"
-2. **GitHub button** — outline style with inline GitHub octomark SVG icon, text: "Sign in with GitHub"
+2. **GitHub button** — outline style with inline GitHub Mark SVG icon, text: "Sign in with GitHub"
 3. **"or" separator** (unchanged)
 4. **Email field**
 5. **Password field** + **"Forgot password?"** link positioned as a small inline link directly below/right of the password field
@@ -108,7 +113,7 @@ The bottom padding of the card content area matches the top. Currently the gap b
 Same treatment as login:
 
 - `<BrandName />` heading with "system design, measured." tagline via the shared auth layout.
-- OAuth buttons (Google, GitHub) with SVG icons above the email/password form.
+- OAuth buttons (Google, GitHub) with SVG icons above the email/password form. Button text uses "Sign up with Google" / "Sign up with GitHub" (not "Sign in") to match the page context.
 - Consistent spacing.
 
 ---
@@ -119,13 +124,15 @@ Same treatment as login:
 
 ### Composition (top to bottom, vertically centered but biased toward upper viewport)
 
-1. **Question image** — the cubist illustration for the session's question. Subdued (opacity ~0.7), moderate size (~180-200px wide), rounded corners, subtle shadow. Positioned with less space above than below to sit higher in the viewport.
+1. **Question image** — the cubist illustration for the session's question. Subdued (opacity ~0.7), moderate size (~180-200px wide), rounded corners, subtle shadow. Positioned with less space above than below to sit higher in the viewport. **Data plumbing:** The `Session` proto does not currently include `image_url` — it only has `question_id`, `question_title`, `question_prompt`, etc. Add a `question_image_url` field to the `Session` proto message. Populate it from the question's `image_url` when creating the session in the backend. This avoids a separate question fetch from the session layout.
 2. **WebGL shader orb** — the centerpiece loading indicator.
 3. **Rotating evaluation messages** — the existing 5 messages, fading in/out on a cycle.
 
 No question title text — the image already provides context.
 
 ### WebGL shader orb
+
+**New dependency:** `three` (Three.js). Only the core WebGL renderer, `SphereGeometry`, and `ShaderMaterial` are needed — tree-shaking should keep the bundle impact well below the full ~600KB. Consider a dynamic `import()` so the shader code is only loaded on the waiting page, not in the main bundle.
 
 A Three.js scene with a single sphere:
 
@@ -156,7 +163,8 @@ Messages fade in (translate up + opacity) → hold → fade out (translate up + 
 **Files:**
 - New: `web/src/contexts/theme-context.tsx` (or similar)
 - Modified: `web/src/hooks/use-theme.ts` — becomes a thin wrapper around `useContext`
-- Modified: app entry point to wrap with `<ThemeProvider>`
+- Modified: app entry point (`main.tsx`) to wrap with `<ThemeProvider>`
+- Modified: Sonner `<Toaster>` in `main.tsx` — currently hardcoded to `theme="dark"`. Wire it to the `ThemeContext` so it respects the user's theme selection.
 
 ### Ternary theme switcher
 
@@ -173,7 +181,7 @@ The selected icon is visually highlighted (background fill or similar). This con
 - The avatar dropdown menu in `app-layout.tsx`
 - The settings page in `settings.tsx`
 
-Both render the same `<ThemeSwitch />` component backed by the shared `ThemeContext`.
+Both render the same `<ThemeSwitch />` component backed by the shared `ThemeContext`. The settings page currently has a text-based segmented control (`ThemeToggle` with "Light" / "Dark" / "System" labels); this is replaced by the icon-based `<ThemeSwitch />` for consistency between the two surfaces.
 
 ---
 
@@ -195,7 +203,7 @@ Each step is minimal — icon + short label. Connected by a subtle line or arrow
 
 **Two CTAs below the steps:**
 
-- **Primary:** "Start a recommended question" — picks a random question from the easiest available difficulty (easy > medium > hard fallback). Links directly to `/sessions/new?question={id}`.
+- **Primary:** "Start a recommended question" — picks a random question from the easiest available difficulty (medium > hard fallback; the codebase only has `MEDIUM` and `HARD` difficulties). Links directly to `/sessions/new?question={id}`.
 - **Secondary:** "Browse questions" — links to `/` (home page).
 
 ### Home page (new user)
@@ -208,11 +216,11 @@ Replace the small welcome text ("Pick a question to start practicing...") with a
 
 ## 8. Emails
 
-**Files:** `internal/backend/auth.go`, potentially a new `internal/email/template.go`
+**Files:** `internal/backend/auth.go`, `internal/jobs/evaluate.go`, potentially a new `internal/email/template.go`
 
 ### Styled HTML template
 
-A shared HTML email wrapper used by both transactional emails. Design reference: Notion's transactional emails (card-style body on a colored background).
+A shared HTML email wrapper used by all transactional emails (verification, password reset, and evaluation notification). Design reference: Notion's transactional emails (card-style body on a colored background). The evaluation notification email (`internal/jobs/evaluate.go` lines 233-283) currently has its own inline HTML template with a blue/grey corporate style that does not match the app branding — it must be migrated to the shared wrapper.
 
 Structure:
 - **Outer background:** subtle warm tone (cream or light amber, e.g., `#fffbf5`)
@@ -231,7 +239,7 @@ Structure:
 
 **Password reset email:**
 - Subject: `Reset your Sabermatic[.DEV] password`
-- Body: "Click the button below to reset your password. This link expires in 1 hour."
+- Body: "Click the button below to reset your password. This link expires in 1 hour." (The TTL is configurable via `AUTH_RESET_TOKEN_TTL`, default `1h`. The email template should read this value from config and format it, not hardcode "1 hour".)
 - CTA button: amber background, white text, "Reset password"
 - Fallback text link below button.
 
