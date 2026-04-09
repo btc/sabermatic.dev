@@ -581,6 +581,7 @@ type Session struct {
 	QuestionPrompt        string                 `protobuf:"bytes,15,opt,name=question_prompt,json=questionPrompt,proto3" json:"question_prompt,omitempty"`
 	QuestionDifficulty    string                 `protobuf:"bytes,16,opt,name=question_difficulty,json=questionDifficulty,proto3" json:"question_difficulty,omitempty"`
 	QuestionHints         *string                `protobuf:"bytes,17,opt,name=question_hints,json=questionHints,proto3,oneof" json:"question_hints,omitempty"`
+	QuestionImageUrl      *string                `protobuf:"bytes,18,opt,name=question_image_url,json=questionImageUrl,proto3,oneof" json:"question_image_url,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -730,6 +731,13 @@ func (x *Session) GetQuestionDifficulty() string {
 func (x *Session) GetQuestionHints() string {
 	if x != nil && x.QuestionHints != nil {
 		return *x.QuestionHints
+	}
+	return ""
+}
+
+func (x *Session) GetQuestionImageUrl() string {
+	if x != nil && x.QuestionImageUrl != nil {
+		return *x.QuestionImageUrl
 	}
 	return ""
 }
@@ -1008,7 +1016,7 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"F\n" +
 	"\x15GetTranscriptResponse\x12-\n" +
-	"\bmessages\x18\x01 \x03(\v2\x11.drill.v1.MessageR\bmessages\"\xd0\x06\n" +
+	"\bmessages\x18\x01 \x03(\v2\x11.drill.v1.MessageR\bmessages\"\x9a\a\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
@@ -1032,10 +1040,12 @@ const file_drill_v1_session_proto_rawDesc = "" +
 	"\x0equestion_title\x18\x0e \x01(\tR\rquestionTitle\x12'\n" +
 	"\x0fquestion_prompt\x18\x0f \x01(\tR\x0equestionPrompt\x12/\n" +
 	"\x13question_difficulty\x18\x10 \x01(\tR\x12questionDifficulty\x12*\n" +
-	"\x0equestion_hints\x18\x11 \x01(\tH\x02R\rquestionHints\x88\x01\x01B\v\n" +
+	"\x0equestion_hints\x18\x11 \x01(\tH\x02R\rquestionHints\x88\x01\x01\x121\n" +
+	"\x12question_image_url\x18\x12 \x01(\tH\x03R\x10questionImageUrl\x88\x01\x01B\v\n" +
 	"\t_end_timeB\x0f\n" +
 	"\r_archive_timeB\x11\n" +
-	"\x0f_question_hints\"\x89\x05\n" +
+	"\x0f_question_hintsB\x15\n" +
+	"\x13_question_image_url\"\x89\x05\n" +
 	"\x0eSessionSummary\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +

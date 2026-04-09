@@ -104,6 +104,7 @@ message Session {
   string question_prompt = 15;
   string question_difficulty = 16;
   optional string question_hints = 17;
+  optional string question_image_url = 18;
 }
 
 // Summary for list view (lighter than full Session).
