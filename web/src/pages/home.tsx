@@ -568,7 +568,8 @@ export default function Home() {
   const concurrentLimit = user?.plan === UserPlan.PRO ? 2 : 1;
   const atConcurrentLimit = active.length >= concurrentLimit;
   // Tier
-  const isNew = reviewedCount === 0;
+  const visibleSessions = sessions.filter(s => !s.archiveTime);
+  const isNew = visibleSessions.length === 0;
   const isActive = reviewedCount >= 3;
 
   const suggestedId = coach?.suggestedQuestionId ?? null;

@@ -28,7 +28,7 @@ import { scoreColor } from "@/lib/score-utils";
 // Types
 // ---------------------------------------------------------------------------
 
-const VALID_TABS = ["all", "in_progress", "reviewed", "archived"] as const;
+const VALID_TABS = ["all", "in_progress", "archived"] as const;
 const VALID_SORTS = ["newest", "oldest", "score_high", "score_low"] as const;
 type FilterTab = (typeof VALID_TABS)[number];
 type SortOrder = (typeof VALID_SORTS)[number];
@@ -43,7 +43,6 @@ function getCreateTimeMs(s: SessionSummary): number {
 }
 
 const IN_PROGRESS_STATUSES: SessionStatus[] = [SessionStatus.ACTIVE, SessionStatus.COMPLETED, SessionStatus.EVALUATING];
-const REVIEWED_STATUSES: SessionStatus[] = [SessionStatus.REVIEWED, SessionStatus.EVALUATION_FAILED];
 
 function applyFilter(sessions: SessionSummary[], tab: FilterTab): SessionSummary[] {
   switch (tab) {
@@ -52,10 +51,6 @@ function applyFilter(sessions: SessionSummary[], tab: FilterTab): SessionSummary
     case "in_progress":
       return sessions.filter(
         (s) => !s.archiveTime && IN_PROGRESS_STATUSES.includes(s.status),
-      );
-    case "reviewed":
-      return sessions.filter(
-        (s) => !s.archiveTime && REVIEWED_STATUSES.includes(s.status),
       );
     case "archived":
       return sessions.filter((s) => !!s.archiveTime);
@@ -269,7 +264,6 @@ function SessionRow({ session, checked, onToggle }: SessionRowProps) {
 const TABS: { id: FilterTab; label: string }[] = [
   { id: "all", label: "All" },
   { id: "in_progress", label: "In Progress" },
-  { id: "reviewed", label: "Reviewed" },
   { id: "archived", label: "Archived" },
 ];
 
@@ -501,7 +495,7 @@ export default function History() {
     );
   }
 
-  const hasAnySessions = allSessions.length > 0;
+  const hasVisibleSessions = allSessions.some(s => !s.archiveTime);
 
   return (
     <div className="space-y-6">
@@ -513,7 +507,7 @@ export default function History() {
       )}
 
       {/* Filters row */}
-      {hasAnySessions && (
+      {hasVisibleSessions && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <FilterTabs active={tab} onChange={setTab} />
           <SortSelect value={sort} onChange={setSort} />
@@ -530,7 +524,7 @@ export default function History() {
       {/* Session list */}
       {sorted.length === 0 ? (
         <div className="py-16 text-center">
-          {!hasAnySessions ? (
+          {!hasVisibleSessions ? (
             <div className="py-16 flex flex-col items-center gap-8">
               {/* How it works steps */}
               <div className="flex items-center gap-6 text-center">
