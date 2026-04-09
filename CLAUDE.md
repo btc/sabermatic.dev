@@ -33,6 +33,22 @@ ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `interna
 
 Verify library API signatures against installed versions before writing plan code blocks.
 
+# Build & Verify
+
+Full CI: `make test` (runs buf lint, codegen check, frontend typecheck+lint+tests, backend tests).
+
+Frontend typecheck: `cd web && npx tsc --noEmit -p tsconfig.app.json` or `cd web && npx tsc -b`. Do NOT use bare `npx tsc --noEmit` — the root tsconfig has `files: []` with only project references, so it checks nothing without `-b` or `-p`.
+
+Frontend build: `cd web && npm run build` (runs `tsc -b && vite build`).
+
+Backend build: `go build ./...`
+
+Backend tests: `go test ./internal/... ./cmd/... -race -count=1 -timeout=300s`
+
+Proto codegen: `buf generate` then `sqlc generate` if SQL changed.
+
+Local dev: `make dev` (starts overmind with vite + air on :8080).
+
 # Process
 
 Practice red-green TDD when investigating bugs. Write a failing test first, then fix.
