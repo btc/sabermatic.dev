@@ -42,6 +42,7 @@ type CoachAnalysis struct {
 	SuggestedQuestionID pgtype.UUID `json:"suggested_question_id"`
 	SessionsAnalyzed    []uuid.UUID `json:"sessions_analyzed"`
 	CreatedAt           time.Time   `json:"created_at"`
+	Summary             pgtype.Text `json:"summary"`
 }
 
 type EducatorAnalysis struct {
