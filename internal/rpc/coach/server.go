@@ -92,6 +92,10 @@ func coachResponseToProto(r *backend.CoachResponse) *drillv1.CoachAnalysis {
 		CreateTime:          timestamppb.New(r.CreatedAt),
 	}
 
+	if r.Summary != "" {
+		ca.Summary = &r.Summary
+	}
+
 	if r.WeakestDimension != "" {
 		ca.WeakestDimension = &r.WeakestDimension
 	}

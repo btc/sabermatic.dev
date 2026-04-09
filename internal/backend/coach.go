@@ -18,6 +18,7 @@ import (
 type CoachResponse struct {
 	ID                  string    `json:"id"`
 	UserID              string    `json:"user_id"`
+	Summary             string    `json:"summary,omitempty"`
 	Narrative           string    `json:"narrative"`
 	WeakestDimension    string    `json:"weakest_dimension,omitempty"`
 	ImprovingDimensions []string  `json:"improving_dimensions,omitempty"`
@@ -56,6 +57,7 @@ func (b *Backend) GetLatestCoachAnalysis(ctx context.Context, userID uuid.UUID) 
 	resp := &CoachResponse{
 		ID:                  ca.ID.String(),
 		UserID:              ca.UserID.String(),
+		Summary:             ca.Summary.String,
 		Narrative:           ca.Narrative,
 		WeakestDimension:    ca.WeakestDimension.String,
 		ImprovingDimensions: ca.ImprovingDimensions,

@@ -153,6 +153,7 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 	_, err = txq.InsertCoachAnalysis(ctx, db.InsertCoachAnalysisParams{
 		UserID:              userID,
 		Narrative:           result.Narrative,
+		Summary:             pgtype.Text{String: result.Summary, Valid: result.Summary != ""},
 		WeakestDimension:    pgtype.Text{String: result.WeakestDimension, Valid: result.WeakestDimension != ""},
 		ImprovingDimensions: result.ImprovingDimensions,
 		TopicGaps:           result.TopicGaps,
