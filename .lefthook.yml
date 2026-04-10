@@ -1,0 +1,12 @@
+pre-commit:
+  parallel: true
+  commands:
+    frontend-lint:
+      glob: "web/src/**/*.{ts,tsx}"
+      run: cd web && npx eslint --fix {staged_files} && git add {staged_files}
+    frontend-typecheck:
+      glob: "web/src/**/*.{ts,tsx}"
+      run: cd web && npx tsc --noEmit -p tsconfig.app.json
+    backend-vet:
+      glob: "**/*.go"
+      run: go vet ./...
