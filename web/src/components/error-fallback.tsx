@@ -1,4 +1,5 @@
 import type { FallbackProps } from "react-error-boundary";
+
 import { BrandName } from "@/components/brand-name";
 
 export function ErrorFallback({ resetErrorBoundary }: FallbackProps) {

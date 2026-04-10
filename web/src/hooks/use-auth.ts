@@ -1,7 +1,8 @@
 import { useQuery } from "@connectrpc/connect-query";
-import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
-import { useNavigate, useLocation } from "react-router-dom";
 import { useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
 export function useRequireAuth() {
   const { data, isLoading, isError } = useQuery(getMe, {});

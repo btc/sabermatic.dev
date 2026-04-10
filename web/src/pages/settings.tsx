@@ -1,37 +1,36 @@
-import { useState, useRef, KeyboardEvent } from "react";
-import { useLocation, useNavigate, Link } from "react-router-dom";
-import { toast } from "sonner";
-import { useQuery, useMutation } from "@connectrpc/connect-query";
-import { getMe, getUsage, updateProfile, exportData } from "@/pb/drill/v1/user-UserService_connectquery";
-import { checkout as checkoutMethod, portal as portalMethod } from "@/pb/drill/v1/billing-BillingService_connectquery";
-import { UserPlan } from "@/pb/drill/v1/user_pb";
-import { CheckoutRequestSchema } from "@/pb/drill/v1/billing_pb";
 import { create } from "@bufbuild/protobuf";
-import {
-  useLogout, useDeleteAccount,
-} from "@/api/queries";
 import { ConnectError } from "@connectrpc/connect";
+import { useMutation, useQuery } from "@connectrpc/connect-query";
+import { KeyboardEvent, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+
+import { useDeleteAccount, useLogout } from "@/api/queries";
 import { ThemeSwitch } from "@/components/theme-switch";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { CheckoutRequestSchema } from "@/pb/drill/v1/billing_pb";
+import { checkout as checkoutMethod, portal as portalMethod } from "@/pb/drill/v1/billing-BillingService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
+import { exportData, getMe, getUsage, updateProfile } from "@/pb/drill/v1/user-UserService_connectquery";
 
 // ---------------------------------------------------------------------------
 // Section wrapper
@@ -168,9 +167,9 @@ function ProfileSection() {
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">
+          <span className="text-xs font-medium text-muted-foreground">
             Email
-          </label>
+          </span>
           <div className="flex items-center gap-2">
             <span className="text-sm text-foreground">{user?.email}</span>
             {user?.emailVerified ? (

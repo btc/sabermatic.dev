@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+
 import { BrandName } from "@/components/brand-name";
 
 export function AuthLayout({ children }: { children: ReactNode }) {

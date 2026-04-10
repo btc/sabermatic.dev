@@ -1,7 +1,8 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+
 import { AppLayout } from "@/layouts/app-layout";
 import { ImmersiveLayout } from "@/layouts/immersive-layout";
-import { lazy, Suspense } from "react";
 
 const Login = lazy(() => import("@/pages/auth/login"));
 const Signup = lazy(() => import("@/pages/auth/signup"));

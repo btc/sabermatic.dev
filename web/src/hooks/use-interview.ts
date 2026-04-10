@@ -1,14 +1,15 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { ConnectError, createClient } from "@connectrpc/connect";
 import type { Span } from "@opentelemetry/api";
-import { createClient, ConnectError } from "@connectrpc/connect";
-import { InterviewService } from "@/pb/drill/v1/interview_pb";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { transport } from "@/api/transport";
 import type {
   InterviewSessionInfo,
   TurnEvent,
 } from "@/pb/drill/v1/interview_pb";
+import { InterviewService } from "@/pb/drill/v1/interview_pb";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import { transport } from "@/api/transport";
-import { createTurnSpan, closeTurnSpan } from "@/telemetry/trace";
+import { closeTurnSpan, createTurnSpan } from "@/telemetry/trace";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from "react";
 import { Mic, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Waveform } from "@/components/waveform";
 import { Kbd } from "@/components/ui/kbd";
+import { Waveform } from "@/components/waveform";
 import { cn } from "@/lib/utils";
 
 interface RecordingInputProps {

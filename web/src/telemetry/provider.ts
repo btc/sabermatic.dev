@@ -1,9 +1,9 @@
-import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 
 export function initTelemetry() {
   const spanProcessors = import.meta.env.PROD

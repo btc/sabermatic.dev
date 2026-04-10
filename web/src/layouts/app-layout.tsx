@@ -1,16 +1,20 @@
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@connectrpc/connect-query";
-import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
-import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+
 import { useLogout } from "@/api/queries";
-import { useRequireAuth } from "@/hooks/use-auth";
-import { UserRole } from "@/pb/drill/v1/user_pb";
 import { BrandName } from "@/components/brand-name";
 import { ThemeSwitch } from "@/components/theme-switch";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useRequireAuth } from "@/hooks/use-auth";
+import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { UserRole } from "@/pb/drill/v1/user_pb";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
 export function AppLayout() {
   const { isLoading, isAuthenticated } = useRequireAuth();

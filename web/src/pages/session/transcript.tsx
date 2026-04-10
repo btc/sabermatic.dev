@@ -1,13 +1,14 @@
-import { useState, useRef, useCallback } from "react";
-import { useParams, Navigate } from "react-router-dom";
 import { useQuery } from "@connectrpc/connect-query";
-import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
-import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
-import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
-import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
-import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
-import { cn } from "@/lib/utils";
+import { useCallback, useRef, useState } from "react";
+import { Navigate, useParams } from "react-router-dom";
+
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
+import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
+import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
+import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
+import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers

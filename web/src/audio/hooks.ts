@@ -1,6 +1,7 @@
-import { useRef, useCallback, useState, useEffect } from "react";
-import { AudioRecorder } from "./recorder";
+import { useCallback, useEffect, useRef, useState } from "react";
+
 import { AudioPlayer } from "./player";
+import { AudioRecorder } from "./recorder";
 
 export function useAudioRecorder() {
   const recorderRef = useRef<AudioRecorder | null>(null);
