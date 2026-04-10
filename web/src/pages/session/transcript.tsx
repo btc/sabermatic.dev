@@ -1,14 +1,16 @@
-import { useQuery } from "@connectrpc/connect-query";
 import { useCallback, useRef, useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
 
+import { useEvaluation, useSession, useTranscript } from "@/api/queries";
+import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
+import { ReplayControls } from "@/components/replay/controls";
+import { useReplayEngine } from "@/components/replay/engine";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
 import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
-import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
-import type { Message as ProtoMessage } from "@/pb/drill/v1/session_pb";
-import { getTranscript } from "@/pb/drill/v1/session-SessionService_connectquery";
+import type { Message } from "@/pb/drill/v1/session_pb";
+
+import { useSessionDetail } from "./layout";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers
@@ -109,6 +111,7 @@ function SummaryBar({
         return (
           <button
             key={type}
+            type="button"
             onClick={() => handleTypeClick(type)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer",
@@ -133,9 +136,10 @@ function SummaryBar({
 interface AnnotationCardProps {
   annotation: Annotation;
   dimmed: boolean;
+  showRailDot: boolean;
 }
 
-function AnnotationCard({ annotation, dimmed, showRailDot }: AnnotationCardProps & { showRailDot: boolean }) {
+function AnnotationCard({ annotation, dimmed, showRailDot }: AnnotationCardProps) {
   return (
     <div
       className={cn(
@@ -166,7 +170,7 @@ function AnnotationCard({ annotation, dimmed, showRailDot }: AnnotationCardProps
 // ---------------------------------------------------------------------------
 
 interface MessageRowProps {
-  message: ProtoMessage;
+  message: Message;
   annotations: Annotation[];
   activeFilter: FilterType;
   showRailDots: boolean;
@@ -233,18 +237,40 @@ function NoAnnotationsView() {
 // ---------------------------------------------------------------------------
 
 export default function TranscriptPage() {
-  const { id: sessionId } = useParams<{ id: string }>();
-  if (!sessionId) return <Navigate to="/" replace />;
-  return <TranscriptInner sessionId={sessionId} />;
+  return <TranscriptInner />;
 }
 
-function TranscriptInner({ sessionId }: { sessionId: string }) {
-  const { data: transcriptResp } = useQuery(getTranscript, { sessionId });
-  const messages = transcriptResp?.messages;
-  const { data: evalResp } = useQuery(getEvaluation, { sessionId });
-  const evaluation = evalResp?.evaluation;
+function TranscriptInner() {
+  const { dataSource, sessionId } = useSessionDetail();
+
+  const authSession = useSession(sessionId, { enabled: dataSource === "api" });
+  const authTranscript = useTranscript(sessionId, dataSource === "api");
+  const authEval = useEvaluation(sessionId, dataSource === "api");
+  const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+  const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
+
+  const session =
+    dataSource === "api" ? authSession.data?.session : sampleSession.data?.session;
+  const messages = dataSource === "api" ? authTranscript.data?.messages : sampleSession.data?.messages;
+  const evaluation = dataSource === "api" ? authEval.data?.evaluation : sampleEval.data?.evaluation;
 
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+
+  // Replay state
+  const [replayMode, setReplayMode] = useState(false);
+
+  const replay = useReplayEngine(
+    replayMode && messages && session?.startTime
+      ? {
+          messages,
+          sessionStartedAt: session.startTime,
+          sessionEndedAt: session.endTime,
+          annotationSeqs: (evaluation?.annotations ?? []).map(
+            (a) => a.messageSeq,
+          ),
+        }
+      : null,
+  );
 
   // Map of seq -> DOM element ref for scroll targets
   const msgRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -299,26 +325,79 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
     }
   };
 
+  // Filter messages/annotations during replay
+  const displayMessages = replayMode
+    ? sorted.slice(0, replay.state.visibleMessages)
+    : sorted;
+
+  const displayAnnotations = replayMode
+    ? (() => {
+        const activeSet = new Set(replay.state.activeAnnotationSeqs);
+        return annotations.filter((a) => activeSet.has(a.messageSeq));
+      })()
+    : annotations;
+
+  // Build display-time annotation lookup (changes during replay)
+  const displayAnnotationsBySeq = replayMode
+    ? displayAnnotations.reduce<Map<number, Annotation[]>>(
+        (acc, ann) => {
+          const existing = acc.get(ann.messageSeq) ?? [];
+          acc.set(ann.messageSeq, [...existing, ann]);
+          return acc;
+        },
+        new Map(),
+      )
+    : annotationsBySeq;
+
   return (
     <div className="flex gap-0 max-w-3xl mx-auto">
       {/* Main content column */}
       <div className="flex-1 min-w-0">
+        {/* Replay controls */}
+        <div className="flex items-center gap-2 py-2 px-1">
+          <button
+            type="button"
+            className={cn(
+              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              replayMode
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setReplayMode((v) => !v)}
+            aria-pressed={replayMode}
+          >
+            {replayMode ? "Exit Replay" : "Replay"}
+          </button>
+        </div>
+
+        {replayMode && (
+          <div className="px-1 pb-3">
+            <ReplayControls
+              state={replay.state}
+              onPlay={replay.play}
+              onPause={replay.pause}
+              onSeek={replay.seek}
+              onSetSpeed={replay.setSpeed}
+            />
+          </div>
+        )}
+
         {/* Summary bar */}
-        {annotations.length > 0 ? (
+        {!replayMode && annotations.length > 0 ? (
           <SummaryBar
             annotations={annotations}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
             onJumpToFirst={handleJumpToFirst}
           />
-        ) : (
+        ) : !replayMode ? (
           <NoAnnotationsView />
-        )}
+        ) : null}
 
         {/* Message list */}
         <div className="space-y-5 pt-2 pb-10">
-          {sorted.map((msg) => {
-            const msgAnnotations = annotationsBySeq.get(msg.seq) ?? [];
+          {displayMessages.map((msg) => {
+            const msgAnnotations = displayAnnotationsBySeq.get(msg.seq) ?? [];
             return (
               <MessageRow
                 key={msg.id}
@@ -334,7 +413,7 @@ function TranscriptInner({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Annotation rail */}
-      {annotations.length > 0 && <AnnotationRail />}
+      {!replayMode && annotations.length > 0 && <AnnotationRail />}
     </div>
   );
 }

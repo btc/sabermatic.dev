@@ -16,7 +16,7 @@ import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery"
 import { UserRole } from "@/pb/drill/v1/user_pb";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
-export function AppLayout() {
+export function AppLayout({ children }: { children?: React.ReactNode }) {
   const { isLoading, isAuthenticated } = useRequireAuth();
   const { data: meData } = useQuery(getMe, {});
   const user = meData?.user;
@@ -93,7 +93,7 @@ export function AppLayout() {
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-4 py-6">
-        <Outlet />
+        {children ?? <Outlet />}
       </main>
     </div>
   );

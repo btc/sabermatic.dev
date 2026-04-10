@@ -1,6 +1,6 @@
 import { useQuery } from "@connectrpc/connect-query";
 import { skipToken } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 
 import { ShaderOrb } from "@/components/shader-orb";
@@ -9,6 +9,26 @@ import { cn } from "@/lib/utils";
 import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
+
+// ---------------------------------------------------------------------------
+// Session detail context — allows child tabs to read from API or sample data
+// ---------------------------------------------------------------------------
+
+type DataSource = "api" | "sample";
+
+interface SessionDetailContext {
+  dataSource: DataSource;
+  sessionId: string;
+}
+
+const SessionDetailCtx = createContext<SessionDetailContext>({
+  dataSource: "api",
+  sessionId: "",
+});
+
+export function useSessionDetail() {
+  return useContext(SessionDetailCtx);
+}
 
 // ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
@@ -90,8 +110,14 @@ function TabLink({ to, children, disabled }: TabLinkProps) {
 export default function SessionLayout() {
   const { id } = useParams<{ id: string }>();
   if (!id) return <Navigate to="/" replace />;
-  return <SessionLayoutInner id={id} />;
+  return (
+    <SessionDetailCtx.Provider value={{ dataSource: "api", sessionId: id }}>
+      <SessionLayoutInner id={id} />
+    </SessionDetailCtx.Provider>
+  );
 }
+
+export { SessionDetailCtx, TabLink };
 
 function SessionLayoutInner({ id }: { id: string }) {
   const navigate = useNavigate();
@@ -131,7 +157,7 @@ function SessionLayoutInner({ id }: { id: string }) {
     <div className="space-y-0">
       {/* Tab bar */}
       <div className="border-b border-border -mx-4 px-4">
-        <nav className="flex items-end max-w-5xl mx-auto -mb-px">
+        <nav aria-label="Session tabs" className="flex items-end max-w-5xl mx-auto -mb-px">
           <TabLink to={`/sessions/${id}/overview`} disabled={!overviewEnabled}>
             Overview
           </TabLink>

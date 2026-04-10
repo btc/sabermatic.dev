@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { useOptionalAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/layouts/app-layout";
 import { ImmersiveLayout } from "@/layouts/immersive-layout";
 
@@ -10,6 +11,8 @@ const ForgotPassword = lazy(() => import("@/pages/auth/forgot-password"));
 const ResetPassword = lazy(() => import("@/pages/auth/reset-password"));
 const VerifyEmail = lazy(() => import("@/pages/auth/verify-email"));
 const Home = lazy(() => import("@/pages/home"));
+const Landing = lazy(() => import("@/pages/landing"));
+const SampleSession = lazy(() => import("@/pages/sample"));
 const SessionConfig = lazy(() => import("@/pages/session-config"));
 const Interview = lazy(() => import("@/pages/interview"));
 const SessionLayout = lazy(() => import("@/pages/session/layout"));
@@ -24,20 +27,47 @@ function Loading() {
   return <div className="flex h-screen items-center justify-center text-muted-foreground">Loading...</div>;
 }
 
+function ConditionalHome() {
+  const { isAuthenticated, isLoading, isAuthError } = useOptionalAuth();
+  if (isLoading) return <Loading />;
+  if (isAuthenticated) {
+    return (
+      <AppLayout>
+        <Home />
+      </AppLayout>
+    );
+  }
+  if (isAuthError) {
+    return <Landing />;
+  }
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <p className="text-sm text-muted-foreground">Something went wrong. Please try again later.</p>
+    </div>
+  );
+}
+
 export function App() {
   return (
     <Suspense fallback={<Loading />}>
       <Routes>
-        {/* Auth — standalone layout */}
+        {/* Public — no layout */}
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/sample" element={<SampleSession />}>
+          <Route index element={<Overview />} />
+          <Route path="transcript" element={<TranscriptPage />} />
+          <Route path="deep-dive" element={<DeepDive />} />
+        </Route>
 
-        {/* App — top bar layout */}
+        {/* Root — conditional: landing (unauth) or app layout (auth) */}
+        <Route path="/" element={<ConditionalHome />} />
+
+        {/* App — top bar layout (all require auth) */}
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Home />} />
           <Route path="/sessions/new" element={<SessionConfig />} />
           <Route path="/sessions/:id" element={<SessionLayout />}>
             <Route index element={<Navigate to="overview" replace />} />
