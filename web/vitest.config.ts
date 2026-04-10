@@ -1,6 +1,6 @@
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
@@ -13,5 +13,12 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/pb/**", "src/test-setup.ts"],
+      // TODO(test-coverage): add thresholds once baseline is established
+    },
   },
 });
