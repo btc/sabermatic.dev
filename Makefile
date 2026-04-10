@@ -30,11 +30,15 @@ test:
 	@echo ""
 	@echo "=== all checks passed ==="
 
+deploy: test
+	./scripts/deploy.sh
 # Start dev server via overmind. Ctrl-C kills all processes cleanly.
 # Runs: npm build, vite watch, air (Go rebuild). One origin on :8080.
 dev:
 	@echo "Starting Sabermatic → http://localhost:8080"
-	@cd web && npm install --silent && npm run build --silent
+	pkill -f 'air$$' || true
+	pkill -f 'tmp/drill' || true
+	@cd web && npm install && npm run build
 	overmind start -f Procfile.dev
 
 # Same as dev, but tee all output to tmp/dev.log for easy inspection.
@@ -110,3 +114,17 @@ generate:
 # Run golangci-lint (same config as CI).
 lint:
 	golangci-lint run ./...
+
+# Tunnel to the prod Cloud SQL instance via Cloud SQL Auth Proxy.
+# Exposes postgres on localhost:5433 — use this in Postico:
+#   Host: localhost  Port: 5433  User: sabermatic  DB: sabermatic
+CLOUDSQL_INSTANCE := sabermatic-production:us-central1:sabermatic-production
+CLOUDSQL_PORT     := 5433
+cloudsql-proxy:
+	cloud_sql_proxy -instances=$(CLOUDSQL_INSTANCE)=tcp:$(CLOUDSQL_PORT)
+
+# Print the admin DB password for use in Postico (separate credential from app user).
+brian-db-password:
+	@gcloud secrets versions access latest \
+	  --secret=brian-db-password \
+	  --project=sabermatic-production
