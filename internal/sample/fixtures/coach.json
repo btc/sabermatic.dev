@@ -1,0 +1,54 @@
+{
+  "analysis": {
+    "id": "8",
+    "user_id": "sample",
+    "narrative": "Focus on building complete end-to-end system flows and performing back-of-envelope calculations consistently. Your requirements gathering and scalability thinking are strong, but you need to develop more confidence in technology selection and complete your architectural narratives. Practice medium-difficulty questions that force you to connect all system components clearly, and always validate your design with concrete calculations before diving deep into specific areas.",
+    "weakest_dimension": "Communication",
+    "improving_dimensions": [
+      "Requirements",
+      "High-Level"
+    ],
+    "topic_gaps": [
+      "distributed",
+      "consistency",
+      "conflict-resolution",
+      "write-heavy",
+      "analytics",
+      "streaming",
+      "geospatial",
+      "financial",
+      "scheduling"
+    ],
+    "sessions_analyzed": [
+      "27",
+      "26"
+    ],
+    "create_time": "2026-04-03T14:07:43-04:00"
+  },
+  "score_trend": [
+    {
+      "date": "2026-03-28",
+      "overall_score": 1
+    },
+    {
+      "date": "2026-03-28",
+      "overall_score": 1
+    },
+    {
+      "date": "2026-03-28",
+      "overall_score": 1
+    },
+    {
+      "date": "2026-03-28",
+      "overall_score": 1
+    },
+    {
+      "date": "2026-03-29",
+      "overall_score": 4
+    },
+    {
+      "date": "2026-03-31",
+      "overall_score": 3
+    }
+  ]
+}
