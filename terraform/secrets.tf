@@ -1,7 +1,6 @@
 locals {
   secret_ids = [
     "database-url",
-    "brian-db-password",
     "auth-token-secret",
     "anthropic-api-key",
     "openai-api-key",
@@ -22,11 +21,6 @@ resource "google_secret_manager_secret" "secrets" {
   }
 }
 
-resource "google_secret_manager_secret_version" "brian_db_password" {
-  secret      = google_secret_manager_secret.secrets["brian-db-password"].id
-  secret_data = random_password.brian_password.result
-}
-
 # Auto-populate DATABASE_URL with the Cloud SQL Auth Proxy socket path.
 resource "google_secret_manager_secret_version" "db_password" {
   secret      = google_secret_manager_secret.secrets["database-url"].id
@@ -37,7 +31,7 @@ resource "google_secret_manager_secret_version" "db_password" {
 # Replace with real values via gcloud or the console before the app will work.
 locals {
   placeholder_secret_ids = toset([
-    for id in local.secret_ids : id if id != "database-url" && id != "brian-db-password"
+    for id in local.secret_ids : id if id != "database-url"
   ])
 }
 

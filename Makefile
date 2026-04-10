@@ -1,4 +1,4 @@
-.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant
+.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password
 
 test:
 	@echo "=== go mod tidy ==="
@@ -123,8 +123,12 @@ CLOUDSQL_PORT     := 5433
 cloudsql-proxy:
 	cloud_sql_proxy -instances=$(CLOUDSQL_INSTANCE)=tcp:$(CLOUDSQL_PORT)
 
-# Print the admin DB password for use in Postico (separate credential from app user).
-brian-db-password:
+# Print the sabermatic DB password for use in Postico.
+db-password:
 	@gcloud secrets versions access latest \
-	  --secret=brian-db-password \
-	  --project=sabermatic-production
+	  --secret=database-url \
+	  --project=sabermatic-production \
+	  | sed -n 's|.*://sabermatic:\([^@]*\)@.*|\1|p' \
+	  | tr -d '\n' \
+	  | pbcopy
+	@echo "Copied to clipboard."
