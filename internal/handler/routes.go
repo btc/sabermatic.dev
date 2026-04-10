@@ -20,12 +20,17 @@ import (
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
-func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) (http.Handler, error) {
+func NewHandler(b *backend.Backend, spaFS embed.FS) (http.Handler, error) {
+	cfg := b.Config()
+	baseURL := cfg.Auth.BaseURL
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	secureCookies := cfg.Auth.SecureCookies()
+
 	mux := http.NewServeMux()
 	if err := RegisterRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
-	mux.Handle("/", SPAHandler(spaFS, ""))
+	mux.Handle("/", SPAHandler(spaFS, baseURL))
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {

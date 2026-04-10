@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { PublicHeader } from "@/components/public-header";
 import { useOptionalAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/layouts/app-layout";
 import { ImmersiveLayout } from "@/layouts/immersive-layout";
@@ -57,6 +58,7 @@ export function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/about" element={<><PublicHeader /><Landing /></>} />
         <Route path="/sample" element={<SampleSession />}>
           <Route index element={<Overview />} />
           <Route path="transcript" element={<TranscriptPage />} />
