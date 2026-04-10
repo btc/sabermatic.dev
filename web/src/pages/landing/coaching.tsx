@@ -38,7 +38,7 @@ function Sparkline({ data, animate }: { data: { date: string; overallScore: numb
       />
       {points.map((p, i) => (
         <circle
-          key={i}
+          key={`${p.x}-${p.y}`}
           cx={p.x}
           cy={p.y}
           r="3"

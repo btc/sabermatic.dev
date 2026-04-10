@@ -1,8 +1,8 @@
 import { Link,Outlet } from "react-router-dom";
 
 import { PublicHeader } from "@/components/public-header";
-import { SessionDetailCtx } from "@/pages/session/layout";
 import { TabLink } from "@/pages/session/layout";
+import { SessionDetailCtx } from "@/pages/session/session-detail-ctx";
 
 export default function SampleSession() {
   return (

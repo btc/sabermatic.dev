@@ -11,7 +11,7 @@ import { GENERATING_MESSAGES } from "@/lib/constants";
 import { EducatorStatus } from "@/pb/drill/v1/educator_pb";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
 
-import { useSessionDetail } from "./layout";
+import { useSessionDetail } from "./session-detail-ctx";
 
 // ---------------------------------------------------------------------------
 // Heading extraction + slugify

@@ -1,6 +1,6 @@
 import { useQuery } from "@connectrpc/connect-query";
 import { skipToken } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 
 import { ShaderOrb } from "@/components/shader-orb";
@@ -10,25 +10,7 @@ import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connec
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
 
-// ---------------------------------------------------------------------------
-// Session detail context — allows child tabs to read from API or sample data
-// ---------------------------------------------------------------------------
-
-type DataSource = "api" | "sample";
-
-interface SessionDetailContext {
-  dataSource: DataSource;
-  sessionId: string;
-}
-
-const SessionDetailCtx = createContext<SessionDetailContext>({
-  dataSource: "api",
-  sessionId: "",
-});
-
-export function useSessionDetail() {
-  return useContext(SessionDetailCtx);
-}
+import { SessionDetailCtx } from "./session-detail-ctx";
 
 // ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
@@ -76,7 +58,7 @@ interface TabLinkProps {
   disabled?: boolean;
 }
 
-function TabLink({ to, children, disabled }: TabLinkProps) {
+export function TabLink({ to, children, disabled }: TabLinkProps) {
   if (disabled) {
     return (
       <span className="px-4 py-2.5 text-sm text-muted-foreground/50 cursor-default select-none">
@@ -116,8 +98,6 @@ export default function SessionLayout() {
     </SessionDetailCtx.Provider>
   );
 }
-
-export { SessionDetailCtx, TabLink };
 
 function SessionLayoutInner({ id }: { id: string }) {
   const navigate = useNavigate();
