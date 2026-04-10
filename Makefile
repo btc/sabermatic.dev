@@ -1,18 +1,14 @@
-.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password
+.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend
 
-test:
-	@echo "=== go mod tidy ==="
-	go mod tidy
+test-protos:
 	@echo "=== buf lint ==="
 	buf lint
 	@echo ""
 	@echo "=== buf generate (verify clean) ==="
 	buf generate
 	@git diff --exit-code internal/pb/ web/src/pb/ || (echo "FAIL: buf generate produced uncommitted changes" && exit 1)
-	@echo ""
-	@echo "=== golangci-lint ==="
-	# golangci-lint run ./...
-	@echo ""
+
+test-frontend:
 	@echo "=== frontend deps ==="
 	cd web && npm install
 	@echo ""
@@ -24,9 +20,18 @@ test:
 	@echo ""
 	@echo "=== frontend tests ==="
 	cd web && npx vitest run
-	@echo ""
+
+test-backend:
 	@echo "=== backend tests ==="
 	go test ./internal/... ./cmd/... -race -count=1 -timeout=300s
+
+test: test-protos test-frontend test-backend
+	@echo ""
+	@echo "=== go mod tidy ==="
+	go mod tidy
+	@echo ""
+	@echo "=== golangci-lint ==="
+	golangci-lint run ./...
 	@echo ""
 	@echo "=== all checks passed ==="
 
