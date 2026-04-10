@@ -2,6 +2,7 @@
   "analysis": {
     "id": "8",
     "user_id": "sample",
+    "summary": "Focus on database and messaging architecture depth — requirements gathering is strong but technical deep-dives need more rigor.",
     "narrative": "Focus on building complete end-to-end system flows and performing back-of-envelope calculations consistently. Your requirements gathering and scalability thinking are strong, but you need to develop more confidence in technology selection and complete your architectural narratives. Practice medium-difficulty questions that force you to connect all system components clearly, and always validate your design with concrete calculations before diving deep into specific areas.",
     "weakest_dimension": "Communication",
     "improving_dimensions": [

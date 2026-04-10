@@ -4,6 +4,12 @@ interface TimelineProps {
   onSeek: (time: number) => void;
 }
 
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 const STEP_SEC = 5;
 
 export function Timeline({ currentTime, duration, onSeek }: TimelineProps) {
@@ -48,6 +54,7 @@ export function Timeline({ currentTime, duration, onSeek }: TimelineProps) {
       aria-valuenow={Math.floor(currentTime)}
       aria-valuemin={0}
       aria-valuemax={Math.floor(duration)}
+      aria-valuetext={formatTime(currentTime)}
     >
       <div
         className="h-1.5 rounded-full bg-primary transition-[width] duration-100"

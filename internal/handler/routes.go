@@ -3,6 +3,7 @@ package handler
 import (
 	"embed"
 	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -30,7 +31,11 @@ func NewHandler(b *backend.Backend, spaFS embed.FS) (http.Handler, error) {
 	if err := RegisterRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
-	mux.Handle("/", SPAHandler(spaFS, baseURL))
+	spaHandler, err := SPAHandler(spaFS, baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("spa handler: %w", err)
+	}
+	mux.Handle("/", spaHandler)
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
@@ -110,15 +115,15 @@ var ogRoutes = map[string]ogRoute{
 // For paths with OG tags defined, the tags are injected before </head>.
 // baseURL is the public URL (e.g., "https://sabermatic.dev") used for
 // absolute og:url and og:image values. Pass "" for tests.
-func SPAHandler(fsys fs.FS, baseURL string) http.Handler {
+func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 	sub, err := fs.Sub(fsys, "web/dist")
 	if err != nil {
-		panic(fmt.Sprintf("embed sub: %v", err))
+		return nil, fmt.Errorf("embed sub: %w", err)
 	}
 
 	indexBytes, err := fs.ReadFile(sub, "index.html")
 	if err != nil {
-		panic(fmt.Sprintf("read index.html: %v", err))
+		return nil, fmt.Errorf("read index.html: %w", err)
 	}
 	indexHTML := string(indexBytes)
 
@@ -131,7 +136,8 @@ func SPAHandler(fsys fs.FS, baseURL string) http.Handler {
 				`<meta property="og:type" content="website">`+
 				`<meta property="og:url" content="%s%s">`+
 				`<meta property="og:image" content="%s%s">`,
-			og.title, og.description, baseURL, path, baseURL, og.image,
+			html.EscapeString(og.title), html.EscapeString(og.description),
+			baseURL, path, baseURL, og.image,
 		)
 		ogPages[path] = []byte(strings.Replace(indexHTML, "</head>", tags+"</head>", 1))
 	}
@@ -162,7 +168,7 @@ func SPAHandler(fsys fs.FS, baseURL string) http.Handler {
 		// Fall back to index.html for client-side routing
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
-	})
+	}), nil
 }
 
 // csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes

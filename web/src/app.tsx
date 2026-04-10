@@ -39,7 +39,7 @@ function ConditionalHome() {
     );
   }
   if (isAuthError) {
-    return <Landing />;
+    return <><PublicHeader /><Landing /></>;
   }
   return (
     <div className="flex min-h-screen items-center justify-center">

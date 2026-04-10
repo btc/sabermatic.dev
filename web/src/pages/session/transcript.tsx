@@ -10,7 +10,7 @@ import type { Annotation } from "@/pb/drill/v1/evaluation_pb";
 import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
 import type { Message } from "@/pb/drill/v1/session_pb";
 
-import { useSessionDetail } from "./layout";
+import { useSessionDetail } from "./session-detail-ctx";
 
 // ---------------------------------------------------------------------------
 // Constants & helpers

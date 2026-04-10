@@ -16,7 +16,10 @@ func TestSPAHandlerOGTags(t *testing.T) {
 		"web/dist/index.html": &fstest.MapFile{Data: []byte(indexHTML)},
 	}
 
-	h := handler.SPAHandler(fsys, "https://sabermatic.dev")
+	h, err := handler.SPAHandler(fsys, "https://sabermatic.dev")
+	if err != nil {
+		t.Fatalf("SPAHandler: %v", err)
+	}
 
 	tests := []struct {
 		path     string

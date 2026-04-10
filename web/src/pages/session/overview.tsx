@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import type { EvaluationScores } from "@/pb/drill/v1/evaluation_pb";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 
-import { useSessionDetail } from "./layout";
+import { useSessionDetail } from "./session-detail-ctx";
 
 // ---------------------------------------------------------------------------
 // Score bar
