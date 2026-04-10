@@ -311,11 +311,13 @@ function HeroQuestionCard({
 }) {
   const href = startDisabled ? undefined : `/sessions/new?question=${question.id}`;
 
-  const image = question.imageUrl ? (
+  const [imgError, setImgError] = useState(false);
+  const image = question.imageUrl && !imgError ? (
     <img
       src={question.imageUrl}
       alt={question.title}
       className="w-[55%] aspect-[4/3] object-cover rounded-l-[14px] flex-shrink-0"
+      onError={() => setImgError(true)}
     />
   ) : (
     <div
@@ -365,11 +367,13 @@ function QuestionCard({
 }) {
   const href = startDisabled ? undefined : `/sessions/new?question=${question.id}`;
 
-  const image = question.imageUrl ? (
+  const [imgError, setImgError] = useState(false);
+  const image = question.imageUrl && !imgError ? (
     <img
       src={question.imageUrl}
       alt={question.title}
       className="w-full aspect-[4/3] object-cover transition-transform duration-250 ease-out group-hover:scale-[1.02]"
+      onError={() => setImgError(true)}
     />
   ) : (
     <div

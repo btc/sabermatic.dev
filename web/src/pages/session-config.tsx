@@ -84,6 +84,7 @@ export default function SessionConfig() {
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [coachBriefing, setCoachBriefing] = useState(true);
   const [micState, setMicState] = useState<MicState>("idle");
+  const [imgError, setImgError] = useState(false);
 
   // Check mic permission on mount (non-prompting)
   useEffect(() => {
@@ -165,11 +166,12 @@ export default function SessionConfig() {
       {/* Question — image beside text */}
       <Card className="overflow-hidden py-0">
         <div className="flex">
-          {question?.imageUrl ? (
+          {question?.imageUrl && !imgError ? (
             <img
               src={question.imageUrl}
               alt={question.title}
               className="w-[45%] aspect-[4/3] object-cover flex-shrink-0"
+              onError={() => setImgError(true)}
             />
           ) : (
             <div
