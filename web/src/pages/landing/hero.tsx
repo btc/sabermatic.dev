@@ -1,6 +1,8 @@
 import { useEffect,useState } from "react";
 import { Link } from "react-router-dom";
 
+import { BrandName } from "@/components/brand-name";
+
 const TAGLINES = [
   "system design, measured.",
   "measure what matters.",
@@ -38,8 +40,8 @@ export function Hero() {
 
   return (
     <section aria-labelledby="hero-heading" className="flex min-h-screen flex-col items-center justify-center gap-8 px-4">
-      <h1 id="hero-heading" className="text-5xl font-light tracking-tight text-foreground sm:text-7xl">
-        sabermetric
+      <h1 id="hero-heading" className="text-foreground">
+        <BrandName className="text-5xl font-light tracking-tight sm:text-7xl" />
       </h1>
       <p
         aria-live="polite"

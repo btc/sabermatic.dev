@@ -1,5 +1,6 @@
 import { Link,Outlet } from "react-router-dom";
 
+import { PublicHeader } from "@/components/public-header";
 import { SessionDetailCtx } from "@/pages/session/layout";
 import { TabLink } from "@/pages/session/layout";
 
@@ -7,19 +8,7 @@ export default function SampleSession() {
   return (
     <SessionDetailCtx.Provider value={{ dataSource: "sample", sessionId: "sample" }}>
       <div className="min-h-screen bg-background text-foreground">
-        <header className="border-b border-border">
-          <div className="mx-auto flex h-12 max-w-5xl items-center justify-between px-4">
-            <Link to="/" className="text-sm font-semibold tracking-wider text-muted-foreground">
-              sabermetric
-            </Link>
-            <Link
-              to="/signup"
-              className="rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground"
-            >
-              Start practicing
-            </Link>
-          </div>
-        </header>
+        <PublicHeader />
 
         <main className="mx-auto max-w-5xl px-4 py-6">
           <div className="border-b border-border -mx-4 px-4">
@@ -32,6 +21,16 @@ export default function SampleSession() {
 
           <div className="pt-6">
             <Outlet />
+          </div>
+
+          <div className="border-t border-border mt-12 py-12 text-center">
+            <p className="text-lg text-foreground mb-4">Want feedback on your own design?</p>
+            <Link
+              to="/signup"
+              className="rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground"
+            >
+              Sign up
+            </Link>
           </div>
         </main>
       </div>
