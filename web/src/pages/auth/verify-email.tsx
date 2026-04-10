@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AuthLayout } from "./auth-layout";
+
 import { useVerifyEmail } from "@/api/queries";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
+
+import { AuthLayout } from "./auth-layout";
 
 export default function VerifyEmail() {
   const [searchParams] = useSearchParams();

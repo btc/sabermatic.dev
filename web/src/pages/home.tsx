@@ -1,36 +1,42 @@
-import { useState, useMemo } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Link } from "react-router-dom";
-import { toast } from "sonner";
-import { useQuery, useMutation, createConnectQueryKey } from "@connectrpc/connect-query";
+import { createConnectQueryKey, useMutation, useQuery } from "@connectrpc/connect-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
-import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
-import { getCoachAnalysis, requestCoachAnalysis } from "@/pb/drill/v1/coach-CoachService_connectquery";
-import { Difficulty, QuestionSource } from "@/pb/drill/v1/question_pb";
-import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import type { Question as ProtoQuestion } from "@/pb/drill/v1/question_pb";
-import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
-import { UserPlan } from "@/pb/drill/v1/user_pb";
-import type { SessionSummary } from "@/pb/drill/v1/session_pb";
-import type { CoachAnalysis } from "@/pb/drill/v1/coach_pb";
-import {
-  useCreateQuestion,
-} from "@/api/queries";
+import { useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { Link } from "react-router-dom";
+import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
+
+import { useCreateQuestion } from "@/api/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-  DialogFooter, DialogTrigger,
-} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { scoreColor } from "@/lib/score-utils";
+import type { CoachAnalysis } from "@/pb/drill/v1/coach_pb";
+import { getCoachAnalysis, requestCoachAnalysis } from "@/pb/drill/v1/coach-CoachService_connectquery";
+import type { Question as ProtoQuestion } from "@/pb/drill/v1/question_pb";
+import { Difficulty, QuestionSource } from "@/pb/drill/v1/question_pb";
+import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
+import type { SessionSummary } from "@/pb/drill/v1/session_pb";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import { listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
 // DB constraint enforces difficulty IN ('medium', 'hard'), so UNSPECIFIED
 // should never appear in ListQuestions responses. Defaults are defensive.
@@ -169,7 +175,7 @@ function CoachCard({ coach, isActive }: {
 
   return (
     <>
-      <div className="rounded-xl border border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20 px-5 py-4 space-y-3 cursor-pointer" onClick={() => setModalOpen(true)}>
+      <button type="button" className="rounded-xl border border-amber-300/40 bg-amber-50/30 dark:border-amber-500/20 dark:bg-amber-950/20 px-5 py-4 space-y-3 cursor-pointer text-left w-full" onClick={() => setModalOpen(true)}>
         <span className="text-[10px] font-bold tracking-wider uppercase text-muted-foreground">
           Coach
         </span>
@@ -196,7 +202,7 @@ function CoachCard({ coach, isActive }: {
             Read full analysis &rarr;
           </span>
         </div>
-      </div>
+      </button>
 
       <CoachAnalysisModal
         open={modalOpen}

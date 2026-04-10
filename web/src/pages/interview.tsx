@@ -1,31 +1,32 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
+import { useQuery } from "@connectrpc/connect-query";
 import {
   ArrowLeft,
   Volume2,
 } from "lucide-react";
-import { useInterview } from "@/hooks/use-interview";
-import { useTimer } from "@/hooks/use-timer";
-import { useAudioRecorder, useAudioPlayer } from "@/audio/hooks";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
+
+import { useAudioPlayer, useAudioRecorder } from "@/audio/hooks";
 import { AudioRecorder } from "@/audio/recorder";
-import { useQuery } from "@connectrpc/connect-query";
-import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
-import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import { Button } from "@/components/ui/button";
 import { RecordingInput } from "@/components/recording-input";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogClose,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
-import { cn } from "@/lib/utils";
+import { useInterview } from "@/hooks/use-interview";
+import { useTimer } from "@/hooks/use-timer";
 import { WAITING_MESSAGES } from "@/lib/constants";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -119,6 +120,7 @@ function ReadyGate({
         size="lg"
         className="h-14 px-12 text-lg font-medium"
         onClick={onReady}
+        // eslint-disable-next-line jsx-a11y/no-autofocus -- Intentional: primary CTA on interview start screen
         autoFocus
       >
         Ready

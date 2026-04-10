@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
-import { useParams, Link, Navigate } from "react-router-dom";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { useQuery, useMutation } from "@connectrpc/connect-query";
+import { useMutation, useQuery } from "@connectrpc/connect-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
-import { UserPlan } from "@/pb/drill/v1/user_pb";
-import { getEducatorAnalysis, requestEducatorAnalysis } from "@/pb/drill/v1/educator-EducatorService_connectquery";
-import { EducatorService, EducatorStatus } from "@/pb/drill/v1/educator_pb";
+import { useEffect, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import { Link, Navigate, useParams } from "react-router-dom";
+import remarkGfm from "remark-gfm";
+
 import { Button } from "@/components/ui/button";
 import { GENERATING_MESSAGES } from "@/lib/constants";
+import { EducatorService, EducatorStatus } from "@/pb/drill/v1/educator_pb";
+import { getEducatorAnalysis, requestEducatorAnalysis } from "@/pb/drill/v1/educator-EducatorService_connectquery";
+import { UserPlan } from "@/pb/drill/v1/user_pb";
+import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
 // ---------------------------------------------------------------------------
 // Heading extraction + slugify

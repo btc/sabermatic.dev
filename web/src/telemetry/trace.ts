@@ -1,5 +1,5 @@
-import { context, propagation, trace, SpanStatusCode } from "@opentelemetry/api";
 import type { Span } from "@opentelemetry/api";
+import { context, propagation, SpanStatusCode, trace } from "@opentelemetry/api";
 export interface TraceContext {
   traceparent: string;
 }

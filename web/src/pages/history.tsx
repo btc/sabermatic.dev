@@ -1,28 +1,29 @@
-import { useState, useMemo } from "react";
+import { useMutation, useQuery } from "@connectrpc/connect-query";
+import { createConnectQueryKey } from "@connectrpc/connect-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { BarChart3, MessageSquare, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
 import {
-  LineChart,
   Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts";
-import { useQuery, useMutation } from "@connectrpc/connect-query";
-import { useQueryClient } from "@tanstack/react-query";
-import { createConnectQueryKey } from "@connectrpc/connect-query";
-import { listSessions, archiveSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
-import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
-import { Difficulty } from "@/pb/drill/v1/question_pb";
-import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import type { SessionSummary } from "@/pb/drill/v1/session_pb";
-import { Search, MessageSquare, BarChart3 } from "lucide-react";
+import { toast } from "sonner";
+
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn, formatRelativeDate } from "@/lib/utils";
 import { scoreColor } from "@/lib/score-utils";
+import { cn, formatRelativeDate } from "@/lib/utils";
+import { Difficulty } from "@/pb/drill/v1/question_pb";
+import { listQuestions } from "@/pb/drill/v1/question-QuestionService_connectquery";
+import type { SessionSummary } from "@/pb/drill/v1/session_pb";
+import { SessionStatus } from "@/pb/drill/v1/session_pb";
+import { archiveSessions, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -1,4 +1,5 @@
 import { Outlet } from "react-router-dom";
+
 import { useRequireAuth } from "@/hooks/use-auth";
 
 export function ImmersiveLayout() {
