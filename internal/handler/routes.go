@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/csrf"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/branding"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/rpc"
 )
@@ -23,7 +25,7 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 	if err := RegisterRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
-	mux.Handle("/", SPAHandler(spaFS))
+	mux.Handle("/", SPAHandler(spaFS, ""))
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
@@ -73,13 +75,62 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	return nil
 }
 
+// ogRoute defines OG meta tag content for a public route.
+type ogRoute struct {
+	title       string
+	description string
+	image       string // path relative to base URL
+}
+
+var ogRoutes = map[string]ogRoute{
+	"/": {
+		title:       branding.AppName,
+		description: "data-driven system design prep",
+		image:       "/og-landing.png",
+	},
+	"/about": {
+		title:       branding.AppName,
+		description: "data-driven system design prep",
+		image:       "/og-landing.png",
+	},
+	"/sample": {
+		title:       branding.AppName + " — sample evaluation",
+		description: "See a real system design interview evaluated across 5 dimensions",
+		image:       "/og-sample.png",
+	},
+}
+
 // SPAHandler serves the embedded SPA. Static assets served directly.
 // All other paths return index.html for client-side routing.
-func SPAHandler(fsys embed.FS) http.Handler {
+// For paths with OG tags defined, the tags are injected before </head>.
+// baseURL is the public URL (e.g., "https://sabermatic.dev") used for
+// absolute og:url and og:image values. Pass "" for tests.
+func SPAHandler(fsys fs.FS, baseURL string) http.Handler {
 	sub, err := fs.Sub(fsys, "web/dist")
 	if err != nil {
 		panic(fmt.Sprintf("embed sub: %v", err))
 	}
+
+	indexBytes, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		panic(fmt.Sprintf("read index.html: %v", err))
+	}
+	indexHTML := string(indexBytes)
+
+	// Pre-compute OG-injected HTML at init time
+	ogPages := make(map[string][]byte, len(ogRoutes))
+	for path, og := range ogRoutes {
+		tags := fmt.Sprintf(
+			`<meta property="og:title" content="%s">`+
+				`<meta property="og:description" content="%s">`+
+				`<meta property="og:type" content="website">`+
+				`<meta property="og:url" content="%s%s">`+
+				`<meta property="og:image" content="%s%s">`,
+			og.title, og.description, baseURL, path, baseURL, og.image,
+		)
+		ogPages[path] = []byte(strings.Replace(indexHTML, "</head>", tags+"</head>", 1))
+	}
+
 	fileServer := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +145,15 @@ func SPAHandler(fsys embed.FS) http.Handler {
 				return
 			}
 		}
+
+		// Serve pre-computed OG-injected HTML if this path has OG tags
+		if body, ok := ogPages[path]; ok {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			_, _ = w.Write(body)
+			return
+		}
+
 		// Fall back to index.html for client-side routing
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)

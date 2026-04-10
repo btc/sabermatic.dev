@@ -11,6 +11,7 @@ import (
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	authsvc "github.com/btc/drill/internal/rpc/auth"
 	"github.com/btc/drill/internal/rpc/billing"
+	samplerpc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/rpc/coach"
 	"github.com/btc/drill/internal/rpc/educator"
 	"github.com/btc/drill/internal/rpc/evaluation"
@@ -31,6 +32,7 @@ func ConnectPathPrefixes() []string {
 		drillv1connect.CoachServiceName,
 		drillv1connect.EvaluationServiceName,
 		drillv1connect.InterviewServiceName,
+		drillv1connect.SampleServiceName,
 		drillv1connect.SessionServiceName,
 		drillv1connect.UserServiceName,
 	}
@@ -51,6 +53,7 @@ func Register(mux *http.ServeMux, b *backend.Backend) error {
 	// Public endpoints (no auth interceptor).
 	publicOpts := connect.WithInterceptors(otelInterceptor)
 	mux.Handle(drillv1connect.NewAuthServiceHandler(authsvc.NewServer(b), publicOpts))
+	mux.Handle(drillv1connect.NewSampleServiceHandler(samplerpc.NewServer(b.SampleService), publicOpts))
 
 	mux.Handle(drillv1connect.NewBillingServiceHandler(billing.NewServer(b), opts))
 	mux.Handle(drillv1connect.NewEducatorServiceHandler(educator.NewServer(b), opts))

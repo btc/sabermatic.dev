@@ -3,6 +3,7 @@ pre-commit:
   commands:
     frontend-lint:
       glob: "web/src/**/*.{ts,tsx}"
+      exclude: "web/src/pb/**"
       run: cd web && npx eslint --fix {staged_files} && git add {staged_files}
     frontend-typecheck:
       glob: "web/src/**/*.{ts,tsx}"

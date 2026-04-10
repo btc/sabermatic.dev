@@ -1,0 +1,47 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "drill/v1/session.proto";
+import "drill/v1/evaluation.proto";
+import "drill/v1/educator.proto";
+import "drill/v1/coach.proto";
+
+service SampleService {
+  rpc GetSampleSession(GetSampleSessionRequest) returns (GetSampleSessionResponse);
+  rpc GetSampleEvaluation(GetSampleEvaluationRequest) returns (GetSampleEvaluationResponse);
+  rpc GetSampleEducator(GetSampleEducatorRequest) returns (GetSampleEducatorResponse);
+  rpc GetSampleCoach(GetSampleCoachRequest) returns (GetSampleCoachResponse);
+}
+
+message GetSampleSessionRequest {}
+
+message GetSampleSessionResponse {
+  Session session = 1;
+  repeated Message messages = 2;
+}
+
+message GetSampleEvaluationRequest {}
+
+message GetSampleEvaluationResponse {
+  EvaluationResult evaluation = 1;
+}
+
+message GetSampleEducatorRequest {}
+
+message GetSampleEducatorResponse {
+  EducatorAnalysis analysis = 1;
+}
+
+message GetSampleCoachRequest {}
+
+message GetSampleCoachResponse {
+  CoachAnalysis analysis = 1;
+  repeated ScoreTrendPoint score_trend = 2;
+}
+
+message ScoreTrendPoint {
+  string date = 1;
+  int32 overall_score = 2;
+}
