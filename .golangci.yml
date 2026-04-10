@@ -3,6 +3,9 @@ version: "2"
 run:
   timeout: 5m
 
+issues:
+  new-from-rev: main
+
 linters:
   enable:
     - govet
