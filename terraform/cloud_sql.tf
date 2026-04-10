@@ -45,14 +45,3 @@ resource "google_sql_user" "sabermatic" {
   instance = google_sql_database_instance.sabermatic.name
   password = random_password.db_password.result
 }
-
-resource "random_password" "brian_password" {
-  length  = 32
-  special = false
-}
-
-resource "google_sql_user" "brian" {
-  name     = "brian"
-  instance = google_sql_database_instance.sabermatic.name
-  password = random_password.brian_password.result
-}
