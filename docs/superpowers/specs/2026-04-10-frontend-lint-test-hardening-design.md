@@ -1,8 +1,8 @@
 # Frontend Lint & Test Hardening
 
-**Goal:** Strengthen frontend quality tooling — better lint rules, coverage reporting, pre-commit enforcement, and composable Makefile targets — without writing new tests (follow-up session).
+**Goal:** Strengthen frontend and backend quality tooling — better lint rules, coverage reporting, pre-commit enforcement, composable Makefile targets, and golangci-lint enablement — without writing new tests (follow-up session).
 
-**Tech Stack:** ESLint 9 (flat config), Vitest, Lefthook, TypeScript
+**Tech Stack:** ESLint 9 (flat config), Vitest, Lefthook, golangci-lint, TypeScript
 
 ---
 
@@ -14,7 +14,7 @@ Decompose the monolithic `test` target into three composable targets:
 - **`test-frontend`** — npm install, tsc --noEmit -p tsconfig.app.json, eslint, vitest run
 - **`test-backend`** — go test ./internal/... ./cmd/... -race -count=1 -timeout=300s
 
-Rewrite `test` to compose: `test: test-protos test-frontend test-backend` plus go mod tidy and the commented-out golangci-lint line.
+Rewrite `test` to compose: `test: test-protos test-frontend test-backend` plus go mod tidy and golangci-lint (now enabled, see section 7).
 
 Add all three new targets to the `.PHONY` line.
 
@@ -104,9 +104,23 @@ Run `lefthook install` to activate.
 
 Add `coverage/` to `web/.gitignore` (or root `.gitignore` if web doesn't have its own).
 
-## 6. Out of scope
+## 7. golangci-lint enablement
+
+Create `.golangci.yml` at repo root:
+
+```yaml
+issues:
+  new-from-rev: main
+```
+
+This only flags issues in code changed since `main`. Existing code is grandfathered — zero fixes required. As files are touched over time, they get cleaned up naturally.
+
+Uncomment the `golangci-lint run ./...` line in the Makefile `test` target.
+
+Add golangci-lint to the lefthook `backend-lint` command (or as a separate pre-commit command) if it's fast enough. If not, keep it in `make test` only.
+
+## 8. Out of scope
 
 - Writing new tests (follow-up session)
 - Enabling Prettier (tomorrow / future)
 - Playwright E2E integration
-- golangci-lint enablement
