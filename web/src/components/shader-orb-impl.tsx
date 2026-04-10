@@ -94,8 +94,8 @@ varying vec3 vWorldPosition;
 
 void main() {
   // Layer two noise octaves for richer surface detail
-  float slow = uTime * 0.3;
-  float fast = uTime * 0.7;
+  float slow = uTime * 0.5;
+  float fast = uTime * 1.0;
 
   float noise1 = snoise(normal * uNoiseScale + slow);
   float noise2 = snoise(normal * uNoiseScale * 2.0 + fast + 100.0) * 0.5;
@@ -136,7 +136,7 @@ void main() {
   vec3 sage       = vec3(0.47, 0.63, 0.45);
 
   // Slow-drifting noise fields drive colour variation across the surface
-  float t = uTime * 0.15;
+  float t = uTime * 0.25;
   float colorNoise1 = snoise(vPosition * 1.5 + t);
   float colorNoise2 = snoise(vPosition * 2.0 - t * 0.7 + 50.0);
   float colorNoise3 = snoise(vPosition * 3.0 + t * 0.4 + 100.0);
@@ -209,7 +209,7 @@ void main() {
   float pulse = 0.8 + 0.2 * sin(uTime * 0.8);
 
   vec3 glowColor = mix(amber, cream, fresnel * 0.5);
-  float alpha = glow * 0.35 * pulse;
+  float alpha = glow * 0.5 * pulse;
 
   gl_FragColor = vec4(glowColor, alpha);
 }
@@ -245,8 +245,8 @@ export function ShaderOrbImpl({ size = 120 }: ShaderOrbImplProps) {
 
     // --- Scene & Camera ---
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-    camera.position.set(0, 0, 3.5);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(0, 0, 2.8);
     camera.lookAt(0, 0, 0);
 
     // --- Main orb ---
@@ -256,8 +256,8 @@ export function ShaderOrbImpl({ size = 120 }: ShaderOrbImplProps) {
       fragmentShader,
       uniforms: {
         uTime: { value: 0 },
-        uNoiseScale: { value: 1.5 },
-        uDisplacementStrength: { value: 0.08 },
+        uNoiseScale: { value: 2.0 },
+        uDisplacementStrength: { value: 0.22 },
         uCameraPosition: { value: camera.position.clone() },
       },
     });
@@ -318,7 +318,11 @@ export function ShaderOrbImpl({ size = 120 }: ShaderOrbImplProps) {
   return (
     <div
       ref={containerRef}
-      style={{ width: size, height: size }}
+      style={{
+        width: size,
+        height: size,
+        filter: "drop-shadow(0 0 30px rgba(245, 158, 11, 0.3)) drop-shadow(0 0 60px rgba(245, 158, 11, 0.15))",
+      }}
       aria-hidden="true"
     />
   );

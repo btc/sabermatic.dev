@@ -35,7 +35,7 @@ function EvaluatingView({ imageUrl }: { imageUrl?: string }) {
       )}
 
       {/* WebGL shader orb */}
-      <ShaderOrb size={120} />
+      <ShaderOrb size={180} />
 
       {/* Rotating evaluation message */}
       <p className="text-sm text-muted-foreground text-center max-w-xs" key={index}>
