@@ -9,7 +9,7 @@ export function PublicHeader() {
         <Link to="/" className="text-sm font-semibold tracking-wider text-muted-foreground">
           <BrandName />
         </Link>
-        <div className="flex items-center gap-4">
+        <nav aria-label="Public navigation" className="flex items-center gap-4">
           <Link
             to="/login"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -22,7 +22,7 @@ export function PublicHeader() {
           >
             Sign up
           </Link>
-        </div>
+        </nav>
       </div>
     </header>
   );

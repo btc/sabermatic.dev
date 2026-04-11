@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-import { useSampleEvaluation,useSampleSession } from "@/api/sample-queries";
+import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 
 export function SampleSessionLink() {
@@ -9,6 +9,8 @@ export function SampleSessionLink() {
   const { data: evalData } = useSampleEvaluation();
   const session = sessionData?.session;
   const evaluation = evalData?.evaluation;
+
+  if (!session) return null;
 
   return (
     <section ref={ref} aria-labelledby="sample-heading" className="flex min-h-screen flex-col items-center justify-center gap-8 px-4">

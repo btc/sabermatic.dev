@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
+import type { EvaluationScores } from "@/pb/drill/v1/evaluation_pb";
 
 const DIMENSIONS = [
   { key: "requirements", label: "Requirements" },
@@ -60,11 +61,11 @@ export function Scoring() {
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">{dim.label}</span>
               <span className="font-medium text-foreground">
-                {isVisible ? scores[dim.key] : 0}/5
+                {isVisible ? scores[dim.key as keyof EvaluationScores] as number : 0}/5
               </span>
             </div>
             <AnimatedBar
-              value={scores[dim.key]}
+              value={scores[dim.key as keyof EvaluationScores] as number}
               delay={i * 150}
               animate={isVisible}
             />

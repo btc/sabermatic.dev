@@ -40,7 +40,7 @@ export function Timeline({ currentTime, duration, onSeek }: TimelineProps) {
 
   return (
     <div
-      className="h-1.5 w-full cursor-pointer rounded-full bg-muted"
+      className="h-1.5 w-full cursor-pointer rounded-full bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="slider"

@@ -164,14 +164,16 @@ function OverviewInner() {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
         <p className="text-sm text-muted-foreground">Evaluation could not be completed.</p>
-        <Button
-          variant="outline"
-          onClick={() => retryMutation.mutate({ sessionId })}
-          disabled={retryMutation.isPending}
-          type="button"
-        >
-          {retryMutation.isPending ? "Retrying..." : "Retry evaluation"}
-        </Button>
+        {dataSource === "api" && (
+          <Button
+            variant="outline"
+            onClick={() => retryMutation.mutate({ sessionId })}
+            disabled={retryMutation.isPending}
+            type="button"
+          >
+            {retryMutation.isPending ? "Retrying..." : "Retry evaluation"}
+          </Button>
+        )}
       </div>
     );
   }
