@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
 
 import { PublicHeader } from "@/components/public-header";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { useOptionalAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/layouts/app-layout";
 import { ImmersiveLayout } from "@/layouts/immersive-layout";
@@ -29,7 +30,7 @@ function Loading() {
 }
 
 function ConditionalHome() {
-  const { isAuthenticated, isLoading, isAuthError } = useOptionalAuth();
+  const { isAuthenticated, isLoading, isAuthError, error, refetch } = useOptionalAuth();
   if (isLoading) return <Loading />;
   if (isAuthenticated) {
     return (
@@ -41,9 +42,20 @@ function ConditionalHome() {
   if (isAuthError) {
     return <><PublicHeader /><Landing /></>;
   }
+  if (error) {
+    console.error("ConditionalHome: unexpected error", error);
+  }
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4">
       <p className="text-sm text-muted-foreground">Something went wrong. Please try again later.</p>
+      <div className="flex gap-3">
+        <Button onClick={() => refetch()} type="button">
+          Try again
+        </Button>
+        <Link to="/about" className={buttonVariants({ variant: "outline" })}>
+          Go to about page
+        </Link>
+      </div>
     </div>
   );
 }

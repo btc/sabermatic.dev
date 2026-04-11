@@ -11,10 +11,10 @@ import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
  * Distinguishes unauthenticated from server error.
  */
 export function useOptionalAuth() {
-  const { data, isLoading, error } = useQuery(getMe, {}, { retry: false });
+  const { data, isLoading, error, refetch } = useQuery(getMe, {}, { retry: false });
   const user = data?.user;
   const isAuthError = error instanceof ConnectError && error.code === Code.Unauthenticated;
-  return { user, isLoading, isAuthenticated: !!user, isAuthError };
+  return { user, isLoading, isAuthenticated: !!user, isAuthError, error, refetch };
 }
 
 export function useRequireAuth() {
