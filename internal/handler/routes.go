@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"embed"
 	"fmt"
 	"html"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,7 +21,7 @@ import (
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
-func NewHandler(b *backend.Backend, spaFS embed.FS) (http.Handler, error) {
+func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	cfg := b.Config()
 	baseURL := cfg.Auth.BaseURL
 	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
@@ -54,7 +54,7 @@ func NewHandler(b *backend.Backend, spaFS embed.FS) (http.Handler, error) {
 		}),
 	)(mux)
 
-	return csrfMiddleware(otelHandler, csrfKey, secureCookies), nil
+	return SecurityHeaders(secureCookies, csrfMiddleware(otelHandler, csrfKey, secureCookies)), nil
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
@@ -127,6 +127,10 @@ func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 	}
 	indexHTML := string(indexBytes)
 
+	if !strings.Contains(indexHTML, "</head>") {
+		slog.Warn("index.html missing </head> — OG tags will not be injected")
+	}
+
 	// Pre-compute OG-injected HTML at init time
 	ogPages := make(map[string][]byte, len(ogRoutes))
 	for path, og := range ogRoutes {
@@ -137,7 +141,8 @@ func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 				`<meta property="og:url" content="%s%s">`+
 				`<meta property="og:image" content="%s%s">`,
 			html.EscapeString(og.title), html.EscapeString(og.description),
-			baseURL, path, baseURL, og.image,
+			html.EscapeString(baseURL), html.EscapeString(path),
+			html.EscapeString(baseURL), html.EscapeString(og.image),
 		)
 		ogPages[path] = []byte(strings.Replace(indexHTML, "</head>", tags+"</head>", 1))
 	}
@@ -171,6 +176,26 @@ func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 	}), nil
 }
 
+// isCSRFExempt returns true for paths that handle their own request
+// authentication and don't need CSRF protection.
+func isCSRFExempt(path, method string, connectPrefixes []string) bool {
+	// Stripe webhook — signature-verified by the handler.
+	if path == "/api/webhooks/stripe" && method == http.MethodPost {
+		return true
+	}
+	// River UI — application/json bodies; auth checked by requireAuth middleware.
+	if strings.HasPrefix(path, "/admin/jobs/") || path == "/admin/jobs" {
+		return true
+	}
+	// ConnectRPC — custom Content-Type prevents cross-origin form submissions.
+	for _, prefix := range connectPrefixes {
+		if strings.HasPrefix(path, "/"+prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes
 // the CSRF token via response header, and exempts routes that have their own
 // protection (Stripe webhooks use signature verification; ConnectRPC uses
@@ -180,7 +205,7 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 		csrfKey,
 		csrf.Secure(secureCookies),
 		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
+		csrf.CookieName("sabermatic_csrf"),
 		csrf.Path("/"),
 		csrf.SameSite(csrf.SameSiteLaxMode),
 	)
@@ -193,27 +218,10 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 
 	connectPrefixes := rpc.ConnectPathPrefixes()
 
-	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
-		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isCSRFExempt(r.URL.Path, r.Method, connectPrefixes) {
 			next.ServeHTTP(w, r)
 			return
-		}
-		// River UI — exempt from CSRF; uses application/json bodies which cannot be
-		// submitted cross-origin by a simple HTML form. Unauthenticated requests to
-		// this prefix are rejected by requireAuth in the mux before reaching the handler.
-		// TODO: flip csrfMiddleware to opt-in model — exempt list is growing.
-		if strings.HasPrefix(r.URL.Path, "/admin/jobs/") || r.URL.Path == "/admin/jobs" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// ConnectRPC — exempt from CSRF; POST with custom Content-Type headers
-		// cannot be sent by simple HTML forms without CORS preflight.
-		for _, prefix := range connectPrefixes {
-			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
-				next.ServeHTTP(w, r)
-				return
-			}
 		}
 		// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
 		// HTTPS-only referer/origin checks.
@@ -221,5 +229,5 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 			r = csrf.PlaintextHTTPRequest(r)
 		}
 		csrfProtected.ServeHTTP(w, r)
-	}))
+	})
 }
