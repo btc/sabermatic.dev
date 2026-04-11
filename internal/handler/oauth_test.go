@@ -31,7 +31,7 @@ func TestCSRF_RejectsPostWithoutToken(t *testing.T) {
 		csrfKey,
 		csrf.Secure(false),
 		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
+		csrf.CookieName("sabermatic_csrf"),
 		csrf.Path("/"),
 	)
 
@@ -54,7 +54,7 @@ func TestCSRF_AllowsGetRequests(t *testing.T) {
 		csrfKey,
 		csrf.Secure(false),
 		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
+		csrf.CookieName("sabermatic_csrf"),
 		csrf.Path("/"),
 	)
 
@@ -77,7 +77,7 @@ func TestCSRF_PostWithValidToken(t *testing.T) {
 		csrfKey,
 		csrf.Secure(false),
 		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
+		csrf.CookieName("sabermatic_csrf"),
 		csrf.Path("/"),
 	)
 
@@ -105,12 +105,12 @@ func TestCSRF_PostWithValidToken(t *testing.T) {
 	// Extract the cookie from the GET response.
 	var csrfCookie *http.Cookie
 	for _, c := range getW.Result().Cookies() {
-		if c.Name == "drill_csrf" {
+		if c.Name == "sabermatic_csrf" {
 			csrfCookie = c
 			break
 		}
 	}
-	require.NotNil(t, csrfCookie, "GET response should set drill_csrf cookie")
+	require.NotNil(t, csrfCookie, "GET response should set sabermatic_csrf cookie")
 
 	// Step 2: POST with the cookie + masked token in the header.
 	postReq := httptest.NewRequest(http.MethodPost, "/api/test", strings.NewReader("{}"))
