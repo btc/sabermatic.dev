@@ -1,13 +1,9 @@
+import { formatTime } from "./utils";
+
 interface TimelineProps {
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
-}
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 const STEP_SEC = 5;

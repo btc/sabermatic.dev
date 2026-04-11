@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { useEvaluation, useSession, useTranscript } from "@/api/queries";
 import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
@@ -259,18 +259,22 @@ function TranscriptInner() {
   // Replay state
   const [replayMode, setReplayMode] = useState(false);
 
-  const replay = useReplayEngine(
-    replayMode && messages && session?.startTime
-      ? {
-          messages,
-          sessionStartedAt: session.startTime,
-          sessionEndedAt: session.endTime,
-          annotationSeqs: (evaluation?.annotations ?? []).map(
-            (a) => a.messageSeq,
-          ),
-        }
-      : null,
+  const replayOptions = useMemo(
+    () =>
+      replayMode && messages && session?.startTime
+        ? {
+            messages,
+            sessionStartedAt: session.startTime,
+            sessionEndedAt: session.endTime,
+            annotationSeqs: (evaluation?.annotations ?? []).map(
+              (a) => a.messageSeq,
+            ),
+          }
+        : null,
+    [replayMode, messages, session, evaluation?.annotations],
   );
+
+  const replay = useReplayEngine(replayOptions);
 
   // Map of seq -> DOM element ref for scroll targets
   const msgRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -293,6 +297,20 @@ function TranscriptInner() {
     }
   }, []);
 
+  // Place BEFORE the `if (!messages) return` early return:
+  const annotationsBySeq = useMemo(
+    () =>
+      (evaluation?.annotations ?? []).reduce<Map<number, Annotation[]>>(
+        (acc, ann) => {
+          const existing = acc.get(ann.messageSeq) ?? [];
+          acc.set(ann.messageSeq, [...existing, ann]);
+          return acc;
+        },
+        new Map(),
+      ),
+    [evaluation?.annotations],
+  );
+
   if (!messages) {
     return (
       <div className="space-y-4 max-w-3xl mx-auto">
@@ -307,16 +325,6 @@ function TranscriptInner() {
 
   const sorted = [...messages].sort((a, b) => a.seq - b.seq);
   const annotations = evaluation?.annotations ?? [];
-
-  // Group annotations by messageSeq for efficient lookup
-  const annotationsBySeq = annotations.reduce<Map<number, Annotation[]>>(
-    (acc, ann) => {
-      const existing = acc.get(ann.messageSeq) ?? [];
-      acc.set(ann.messageSeq, [...existing, ann]);
-      return acc;
-    },
-    new Map(),
-  );
 
   const handleJumpToFirst = (type: AnnotationType) => {
     const first = annotations.find((a) => a.type === type);

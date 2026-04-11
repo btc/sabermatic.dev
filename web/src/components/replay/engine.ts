@@ -77,6 +77,9 @@ export function useReplayEngine(options: ReplayOptions | null) {
   const lastTickRef = useRef<number>(0);
   const playingRef = useRef(false);
 
+  // Latest-ref pattern: runs after every render to keep refs in sync.
+  // Do not add a dependency array — the tick callback must always
+  // read current options/timings without stale closures.
   const optionsRef = useRef(options);
   useEffect(() => {
     optionsRef.current = options;
