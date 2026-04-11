@@ -110,7 +110,7 @@ function TOC({ headings }: TOCProps) {
   if (headings.length === 0) return null;
 
   return (
-    <nav className="w-48 shrink-0 sticky top-6 self-start">
+    <nav className="hidden lg:block w-48 shrink-0 sticky top-6 self-start">
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
         Contents
       </p>
@@ -277,7 +277,7 @@ function DeepDiveInner() {
   const headings = extractHeadings(fullContent);
 
   return (
-    <div className="flex gap-10 max-w-5xl">
+    <div className="flex flex-col lg:flex-row lg:gap-10 max-w-5xl">
       <TOC headings={headings} />
       <div className="flex-1 min-w-0 prose-sm">
         {educator.modelAnswer && (

@@ -1,4 +1,4 @@
-import { Link,Outlet } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 
 import { PublicHeader } from "@/components/public-header";
 import { TabLink } from "@/pages/session/layout";
