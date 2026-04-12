@@ -21,12 +21,13 @@ import (
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 )
 
-// minimalIndexHTML is the bare HTML used for handler tests. SPAHandler reads
-// this from the fstest.MapFS during NewHandler construction.
+// minimalIndexHTML is the bare HTML used for handler tests. SPAHandler fails
+// construction if web/dist/index.html is missing, so tests must supply something;
+// a `</head>` is included so OG-tag injection code paths remain exercisable.
 const minimalIndexHTML = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>`
 
 // NewTestHandler builds the production HTTP handler with a minimal in-memory
-// SPA. Tests call this instead of handler.RegisterRoutes so they exercise the
+// SPA. Tests call this instead of constructing a bare mux, so they exercise the
 // same middleware chain as production (SecurityHeaders, OTel tracing).
 func NewTestHandler(t *testing.T, b *backend.Backend) http.Handler {
 	t.Helper()
