@@ -21,24 +21,6 @@ import (
 	"github.com/btc/drill/internal/rpc/user"
 )
 
-// ConnectPathPrefixes returns all path prefixes used by registered Connect
-// services. Used by the OTel filter to exempt Connect routes from HTTP-level
-// tracing (Connect has its own interceptor).
-func ConnectPathPrefixes() []string {
-	return []string{
-		drillv1connect.AuthServiceName,
-		drillv1connect.BillingServiceName,
-		drillv1connect.EducatorServiceName,
-		drillv1connect.QuestionServiceName,
-		drillv1connect.CoachServiceName,
-		drillv1connect.EvaluationServiceName,
-		drillv1connect.InterviewServiceName,
-		drillv1connect.SampleServiceName,
-		drillv1connect.SessionServiceName,
-		drillv1connect.UserServiceName,
-	}
-}
-
 // Register mounts all ConnectRPC services on the given mux.
 func Register(mux *http.ServeMux, b *backend.Backend) error {
 	otelInterceptor, err := otelconnect.NewInterceptor()

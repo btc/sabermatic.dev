@@ -42,14 +42,6 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 			}
 			return r.Method + " " + r.URL.Path
 		}),
-		otelhttp.WithFilter(func(r *http.Request) bool {
-			for _, prefix := range rpc.ConnectPathPrefixes() {
-				if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
-					return false
-				}
-			}
-			return true
-		}),
 	)(mux)
 
 	return SecurityHeaders(secureCookies, otelHandler), nil
