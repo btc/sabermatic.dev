@@ -34,9 +34,29 @@ Remove every CSRF code path from backend and frontend. The middleware protects z
 rm /Users/btc/Projects/src/drill/internal/handler/csrf_test.go
 ```
 
-- [ ] **Step 1.2: Delete `internal/handler/oauth_test.go`**
+- [ ] **Step 1.2: Preserve the handler_test package doc, then delete `internal/handler/oauth_test.go`**
 
-The file is misnamed — it contains only CSRF middleware tests, not OAuth tests. OAuth tests are in `oauth_flow_test.go`.
+The file is misnamed — it contains only CSRF middleware tests, not OAuth tests. OAuth tests are in `oauth_flow_test.go`. But its top-of-file package doc comment describes what handler integration tests should/shouldn't cover, and deleting the file would lose that guidance.
+
+First, copy the package doc block to the top of `internal/handler/main_test.go`. Open `internal/handler/main_test.go` and prepend above the existing `package handler_test` line:
+
+```go
+// Package handler_test contains integration tests for the HTTP layer.
+//
+// These tests verify HTTP-specific concerns: status codes, cookies, JSON
+// response shape, and middleware wiring. They intentionally do NOT test
+// business logic, validation edge cases, or database state — those belong
+// in package backend's tests (internal/backend/*_test.go).
+//
+// If you're adding a new backend method or business rule, write the test in
+// internal/backend/. Only add a handler test if you need to verify something
+// specific to the HTTP contract (e.g. a new status code mapping, cookie
+// behavior, or middleware interaction).
+```
+
+(Note: removed the original reference to "CSRF protection" since CSRF is being deleted.)
+
+Then delete `oauth_test.go`:
 
 ```bash
 rm /Users/btc/Projects/src/drill/internal/handler/oauth_test.go
@@ -450,7 +470,7 @@ describe("apiClient", () => {
 
 In `web/src/api/queries.ts`, remove three things:
 
-(1) The import line at the top:
+(1) Delete both of these import lines at the top of the file:
 
 ```ts
 import { apiClient } from "./client";
@@ -758,11 +778,15 @@ Move `RequireAuth`, `RequireAdmin`, and supporting code from `internal/auth/midd
 **Files:**
 - Create: `internal/handler/middleware.go`
 - Create: `internal/handler/middleware_test.go`
+- Create: `internal/auth/user_context.go` (types moved out of `auth/middleware.go`)
+- Create: `internal/auth/user_context_test.go` (test for `WithUser`/`UserFromContext`)
 - Delete: `internal/auth/middleware.go`
 - Delete: `internal/auth/middleware_test.go`
 - Delete: `internal/handler/security.go`
 - Delete: `internal/handler/security_test.go`
 - Modify: `internal/handler/routes.go` (callers reference `auth.RequireAuth` / `auth.RequireAdmin` — change to local references after the move)
+
+**Note on intermediate build state:** Steps 4.2 and 4.3 together move types from `auth/middleware.go` to a new `auth/user_context.go`. Between those sub-steps, the repo will not compile (types defined in both files, or in neither). This is expected; Task 4 as a whole ends on green at Step 4.10. Do not `go build` between individual sub-steps of this task — wait until Step 4.9.
 
 - [ ] **Step 4.1: Create `internal/handler/middleware.go`**
 
@@ -1039,7 +1063,22 @@ func TestRequireAdmin_AdminRole(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
-// --- Pure auth context tests (kept here since they're tightly coupled to RequireAuth) ---
+```
+
+The pure auth context tests (`TestAuthUser_FromContext`, `TestAuthUser_FromContext_Missing`) move to a new file `internal/auth/user_context_test.go` since they exercise `auth.WithUser`/`auth.UserFromContext` and have no coupling to handler middleware:
+
+```go
+package auth_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/auth"
+)
 
 func TestAuthUser_FromContext(t *testing.T) {
 	user := &auth.AuthUser{
@@ -1059,6 +1098,23 @@ func TestAuthUser_FromContext_Missing(t *testing.T) {
 	got := auth.UserFromContext(context.Background())
 	require.Nil(t, got)
 }
+```
+
+Also remove `context` from the imports in `handler/middleware_test.go` since it was only used by those relocated tests. Final imports for `middleware_test.go` become:
+
+```go
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/handler"
+)
 ```
 
 - [ ] **Step 4.7: Delete `internal/auth/middleware_test.go` and `internal/handler/security_test.go`**
@@ -1089,7 +1145,7 @@ Expected: green.
 
 ```bash
 cd /Users/btc/Projects/src/drill
-git add internal/handler/middleware.go internal/handler/middleware_test.go internal/handler/routes.go internal/auth/user_context.go
+git add internal/handler/middleware.go internal/handler/middleware_test.go internal/handler/routes.go internal/auth/user_context.go internal/auth/user_context_test.go
 git rm internal/auth/middleware.go internal/auth/middleware_test.go internal/handler/security.go internal/handler/security_test.go
 git commit -m "$(cat <<'EOF'
 refactor: move HTTP middleware to handler package
@@ -1366,12 +1422,12 @@ EOF
 
 ## Task 6: Collapse `NewHandler` + `RegisterRoutes` into single entry point
 
-Migrate the 8 test sites that call `handler.RegisterRoutes(mux, b)` to call `handler.NewHandler(b, fstest.MapFS{...})` instead. Demote `RegisterRoutes` to unexported `registerRoutes`. Tests now use the same handler chain as production (SecurityHeaders + OTel).
+Migrate the 7 test sites that call `handler.RegisterRoutes(mux, b)` to call `handler.NewHandler(b, fstest.MapFS{...})` instead. Demote `RegisterRoutes` to unexported `registerRoutes`. Tests now use the same handler chain as production (SecurityHeaders + OTel).
 
 **Files:**
 - Modify: `internal/handler/server.go` (rename `RegisterRoutes` → `registerRoutes`)
-- Modify: `internal/testutil/testutil.go`
-- Modify: `internal/handler/health_test.go`
+- Modify: `internal/testutil/testutil.go` (1 call site)
+- Modify: `internal/handler/health_test.go` (1 call site)
 - Modify: `internal/handler/oauth_flow_test.go` (5 call sites)
 
 - [ ] **Step 6.1: Capture pre-migration timing baseline**
@@ -1593,7 +1649,9 @@ Rename for accuracy. Delete dead `writeJSON`/`writePaidBalanceRequired`. Add a r
 
 - [ ] **Step 7.1: Verify `writeJSON` and `writePaidBalanceRequired` are unused**
 
-Run: `cd /Users/btc/Projects/src/drill && grep -rn "writeJSON\|writePaidBalanceRequired" --include="*.go" internal/ cmd/`
+Use word boundaries to avoid false positives on similar names:
+
+Run: `cd /Users/btc/Projects/src/drill && grep -rnE '\bwriteJSON\b|\bwritePaidBalanceRequired\b' --include="*.go" internal/ cmd/`
 Expected: only the definitions in `internal/handler/auth.go`. No callers.
 
 If you find a caller, escalate before deleting.

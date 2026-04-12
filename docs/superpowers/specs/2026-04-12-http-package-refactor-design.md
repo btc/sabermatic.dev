@@ -67,7 +67,7 @@ Keep `internal/handler/` as the package name. Renaming to `http` would shadow st
 
 ### Single entry point: collapse `NewHandler` and `RegisterRoutes`
 
-Today `RegisterRoutes` is public so 8 test sites can build a bare mux without the OTel + SecurityHeaders chain. Collapse to a single `NewHandler` and migrate test sites. Higher-fidelity tests (real middleware chain), one entry point, removes the question "which do I use?" `RegisterRoutes` becomes an unexported `registerRoutes` helper inside `server.go` if the body is non-trivial.
+Today `RegisterRoutes` is public so 7 test sites can build a bare mux without the OTel + SecurityHeaders chain (1 in `testutil.go`, 1 in `health_test.go`, 5 in `oauth_flow_test.go`). Collapse to a single `NewHandler` and migrate test sites. Higher-fidelity tests (real middleware chain), one entry point, removes the question "which do I use?" `RegisterRoutes` becomes an unexported `registerRoutes` helper inside `server.go` if the body is non-trivial.
 
 ### Storage handler consolidation
 
@@ -89,7 +89,7 @@ Each step ends with `make test` green. Each step is independently revertable.
 - Delete `csrfMiddleware`, `isCSRFExempt` from `routes.go`.
 - Simplify the `NewHandler` middleware chain to `SecurityHeaders(otelHandler)` (drop the CSRF wrap).
 - Delete `auth.DeriveKey(..., "csrf")` call in `routes.go`.
-- In `internal/handler/oauth_test.go`: delete the 3 `csrfKey := auth.DeriveKey(..., "csrf")` lines AND the surrounding CSRF-wrap setup blocks AND the `X-CSRF-Token` echo assertions (lines ~87-118 — verify exact range during impl). Tests should call the handler under test directly.
+- Delete `internal/handler/oauth_test.go` entirely — the file is misnamed and contains only CSRF middleware tests (not OAuth tests; those live in `oauth_flow_test.go`). Its package doc comment about handler test scope moves to `internal/handler/main_test.go` so the guidance isn't lost.
 - Remove `gorilla/csrf` from `go.mod`; run `go mod tidy`.
 - Frontend: remove `getCsrfToken`, `mutationHeaders` CSRF logic, and the `Content-Type` branch reshuffling in `web/src/api/client.ts`. Remove `window.__csrfToken` declaration from `web/src/vite-env.d.ts` and assignment in `web/src/main.tsx`. Delete the dead `useCreateQuestion` from `web/src/api/queries.ts` (boy-scout cleanup).
 - Update `web/src/api/__tests__/client.test.ts` (remove CSRF assertions).
@@ -130,7 +130,7 @@ Each step ends with `make test` green. Each step is independently revertable.
 
 ### Step 6 — Collapse `NewHandler` + `RegisterRoutes`
 
-- Migrate 8 test sites that call `handler.RegisterRoutes(mux, b)` to call `handler.NewHandler(b, fstest.MapFS{...minimal index.html...})` instead. Tests accept the full middleware chain (SecurityHeaders headers in responses; OTel no-op spans).
+- Migrate all 7 test sites that call `handler.RegisterRoutes(mux, b)` to call `handler.NewHandler(b, fstest.MapFS{...minimal index.html...})` instead. Tests accept the full middleware chain (SecurityHeaders headers in responses; OTel no-op spans).
 - Delete public `RegisterRoutes`. Body becomes unexported `registerRoutes` inside `server.go`.
 - **Test-runtime check:** `oauth_flow_test.go` calls `RegisterRoutes` 5 times across subtests; `testutil` is reused across many packages. After migration, time the handler test packages (`go test ./internal/handler/... -count=1`) and compare to a pre-Step-6 baseline. If the regression is meaningful (>20% wall-clock), introduce a `handler.newTestHandler(b)` helper that skips `otelhttp.NewMiddleware` (still keeps SecurityHeaders, since those have no per-request cost). If the regression is negligible, leave the single entry point.
 - Verify: `make test`.
