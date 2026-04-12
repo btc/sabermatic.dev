@@ -23,6 +23,7 @@ import (
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/jobs"
+	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/storage"
 )
 
@@ -43,14 +44,21 @@ type Backend struct {
 	stt          ai.Transcriber
 	tts          ai.Synthesizer
 	store        storage.Store
+
+	SampleService *samplesvc.SampleService
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
 // App migrations must be run before calling this (schema must exist).
 func New(cfg *config.Config) (*Backend, error) {
+	// SampleService (no pool dependency -- initialize first).
+	ss, err := samplesvc.NewSampleService()
+	if err != nil {
+		return nil, fmt.Errorf("sample service: %w", err)
+	}
+
 	// Object storage (no pool dependency -- initialize first).
 	var store storage.Store
-	var err error
 	switch cfg.Storage.Backend {
 	case "gcs":
 		store, err = storage.NewGCS(context.Background(), cfg.Storage.Bucket, cfg.Storage.PublicBucket)
@@ -192,15 +200,16 @@ func New(cfg *config.Config) (*Backend, error) {
 	slog.Info("riverui started")
 
 	return &Backend{
-		pool:         pool,
-		jobs:         riverClient,
-		riverUI:      uiHandler,
-		closeRiverUI: closeRiverUI,
-		cfg:          cfg,
-		llm:          llmClient,
-		stt:          stt,
-		tts:          tts,
-		store:        store,
+		pool:          pool,
+		jobs:          riverClient,
+		riverUI:       uiHandler,
+		closeRiverUI:  closeRiverUI,
+		cfg:           cfg,
+		llm:           llmClient,
+		stt:           stt,
+		tts:           tts,
+		store:         store,
+		SampleService: ss,
 	}, nil
 }
 

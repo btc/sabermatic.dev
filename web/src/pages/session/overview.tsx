@@ -1,15 +1,14 @@
-import { useMutation, useQuery } from "@connectrpc/connect-query";
-import { createConnectQueryKey } from "@connectrpc/connect-query";
-import { useQueryClient } from "@tanstack/react-query";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 
+import { useEvaluation, useRetryEvaluation, useSession } from "@/api/queries";
+import { useSampleEvaluation, useSampleSession } from "@/api/sample-queries";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { EvaluationScores } from "@/pb/drill/v1/evaluation_pb";
-import { getEvaluation, retryEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
-import { getSession, listSessions } from "@/pb/drill/v1/session-SessionService_connectquery";
+
+import { useSessionDetail } from "./session-detail-ctx";
 
 // ---------------------------------------------------------------------------
 // Score bar
@@ -61,7 +60,7 @@ function ScoreBar({ label, score, large = false }: ScoreBarProps) {
 // Scores section
 // ---------------------------------------------------------------------------
 
-const DIMENSION_LABELS: Record<keyof Omit<EvaluationScores, "overall" | "$typeName" | "$unknown">, string> = {
+const DIMENSION_LABELS: Record<string, string> = {
   requirements: "Requirements",
   architecture: "Architecture",
   deepDive: "Deep Dive",
@@ -84,7 +83,7 @@ function ScoresSection({ scores }: ScoresSectionProps) {
 
       <div className="space-y-3">
         {dimensions.map(([key, label]) => (
-          <ScoreBar key={key} label={label} score={scores[key]} />
+          <ScoreBar key={key} label={label} score={scores[key as keyof EvaluationScores] as number} />
         ))}
       </div>
 
@@ -103,16 +102,20 @@ interface InsightCardProps {
   text: string;
   variant: "strength" | "gap";
   sessionId: string;
+  dataSource: "api" | "sample";
 }
 
-function InsightCard({ text, variant, sessionId }: InsightCardProps) {
+function InsightCard({ text, variant, sessionId, dataSource }: InsightCardProps) {
   const borderColor = variant === "strength" ? "border-strength" : "border-gap";
+  const transcriptPath = dataSource === "sample"
+    ? "/sample/transcript"
+    : `/sessions/${sessionId}/transcript`;
 
   return (
     <div className={cn("bg-card rounded-lg border border-border border-l-4 px-4 py-3 space-y-1.5", borderColor)}>
       <p className="text-sm leading-relaxed">{text}</p>
       <Link
-        to={`/sessions/${sessionId}/transcript`}
+        to={transcriptPath}
         className="text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         View in transcript
@@ -126,23 +129,20 @@ function InsightCard({ text, variant, sessionId }: InsightCardProps) {
 // ---------------------------------------------------------------------------
 
 export default function Overview() {
-  const { id: sessionId } = useParams<{ id: string }>();
-  if (!sessionId) return <Navigate to="/" replace />;
-  return <OverviewInner sessionId={sessionId} />;
+  return <OverviewInner />;
 }
 
-function OverviewInner({ sessionId }: { sessionId: string }) {
-  const { data: sessionResp } = useQuery(getSession, { id: sessionId });
-  const session = sessionResp?.session;
-  const { data: evalResp } = useQuery(getEvaluation, { sessionId });
-  const evaluation = evalResp?.evaluation;
-  const qc = useQueryClient();
-  const retryMutation = useMutation(retryEvaluation, {
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: getSession, input: { id: sessionId }, cardinality: undefined }) });
-      qc.invalidateQueries({ queryKey: createConnectQueryKey({ schema: listSessions, input: {}, cardinality: undefined }) });
-    },
-  });
+function OverviewInner() {
+  const { dataSource, sessionId } = useSessionDetail();
+
+  const authSession = useSession(sessionId, { enabled: dataSource === "api" });
+  const authEval = useEvaluation(sessionId, dataSource === "api");
+  const sampleSession = useSampleSession({ enabled: dataSource === "sample" });
+  const sampleEval = useSampleEvaluation({ enabled: dataSource === "sample" });
+
+  const session = dataSource === "api" ? authSession.data?.session : sampleSession.data?.session;
+  const evaluation = dataSource === "api" ? authEval.data?.evaluation : sampleEval.data?.evaluation;
+  const retryMutation = useRetryEvaluation(sessionId);
 
   if (!session || !evaluation) {
     return (
@@ -164,13 +164,16 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
         <p className="text-sm text-muted-foreground">Evaluation could not be completed.</p>
-        <Button
-          variant="outline"
-          onClick={() => retryMutation.mutate({ sessionId })}
-          disabled={retryMutation.isPending}
-        >
-          {retryMutation.isPending ? "Retrying..." : "Retry evaluation"}
-        </Button>
+        {dataSource === "api" && (
+          <Button
+            variant="outline"
+            onClick={() => retryMutation.mutate({ sessionId })}
+            disabled={retryMutation.isPending}
+            type="button"
+          >
+            {retryMutation.isPending ? "Retrying..." : "Retry evaluation"}
+          </Button>
+        )}
       </div>
     );
   }
@@ -195,7 +198,7 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
           </h2>
           <div className="space-y-2">
             {strengths.map((text, i) => (
-              <InsightCard key={i} text={text} variant="strength" sessionId={sessionId} />
+              <InsightCard key={i} text={text} variant="strength" sessionId={sessionId} dataSource={dataSource} />
             ))}
           </div>
         </section>
@@ -209,7 +212,7 @@ function OverviewInner({ sessionId }: { sessionId: string }) {
           </h2>
           <div className="space-y-2">
             {gaps.map((text, i) => (
-              <InsightCard key={i} text={text} variant="gap" sessionId={sessionId} />
+              <InsightCard key={i} text={text} variant="gap" sessionId={sessionId} dataSource={dataSource} />
             ))}
           </div>
         </section>

@@ -1,10 +1,12 @@
 package handler
 
 import (
-	"embed"
 	"fmt"
+	"html"
 	"io/fs"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/csrf"
@@ -12,18 +14,28 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/branding"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/rpc"
 )
 
 // NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
 // and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
-func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookies bool) (http.Handler, error) {
+func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
+	cfg := b.Config()
+	baseURL := cfg.Auth.BaseURL
+	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
+	secureCookies := cfg.Auth.SecureCookies()
+
 	mux := http.NewServeMux()
 	if err := RegisterRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
-	mux.Handle("/", SPAHandler(spaFS))
+	spaHandler, err := SPAHandler(spaFS, baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("spa handler: %w", err)
+	}
+	mux.Handle("/", spaHandler)
 
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
@@ -42,7 +54,7 @@ func NewHandler(b *backend.Backend, spaFS embed.FS, csrfKey []byte, secureCookie
 		}),
 	)(mux)
 
-	return csrfMiddleware(otelHandler, csrfKey, secureCookies), nil
+	return SecurityHeaders(secureCookies, csrfMiddleware(otelHandler, csrfKey, secureCookies)), nil
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
@@ -73,13 +85,68 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	return nil
 }
 
+// ogRoute defines OG meta tag content for a public route.
+type ogRoute struct {
+	title       string
+	description string
+	image       string // path relative to base URL
+}
+
+var ogRoutes = map[string]ogRoute{
+	"/": {
+		title:       branding.AppName,
+		description: "data-driven system design prep",
+		image:       "/og-landing.png",
+	},
+	"/about": {
+		title:       branding.AppName,
+		description: "data-driven system design prep",
+		image:       "/og-landing.png",
+	},
+	"/sample": {
+		title:       branding.AppName + " — sample evaluation",
+		description: "See a real system design interview evaluated across 5 dimensions",
+		image:       "/og-sample.png",
+	},
+}
+
 // SPAHandler serves the embedded SPA. Static assets served directly.
 // All other paths return index.html for client-side routing.
-func SPAHandler(fsys embed.FS) http.Handler {
+// For paths with OG tags defined, the tags are injected before </head>.
+// baseURL is the public URL (e.g., "https://sabermatic.dev") used for
+// absolute og:url and og:image values. Pass "" for tests.
+func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 	sub, err := fs.Sub(fsys, "web/dist")
 	if err != nil {
-		panic(fmt.Sprintf("embed sub: %v", err))
+		return nil, fmt.Errorf("embed sub: %w", err)
 	}
+
+	indexBytes, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		return nil, fmt.Errorf("read index.html: %w", err)
+	}
+	indexHTML := string(indexBytes)
+
+	if !strings.Contains(indexHTML, "</head>") {
+		slog.Warn("index.html missing </head> — OG tags will not be injected")
+	}
+
+	// Pre-compute OG-injected HTML at init time
+	ogPages := make(map[string][]byte, len(ogRoutes))
+	for path, og := range ogRoutes {
+		tags := fmt.Sprintf(
+			`<meta property="og:title" content="%s">`+
+				`<meta property="og:description" content="%s">`+
+				`<meta property="og:type" content="website">`+
+				`<meta property="og:url" content="%s%s">`+
+				`<meta property="og:image" content="%s%s">`,
+			html.EscapeString(og.title), html.EscapeString(og.description),
+			html.EscapeString(baseURL), html.EscapeString(path),
+			html.EscapeString(baseURL), html.EscapeString(og.image),
+		)
+		ogPages[path] = []byte(strings.Replace(indexHTML, "</head>", tags+"</head>", 1))
+	}
+
 	fileServer := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,10 +161,39 @@ func SPAHandler(fsys embed.FS) http.Handler {
 				return
 			}
 		}
+
+		// Serve pre-computed OG-injected HTML if this path has OG tags
+		if body, ok := ogPages[path]; ok {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			_, _ = w.Write(body)
+			return
+		}
+
 		// Fall back to index.html for client-side routing
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
-	})
+	}), nil
+}
+
+// isCSRFExempt returns true for paths that handle their own request
+// authentication and don't need CSRF protection.
+func isCSRFExempt(path, method string, connectPrefixes []string) bool {
+	// Stripe webhook — signature-verified by the handler.
+	if path == "/api/webhooks/stripe" && method == http.MethodPost {
+		return true
+	}
+	// River UI — application/json bodies; auth checked by requireAuth middleware.
+	if strings.HasPrefix(path, "/admin/jobs/") || path == "/admin/jobs" {
+		return true
+	}
+	// ConnectRPC — custom Content-Type prevents cross-origin form submissions.
+	for _, prefix := range connectPrefixes {
+		if strings.HasPrefix(path, "/"+prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes
@@ -109,7 +205,7 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 		csrfKey,
 		csrf.Secure(secureCookies),
 		csrf.HttpOnly(false),
-		csrf.CookieName("drill_csrf"),
+		csrf.CookieName("sabermatic_csrf"),
 		csrf.Path("/"),
 		csrf.SameSite(csrf.SameSiteLaxMode),
 	)
@@ -122,27 +218,10 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 
 	connectPrefixes := rpc.ConnectPathPrefixes()
 
-	return SecurityHeaders(secureCookies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Stripe webhook — exempt from CSRF; uses Stripe signature verification.
-		if r.URL.Path == "/api/webhooks/stripe" && r.Method == http.MethodPost {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isCSRFExempt(r.URL.Path, r.Method, connectPrefixes) {
 			next.ServeHTTP(w, r)
 			return
-		}
-		// River UI — exempt from CSRF; uses application/json bodies which cannot be
-		// submitted cross-origin by a simple HTML form. Unauthenticated requests to
-		// this prefix are rejected by requireAuth in the mux before reaching the handler.
-		// TODO: flip csrfMiddleware to opt-in model — exempt list is growing.
-		if strings.HasPrefix(r.URL.Path, "/admin/jobs/") || r.URL.Path == "/admin/jobs" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// ConnectRPC — exempt from CSRF; POST with custom Content-Type headers
-		// cannot be sent by simple HTML forms without CORS preflight.
-		for _, prefix := range connectPrefixes {
-			if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
-				next.ServeHTTP(w, r)
-				return
-			}
 		}
 		// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
 		// HTTPS-only referer/origin checks.
@@ -150,5 +229,5 @@ func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.
 			r = csrf.PlaintextHTTPRequest(r)
 		}
 		csrfProtected.ServeHTTP(w, r)
-	}))
+	})
 }

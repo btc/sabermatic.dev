@@ -1,16 +1,17 @@
-import { useMutation, useQuery } from "@connectrpc/connect-query";
-import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 
+import { useEducator, useMe, useRequestEducator } from "@/api/queries";
+import { useSampleEducator } from "@/api/sample-queries";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { GENERATING_MESSAGES } from "@/lib/constants";
-import { EducatorService, EducatorStatus } from "@/pb/drill/v1/educator_pb";
-import { getEducatorAnalysis, requestEducatorAnalysis } from "@/pb/drill/v1/educator-EducatorService_connectquery";
+import { EducatorStatus } from "@/pb/drill/v1/educator_pb";
 import { UserPlan } from "@/pb/drill/v1/user_pb";
-import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+
+import { useSessionDetail } from "./session-detail-ctx";
 
 // ---------------------------------------------------------------------------
 // Heading extraction + slugify
@@ -109,7 +110,7 @@ function TOC({ headings }: TOCProps) {
   if (headings.length === 0) return null;
 
   return (
-    <nav className="w-48 shrink-0 sticky top-6 self-start">
+    <nav className="hidden lg:block w-48 shrink-0 sticky top-6 self-start">
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
         Contents
       </p>
@@ -158,28 +159,24 @@ function GeneratingView() {
 // ---------------------------------------------------------------------------
 
 export default function DeepDive() {
-  const { id: sessionId } = useParams<{ id: string }>();
-  if (!sessionId) return <Navigate to="/" replace />;
-  return <DeepDiveInner sessionId={sessionId} />;
+  return <DeepDiveInner />;
 }
 
-function DeepDiveInner({ sessionId }: { sessionId: string }) {
-  const qc = useQueryClient();
-  const { data: resp, isError } = useQuery(getEducatorAnalysis, { sessionId }, {
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data?.analysis?.status === EducatorStatus.GENERATING) return 3000;
-      return false;
-    },
-  });
-  const educator = resp?.analysis;
-  const requestEducatorMutation = useMutation(requestEducatorAnalysis, {
-    onSuccess: () => qc.invalidateQueries({ queryKey: [EducatorService.typeName] }),
-  });
-  const { data: meData } = useQuery(getMe, {});
-  const me = meData?.user;
+function DeepDiveInner() {
+  const { dataSource, sessionId } = useSessionDetail();
 
-  const isPro = me?.plan === UserPlan.PRO;
+  const authEducator = useEducator(sessionId, dataSource === "api");
+  const sampleEducator = useSampleEducator({ enabled: dataSource === "sample" });
+
+  const educator = dataSource === "api" ? authEducator.data?.analysis : sampleEducator.data?.analysis;
+  const isError = dataSource === "api" ? authEducator.isError : sampleEducator.isError;
+
+  const requestEducator = useRequestEducator(sessionId);
+  // Only fetch user data in authenticated mode — sample visitors are unauthenticated
+  const meQuery = useMe({ enabled: dataSource === "api" });
+
+  const isSample = dataSource === "sample";
+  const isPro = !isSample && meQuery.data?.user?.plan === UserPlan.PRO;
 
   // Error state — separate from "not requested"
   if (isError) {
@@ -190,17 +187,29 @@ function DeepDiveInner({ sessionId }: { sessionId: string }) {
         </p>
         <Button
           variant="outline"
-          onClick={() => requestEducatorMutation.mutate({ sessionId })}
-          disabled={requestEducatorMutation.isPending}
+          type="button"
+          onClick={() => requestEducator.mutate({ sessionId })}
+          disabled={isSample || requestEducator.isPending}
         >
-          {requestEducatorMutation.isPending ? "Requesting..." : "Retry"}
+          {requestEducator.isPending ? "Requesting..." : "Retry"}
         </Button>
       </div>
     );
   }
 
-  // Not yet requested
-  if (!educator || educator.status === EducatorStatus.NOT_REQUESTED) {
+  // Loading state
+  const isLoading = dataSource === "api" ? authEducator.isLoading : sampleEducator.isLoading;
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-16">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-32 w-full max-w-2xl" />
+      </div>
+    );
+  }
+
+  // Not yet requested (null data)
+  if (!educator) {
     return (
       <div className="flex flex-col items-center gap-4 py-16 text-center max-w-md mx-auto">
         <p className="text-sm text-muted-foreground leading-relaxed">
@@ -209,18 +218,20 @@ function DeepDiveInner({ sessionId }: { sessionId: string }) {
         </p>
         {isPro ? (
           <Button
-            onClick={() => requestEducatorMutation.mutate({ sessionId })}
-            disabled={requestEducatorMutation.isPending}
+            type="button"
+            onClick={() => requestEducator.mutate({ sessionId })}
+            disabled={isSample || requestEducator.isPending}
           >
-            {requestEducatorMutation.isPending ? "Requesting..." : "Generate"}
+            {requestEducator.isPending ? "Requesting..." : "Generate"}
           </Button>
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Button
-              onClick={() => requestEducatorMutation.mutate({ sessionId })}
-              disabled={requestEducatorMutation.isPending}
+              type="button"
+              onClick={() => requestEducator.mutate({ sessionId })}
+              disabled={isSample || requestEducator.isPending}
             >
-              {requestEducatorMutation.isPending ? "Requesting..." : "Generate"}
+              {requestEducator.isPending ? "Requesting..." : "Generate"}
             </Button>
             <p className="text-xs text-muted-foreground">
               Upgrade to access full analysis.{" "}
@@ -248,10 +259,11 @@ function DeepDiveInner({ sessionId }: { sessionId: string }) {
         </p>
         <Button
           variant="outline"
-          onClick={() => requestEducatorMutation.mutate({ sessionId })}
-          disabled={requestEducatorMutation.isPending}
+          type="button"
+          onClick={() => requestEducator.mutate({ sessionId })}
+          disabled={isSample || requestEducator.isPending}
         >
-          {requestEducatorMutation.isPending ? "Retrying..." : "Retry"}
+          {requestEducator.isPending ? "Retrying..." : "Retry"}
         </Button>
       </div>
     );
@@ -265,7 +277,7 @@ function DeepDiveInner({ sessionId }: { sessionId: string }) {
   const headings = extractHeadings(fullContent);
 
   return (
-    <div className="flex gap-10 max-w-5xl">
+    <div className="flex flex-col lg:flex-row lg:gap-10 max-w-5xl">
       <TOC headings={headings} />
       <div className="flex-1 min-w-0 prose-sm">
         {educator.modelAnswer && (

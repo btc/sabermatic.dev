@@ -1,17 +1,3 @@
-// --- Auth ---
-export interface User {
-  id: string;
-  email: string;
-  display_name: string;
-  role: "candidate" | "admin";
-  plan: "free" | "pro";
-  email_verified: boolean;
-}
-
-export interface AuthResponse {
-  user: User;
-}
-
 // --- Questions ---
 export type Difficulty = "medium" | "hard";
 export type QuestionSource = "seed" | "custom" | "coach_generated";

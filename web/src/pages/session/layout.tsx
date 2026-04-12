@@ -10,6 +10,8 @@ import { getEvaluation } from "@/pb/drill/v1/evaluation-EvaluationService_connec
 import { SessionStatus } from "@/pb/drill/v1/session_pb";
 import { getSession } from "@/pb/drill/v1/session-SessionService_connectquery";
 
+import { SessionDetailCtx } from "./session-detail-ctx";
+
 // ---------------------------------------------------------------------------
 // Waiting state — shown when evaluation is still in progress
 // ---------------------------------------------------------------------------
@@ -56,7 +58,7 @@ interface TabLinkProps {
   disabled?: boolean;
 }
 
-function TabLink({ to, children, disabled }: TabLinkProps) {
+export function TabLink({ to, children, disabled }: TabLinkProps) {
   if (disabled) {
     return (
       <span className="px-4 py-2.5 text-sm text-muted-foreground/50 cursor-default select-none">
@@ -90,7 +92,11 @@ function TabLink({ to, children, disabled }: TabLinkProps) {
 export default function SessionLayout() {
   const { id } = useParams<{ id: string }>();
   if (!id) return <Navigate to="/" replace />;
-  return <SessionLayoutInner id={id} />;
+  return (
+    <SessionDetailCtx.Provider value={{ dataSource: "api", sessionId: id }}>
+      <SessionLayoutInner id={id} />
+    </SessionDetailCtx.Provider>
+  );
 }
 
 function SessionLayoutInner({ id }: { id: string }) {
@@ -131,7 +137,7 @@ function SessionLayoutInner({ id }: { id: string }) {
     <div className="space-y-0">
       {/* Tab bar */}
       <div className="border-b border-border -mx-4 px-4">
-        <nav className="flex items-end max-w-5xl mx-auto -mb-px">
+        <nav aria-label="Session tabs" className="flex items-end max-w-5xl mx-auto -mb-px">
           <TabLink to={`/sessions/${id}/overview`} disabled={!overviewEnabled}>
             Overview
           </TabLink>

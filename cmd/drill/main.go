@@ -80,8 +80,7 @@ func runWithContext(ctx context.Context) error {
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)
 
-	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
-	h, err := handler.NewHandler(b, drill.WebFS, csrfKey, cfg.Auth.SecureCookies())
+	h, err := handler.NewHandler(b, drill.WebFS)
 	if err != nil {
 		return fmt.Errorf("create handler: %w", err)
 	}
