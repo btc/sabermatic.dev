@@ -548,43 +548,125 @@ EOF
 
 ---
 
-## Task 2: Delete `ConnectPathPrefixes()`
+## Task 2: Drop `otelhttp.WithFilter`; delete `ConnectPathPrefixes()`
 
-The function existed only to feed the CSRF exemption list. Without CSRF, it has no callers. Note: it's still referenced inside `routes.go`'s OTel filter (kept after Step 1) — that filter strips Connect spans, which is independent of CSRF and must continue working. So the function stays alive but the spec's intent was to delete it. Re-read step 2 in spec — yes, spec says delete, but the OTel filter at `routes.go:48` still uses it. Resolve: keep the function (the OTel filter is a real caller).
+Today the OTel filter in `NewHandler` uses `rpc.ConnectPathPrefixes()` to skip span creation on Connect routes (because Connect's `otelconnect` interceptor already emits a span — the filter prevents duplicates). This creates parallel state: every new Connect service must be added to `rpc.ConnectPathPrefixes()` or duplicate spans appear.
 
-Update the spec/plan understanding: `ConnectPathPrefixes` has one remaining caller (OTel filter) and stays. Skip the deletion. Document this discovery.
+Per spec §OTel span model, drop the filter. Each Connect call now produces an `otelhttp` parent span (HTTP method, route, status, duration) and an `otelconnect` child span (procedure, codec). `drilotel.Init` already uses `ParentBased(TraceIDRatioBased)`, so the child inherits the parent's sampling decision — unsampled traces cost nothing. With the filter gone, `ConnectPathPrefixes()` has zero callers and is deleted.
 
-- [ ] **Step 2.1: Verify `ConnectPathPrefixes` callers**
+**Files:**
+- Modify: `internal/handler/routes.go` (remove `otelhttp.WithFilter` and the inline filter func)
+- Modify: `internal/rpc/register.go` (delete `ConnectPathPrefixes` function)
+
+- [ ] **Step 2.1: Verify caller landscape**
 
 Run: `cd /Users/btc/Projects/src/drill && grep -rn "ConnectPathPrefixes" --include="*.go"`
-Expected: matches in `internal/rpc/register.go` (definition) and `internal/handler/routes.go` (OTel filter caller). The CSRF caller was deleted in Task 1.
+Expected after Task 1: matches in `internal/rpc/register.go` (definition) and `internal/handler/routes.go` (OTel filter — about to be removed). The CSRF caller was deleted in Task 1.
 
-- [ ] **Step 2.2: Decision — function stays**
+- [ ] **Step 2.2: Remove the `otelhttp.WithFilter` block from `NewHandler`**
 
-The OTel filter in `routes.go:NewHandler` uses `ConnectPathPrefixes()` to skip duplicate spans on Connect routes (Connect's own otelconnect interceptor already creates spans). This is unrelated to CSRF and is a legitimate caller. The function stays.
+Open `internal/handler/routes.go`. Find this block in `NewHandler`:
 
-If you read the spec and expected to delete this function, the spec is incorrect on this point. Do not delete it. Skip to Task 3.
-
-- [ ] **Step 2.3: Update spec to reflect this finding**
-
-Edit `docs/superpowers/specs/2026-04-12-http-package-refactor-design.md`. Find the "Step 2 — Delete ConnectPathPrefixes()" section and replace with:
-
-```markdown
-### Step 2 — Verify `ConnectPathPrefixes()` callers (no deletion)
-
-`ConnectPathPrefixes()` has a second caller besides the deleted CSRF exemption: the OTel middleware filter in `NewHandler` uses it to skip duplicate spans on Connect routes (Connect's own `otelconnect` interceptor already emits spans). This caller is unrelated to CSRF and remains. The function stays.
-
-- Verify: `grep -rn "ConnectPathPrefixes" --include="*.go"` shows callers in `register.go` (definition) and `routes.go` (OTel filter only, no longer in CSRF middleware).
+```go
+	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			if r.Pattern != "" {
+				return r.Pattern
+			}
+			return r.Method + " " + r.URL.Path
+		}),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			for _, prefix := range rpc.ConnectPathPrefixes() {
+				if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
+					return false
+				}
+			}
+			return true
+		}),
+	)(mux)
 ```
 
-- [ ] **Step 2.4: Commit spec update**
+Replace with:
+
+```go
+	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			if r.Pattern != "" {
+				return r.Pattern
+			}
+			return r.Method + " " + r.URL.Path
+		}),
+	)(mux)
+```
+
+Do not remove the `strings` or `rpc` imports — both are used elsewhere in the file (`strings` by `SPAHandler`, `rpc` by `rpc.Register`).
+
+- [ ] **Step 2.3: Delete `ConnectPathPrefixes` from `internal/rpc/register.go`**
+
+Open `internal/rpc/register.go`. Delete this function and its doc comment:
+
+```go
+// ConnectPathPrefixes returns all path prefixes used by registered Connect
+// services. Used by the CSRF middleware to exempt Connect routes.
+func ConnectPathPrefixes() []string {
+	return []string{
+		drillv1connect.AuthServiceName,
+		drillv1connect.BillingServiceName,
+		drillv1connect.EducatorServiceName,
+		drillv1connect.QuestionServiceName,
+		drillv1connect.CoachServiceName,
+		drillv1connect.EvaluationServiceName,
+		drillv1connect.InterviewServiceName,
+		drillv1connect.SampleServiceName,
+		drillv1connect.SessionServiceName,
+		drillv1connect.UserServiceName,
+	}
+}
+```
+
+After deletion, `register.go` has only the imports and `Register()`. Remove any imports that become unused (most likely `drillv1connect` is still used by `Register()` — verify with `goimports` or `go build`).
+
+- [ ] **Step 2.4: Verify build and tests**
+
+Run: `cd /Users/btc/Projects/src/drill && go build ./... && go test ./internal/handler/... ./internal/rpc/... -race -count=1 -timeout=120s`
+Expected: build succeeds, tests pass.
+
+- [ ] **Step 2.5: Verify trace nesting in local dev**
+
+Run `make dev`. With OTel exporter pointed at console or local Jaeger/Tempo:
+
+1. Fire a unary Connect RPC from the SPA (e.g., login). Look for two spans sharing one trace ID: an HTTP parent (e.g., `POST /drill.v1.AuthService/Login`) and an `otelconnect` child (e.g., `drill.v1.AuthService/Login`).
+2. Fire a streaming RPC: open a session and submit a turn (`InterviewService.SubmitTurn`). Verify the parent HTTP span's `End` does not occur before the child Connect span's `End` — the parent should bracket the entire stream lifetime. If you see "parent ended before child" warnings in your trace UI, escalate.
+3. If the trace UI shows confusingly similar span names (HTTP `POST /drill.v1.AuthService/Login` next to Connect `drill.v1.AuthService/Login`), that's expected — they describe the same request at two layers. Eyeball it once and move on.
+
+- [ ] **Step 2.6: Run full CI**
+
+Run: `cd /Users/btc/Projects/src/drill && make test`
+Expected: green.
+
+- [ ] **Step 2.7: Commit**
 
 ```bash
 cd /Users/btc/Projects/src/drill
-git add docs/superpowers/specs/2026-04-12-http-package-refactor-design.md
-git commit -m "docs: keep ConnectPathPrefixes (OTel filter still uses it)
+git add internal/handler/routes.go internal/rpc/register.go
+git commit -m "$(cat <<'EOF'
+refactor: drop otelhttp filter, delete ConnectPathPrefixes
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+Removing the filter eliminates parallel state between rpc.Register and
+handler.NewHandler — every new Connect service had to be added to the
+prefix list or duplicate spans appeared. The OTel-recommended pattern
+is to let each layer instrument what it knows: otelhttp produces the
+HTTP parent span, otelconnect produces a Connect child span.
+
+drilotel already uses ParentBased(TraceIDRatioBased), so the child
+inherits the parent's sampling decision — unsampled traces cost
+nothing. Volume impact is bounded by cfg.SampleRate.
+
+ConnectPathPrefixes has zero callers after this change and is deleted.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+EOF
+)"
 ```
 
 ---
@@ -1147,15 +1229,15 @@ func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 
 - [ ] **Step 5.2: Rewrite `internal/handler/routes.go` (will be renamed to `server.go` next)**
 
-Replace with just the assembly + registration code:
+Replace with just the assembly + registration code. By this point Task 2 has removed `otelhttp.WithFilter`, so the OTel block is the simplified version. `strings` is no longer needed in this file — it lives in `spa.go` now (and was used by the deleted CSRF filter).
 
 ```go
 package handler
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
-	"strings"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -1188,14 +1270,6 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 			}
 			return r.Method + " " + r.URL.Path
 		}),
-		otelhttp.WithFilter(func(r *http.Request) bool {
-			for _, prefix := range rpc.ConnectPathPrefixes() {
-				if strings.HasPrefix(r.URL.Path, "/"+prefix+"/") {
-					return false
-				}
-			}
-			return true
-		}),
 	)(mux)
 
 	return SecurityHeaders(secureCookies, otelHandler), nil
@@ -1211,6 +1285,12 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 // signature-verified; OAuth callbacks use the state parameter. If a future
 // cookie-authenticated REST mutation endpoint is added, wrap it in a
 // per-route CSRF helper at registration time.
+//
+// OTel tracing: otelhttp wraps the entire mux and produces the HTTP-level
+// span. Connect routes also produce a child Connect-level span via the
+// otelconnect interceptor in rpc.Register. drilotel uses
+// ParentBased(TraceIDRatioBased) so the child inherits the parent's
+// sampling decision — unsampled traces cost nothing.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
@@ -1240,23 +1320,6 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 
 	return nil
 }
-```
-
-Note: this requires `io/fs` import for the `fs.FS` parameter — add it. Final import list should be:
-
-```go
-import (
-	"fmt"
-	"io/fs"
-	"net/http"
-	"strings"
-
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
-	"github.com/btc/drill/internal/backend"
-	"github.com/btc/drill/internal/drilotel"
-	"github.com/btc/drill/internal/rpc"
-)
 ```
 
 - [ ] **Step 5.3: Rename `routes.go` → `server.go`**
