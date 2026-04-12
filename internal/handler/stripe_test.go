@@ -24,7 +24,10 @@ func TestStripeWebhook_ValidSignature(t *testing.T) {
 	b.SetConfig(cfg)
 
 	// A minimal Stripe event payload. The handler routes by event type;
-	// "ping" is unknown so HandleStripeWebhook returns nil (success).
+	// "ping" falls through HandleStripeWebhook's default branch (see
+	// internal/backend/billing.go), which logs "unhandled stripe event" and
+	// returns nil. Any not-handled event type would work; "ping" is chosen
+	// because it's clearly synthetic.
 	payload := []byte(`{"id":"evt_test_1","type":"ping","data":{"object":{}}}`)
 	signed := webhook.GenerateTestSignedPayload(&webhook.UnsignedPayload{
 		Payload:   payload,
@@ -70,8 +73,9 @@ func TestStripeWebhook_MissingSecret(t *testing.T) {
 
 	payload := []byte(`{"id":"evt_test_3","type":"ping","data":{"object":{}}}`)
 
+	// No Stripe-Signature header — the handler short-circuits on empty secret
+	// before reading the header, so its presence is irrelevant.
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/stripe", bytes.NewReader(payload))
-	req.Header.Set("Stripe-Signature", "t=0,v1=anything")
 
 	w := httptest.NewRecorder()
 	handler.PostStripeWebhook(b)(w, req)
