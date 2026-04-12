@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gorilla/csrf"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/btc/drill/internal/auth"
@@ -19,12 +18,11 @@ import (
 	"github.com/btc/drill/internal/rpc"
 )
 
-// NewHandler builds the full HTTP handler chain: routes, CSRF, OTel tracing,
-// and webhook/Connect CSRF exemption. Returns a ready-to-use http.Handler.
+// NewHandler builds the full HTTP handler chain: routes, OTel tracing, and
+// security headers. Returns a ready-to-use http.Handler.
 func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	cfg := b.Config()
 	baseURL := cfg.Auth.BaseURL
-	csrfKey := auth.DeriveKey(cfg.Auth.TokenSecret, "csrf")
 	secureCookies := cfg.Auth.SecureCookies()
 
 	mux := http.NewServeMux()
@@ -54,11 +52,19 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 		}),
 	)(mux)
 
-	return SecurityHeaders(secureCookies, csrfMiddleware(otelHandler, csrfKey, secureCookies)), nil
+	return SecurityHeaders(secureCookies, otelHandler), nil
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.
 // Used by NewHandler for production and directly by tests.
+//
+// Security model: this app does not use anti-CSRF tokens. ConnectRPC's
+// Connect-Protocol-Version custom header forces a CORS preflight, which
+// the absence of permissive CORS config blocks; the SPA is served
+// same-origin; session cookies are SameSite=Lax; the Stripe webhook is
+// signature-verified; OAuth callbacks use the state parameter. If a future
+// cookie-authenticated REST mutation endpoint is added, wrap it in a
+// per-route CSRF helper at registration time.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
@@ -71,15 +77,11 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	requireAdmin := auth.RequireAdmin()
 	mux.Handle("/admin/jobs/", requireAuth(requireAdmin(b.RiverUIHandler())))
 
-	// Auth (ConnectRPC AuthService handles signup/login/logout/etc.)
-
 	// OAuth
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", OAuthStart(b))
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", OAuthCallback(b))
 
-	// Stripe webhook — no auth, signature verified.
-	// Must be exempt from CSRF middleware. Registered here before any
-	// CSRF wrapping, or add to CSRF exemption filter.
+	// Stripe webhook — signature-verified by the handler.
 	mux.HandleFunc("POST /api/webhooks/stripe", PostStripeWebhook(b))
 
 	return nil
@@ -174,60 +176,4 @@ func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	}), nil
-}
-
-// isCSRFExempt returns true for paths that handle their own request
-// authentication and don't need CSRF protection.
-func isCSRFExempt(path, method string, connectPrefixes []string) bool {
-	// Stripe webhook — signature-verified by the handler.
-	if path == "/api/webhooks/stripe" && method == http.MethodPost {
-		return true
-	}
-	// River UI — application/json bodies; auth checked by requireAuth middleware.
-	if strings.HasPrefix(path, "/admin/jobs/") || path == "/admin/jobs" {
-		return true
-	}
-	// ConnectRPC — custom Content-Type prevents cross-origin form submissions.
-	for _, prefix := range connectPrefixes {
-		if strings.HasPrefix(path, "/"+prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-// csrfMiddleware wraps the given handler with gorilla/csrf protection, exposes
-// the CSRF token via response header, and exempts routes that have their own
-// protection (Stripe webhooks use signature verification; ConnectRPC uses
-// custom Content-Type headers that prevent cross-origin form submissions).
-func csrfMiddleware(next http.Handler, csrfKey []byte, secureCookies bool) http.Handler {
-	csrfProtect := csrf.Protect(
-		csrfKey,
-		csrf.Secure(secureCookies),
-		csrf.HttpOnly(false),
-		csrf.CookieName("sabermatic_csrf"),
-		csrf.Path("/"),
-		csrf.SameSite(csrf.SameSiteLaxMode),
-	)
-
-	// CSRF-protected handler that exposes the masked token via response header.
-	csrfProtected := csrfProtect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-CSRF-Token", csrf.Token(r))
-		next.ServeHTTP(w, r)
-	}))
-
-	connectPrefixes := rpc.ConnectPathPrefixes()
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isCSRFExempt(r.URL.Path, r.Method, connectPrefixes) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		// For plaintext HTTP (local dev), mark requests so gorilla/csrf skips
-		// HTTPS-only referer/origin checks.
-		if !secureCookies {
-			r = csrf.PlaintextHTTPRequest(r)
-		}
-		csrfProtected.ServeHTTP(w, r)
-	})
 }
