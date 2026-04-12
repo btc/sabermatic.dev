@@ -100,10 +100,10 @@ Each step ends with `make test` green. Each step is independently revertable.
 ### Step 2 — Drop `otelhttp.WithFilter`; delete `ConnectPathPrefixes()`
 
 - In `NewHandler` (`internal/handler/routes.go`), remove the `otelhttp.WithFilter(...)` option. Keep `otelhttp.WithSpanNameFormatter`. The filter's only purpose was to suppress duplicate spans on Connect routes; the new model accepts nested spans (see §OTel span model).
-- Drop the `strings` and `rpc` imports from `routes.go` if no other callers in the file (verify after edit).
+- Both `strings` and `rpc` imports stay in `routes.go` — `strings` is used by `SPAHandler` and other helpers, and `rpc.Register` is still the entry point for mounting Connect handlers.
 - Delete `ConnectPathPrefixes()` from `internal/rpc/register.go`. Both callers (CSRF middleware in step 1, OTel filter in this step) are gone.
 - Verify: `go build ./...` + `make test`.
-- Verify trace nesting in local dev: run `make dev`, fire a Connect RPC from the SPA, check the OTel exporter (logs or collector) for two spans per call — an HTTP parent and a Connect child sharing the same trace ID.
+- Verify trace nesting in local dev: run `make dev`, fire a unary Connect RPC from the SPA, check the OTel exporter (logs or collector) for two spans per call — an HTTP parent and a Connect child sharing the same trace ID. Also fire a streaming RPC (e.g., `InterviewService.SubmitTurn`) and verify the parent HTTP span's `End` does not occur before the child Connect span's `End` — in otelhttp, the span ends when the handler returns, which for streaming Connect means after the stream completes; this is the expected pairing but worth eyeballing once.
 
 ### Step 3 — Move storage mux into `NewHandler`
 
@@ -151,7 +151,8 @@ Each step ends with `make test` green. Each step is independently revertable.
 ## Risks
 
 - **CSRF removal blast radius.** A future cookie-auth REST mutation endpoint added without `WithCSRF` would be vulnerable. Mitigated by the security-model comment in `server.go` (step 5).
-- **OTel trace volume increase.** Removing the `otelhttp` filter doubles the span count on Connect routes (HTTP parent + Connect child). At current request volume this is negligible; at scale it may matter for span-budget-priced exporters. Sampling configuration is unchanged and applies uniformly. If volume becomes a concern, switch to a tail-based or ratio sampler in `drilotel.Init` rather than reintroducing the filter.
+- **OTel trace volume increase.** Removing the `otelhttp` filter doubles the span count *on sampled* Connect routes (one HTTP parent + one Connect child for unary calls; streaming RPCs add per-message events on the Connect child span, not extra spans). `drilotel.Init` (`internal/drilotel/drilotel.go:90-94`) already uses `sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.SampleRate))`, so the otelconnect child inherits the otelhttp parent's sampling decision — unsampled traces cost nothing, and the volume impact is bounded by `cfg.SampleRate`. If volume becomes a concern at production scale, lower `cfg.SampleRate` rather than reintroducing the filter.
+- **Span name overlap, not collision.** otelhttp names spans via `WithSpanNameFormatter` (e.g., `POST /drill.v1.AuthService/Login`); otelconnect names its child span by procedure (`drill.v1.AuthService/Login`). Similar but not identical strings, which is fine for trace UI grouping. Eyeball your trace exporter once after the change to confirm rendering is sensible.
 - **Test migration in step 6** is mechanical but touches files not fully read during brainstorm. Watch for hidden setup logic in `oauth_flow_test.go` and `testutil/testutil.go`.
 - **Frontend smoke gap.** Removing `X-CSRF-Token` from request headers must not break any code path that reads it from the request. Verified: backend has no `r.Header.Get("X-CSRF-Token")` callers outside `gorilla/csrf`.
 - **Stale references in historical plan docs.** Plans under `docs/superpowers/plans/` (e.g., `2026-04-02-phase3b-oauth-csrf.md`) reference the CSRF middleware being removed. These are historical records of completed work and are intentionally left as-is.
