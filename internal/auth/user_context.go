@@ -7,6 +7,12 @@ import (
 	"github.com/google/uuid"
 )
 
+const SessionCookieName = "drill_session"
+
+type contextKey string
+
+const userContextKey contextKey = "auth_user"
+
 // AuthUser is the authenticated user extracted from the session cookie.
 type AuthUser struct {
 	ID            uuid.UUID
@@ -18,9 +24,11 @@ type AuthUser struct {
 	CreatedAt     time.Time
 }
 
-type contextKey string
-
-const userContextKey contextKey = "auth_user"
+// SessionAuthenticator validates a hashed session token and returns the
+// authenticated user. Implemented by *backend.Backend.
+type SessionAuthenticator interface {
+	AuthenticateSession(ctx context.Context, tokenHash string) (*AuthUser, error)
+}
 
 // WithUser stores the authenticated user in the context.
 func WithUser(ctx context.Context, user *AuthUser) context.Context {
@@ -32,12 +40,4 @@ func WithUser(ctx context.Context, user *AuthUser) context.Context {
 func UserFromContext(ctx context.Context) *AuthUser {
 	user, _ := ctx.Value(userContextKey).(*AuthUser)
 	return user
-}
-
-const SessionCookieName = "drill_session"
-
-// SessionAuthenticator validates a hashed session token and returns the
-// authenticated user. Implemented by *backend.Backend.
-type SessionAuthenticator interface {
-	AuthenticateSession(ctx context.Context, tokenHash string) (*AuthUser, error)
 }

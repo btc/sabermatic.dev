@@ -26,7 +26,7 @@ func Health(b *backend.Backend) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(httpStatus)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": status,
 			"db":     dbOK,
 		})
