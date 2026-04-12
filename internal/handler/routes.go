@@ -11,7 +11,6 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
-	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/branding"
 	"github.com/btc/drill/internal/drilotel"
@@ -65,8 +64,8 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	mux.HandleFunc("GET /api/health", Health(b))
 
 	// Admin — requires both auth and admin role.
-	requireAuth := auth.RequireAuth(b)
-	requireAdmin := auth.RequireAdmin()
+	requireAuth := RequireAuth(b)
+	requireAdmin := RequireAdmin()
 	mux.Handle("/admin/jobs/", requireAuth(requireAdmin(b.RiverUIHandler())))
 
 	// OAuth
