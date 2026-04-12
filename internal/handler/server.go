@@ -13,7 +13,9 @@ import (
 )
 
 // NewHandler builds the full HTTP handler chain: routes, OTel tracing, and
-// security headers. Returns a ready-to-use http.Handler.
+// security headers. Returns a ready-to-use http.Handler. See registerRoutes
+// for the route surface and the security model (no CSRF by default; opt in
+// per-route if a future cookie-auth REST mutation endpoint is added).
 //
 // OTel tracing: otelhttp wraps the entire mux and produces the HTTP-level
 // span. Connect routes also produce a child Connect-level span via the
