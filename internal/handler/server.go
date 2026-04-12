@@ -26,7 +26,7 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	secureCookies := cfg.Auth.SecureCookies()
 
 	mux := http.NewServeMux()
-	if err := RegisterRoutes(mux, b); err != nil {
+	if err := registerRoutes(mux, b); err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
 	}
 	spaHandler, err := SPAHandler(spaFS, baseURL)
@@ -47,8 +47,7 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	return SecurityHeaders(secureCookies, otelHandler), nil
 }
 
-// RegisterRoutes sets up all HTTP routes on the given mux.
-// Used by NewHandler for production and directly by tests.
+// registerRoutes sets up all HTTP routes on the given mux.
 //
 // Security model: this app does not use anti-CSRF tokens. ConnectRPC's
 // Connect-Protocol-Version custom header forces a CORS preflight, which
@@ -57,7 +56,7 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 // signature-verified; OAuth callbacks use the state parameter. If a future
 // cookie-authenticated REST mutation endpoint is added, wrap it in a
 // per-route CSRF helper at registration time.
-func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
+func registerRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
 	}

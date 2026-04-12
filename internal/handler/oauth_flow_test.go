@@ -14,7 +14,6 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/testutil"
 )
 
@@ -52,8 +51,7 @@ func setupGothForTest(t *testing.T, user goth.User) {
 
 func TestOAuthStart_UnknownProvider(t *testing.T) {
 	b := pg.NewBackend(t)
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	h := testutil.NewTestHandler(t, b)
 
 	// No providers registered → any provider returns 404.
 	goth.ClearProviders()
@@ -61,7 +59,7 @@ func TestOAuthStart_UnknownProvider(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/nonexistent", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -75,9 +73,7 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 		"BASE_URL": "http://localhost:3000",
 	})
 	b := testutil.NewBackend(t, cfg)
-
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	h := testutil.NewTestHandler(t, b)
 
 	setupGothForTest(t, goth.User{
 		Provider: "faux",
@@ -89,7 +85,7 @@ func TestOAuthCallback_NewUser(t *testing.T) {
 	// Call the callback endpoint. The provider path value must match a registered provider.
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 
 	// Should redirect to home.
 	assert.Equal(t, http.StatusFound, w.Code)
@@ -113,9 +109,7 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 		"BASE_URL": "http://localhost:3000",
 	})
 	b := testutil.NewBackend(t, cfg)
-
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	h := testutil.NewTestHandler(t, b)
 
 	oauthUser := goth.User{
 		Provider: "faux",
@@ -128,13 +122,13 @@ func TestOAuthCallback_ExistingUser(t *testing.T) {
 	// First login — creates user.
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusFound, w.Code)
 
 	// Second login — same provider + provider_id → finds existing user.
 	req2 := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
 	w2 := httptest.NewRecorder()
-	mux.ServeHTTP(w2, req2)
+	h.ServeHTTP(w2, req2)
 	assert.Equal(t, http.StatusFound, w2.Code)
 	assert.Equal(t, "http://localhost:3000/", w2.Header().Get("Location"))
 
@@ -156,9 +150,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 		"BASE_URL": "http://localhost:3000",
 	})
 	b := testutil.NewBackend(t, cfg)
-
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	h := testutil.NewTestHandler(t, b)
 
 	// GitHub sometimes has empty Name but non-empty NickName.
 	setupGothForTest(t, goth.User{
@@ -171,7 +163,7 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusFound, w.Code)
 
@@ -184,15 +176,14 @@ func TestOAuthCallback_NickNameFallback(t *testing.T) {
 
 func TestOAuthCallback_UnknownProvider(t *testing.T) {
 	b := pg.NewBackend(t)
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	h := testutil.NewTestHandler(t, b)
 
 	goth.ClearProviders()
 	t.Cleanup(goth.ClearProviders)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/nonexistent/callback", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }

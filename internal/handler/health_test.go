@@ -6,20 +6,20 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/btc/drill/internal/handler"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/testutil"
 )
 
 func TestHealthCheck_Healthy(t *testing.T) {
 	t.Parallel()
 
 	b := pg.NewBackend(t)
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
+	h := testutil.NewTestHandler(t, b)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
+	h.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"testing/fstest"
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/require"
@@ -20,14 +21,28 @@ import (
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 )
 
+// minimalIndexHTML is the bare HTML used for handler tests. SPAHandler reads
+// this from the fstest.MapFS during NewHandler construction.
+const minimalIndexHTML = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>`
+
+// NewTestHandler builds the production HTTP handler with a minimal in-memory
+// SPA. Tests call this instead of handler.RegisterRoutes so they exercise the
+// same middleware chain as production (SecurityHeaders, OTel tracing).
+func NewTestHandler(t *testing.T, b *backend.Backend) http.Handler {
+	t.Helper()
+	fsys := fstest.MapFS{
+		"web/dist/index.html": &fstest.MapFile{Data: []byte(minimalIndexHTML)},
+	}
+	h, err := handler.NewHandler(b, fsys)
+	require.NoError(t, err)
+	return h
+}
+
 // SignupAndLogin creates a user via ConnectRPC AuthService and returns the raw
 // session token string.
 func SignupAndLogin(t *testing.T, b *backend.Backend) string {
 	t.Helper()
-	mux := http.NewServeMux()
-	require.NoError(t, handler.RegisterRoutes(mux, b))
-
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewServer(NewTestHandler(t, b))
 	t.Cleanup(srv.Close)
 
 	// Signup via ConnectRPC.
