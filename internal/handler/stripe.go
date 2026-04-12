@@ -12,8 +12,11 @@ import (
 
 // PostStripeWebhook returns a handler that processes incoming Stripe webhook
 // events. The request body is verified against the Stripe-Signature header
-// using the configured webhook secret. Always returns 200 to avoid Stripe
-// retries on application errors that would recur.
+// using the configured webhook secret. Status codes:
+//   - 200 on success, or when deliberately swallowing a misconfiguration
+//     (missing webhook secret, unreadable body) to avoid Stripe retry storms.
+//   - 400 on signature-verification failure (the sender isn't Stripe).
+//   - 500 on transient handler errors — Stripe retries these.
 func PostStripeWebhook(b *backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const maxBodyBytes = 65536
