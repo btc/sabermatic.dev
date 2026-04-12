@@ -13,9 +13,15 @@ import (
 )
 
 // NewHandler builds the full HTTP handler chain: routes, OTel tracing, and
-// security headers. Returns a ready-to-use http.Handler. See registerRoutes
-// for the route surface and the security model (no CSRF by default; opt in
-// per-route if a future cookie-auth REST mutation endpoint is added).
+// security headers. Returns a ready-to-use http.Handler.
+//
+// Security model: this app does not use anti-CSRF tokens. ConnectRPC's
+// Connect-Protocol-Version custom header forces a CORS preflight, which
+// the absence of permissive CORS config blocks; the SPA is served
+// same-origin; session cookies are SameSite=Lax; the Stripe webhook is
+// signature-verified; OAuth callbacks use the state parameter. If a future
+// cookie-authenticated REST mutation endpoint is added, wrap it in a
+// per-route CSRF helper at registration time (see registerRoutes).
 //
 // OTel tracing: otelhttp wraps the entire mux and produces the HTTP-level
 // span. Connect routes also produce a child Connect-level span via the
@@ -49,15 +55,9 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	return SecurityHeaders(secureCookies, otelHandler), nil
 }
 
-// registerRoutes sets up all HTTP routes on the given mux.
-//
-// Security model: this app does not use anti-CSRF tokens. ConnectRPC's
-// Connect-Protocol-Version custom header forces a CORS preflight, which
-// the absence of permissive CORS config blocks; the SPA is served
-// same-origin; session cookies are SameSite=Lax; the Stripe webhook is
-// signature-verified; OAuth callbacks use the state parameter. If a future
-// cookie-authenticated REST mutation endpoint is added, wrap it in a
-// per-route CSRF helper at registration time.
+// registerRoutes sets up all HTTP routes on the given mux. See NewHandler
+// for the security model; any future cookie-auth REST mutation endpoint
+// added here must wrap the handler in a per-route CSRF helper.
 func registerRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)

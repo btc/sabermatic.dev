@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/handler"
@@ -129,7 +131,63 @@ func TestRequireAuth_InvalidSession(t *testing.T) {
 	require.True(t, sa.called)
 }
 
+func TestRequireAuth_EmptyCookieValue(t *testing.T) {
+	t.Parallel()
+
+	sa := &stubAuthenticator{}
+	h := handler.RequireAuth(sa)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: ""})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.False(t, sa.called, "authenticator must not be called on empty cookie value")
+}
+
+// TestRequireAuth_SetsUserIDSpanAttribute pins the telemetry contract: on a
+// successful session, the middleware writes `user_id` onto the ambient span.
+// Without this test, a refactor could silently drop the attribute and we'd
+// lose per-user trace correlation.
+func TestRequireAuth_SetsUserIDSpanAttribute(t *testing.T) {
+	t.Parallel()
+
+	exp := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+
+	userID := uuid.New()
+	sa := &stubAuthenticator{user: &auth.AuthUser{ID: userID, Role: "candidate"}}
+
+	h := handler.RequireAuth(sa)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	ctx, span := tp.Tracer("test").Start(context.Background(), "req")
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "raw-token"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	span.End()
+
+	spans := exp.GetSpans()
+	require.Len(t, spans, 1)
+	var got string
+	for _, a := range spans[0].Attributes {
+		if string(a.Key) == "user_id" {
+			got = a.Value.AsString()
+			break
+		}
+	}
+	require.Equal(t, userID.String(), got, "expected user_id attribute on span")
+}
+
 func TestRequireAdmin_NoUser(t *testing.T) {
+	t.Parallel()
+
 	h := handler.RequireAdmin()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -140,6 +198,8 @@ func TestRequireAdmin_NoUser(t *testing.T) {
 }
 
 func TestRequireAdmin_CandidateRole(t *testing.T) {
+	t.Parallel()
+
 	h := handler.RequireAdmin()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -151,6 +211,8 @@ func TestRequireAdmin_CandidateRole(t *testing.T) {
 }
 
 func TestRequireAdmin_AdminRole(t *testing.T) {
+	t.Parallel()
+
 	h := handler.RequireAdmin()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

@@ -41,6 +41,7 @@ func TestStorageRoute_GCSNotRegistered(t *testing.T) {
 	cfg.Storage.Backend = "gcs"
 	cfg.Storage.Bucket = "test-bucket"
 	cfg.Storage.PublicBucket = "test-public-bucket"
+	cfg.Storage.LocalDir = t.TempDir()
 	b.SetConfig(cfg)
 
 	// With gcs backend, /storage/ is not registered on the mux; the request
