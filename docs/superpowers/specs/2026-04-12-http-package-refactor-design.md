@@ -30,6 +30,16 @@ The Stripe webhook is signature-verified (`internal/handler/billing.go:37` via `
 
 If a future cookie-auth REST mutation endpoint is added, the developer must consciously add a `WithCSRF` wrapper at that route. To make this discoverable, `server.go` will carry a comment near `RegisterRoutes` explaining the security model and the opt-in path.
 
+### OTel span model
+
+Today `NewHandler` wraps the entire mux with `otelhttp.NewMiddleware` and then uses `otelhttp.WithFilter` plus `rpc.ConnectPathPrefixes()` to skip span creation on Connect routes. The reasoning was that Connect's own `otelconnect` interceptor already creates a span per RPC, so wrapping with `otelhttp` would produce a duplicate.
+
+This is parallel state: every new Connect service must be added to `rpc.ConnectPathPrefixes()` or the OTel filter silently breaks (duplicate spans on the new service). It's a hidden coupling between `rpc.Register` and `handler.NewHandler`.
+
+**Decision: drop `otelhttp.WithFilter` entirely.** Allow `otelhttp` to wrap all routes uniformly. Connect requests will produce two nested spans per call: an `otelhttp` parent (HTTP method, route pattern, status, duration) and an `otelconnect` child (procedure, codec, Connect error code). This is the OTel-recommended pattern for HTTP-over-RPC stacks: each layer instruments what it knows about. Trace volume on Connect routes roughly doubles, but spans nest correctly under their parent and the eliminated parallel-state hazard is worth the cost.
+
+`rpc.ConnectPathPrefixes()` becomes dead code and is deleted alongside the filter (this is what the original spec intended in Step 2; the plan-time discovery that the OTel filter still used it is resolved by removing the filter too).
+
 ### Package & file shape
 
 Keep `internal/handler/` as the package name. Renaming to `http` would shadow stdlib `net/http`; `drillhttp` was considered (matching the `drilotel` precedent) but `handler` is already in place, used consistently across the repo, and matches the single-word convention of every other internal package.
@@ -87,10 +97,13 @@ Each step ends with `make test` green. Each step is independently revertable.
 - Note: existing `sabermatic_csrf` cookies in client browsers will expire naturally; no cleanup action required.
 - Verify: `make test` + browser smoke (login, session create, billing checkout, OAuth login).
 
-### Step 2 — Delete `ConnectPathPrefixes()`
+### Step 2 — Drop `otelhttp.WithFilter`; delete `ConnectPathPrefixes()`
 
-- Remove function from `internal/rpc/register.go` (only caller was CSRF, gone in step 1).
+- In `NewHandler` (`internal/handler/routes.go`), remove the `otelhttp.WithFilter(...)` option. Keep `otelhttp.WithSpanNameFormatter`. The filter's only purpose was to suppress duplicate spans on Connect routes; the new model accepts nested spans (see §OTel span model).
+- Drop the `strings` and `rpc` imports from `routes.go` if no other callers in the file (verify after edit).
+- Delete `ConnectPathPrefixes()` from `internal/rpc/register.go`. Both callers (CSRF middleware in step 1, OTel filter in this step) are gone.
 - Verify: `go build ./...` + `make test`.
+- Verify trace nesting in local dev: run `make dev`, fire a Connect RPC from the SPA, check the OTel exporter (logs or collector) for two spans per call — an HTTP parent and a Connect child sharing the same trace ID.
 
 ### Step 3 — Move storage mux into `NewHandler`
 
@@ -138,6 +151,7 @@ Each step ends with `make test` green. Each step is independently revertable.
 ## Risks
 
 - **CSRF removal blast radius.** A future cookie-auth REST mutation endpoint added without `WithCSRF` would be vulnerable. Mitigated by the security-model comment in `server.go` (step 5).
+- **OTel trace volume increase.** Removing the `otelhttp` filter doubles the span count on Connect routes (HTTP parent + Connect child). At current request volume this is negligible; at scale it may matter for span-budget-priced exporters. Sampling configuration is unchanged and applies uniformly. If volume becomes a concern, switch to a tail-based or ratio sampler in `drilotel.Init` rather than reintroducing the filter.
 - **Test migration in step 6** is mechanical but touches files not fully read during brainstorm. Watch for hidden setup logic in `oauth_flow_test.go` and `testutil/testutil.go`.
 - **Frontend smoke gap.** Removing `X-CSRF-Token` from request headers must not break any code path that reads it from the request. Verified: backend has no `r.Header.Get("X-CSRF-Token")` callers outside `gorilla/csrf`.
 - **Stale references in historical plan docs.** Plans under `docs/superpowers/plans/` (e.g., `2026-04-02-phase3b-oauth-csrf.md`) reference the CSRF middleware being removed. These are historical records of completed work and are intentionally left as-is.
