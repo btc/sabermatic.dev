@@ -22,7 +22,8 @@ import (
 )
 
 // ConnectPathPrefixes returns all path prefixes used by registered Connect
-// services. Used by the CSRF middleware to exempt Connect routes.
+// services. Used by the OTel filter to exempt Connect routes from HTTP-level
+// tracing (Connect has its own interceptor).
 func ConnectPathPrefixes() []string {
 	return []string{
 		drillv1connect.AuthServiceName,
