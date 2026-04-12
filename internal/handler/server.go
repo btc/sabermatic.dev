@@ -14,6 +14,12 @@ import (
 
 // NewHandler builds the full HTTP handler chain: routes, OTel tracing, and
 // security headers. Returns a ready-to-use http.Handler.
+//
+// OTel tracing: otelhttp wraps the entire mux and produces the HTTP-level
+// span. Connect routes also produce a child Connect-level span via the
+// otelconnect interceptor in rpc.Register. drilotel uses
+// ParentBased(TraceIDRatioBased) so the child inherits the parent's
+// sampling decision — unsampled traces cost nothing.
 func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	cfg := b.Config()
 	baseURL := cfg.Auth.BaseURL
@@ -51,12 +57,6 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 // signature-verified; OAuth callbacks use the state parameter. If a future
 // cookie-authenticated REST mutation endpoint is added, wrap it in a
 // per-route CSRF helper at registration time.
-//
-// OTel tracing: otelhttp wraps the entire mux and produces the HTTP-level
-// span. Connect routes also produce a child Connect-level span via the
-// otelconnect interceptor in rpc.Register. drilotel uses
-// ParentBased(TraceIDRatioBased) so the child inherits the parent's
-// sampling decision — unsampled traces cost nothing.
 func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	if err := rpc.Register(mux, b); err != nil {
 		return fmt.Errorf("rpc register: %w", err)
