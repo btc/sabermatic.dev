@@ -76,6 +76,14 @@ func RegisterRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	// Stripe webhook — signature-verified by the handler.
 	mux.HandleFunc("POST /api/webhooks/stripe", PostStripeWebhook(b))
 
+	// Local-dev storage server: serve uploaded files via HTTP so the browser
+	// can load them. In production (cfg.Storage.Backend == "gcs"), files are
+	// served directly from GCS by signed URLs.
+	if b.Config().Storage.Backend == "local" {
+		mux.Handle("/storage/", http.StripPrefix("/storage/",
+			http.FileServer(http.Dir(b.Config().Storage.LocalDir))))
+	}
+
 	return nil
 }
 
