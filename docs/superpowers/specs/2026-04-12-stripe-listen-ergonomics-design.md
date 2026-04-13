@@ -8,7 +8,7 @@ Make local Stripe webhook testing frictionless:
 
 1. `stripe listen` runs as part of `make dev` — always forwarding, no extra terminal.
 2. The signing secret stays in sync with the server's `STRIPE_WEBHOOK_SECRET` by default, pinned once via a setup target.
-3. Each already-handled webhook branch has a one-line scenario that exercises it with real DB state, so the happy path (not the no-op branch) executes.
+3. Each already-handled webhook branch that can be driven through the CLI has a one-line scenario that exercises it with real DB state, so the happy path (not the no-op branch) executes.
 4. Idempotency is verifiable with one command.
 
 ## Non-goals
@@ -17,6 +17,7 @@ Make local Stripe webhook testing frictionless:
 - Offline fixture signing. Duplicates `internal/backend/billing_test.go` which already constructs `stripe.Event` values directly.
 - Integration tests driven by `stripe listen`. Unit tests at the handler/backend layer are the right coverage; the scenarios in this spec are for interactive local verification.
 - Supporting multiple concurrent developers on the same Stripe test account. One dev = one `stripe listen` session. Documented caveat.
+- A scenario for `handleSubscriptionUpdated`'s `past_due` branch. That branch produces the same DB mutation (`UpdatePlanByStripeCustomer → 'free'`) as `handleSubscriptionDeleted`, which `sub-cancel` already exercises. If the two branches ever diverge (e.g., `past_due` becomes a grace period instead of an immediate downgrade), add a scenario then — likely using Stripe Test Clocks.
 
 ## Components
 
@@ -28,32 +29,48 @@ Add a third process:
 stripe: stripe listen --forward-to localhost:8080/api/webhooks/stripe
 ```
 
-The webhook endpoint is `POST /api/webhooks/stripe` (see `internal/handler/routes.go:83`). The handler verifies signatures using `cfg.Stripe.WebhookSecret`; as long as that matches the CLI's session secret, events flow through.
+The webhook endpoint is registered by `PostStripeWebhook` in `internal/handler/routes.go`. The handler verifies signatures using `cfg.Stripe.WebhookSecret`; as long as that matches the CLI's session secret, events flow through. API-version drift between the CLI's fixtures and the stripe-go SDK version is handled by `webhook.ConstructEventWithOptions(..., IgnoreAPIVersionMismatch: true)` in `internal/handler/billing.go`.
 
 **Failure modes are acceptable:**
 - CLI not installed / not logged in: the `stripe` process exits non-zero at startup and appears failed in overmind. Other processes keep running.
 - Stripe account reauthorization needed: same — visible, loud, doesn't break dev.
+- Startup race: `stripe listen` establishes its websocket before `air` finishes rebuilding. A scenario invoked during a rebuild gets a connection-refused delivery; the event stays in Stripe and is recoverable via `make stripe-resend EVENT=<id>`.
 
 No `--skip-verify` needed (localhost HTTP, not TLS).
 
 ### 2. One-time secret pinning: `scripts/stripe-setup.sh` + `make stripe-setup`
 
-`stripe listen --print-secret` returns the device-local session `whsec_...`, which is stable per CLI install until `stripe logout`. Fetch once, write to `.env`, forget.
+`stripe listen --print-secret` returns the device-local session `whsec_...`, which is stable per CLI install until `stripe logout`. Fetch once, write to `.env`, forget. Re-run after `stripe logout && stripe login`.
 
 ```bash
-# scripts/stripe-setup.sh (sketch)
+#!/usr/bin/env bash
+# scripts/stripe-setup.sh
 set -euo pipefail
+
 if ! stripe config --list >/dev/null 2>&1; then
     stripe login
 fi
+
 secret="$(stripe listen --print-secret)"
-# Upsert STRIPE_WEBHOOK_SECRET in .env, preserving other keys.
-if grep -q '^STRIPE_WEBHOOK_SECRET=' .env; then
+if [[ -z "$secret" ]]; then
+    echo "stripe listen --print-secret returned empty" >&2
+    exit 1
+fi
+
+# Ensure .env ends with a newline before appending.
+if [[ -s .env ]] && [[ "$(tail -c1 .env | od -An -c)" != *"\n"* ]]; then
+    printf '\n' >> .env
+fi
+
+# Upsert STRIPE_WEBHOOK_SECRET; preserve other keys.
+if grep -q '^STRIPE_WEBHOOK_SECRET=' .env 2>/dev/null; then
+    # `-i.bak` form works on both BSD (macOS) and GNU sed.
     sed -i.bak "s|^STRIPE_WEBHOOK_SECRET=.*|STRIPE_WEBHOOK_SECRET=${secret}|" .env
+    rm -f .env.bak
 else
     echo "STRIPE_WEBHOOK_SECRET=${secret}" >> .env
 fi
-rm -f .env.bak
+
 echo "STRIPE_WEBHOOK_SECRET written to .env"
 ```
 
@@ -67,55 +84,77 @@ Documented in `.env.example` with a comment directing new contributors to `make 
 
 ### 3. Scenario runner: `cmd/stripescenario`
 
-A single Go binary with subcommands. Dispatch via `os.Args[1]` + `flag.NewFlagSet` per subcommand (no new deps — codebase doesn't use cobra).
+A single Go binary with subcommands, using `github.com/urfave/cli/v3` to match `cmd/drillctl` (already a go.mod dependency).
 
 **Layout:**
 
 ```
 cmd/stripescenario/
-    main.go         # subcommand dispatch, usage
-    runner.go       # Runner struct, NewRunner (asserts test mode), shared helpers
-    packbuy.go      # (r *Runner) PackBuy(ctx, userID, minutes)
-    substart.go     # (r *Runner) SubStart(ctx, userID)
-    subpastdue.go   # (r *Runner) SubPastDue(ctx, userID)
-    subcancel.go    # (r *Runner) SubCancel(ctx, userID)
-    resend.go       # (r *Runner) Resend(ctx, eventID)
+    main.go         # urfave/cli root command + subcommand registration
+    runner.go       # Runner struct, newRunner (safety assert + deps), shared helpers
+    packbuy.go      # (r *Runner) packBuy(ctx, userID, minutes)
+    substart.go     # (r *Runner) subStart(ctx, userID)
+    subcancel.go    # (r *Runner) subCancel(ctx, userID)
+    resend.go       # (r *Runner) resend(ctx, eventID)
 ```
 
 **`Runner` holds:**
-- `*config.Config` — loads from `.env` same as the server (reuses `internal/config`).
-- `*pgxpool.Pool` — for DB reads/writes in `sub-start` (customer link).
-- Stripe SDK package-level `stripe.Key` set via `cfg.Stripe.Init()` — matches server init path.
+- `*pgxpool.Pool` for DB reads/writes.
+- Stripe SDK API key set as a package-level side-effect (`stripe.Key` from `github.com/stripe/stripe-go/v82`).
 
-**Constructor safety assert:**
+**Config loading.** Read `STRIPE_SECRET_KEY`, `DATABASE_URL`, and `STRIPE_PRO_PRICE_ID` directly via `os.Getenv` after `godotenv.Load()`. Do **not** call `config.Load()` — it requires unrelated fields (`ANTHROPIC_API_KEY`, `GOOGLE_CLOUD_PROJECT`, `AUTH_TOKEN_SECRET`, etc.) that a standalone dev tool shouldn't need. This matches the `drillctl` pattern (`cmd/drillctl/main.go`).
+
+**Constructor (sketch):**
 ```go
-func NewRunner(ctx context.Context) (*Runner, error) {
-    cfg, err := config.Load()
-    if err != nil { return nil, err }
-    if !strings.HasPrefix(cfg.Stripe.SecretKey, "sk_test_") {
-        return nil, fmt.Errorf("refusing to run: STRIPE_SECRET_KEY is not a test key")
+func newRunner(ctx context.Context) (*Runner, error) {
+    key := os.Getenv("STRIPE_SECRET_KEY")
+    if !strings.HasPrefix(key, "sk_test_") {
+        return nil, fmt.Errorf("refusing to run: STRIPE_SECRET_KEY missing or not a test key")
     }
-    cfg.Stripe.Init()
-    // ... pgxpool.New(ctx, cfg.Database.URL)
-    return &Runner{cfg: cfg, pool: pool}, nil
+    dbURL := os.Getenv("DATABASE_URL")
+    if dbURL == "" {
+        return nil, fmt.Errorf("DATABASE_URL not set")
+    }
+    pool, err := pgxpool.New(ctx, dbURL)
+    if err != nil {
+        return nil, fmt.Errorf("db pool: %w", err)
+    }
+    stripe.Key = key
+    return &Runner{pool: pool}, nil
 }
 ```
 
 **Subcommand behaviors:**
 
-| Subcommand | Action | Handler branch exercised |
+| Subcommand | Mechanism | Handler branch exercised |
 |---|---|---|
-| `pack-buy --user <uuid> [--minutes 120]` | Shells `stripe trigger checkout.session.completed --add checkout_session:metadata.user_id=<uuid> --add checkout_session:metadata.pack_minutes=<n>` | `handleCheckoutCompleted` → `CreatePurchaseGrant` |
-| `sub-start --user <uuid>` | (1) `stripe.Customer.New` via API. (2) `UPDATE users SET stripe_customer_id=? WHERE id=?`. (3) Shell `stripe trigger invoice.paid --add invoice:customer=<cus_id>`. | `handleInvoicePaid` → `CreateSubscriptionGrant` |
-| `sub-past-due --user <uuid>` | Looks up `stripe_customer_id` from users table; errors if null ("run sub-start first"). Shells `stripe trigger customer.subscription.updated --add subscription:customer=<cus_id> --add subscription:status=past_due`. | `handleSubscriptionUpdated` → plan flipped to `free` |
-| `sub-cancel --user <uuid>` | Looks up `stripe_customer_id`. Shells `stripe trigger customer.subscription.deleted --add subscription:customer=<cus_id>`. | `handleSubscriptionDeleted` → `UpdatePlanByStripeCustomer("free")` |
-| `resend <event_id>` | Shells `stripe events resend <event_id>`. | Whichever handler matches; used to verify `stripe_event_id` unique dedup. |
+| `pack-buy --user <uuid> [--minutes 120]` | `stripe trigger checkout.session.completed --add checkout_session:metadata.user_id=<uuid> --add checkout_session:metadata.pack_minutes=<n>`. Validate minutes via `billing.ValidPackSize` before triggering to match the production checkout path. | `handleCheckoutCompleted` → `CreatePurchaseGrant` |
+| `sub-start --user <uuid>` | **SDK-driven**, not `stripe trigger`. See below. | `handleInvoicePaid` → `CreateSubscriptionGrant` (and `handleSubscriptionUpdated` on activation) |
+| `sub-cancel --user <uuid>` | **SDK-driven**, not `stripe trigger`. See below. Requires `sub-start` to have run first. | `handleSubscriptionDeleted` → `UpdatePlanByStripeCustomer("free")` |
+| `resend <event_id>` | `stripe events resend "<event_id>"`. Used to verify idempotency. | Whichever handler the original event matched. |
+
+**Why SDK-driven for subscriptions.** `stripe trigger invoice.paid` and `stripe trigger customer.subscription.*` are fixture pipelines that pre-create their own `Customer`/`Subscription` objects. Even with `--override subscription:customer=<cus_id>`, downstream pipeline steps (e.g., `invoiceitem` creation) reference the fixture's internally-created customer, so the emitted event's `customer` does not match the one we wrote into `users.stripe_customer_id`. The `handleInvoicePaid` lookup would hit `n==0`. Real SDK calls produce real webhooks with the correct customer.
+
+**`sub-start` SDK flow:**
+1. `customer.New` (package `github.com/stripe/stripe-go/v82/customer`) with optional email metadata for traceability.
+2. Attach a test payment method (`pm_card_visa` is a stable test token in Stripe test mode) to the customer and set it as the customer's default via `customer.Update` with `InvoiceSettings.DefaultPaymentMethod`.
+3. `pool.Exec(ctx, "UPDATE users SET stripe_customer_id = $1, stripe_customer_id_updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL", cust.ID, userID)`. Check `CommandTag.RowsAffected() == 1`; error with a clear "user not found" if zero. (If the `stripe_customer_id_updated_at` column doesn't exist yet, drop it from the UPDATE — this scenario tool is not the place to add columns.)
+4. `sub.New` with `Customer = cust.ID` and `Items = [{Price: STRIPE_PRO_PRICE_ID}]`. Default `collection_method=charge_automatically` causes Stripe to create and charge the invoice immediately in test mode, firing `invoice.paid`.
+
+If the user already has a `stripe_customer_id`, overwrite. The prior customer is orphaned in the Stripe test account — acceptable (test mode, not prod). Any active subscription on the prior customer will keep billing against its own payment method; running `sub-cancel` only cancels the subscription on the current `stripe_customer_id`.
+
+**`sub-cancel` SDK flow:**
+1. Read `users.stripe_customer_id`; error if null ("run sub-start first").
+2. `sub.List` filtered by `Customer = custID, Status = "active"`.
+3. For each active subscription, `sub.Cancel(subID, nil)` with default immediate cancellation. Emits `customer.subscription.deleted`.
+
+**Orphan leak:** if step 1 of `sub-start` succeeds but step 3 fails (DB update fails), an orphaned `Customer` exists in the Stripe test account. Acceptable in dev tooling — test mode customers are free and listable via `stripe customers list`. Documented caveat, not something the tool handles.
 
 **Shared helpers in `runner.go`:**
-- `(r *Runner) lookupStripeCustomer(ctx, userID) (string, error)` — reads `users.stripe_customer_id`, errors cleanly if null.
-- `(r *Runner) runStripe(args ...string) error` — `exec.Command("stripe", args...)` with stdout/stderr piped, error if non-zero.
+- `(r *Runner) lookupStripeCustomer(ctx, userID) (string, error)` — reads `users.stripe_customer_id`, errors cleanly if null or user missing.
+- `(r *Runner) runStripeCLI(args ...string) error` — `exec.Command("stripe", args...)` with stdout/stderr wired to the runner's streams, non-zero exit → Go error.
 
-**Error philosophy:** dev tool. Errors surface clearly with context. No retries.
+**Error philosophy:** dev tool. Errors surface with clear context and non-zero exit. No retries. `slog` for diagnostic logs, plain `fmt.Fprintf(os.Stderr, ...)` for user-facing messages.
 
 ### 4. Make target surface
 
@@ -126,61 +165,58 @@ stripe-setup:
 	./scripts/stripe-setup.sh
 
 stripe-pack-buy:
-	go run ./cmd/stripescenario pack-buy --user $(U) $(if $(MINUTES),--minutes $(MINUTES),)
+	go run ./cmd/stripescenario pack-buy --user "$(U)" $(if $(MINUTES),--minutes $(MINUTES),)
 
 stripe-sub-start:
-	go run ./cmd/stripescenario sub-start --user $(U)
-
-stripe-sub-past-due:
-	go run ./cmd/stripescenario sub-past-due --user $(U)
+	go run ./cmd/stripescenario sub-start --user "$(U)"
 
 stripe-sub-cancel:
-	go run ./cmd/stripescenario sub-cancel --user $(U)
+	go run ./cmd/stripescenario sub-cancel --user "$(U)"
 
 stripe-resend:
-	go run ./cmd/stripescenario resend $(EVENT)
+	go run ./cmd/stripescenario resend "$(EVENT)"
 
 # Ad-hoc passthrough for exploring unhandled event types.
 stripe-trigger:
-	stripe trigger $(TYPE)
+	stripe trigger "$(TYPE)"
 ```
 
 Usage:
 ```
-make stripe-setup                                  # one-time
-make stripe-pack-buy U=<uuid> MINUTES=300          # exercises pack purchase
-make stripe-sub-start U=<uuid>                     # links customer, fires invoice.paid
-make stripe-sub-past-due U=<uuid>                  # downgrades to free
-make stripe-sub-cancel U=<uuid>                    # also downgrades to free
-make stripe-resend EVENT=evt_1ABC...               # idempotency check
-make stripe-trigger TYPE=charge.refunded           # ad-hoc event
+make stripe-setup                              # one-time
+make stripe-pack-buy U=<uuid> MINUTES=300      # exercises pack purchase
+make stripe-sub-start U=<uuid>                 # creates sub, fires invoice.paid
+make stripe-sub-cancel U=<uuid>                # cancels active sub, fires subscription.deleted
+make stripe-resend EVENT=evt_1ABC...           # idempotency check
+make stripe-trigger TYPE=charge.refunded       # ad-hoc event
 ```
 
 ### 5. Safety rails
 
-- **Test-mode assertion** in `NewRunner` (above). Refuses to run on `sk_live_...`.
-- **No prod DB access.** `config.Load` uses the same `.env` as the dev server; pointing it at prod is an explicit misconfiguration, not a silent risk.
-- **No auto-destructive DB writes.** Only `sub-start` writes: a single `UPDATE users SET stripe_customer_id`. Existing value is overwritten intentionally (rerunning `sub-start` rotates the customer link).
+- **Test-mode assertion** in `newRunner`. Refuses to run unless `STRIPE_SECRET_KEY` starts with `sk_test_`.
+- **No prod DB access path.** Runner uses `DATABASE_URL` from `.env`; same file the dev server uses. Pointing at prod is explicit misconfiguration.
+- **Narrow DB writes.** Only `sub-start` writes to the DB (`UPDATE users.stripe_customer_id`). `pack-buy`, `sub-cancel`, and `resend` are read-only at the scenario layer — any DB mutations they cause happen through the real webhook handler, same as production.
 
 ## Data flow (example: `pack-buy`)
 
 ```
-$ make stripe-pack-buy USER=9f1a... MINUTES=120
+$ make stripe-pack-buy U=9f1a... MINUTES=120
   │
-  ├─ cmd/stripescenario pack-buy …
+  ├─ cmd/stripescenario pack-buy --user 9f1a... --minutes 120
+  │    ├─ validate minutes via billing.ValidPackSize
   │    └─ exec: stripe trigger checkout.session.completed
   │              --add checkout_session:metadata.user_id=9f1a...
   │              --add checkout_session:metadata.pack_minutes=120
   │
   ├─ Stripe API receives trigger → emits checkout.session.completed event
   │
-  ├─ `stripe listen` (in Procfile.dev) receives event, signs with session whsec,
-  │    POSTs to localhost:8080/api/webhooks/stripe
+  ├─ `stripe listen` (running under overmind) receives event, signs with
+  │    session whsec, POSTs to localhost:8080/api/webhooks/stripe
   │
-  ├─ handler.PostStripeWebhook → verifies signature → b.HandleStripeWebhook
+  ├─ PostStripeWebhook → verify signature → b.HandleStripeWebhook
   │    → handleCheckoutCompleted → CreatePurchaseGrant
   │
-  └─ DB: new row in grants (source=purchase, 120 min), ledger entry (purchase, +120)
+  └─ DB: new row in grants (source=purchase, 120 min), ledger_entries (purchase, +120)
 ```
 
 ## Out of scope (deferred to future specs)
@@ -189,21 +225,22 @@ $ make stripe-pack-buy USER=9f1a... MINUTES=120
 - **Dispute handling (`charge.dispute.created`, `charge.dispute.closed`).** Needs ledger-based hold/reversal state machine. Spec alongside refunds.
 - **`invoice.payment_failed` handler.** Already covered by `subscription.updated → past_due`. Only worth a dedicated handler for first-failure user notification, which is a product decision.
 - **Scenarios for unhandled events.** Principle: a scenario exists only when (a) the handler has a case for the event AND (b) reaching that case's non-trivial path requires setup beyond `stripe trigger`. When refund/dispute handling ships, add `refund-pack`, `dispute-open`, etc. alongside.
+- **Known latent handler gap — `UpdatePlanByStripeCustomer` is not dedup-guarded.** `handleSubscriptionDeleted` and `handleSubscriptionUpdated` issue blind `UPDATE users SET plan=...` with no `stripe_event_id` check. Resending a `.deleted` event after a user has re-subscribed would incorrectly flip them back to `free`. This is the reason the `resend` acceptance criterion below is narrowed to purchase/invoice events only. A fix (adding per-user-event dedup — likely via an event log or a `last_applied_event_id` column) belongs in a separate spec.
 
 ## Open migration / backfill considerations
 
-None — no schema changes. Pure additive tooling.
+None. No schema changes. Pure additive tooling.
 
 ## Testing
 
-- Manual verification per scenario: run it, observe DB state and handler logs.
-- `go build ./cmd/stripescenario` in `make test` (via existing `go build ./...`).
-- No new Go unit tests — scenarios are thin wrappers over `stripe trigger`; tests would stub the one thing we're trying to exercise (the CLI).
+- Manual verification per scenario: run it, observe DB state and handler logs (`slog.Info("purchase grant created", ...)`).
+- `go build ./cmd/stripescenario` runs in `make test` via existing `go build ./...`.
+- No new Go unit tests — scenarios are thin wrappers over `stripe trigger` and Stripe SDK calls; tests would stub the one thing the scenarios exist to exercise.
 
 ## Acceptance
 
 - `make dev` starts vite + air + `stripe listen` together; webhook events delivered to local server without manual CLI invocation.
-- `make stripe-setup` produces a working `.env` entry; subsequent `stripe listen` sessions verify signatures cleanly.
-- Each of the four scenarios produces the expected DB mutation (new grant row, plan flip, etc.) observable via `psql`.
-- `make stripe-resend EVENT=<id>` applied to a recent event is a no-op (dedup via `stripe_event_id` unique constraint).
-- Attempting to run any scenario with `sk_live_...` configured fails loudly before any Stripe API call.
+- `make stripe-setup` produces a working `.env` entry on a fresh `.env` and on one already containing `STRIPE_WEBHOOK_SECRET`. Works whether or not `.env` ends with a trailing newline. Subsequent `stripe listen` sessions verify signatures cleanly.
+- Each of the three scenarios produces the expected DB mutation — new grant row for `pack-buy` and `sub-start`, plan flip to `free` for `sub-cancel` — observable via `psql`.
+- `make stripe-resend EVENT=<id>` on a `checkout.session.completed` or `invoice.paid` event is a no-op (dedup via the `grants.stripe_event_id` unique constraint). Resending `customer.subscription.*` events is NOT no-op; documented as the known handler gap above.
+- Attempting to run any scenario with `sk_live_...` configured fails loudly before any Stripe API call or DB connection.
