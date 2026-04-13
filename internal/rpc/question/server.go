@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -138,6 +139,7 @@ func (s *Server) CreateQuestion(
 
 	row, err := s.b.CreateQuestion(ctx, user.ID, q.Title, q.Prompt, diffStr, q.Tags)
 	if err != nil {
+		slog.Error("create question failed", "error", err, "user_id", user.ID)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("create question failed"))
 	}
 
