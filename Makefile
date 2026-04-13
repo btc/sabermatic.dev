@@ -1,4 +1,4 @@
-.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend
+.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend stripe-setup stripe-pack-buy stripe-sub-start stripe-sub-cancel stripe-resend stripe-trigger
 
 test-protos:
 	@echo "=== buf lint ==="
@@ -137,3 +137,26 @@ db-password:
 	  | tr -d '\n' \
 	  | pbcopy
 	@echo "Copied to clipboard."
+
+# --- Stripe scenarios ----------------------------------------------------------
+# U is the target user's UUID. Chosen over USER to avoid colliding with the
+# shell's auto-exported USER env var (which Make inherits as a default).
+
+stripe-setup:
+	./scripts/stripe-setup.sh
+
+stripe-pack-buy:
+	go run ./cmd/stripescenario pack-buy --user "$(U)" $(if $(MINUTES),--minutes $(MINUTES),)
+
+stripe-sub-start:
+	go run ./cmd/stripescenario sub-start --user "$(U)"
+
+stripe-sub-cancel:
+	go run ./cmd/stripescenario sub-cancel --user "$(U)"
+
+stripe-resend:
+	go run ./cmd/stripescenario resend "$(EVENT)"
+
+# Passthrough for ad-hoc event triggers (unhandled-event exploration).
+stripe-trigger:
+	stripe trigger "$(TYPE)"
