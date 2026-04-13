@@ -11,16 +11,20 @@ import (
 )
 
 // baseEnv returns the minimum env vars needed to satisfy config.Load's
-// required fields, with sensible test defaults.
-func baseEnv(databaseURL string) map[string]string {
+// required fields, with sensible test defaults. STORAGE_LOCAL_DIR is
+// pinned to t.TempDir() so each test gets an isolated, auto-cleaned
+// storage path instead of sharing the default relative `data/storage`.
+func baseEnv(t *testing.T, databaseURL string) map[string]string {
+	t.Helper()
 	return map[string]string{
-		"DATABASE_URL":          databaseURL,
-		"ANTHROPIC_API_KEY":     "sk-ant-test",
-		"OPENAI_API_KEY":        "sk-test",
-		"AUTH_TOKEN_SECRET":     "test-secret-at-least-32-bytes-long",
-		"AUTH_BCRYPT_COST":      "4",
-		"GOOGLE_CLOUD_PROJECT":  "test-project",
-		"GEMINI_LOCATION":       "us-central1",
+		"DATABASE_URL":         databaseURL,
+		"ANTHROPIC_API_KEY":    "sk-ant-test",
+		"OPENAI_API_KEY":       "sk-test",
+		"AUTH_TOKEN_SECRET":    "test-secret-at-least-32-bytes-long",
+		"AUTH_BCRYPT_COST":     "4",
+		"GOOGLE_CLOUD_PROJECT": "test-project",
+		"GEMINI_LOCATION":      "us-central1",
+		"STORAGE_LOCAL_DIR":    t.TempDir(),
 	}
 }
 
@@ -37,7 +41,7 @@ func Config(t *testing.T) *config.Config {
 // and any additional env-key overrides merged on top of the test defaults.
 func ConfigWithOverrides(t *testing.T, databaseURL string, overrides map[string]string) *config.Config {
 	t.Helper()
-	env := baseEnv(databaseURL)
+	env := baseEnv(t, databaseURL)
 	for k, v := range overrides {
 		env[k] = v
 	}

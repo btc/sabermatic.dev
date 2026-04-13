@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -37,6 +38,8 @@ func TestFullStartup(t *testing.T) {
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 	t.Setenv("SERVER_PORT", fmt.Sprintf("%d", port))
+	t.Setenv("STORAGE_LOCAL_DIR", t.TempDir())
+	t.Setenv("LOG_FILE", filepath.Join(t.TempDir(), "drill.log"))
 
 	// Start server with cancellable context
 	ctx := context.Background()

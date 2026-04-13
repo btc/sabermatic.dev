@@ -15,14 +15,11 @@ import (
 func TestStorageRoute_Local(t *testing.T) {
 	t.Parallel()
 
-	tmp := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(tmp, "hello.txt"), []byte("hi"), 0o644))
-
 	b := pg.NewBackend(t)
 	cfg := b.Config()
-	cfg.Storage.Backend = "local"
-	cfg.Storage.LocalDir = tmp
-	b.SetConfig(cfg)
+	// cfg.Storage.Backend is already "local" and LocalDir is already a
+	// unique t.TempDir() (see testutil.baseEnv). Just drop a known file in.
+	require.NoError(t, os.WriteFile(filepath.Join(cfg.Storage.LocalDir, "hello.txt"), []byte("hi"), 0o644))
 
 	h := testutil.NewTestHandler(t, b)
 	req := httptest.NewRequest(http.MethodGet, "/storage/hello.txt", nil)
@@ -41,7 +38,6 @@ func TestStorageRoute_GCSNotRegistered(t *testing.T) {
 	cfg.Storage.Backend = "gcs"
 	cfg.Storage.Bucket = "test-bucket"
 	cfg.Storage.PublicBucket = "test-public-bucket"
-	cfg.Storage.LocalDir = t.TempDir()
 	b.SetConfig(cfg)
 
 	// With gcs backend, /storage/ is not registered on the mux; the request
