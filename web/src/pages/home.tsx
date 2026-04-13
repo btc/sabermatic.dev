@@ -445,8 +445,11 @@ function CreateQuestionDialog() {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
+    const difficultyEnum = difficulty === "hard"
+      ? Difficulty.HARD
+      : Difficulty.MEDIUM;
     createQuestion.mutate(
-      { title, prompt, difficulty, tags },
+      { question: { title, prompt, difficulty: difficultyEnum, tags } },
       {
         onSuccess: () => {
           setOpen(false);

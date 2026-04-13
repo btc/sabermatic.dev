@@ -3,7 +3,7 @@ import {
   useMutation as useConnectMutation,
   useQuery,
 } from "@connectrpc/connect-query";
-import { useMutation as useTanStackMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
   deleteAccount as deleteAccountMethod,
@@ -24,22 +24,24 @@ import {
   retryEvaluation as retryEvaluationMethod,
 } from "@/pb/drill/v1/evaluation-EvaluationService_connectquery";
 import {
+  createQuestion as createQuestionMethod,
+  listQuestions,
+} from "@/pb/drill/v1/question-QuestionService_connectquery";
+import {
   getSession,
   getTranscript,
 } from "@/pb/drill/v1/session-SessionService_connectquery";
 import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
-import { apiClient } from "./client";
-import type { Question } from "./types";
-
-// --- Questions (still REST until QuestionService gets CreateQuestion) ---
+// --- Questions ---
 
 export function useCreateQuestion() {
   const qc = useQueryClient();
-  return useTanStackMutation({
-    mutationFn: (data: { title: string; prompt: string; difficulty: string; tags: string[] }) =>
-      apiClient.post<Question>("/api/questions", data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["questions"] }),
+  return useConnectMutation(createQuestionMethod, {
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: createConnectQueryKey({ schema: listQuestions, input: {}, cardinality: undefined }),
+      }),
   });
 }
 
