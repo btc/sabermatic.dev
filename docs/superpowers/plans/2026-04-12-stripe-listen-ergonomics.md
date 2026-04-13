@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make local Stripe webhook testing frictionless — `stripe listen` runs under `make dev`, the signing secret auto-pins, and four scenarios (`pack-buy`, `sub-start`, `sub-cancel`, `resend`) exercise the already-handled webhook branches in one command.
+**Goal:** Make local Stripe webhook testing frictionless — `stripe listen` runs under `make dev`, the signing secret auto-pins, and three scenarios (`pack-buy`, `sub-start`, `sub-cancel`) plus a `resend` helper exercise the already-handled webhook branches (and verify idempotency) in one command.
 
 **Architecture:** Additive. Three surfaces: (1) a new line in `Procfile.dev`; (2) a `scripts/stripe-setup.sh` shell script + `make stripe-setup` target that pins `STRIPE_WEBHOOK_SECRET` in `.env`; (3) a `cmd/stripescenario/` Go binary built with `urfave/cli/v3` (matching `cmd/drillctl`) that either shells out to `stripe trigger` (for `pack-buy`, `resend`) or drives the Stripe SDK directly (for `sub-start`, `sub-cancel`, where CLI fixtures pre-create their own customers and can't be re-pointed to ours). No schema changes. No handler changes.
 
@@ -285,8 +285,10 @@ func (r *Runner) Close() {
 }
 
 // runStripeCLI shells out to the local `stripe` binary, piping stdio through.
-func (r *Runner) runStripeCLI(args ...string) error {
-	cmd := exec.Command("stripe", args...)
+// Takes ctx so Ctrl-C propagates to the spawned process. No callers until
+// Task 4 wires packbuy.go — expected dead code at the end of Task 3.
+func (r *Runner) runStripeCLI(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "stripe", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -357,7 +359,7 @@ Run:
 ```bash
 go run ./cmd/stripescenario --help
 ```
-Expected: usage text listing `stripescenario` as the command name; no subcommands yet.
+Expected: usage text listing `stripescenario` as the command name. urfave/cli auto-adds a `help, h` entry under COMMANDS; no user-defined subcommands appear yet.
 
 - [ ] **Step 8: Commit**
 
@@ -445,7 +447,7 @@ func packBuyCmd() *cli.Command {
 				return err
 			}
 			defer r.Close()
-			return r.packBuy(ctx, userID, int(cmd.Int("minutes")))
+			return r.packBuy(ctx, userID, cmd.Int("minutes"))
 		},
 	}
 }
@@ -460,7 +462,7 @@ func (r *Runner) packBuy(ctx context.Context, userID uuid.UUID, minutes int) err
 	if !billing.ValidPackSize(minutes) {
 		return fmt.Errorf("invalid pack size %d (valid: 120, 300, 600)", minutes)
 	}
-	return r.runStripeCLI(
+	return r.runStripeCLI(ctx,
 		"trigger", "checkout.session.completed",
 		"--add", fmt.Sprintf("checkout_session:metadata.user_id=%s", userID),
 		"--add", fmt.Sprintf("checkout_session:metadata.pack_minutes=%d", minutes),
@@ -581,14 +583,15 @@ func (r *Runner) subStart(ctx context.Context, userID uuid.UUID) error {
 
 	// pm_card_visa is a stable test-mode PaymentMethod fixture; gated by the
 	// sk_test_ assertion in newRunner. In live mode Stripe would reject it.
+	// Note: existing code in internal/backend/billing.go uses the deprecated
+	// stripe.Params.Metadata form; prefer the top-level field in new code.
+	// Tech-debt cleanup for billing.go belongs in a separate change.
 	cust, err := customer.New(&stripe.CustomerParams{
 		PaymentMethod: stripe.String("pm_card_visa"),
 		InvoiceSettings: &stripe.CustomerInvoiceSettingsParams{
 			DefaultPaymentMethod: stripe.String("pm_card_visa"),
 		},
-		Params: stripe.Params{
-			Metadata: map[string]string{"drill_user_id": userID.String()},
-		},
+		Metadata: map[string]string{"drill_user_id": userID.String()},
 	})
 	if err != nil {
 		return fmt.Errorf("create stripe customer: %w", err)
@@ -824,7 +827,7 @@ func resendCmd() *cli.Command {
 // CreateSubscriptionGrant use grants.stripe_event_id UNIQUE. Resending
 // customer.subscription.* events is NOT a no-op (known handler gap).
 func (r *Runner) resend(ctx context.Context, eventID string) error {
-	return r.runStripeCLI("events", "resend", eventID)
+	return r.runStripeCLI(ctx, "events", "resend", eventID)
 }
 ```
 
@@ -943,7 +946,7 @@ Expected: all checks pass (buf lint, codegen, frontend typecheck/lint/tests, bac
 - [ ] **Step 2: If any failures, fix in place and re-run until green**
 
 Common likely failures and fixes:
-- `go mod tidy` needed for `joho/godotenv` if it wasn't already imported by the binary — it is already a transitive dep via `cmd/drillctl`, so no action expected.
+- `go mod tidy` needed for `joho/godotenv` if imports drift — it is already a direct dep (see `go.mod`), so no action expected.
 - Missing newline at end of files — add one.
 
 No commit here if no fixes needed; otherwise `git commit -m "fix: <specific fix>"`.
@@ -1041,3 +1044,8 @@ Expected: non-zero exit with `refusing to run: STRIPE_SECRET_KEY missing or not 
 - **Spec coverage:** Each of the five spec components maps to tasks — Procfile (T1), setup script (T2), runner scaffold + safety (T3), three scenarios (T4-T6) + resend (T7), Make targets (T8); verification at T9-T10.
 - **Known gap acknowledged in-plan:** T7 comments that resend is NOT no-op for `customer.subscription.*` events. Consistent with the spec's narrowed acceptance criterion.
 - **Non-goals honored:** No schema migration, no handler changes, no integration tests driven by `stripe listen`. Unit tests are limited to two pure-Go checks (safety assert, minute validation).
+- **Intentional deviations from spec:**
+  - Task 2 adds a `command -v stripe` preflight check (spec didn't specify). Strict improvement — earlier/clearer error when the CLI isn't installed.
+  - Task 6 inlines the customer-lookup logic (`GetUserByID` + `StripeCustomerID.Valid` check) instead of introducing the spec's `(*Runner).lookupStripeCustomer` helper. YAGNI — only one caller today; extract if additional subscription-related scenarios appear.
+- **Tech debt flagged by the plan (boy-scout opportunity, not in scope):**
+  - `internal/backend/billing.go` uses the deprecated `stripe.Params.Metadata` form in `CreateCheckoutSession` / `CreatePortalSession`. New code in `substart.go` uses the modern top-level `Metadata` field on `CustomerParams`. A separate change should migrate the existing callers.
