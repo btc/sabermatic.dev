@@ -189,3 +189,160 @@ func TestListQuestions_EnumMapping(t *testing.T) {
 			"question %s has UNSPECIFIED source", q.Id)
 	}
 }
+
+func TestCreateQuestion_Success(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	resp, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:      "Design a rate limiter",
+			Prompt:     "Design a distributed rate limiter for an API gateway.",
+			Difficulty: drillv1.Difficulty_DIFFICULTY_HARD,
+			Tags:       []string{"distributed-systems", "scaling"},
+		},
+	}))
+	require.NoError(t, err)
+
+	q := resp.Msg
+	require.NotEmpty(t, q.Id, "server should assign an ID")
+	require.NotNil(t, q.UserId, "server should assign user_id")
+	require.Equal(t, "Design a rate limiter", q.Title)
+	require.Equal(t, "Design a distributed rate limiter for an API gateway.", q.Prompt)
+	require.Equal(t, drillv1.Difficulty_DIFFICULTY_HARD, q.Difficulty)
+	require.Equal(t, []string{"distributed-systems", "scaling"}, q.Tags)
+	require.Equal(t, drillv1.QuestionSource_QUESTION_SOURCE_CUSTOM, q.Source)
+	require.NotNil(t, q.CreateTime, "server should assign create_time")
+}
+
+func TestCreateQuestion_DefaultDifficulty(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	resp, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:  "Design a cache",
+			Prompt: "Design a distributed cache.",
+		},
+	}))
+	require.NoError(t, err)
+	require.Equal(t, drillv1.Difficulty_DIFFICULTY_MEDIUM, resp.Msg.Difficulty)
+}
+
+func TestCreateQuestion_AppearsInList(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	baseline, err := client.ListQuestions(context.Background(), connect.NewRequest(&drillv1.ListQuestionsRequest{}))
+	require.NoError(t, err)
+	beforeCount := len(baseline.Msg.Questions)
+
+	_, err = client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:  "Design a queue",
+			Prompt: "Design a message queue system.",
+		},
+	}))
+	require.NoError(t, err)
+
+	after, err := client.ListQuestions(context.Background(), connect.NewRequest(&drillv1.ListQuestionsRequest{}))
+	require.NoError(t, err)
+	require.Len(t, after.Msg.Questions, beforeCount+1)
+}
+
+func TestCreateQuestion_NilQuestion(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestCreateQuestion_EmptyTitle(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:  "",
+			Prompt: "Some prompt",
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestCreateQuestion_EmptyPrompt(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:  "Design something",
+			Prompt: "",
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestCreateQuestion_InvalidDifficulty(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:      "Design a cache",
+			Prompt:     "Design a distributed cache.",
+			Difficulty: drillv1.Difficulty(99),
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestCreateQuestion_Unauthenticated(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+
+	client := drillv1connect.NewQuestionServiceClient(&http.Client{}, srvURL)
+	_, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:  "Design a cache",
+			Prompt: "Design a distributed cache.",
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
+}
