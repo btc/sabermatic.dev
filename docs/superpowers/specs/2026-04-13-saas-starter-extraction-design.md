@@ -96,13 +96,16 @@ Drop `usage_periods` — already superseded in drill migration 004. Drop `questi
 
 ### Delete (SQL — queries)
 - `sql/queries/`: delete `questions.sql`, `messages.sql`, `sessions.sql` (interview_sessions), `coach_analyses.sql`, `educator_analyses.sql`, `evaluations.sql`, `interview.sql`
-- Audit `advisory_locks.sql` — if it keys on `interview_sessions.id`, either delete or generalize to opaque subject key
-- Audit `grants.sql` + `ledger_entries.sql` for queries that reference `interview_sessions` (e.g., `ReserveMinutes`, `FullRefundSessionMinutes` — decide fate in Modify — billing)
+- `advisory_locks.sql` takes `@key bigint` — generic, keep as-is (no audit needed).
+- Audit `grants.sql` + `ledger_entries.sql` for queries that reference `interview_sessions` (e.g., `ReserveMinutes`, `FullRefundSessionMinutes` — decide fate in Modify — billing).
+- Audit `llm_calls.sql`: any `GetLLMCallsBySession` or queries filtering on `session_id` must be deleted after the FK column drops.
 - Run `sqlc generate` after query edits; starter must not commit orphan generated code
 
 ### Delete (frontend)
 - Pages: `interview.tsx`, `sample.tsx`, `session-config.tsx`, `session/`, `history.tsx`
 - Components: `recording-input.tsx`, `replay/`, `shader-orb.tsx`, `shader-orb-impl.tsx`, `waveform.tsx`
+- Hooks: `web/src/hooks/use-interview.ts`, `use-timer.ts` (interview timer) — keep `use-auth.ts`, `use-theme.ts`, `use-scroll-reveal.ts`
+- Lib: `web/src/lib/constants.ts` (WAITING_MESSAGES interview prompts), `web/src/lib/score-utils.ts` (drill 1–5 scoring) — keep `web/src/lib/utils.ts` (shadcn `cn`)
 - Generated TS pb for deleted services (`web/src/pb/` regenerate clean)
 - Landing page subcomponents (see Modify — frontend landing)
 - Any imports in `web/src/app.tsx` and `main.tsx` referring to deleted pages — remove explicit route list (enumerated in Modify — frontend router)
@@ -117,13 +120,13 @@ Drop `usage_periods` — already superseded in drill migration 004. Drop `questi
 - `internal/testutil/`, `internal/backendtest/`, `internal/migrate/`, `internal/config/`
 - `internal/rpc/auth/`, `billing/`, `user/` (platform services; **NOT** `session/` or `sample/`)
 - `internal/rpc/interceptor.go`
-- `internal/rpc/register.go` — surgically edit to drop deleted service registrations; must compile against the trimmed service list
+- `internal/rpc/register.go` — surgically edit to drop registrations for `coach`, `educator`, `evaluation`, `interview`, `question`, `sample`, and `session` (interview-session) handlers; keep `auth`, `billing`, `user`
 - `cmd/drill/` → rename `cmd/app/`; update default log file path in `config.go`
 - `cmd/drillctl/` → rename `cmd/appctl/`; keep `seed`; change `grant <minutes>` → `grant <amount>` with help text: "amount is your app-defined billing unit; see internal/billing/plans.go"
 - `cmd/stripescenario/` — generic Stripe webhook scenario tool (source kept; repo-root binary deleted per strip list)
 - `scripts/deploy.sh`, `Procfile.dev`, `.air.toml` (if present) — audit and rename any `drill`/`sabermatic` strings (binary name, log path, overmind process names)
 - `web.go`, `web/src/components/ui/` (shadcn), `web/src/layouts/auth-layout`, auth pages under `web/src/pages/auth/`, `settings.tsx` (trim drill copy), `brand-name.tsx` (drive from `cfg.ProductName`), `error-fallback.tsx`, `oauth-icons.tsx`, `public-header.tsx`, `theme-switch.tsx`
-- `internal/ai/client.go` (LLM chat), `gemini.go` (image gen) + tests for kept files — see "Open decisions" on whether image gen stays
+- `internal/ai/client.go` (LLM chat), `gemini.go` (image gen) + tests for kept files — see "Open decisions" on whether image gen stays; `client.go` requires API-surface changes, see Modify — ai
 
 ### Modify — billing generalization (minutes → unit-agnostic amount)
 Full list of surface to touch — Go + SQL + proto + generated + Stripe:
@@ -136,22 +139,30 @@ Full list of surface to touch — Go + SQL + proto + generated + Stripe:
 - **RPC servers:** `internal/rpc/billing/server.go` and `internal/rpc/user/server.go` — update field accesses to match renamed proto.
 - **Plan fields:** `Plan.FreeEducatorLimit`, `Plan.ConcurrentSessions`, `Plan.MaxDurationMinutes`, `Plan.CanStartSession` — drill-specific feature fields. Strip them. Starter `Plan` exposes only `Name`, `FreeTrialAmount` (renamed from `FreeTrialMinutes`), and generic billing fields.
 - **Frontend:** TS pb regen via `buf generate` picks up renames automatically; audit any hardcoded `"minutes"` strings in React components (settings billing panel, pricing page).
+- **Signup path:** `backend.provisionNewUser` → `EnsureFreeGrantTx` is on the user-creation spine. Its SQL param `InitialMinutes int32` renames to `InitialAmount int32`; default amount comes from `Plan.FreeTrialAmount`. Every caller (including `backendtest.SeedUser` via `Signup`, and `rpc/user/server_test.go` direct call) updates. Post-strip audit: `git grep 'EnsureFreeGrant\|InitialMinutes\|RemainingMinutes'` must return zero.
+
+### Modify — ai (`internal/ai/client.go`)
+- Drop `SessionID uuid.UUID` field from `StreamParams`, `CallParams`, `CallToolParams`, and internal `persistParams`. Callers no longer attribute LLM calls to a session; the `llm_calls.session_id` column is gone.
+- `persistCall` and `CallToolAndLog`: delete `pgtype.UUID` branches that set `session_id`; simplify to user-attribution only (or caller-supplied opaque tag if worth generalizing).
+- Rewrite the `Role` field comment to describe it as a caller-defined tag (default `""`), not `"interviewer"`/`"evaluator"`.
+- Audit call sites after change; kept packages that use `ai.Client` must drop their `SessionID` argument.
 
 ### Modify — config (`internal/config/config.go`)
 - Collapse 5 role-specific LLM env vars (`INTERVIEWER_MODEL`, `EVALUATOR_MODEL`, `COACH_MODEL`, `EDUCATOR_MODEL`, `IMAGE_PROMPT_MODEL`) to one: `LLM_MODEL`.
-- Remove `Speech.*` struct entirely (OPENAI_API_KEY, WHISPER_MODEL, TTS_MODEL).
+- Remove `Speech.*` struct entirely AND remove the `Speech` field from `Config` (config.go:19 area).
 - Relax `config.Load` validator: no longer require `OPENAI_API_KEY` (was required for STT/TTS). `ANTHROPIC_API_KEY` stays required (LLM client).
 - Keep `Gemini.*` (image gen) iff image gen stays; otherwise remove (see Open decisions).
 - Add `ProductName` field (default `"App"`).
 - Rename default `Log.File` from `data/logs/drill.log` → `data/logs/app.log`.
 - Rename default `Email.FromAddress` from `noreply@drill.dev` → `noreply@example.com`.
-- River config: drop `NumGeminiWorkers`/`NumAIWorkers` fields if those queues are dropped; keep if retained.
+- River config: always drop `NumAIWorkers` and `QueueAI` (no kept worker uses it). Keep `NumGeminiWorkers` + `QueueGemini` iff image gen stays (Open decision #1 default: keep).
 
 ### Modify — email
 - `internal/email/template.go`: remove import of `internal/branding`; take `productName string` at construction or via config.
 - `internal/email/sender.go`: no-op aside from identifier rename.
 - `internal/email/templates/wrapper.html`: rewrite as neutral shell using `{{.ProductName}}` template var.
 - Inline email copy (welcome, verify, reset): rewrite as generic; template var for product name.
+- `internal/email/template_test.go`: update expected HTML assertions (drill uses `Sabermatic[.DEV]`) to match new `{{.ProductName}}` output; default in tests becomes `App`.
 
 ### Modify — handler/spa coupling
 - `internal/handler/spa.go`: remove `internal/branding` import; thread `cfg.ProductName` through OG title logic.
@@ -166,13 +177,28 @@ Full list of surface to touch — Go + SQL + proto + generated + Stripe:
 - Verify each decision during implementation; if `credits.tsx` or `cta-repeat.tsx` are drill-specific, delete and add placeholder components
 
 ### Modify — frontend router (`web/src/app.tsx`)
-Remove route entries for deleted pages:
-- `/interview`, `/interview/:id`, `/sample`, `/session-config`, `/session/:id`, `/history`
+Actual routes in source (verified). Treatment:
+
+Remove:
+- `/sample` + nested `/sample/transcript`, `/sample/deep-dive` (SampleSession layout)
+- `/sessions/new`, `/sessions/:id` + nested `overview`, `transcript`, `deep-dive`
+- `/sessions/:id/interview` (immersive layout)
+- `/history`
+- `ImmersiveLayout` wrapper if nothing else uses it
+- `ConditionalHome` if it routes to drill-specific dashboard (replace with empty dashboard placeholder)
 
 Keep:
-- `/` (landing), `/login`, `/signup`, `/forgot-password`, `/reset-password`, `/verify-email`, `/settings`, `/home` (empty dashboard placeholder), `/404`
+- `/` (home/landing conditional), `/login`, `/signup`, `/forgot-password`, `/reset-password`, `/verify-email`, `/about` (public landing via `PublicHeader` + `Landing`), `/settings`, `/settings/billing`, `*` (NotFound)
+
+Remove imports for deleted pages: `SessionConfig`, `SessionLayout`, `Overview`, `TranscriptPage`, `DeepDive`, `Interview`, `History`, `SampleSession`, `ImmersiveLayout`. Keep `AppLayout`, `PublicHeader`, `Landing`, auth pages, `Settings`, `NotFound`, `ConditionalHome` (rewritten).
 
 Audit `main.tsx` for drill-specific imports (document title, analytics keys, feature flags).
+
+### Modify — auth (`internal/auth/sessions.go`)
+Grep for hardcoded cookie name / namespace (likely `"drill_session"` or similar). Thread through `cfg.ProductName` or a dedicated `cfg.Auth.CookieName` field (default `"app_session"`). Rename script updates.
+
+### Modify — frontend telemetry (`web/src/telemetry/provider.ts`)
+Hardcoded `"service.name": "drill-web"`. Swap to a compile-time Vite define (e.g., `__APP_NAME__` injected via `vite.config.ts` using `define`), or `import.meta.env.VITE_APP_NAME` with a default of `"app-web"`. Rename script updates both the `vite.config.ts` define and `provider.ts` fallback.
 
 ### Modify — home.tsx
 Replace with empty dashboard: "Welcome, {user.displayName}" + link to settings/billing. No drill content (coach summary cards, question list, session history).
@@ -191,10 +217,16 @@ Trim drill-specific sections (interview preferences, voice settings). Keep accou
 - Replace every `sabermatic`/`drill` literal (grep for the two tokens in this file; ~12 sites) with the variables. Do not commit line numbers — semantic replacement only.
 - `--dry-run` exits cleanly with the new flags.
 
-### Modify — Dockerfile, Makefile, Procfile.dev
+### Modify — Dockerfile, Makefile, Procfile.dev, deploy.sh
 - `Dockerfile`: `go build -o sabermatic ./cmd/drill` → `go build -o app ./cmd/app`; `ENTRYPOINT ["/sabermatic"]` → `["/app"]`.
-- `Makefile`: `"Starting Sabermatic..."` → `"Starting app..."`; update deploy target references.
-- `Procfile.dev`, `.air.toml`: grep for `drill`/`sabermatic`; swap to `app`.
+- `Makefile`: concrete edits beyond string rename:
+  - `CLOUDSQL_INSTANCE := sabermatic-production:us-central1:sabermatic-production` → parameterize (read from `terraform.tfvars` or env)
+  - `db-password` target grep `://sabermatic:` → `://app:`
+  - `grant MINUTES=` → `grant AMOUNT=`; default `--email dev@sabermatic.dev` → `dev@example.com`
+  - `stripe-pack-buy --minutes` → `--amount`
+  - `dev:` target `"Starting Sabermatic"` → `"Starting app"`; `tmp/drill` binary path → `tmp/app`
+- `Procfile.dev`, `.air.toml`: grep for `drill`/`sabermatic`; swap to `app`; update binary paths (`tmp/drill` → `tmp/app`).
+- `scripts/deploy.sh`: hardcodes `PROJECT=sabermatic-production`, `SERVICE=sabermatic`. Parameterize via env vars; script must refuse to run without `GCP_PROJECT` set (prevents fresh forks from deploying to a dead project).
 
 ### Modify — GitHub Actions (`.github/workflows/`)
 - `deploy.yml`: hardcoded `SERVICE_NAME: sabermatic` and AR path `sabermatic/sabermatic` → use repo variables or parameterize to `app`/`app`. Consider gating deploy on a repo variable so a fresh fork doesn't attempt to deploy to a non-existent GCP project.
@@ -213,6 +245,8 @@ One-shot sed pass accepting `--module`, `--name`, `--domain`. Updates Go source,
 
 The starter itself is already renamed at commit time. This script is for downstream users.
 
+Rename script must also rewrite `pb/<module>/v1/*.proto` package statements (e.g., `package app.v1;` → `package foo.v1;`), the directory path `pb/app/v1` → `pb/foo/v1`, `go_package` options in each proto, and `buf.gen.yaml`'s `go_package_prefix`. Without this, `buf generate` on the renamed tree produces mismatched imports. Also rewrites hardcoded Go string defaults (log file path, FromAddress, cookie name, telemetry AppName const) and `vite.config.ts` defines. Example: `--name foo` yields binaries `foo` and `fooctl` (concatenated, no separator), telemetry package `footel`, cookie `foo_session`.
+
 ### Add — starter README
 Rewrite (not modify). Content: what the starter is, what it includes, how to fork, how to run the rename script, how to run cloud_bootstrap, how to deploy, what to strip further for a non-AI app, where drill's history lives (reference link only).
 
@@ -225,6 +259,7 @@ Starter must be continuously verifiable. Before final commit:
 - `sqlc generate` clean; no queries referencing stripped tables
 - `go vet ./...` clean
 - `go build ./...` succeeds
+- `go mod tidy && git diff --exit-code go.mod go.sum` clean (strip must not leave orphan deps)
 - `make test` passes (buf lint, codegen check, `tsc -b`, eslint, vitest, `go test -race ./...`)
 - `make dev` brings up a working local app: land on marketing page → sign up → verify email (Mailhog or equivalent) → land on empty dashboard → open settings → open Stripe checkout in test mode.
 - `terraform plan` runs clean against a fresh GCP project using placeholder `.tfvars`.
@@ -246,16 +281,33 @@ Starter must be continuously verifiable. Before final commit:
 3. **Stripe pack pricing shape** — single tier, enumerated map, or config-driven slice of packs?
    - **Default: enumerated map** via `STRIPE_PACK_PRICE_IDS="small=price_xxx,med=price_yyy,large=price_zzz"` env var + matching tier labels in `Plan`.
 
-4. **Session cookie name** — drill may hardcode cookie namespace with "drill" string. Audit during implementation; parameterize via `cfg.ProductName` or a dedicated `Auth.CookieName` field.
+4. ~~Session cookie name~~ — moved to Modify — auth below; not a spec open item anymore.
 
 ## Risks
 
 - **Telemetry span/metric name drift:** renaming `AppName = "drill"` to `"app"` changes metric keys. Drill's dashboards/alerts will not apply to the starter, but that's fine (different project). Downstream users rerun rename script and their metrics start fresh.
 - **SQL squash vs preserved history:** squashing migrations loses the drill-era migration sequence. Acceptable — the starter is a reset point. Drill's own migrations remain in drill's git history.
 - **River job queue state in dev DBs:** existing dev DBs from drill will have River metadata pointing at deleted workers. Not a starter problem (fresh DB on fork), but call out in README.
-- **sqlc regeneration race:** `sqlc generate` must run after SQL edits AND the generated `internal/db/` must be committed. Treat as a gate in CI.
+- **sqlc regeneration gate:** `sqlc generate` must run after SQL edits AND the generated `internal/db/` must be committed. Treat as a gate in CI.
+- **`example.com` email deliverability:** IANA reserves example.com; `make dev` smoke test requires local Mailhog or a stub email sender (Mailgun will refuse relaying to example.com addresses). Document in README.
 - **Env-var contract:** dropping `OPENAI_API_KEY` requirement, renaming LLM_MODEL, adding `PRODUCT_NAME` — document the final env var list in README and `terraform.tfvars.example`.
 - **OAuth refactor deferred:** flag as first boy-scout TODO in starter README. Any downstream fork inherits it.
+
+## Execution phasing (optional guidance)
+
+Spec is one logical extraction but the plan may benefit from sequencing commits:
+
+1. **Delete-only:** remove packages, files, pb, SQL migrations, frontend pages. Repo is broken; no tests run. Pure subtraction.
+2. **Compile-fixing surgery:** trim `internal/backend/backend.go`, `internal/rpc/register.go`, `internal/jobs/workers.go`, imports throughout. `go build` passes.
+3. **Rename:** drilotel → apptel, `AppName` const, binaries cmd/drill → cmd/app, cmd/drillctl → cmd/appctl.
+4. **Billing genericization:** schema column rename, Go/proto/Stripe rename, reserve/refund strip.
+5. **Schema squash:** combine migrations 001–012 into one `001_initial`.
+6. **Frontend landing + home + router rewrite.**
+7. **TF, bootstrap, Makefile, deploy.sh, GitHub Actions parameterization.**
+8. **`scripts/rename_project.sh` + README.**
+9. **Validation sweep + smoke test.**
+
+Writing-plans can split into this many commits or consolidate; the sequence is what matters (strip before surgery, rename after compile, validation last).
 
 ## Attribution
 
