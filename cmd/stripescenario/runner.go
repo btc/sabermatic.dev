@@ -44,8 +44,7 @@ func (r *Runner) Close() {
 }
 
 // runStripeCLI shells out to the local `stripe` binary, piping stdio through.
-// Takes ctx so Ctrl-C propagates to the spawned process. No callers until
-// Task 4 wires packbuy.go — expected dead code at the end of Task 3.
+// Takes ctx so Ctrl-C propagates to the spawned process.
 func (r *Runner) runStripeCLI(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "stripe", args...)
 	cmd.Stdout = os.Stdout
