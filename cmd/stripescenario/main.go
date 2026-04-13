@@ -21,7 +21,8 @@ func main() {
 		Usage: "Drive Stripe webhook scenarios against the local dev server",
 		Commands: []*cli.Command{
 			packBuyCmd(),
-			// subStartCmd(), subCancelCmd(), resendCmd() added in later tasks
+			subStartCmd(),
+			// subCancelCmd(), resendCmd() added in later tasks
 		},
 	}
 
