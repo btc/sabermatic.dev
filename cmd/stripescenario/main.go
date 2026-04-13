@@ -23,7 +23,7 @@ func main() {
 			packBuyCmd(),
 			subStartCmd(),
 			subCancelCmd(),
-			// resendCmd() added in next task
+			resendCmd(),
 		},
 	}
 
