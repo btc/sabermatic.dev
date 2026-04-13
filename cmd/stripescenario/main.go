@@ -20,8 +20,8 @@ func main() {
 		Name:  "stripescenario",
 		Usage: "Drive Stripe webhook scenarios against the local dev server",
 		Commands: []*cli.Command{
-			// Subcommands wired in subsequent tasks:
-			//   packBuyCmd(), subStartCmd(), subCancelCmd(), resendCmd(),
+			packBuyCmd(),
+			// subStartCmd(), subCancelCmd(), resendCmd() added in later tasks
 		},
 	}
 
