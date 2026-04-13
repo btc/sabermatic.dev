@@ -123,7 +123,7 @@ Drop `usage_periods` — already superseded in drill migration 004. Drop `questi
 - `internal/rpc/register.go` — surgically edit to drop registrations for `coach`, `educator`, `evaluation`, `interview`, `question`, `sample`, and `session` (interview-session) handlers; keep `auth`, `billing`, `user`
 - `cmd/drill/` → rename `cmd/app/`; update default log file path in `config.go`
 - `cmd/drillctl/` → rename `cmd/appctl/`; keep `seed`; change `grant <minutes>` → `grant <amount>` with help text: "amount is your app-defined billing unit; see internal/billing/plans.go"
-- `cmd/stripescenario/` — generic Stripe webhook scenario tool (source kept; repo-root binary deleted per strip list)
+- `cmd/stripescenario/` — generic Stripe webhook scenario tool (source kept; repo-root binary deleted per strip list). Audit CLI flags for `--minutes` and rename to `--amount` as part of billing genericization.
 - `scripts/deploy.sh`, `Procfile.dev`, `.air.toml` (if present) — audit and rename any `drill`/`sabermatic` strings (binary name, log path, overmind process names)
 - `web.go`, `web/src/components/ui/` (shadcn), `web/src/layouts/auth-layout`, auth pages under `web/src/pages/auth/`, `settings.tsx` (trim drill copy), `brand-name.tsx` (drive from `cfg.ProductName`), `error-fallback.tsx`, `oauth-icons.tsx`, `public-header.tsx`, `theme-switch.tsx`
 - `internal/ai/client.go` (LLM chat), `gemini.go` (image gen) + tests for kept files — see "Open decisions" on whether image gen stays; `client.go` requires API-surface changes, see Modify — ai
@@ -149,7 +149,7 @@ Full list of surface to touch — Go + SQL + proto + generated + Stripe:
 
 ### Modify — config (`internal/config/config.go`)
 - Collapse 5 role-specific LLM env vars (`INTERVIEWER_MODEL`, `EVALUATOR_MODEL`, `COACH_MODEL`, `EDUCATOR_MODEL`, `IMAGE_PROMPT_MODEL`) to one: `LLM_MODEL`.
-- Remove `Speech.*` struct entirely AND remove the `Speech` field from `Config` (config.go:19 area).
+- Remove `Speech.*` struct entirely AND remove the `Speech` field from `Config`.
 - Relax `config.Load` validator: no longer require `OPENAI_API_KEY` (was required for STT/TTS). `ANTHROPIC_API_KEY` stays required (LLM client).
 - Keep `Gemini.*` (image gen) iff image gen stays; otherwise remove (see Open decisions).
 - Add `ProductName` field (default `"App"`).
@@ -194,8 +194,8 @@ Remove imports for deleted pages: `SessionConfig`, `SessionLayout`, `Overview`, 
 
 Audit `main.tsx` for drill-specific imports (document title, analytics keys, feature flags).
 
-### Modify — auth (`internal/auth/sessions.go`)
-Grep for hardcoded cookie name / namespace (likely `"drill_session"` or similar). Thread through `cfg.ProductName` or a dedicated `cfg.Auth.CookieName` field (default `"app_session"`). Rename script updates.
+### Modify — auth (`internal/auth/sessions.go` + `user_context.go`)
+Current cookie name is a package-level const `SessionCookieName = "drill_session"` in `internal/auth/user_context.go`, referenced in ~24 files (handlers, middleware, tests, testutil). Avoid a cross-cutting refactor: convert the const to a package-level var defaulted to `"app_session"` and expose `auth.SetSessionCookieName(name string)` called once from `cmd/app/main.go` with `cfg.Auth.CookieName` (new field on `Config.Auth`, default `"app_session"`). Rename script updates the default value string.
 
 ### Modify — frontend telemetry (`web/src/telemetry/provider.ts`)
 Hardcoded `"service.name": "drill-web"`. Swap to a compile-time Vite define (e.g., `__APP_NAME__` injected via `vite.config.ts` using `define`), or `import.meta.env.VITE_APP_NAME` with a default of `"app-web"`. Rename script updates both the `vite.config.ts` define and `provider.ts` fallback.
@@ -261,7 +261,7 @@ Starter must be continuously verifiable. Before final commit:
 - `go build ./...` succeeds
 - `go mod tidy && git diff --exit-code go.mod go.sum` clean (strip must not leave orphan deps)
 - `make test` passes (buf lint, codegen check, `tsc -b`, eslint, vitest, `go test -race ./...`)
-- `make dev` brings up a working local app: land on marketing page → sign up → verify email (Mailhog or equivalent) → land on empty dashboard → open settings → open Stripe checkout in test mode.
+- `make dev` brings up a working local app: land on marketing page → sign up → verify email (via Mailhog, which must run as an overmind process in `Procfile.dev`, or a stub sender that logs the verify-link to stdout) → land on empty dashboard → open settings → billing tab loads pricing UI. Stripe checkout end-to-end is only exercised when `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` test-mode values are set in `.env`; README documents these as optional for the smoke test and `.env.example` includes placeholders.
 - `terraform plan` runs clean against a fresh GCP project using placeholder `.tfvars`.
 - `cloud_bootstrap.py --dry-run` exits cleanly with the new parameterized flags.
 - `scripts/rename_project.sh --module github.com/btc/foo --name foo --domain foo.dev` on a copy produces a repo where `make test` still passes — smoke test the rename script.
@@ -281,7 +281,6 @@ Starter must be continuously verifiable. Before final commit:
 3. **Stripe pack pricing shape** — single tier, enumerated map, or config-driven slice of packs?
    - **Default: enumerated map** via `STRIPE_PACK_PRICE_IDS="small=price_xxx,med=price_yyy,large=price_zzz"` env var + matching tier labels in `Plan`.
 
-4. ~~Session cookie name~~ — moved to Modify — auth below; not a spec open item anymore.
 
 ## Risks
 
@@ -299,15 +298,19 @@ Spec is one logical extraction but the plan may benefit from sequencing commits:
 
 1. **Delete-only:** remove packages, files, pb, SQL migrations, frontend pages. Repo is broken; no tests run. Pure subtraction.
 2. **Compile-fixing surgery:** trim `internal/backend/backend.go`, `internal/rpc/register.go`, `internal/jobs/workers.go`, imports throughout. `go build` passes.
-3. **Rename:** drilotel → apptel, `AppName` const, binaries cmd/drill → cmd/app, cmd/drillctl → cmd/appctl.
-4. **Billing genericization:** schema column rename, Go/proto/Stripe rename, reserve/refund strip.
-5. **Schema squash:** combine migrations 001–012 into one `001_initial`.
+3. **Schema squash:** combine drill migrations 001–012 into one `001_initial` already using `initial_amount`/`remaining_amount`, no `session_id` FKs, generic `users.role` default. (Done before billing rename so the Go/proto rename targets the squashed schema directly rather than churning.)
+4. **Billing genericization:** Go + proto + Stripe rename (`minutes` → `amount`, `pack_minutes` → `pack_amount`, `PriceIDForPack(tier string)`), `EnsureFreeGrantTx` params, reserve/refund strip.
+5. **Rename:** drilotel → apptel, `AppName` const, binaries cmd/drill → cmd/app, cmd/drillctl → cmd/appctl.
 6. **Frontend landing + home + router rewrite.**
 7. **TF, bootstrap, Makefile, deploy.sh, GitHub Actions parameterization.**
 8. **`scripts/rename_project.sh` + README.**
 9. **Validation sweep + smoke test.**
 
 Writing-plans can split into this many commits or consolidate; the sequence is what matters (strip before surgery, rename after compile, validation last).
+
+## Done means
+
+All items in Validation pass cleanly against a freshly built starter commit, with `.env` limited to dev defaults (no drill-era secrets carried over). The rename smoke test (§Validation final step) succeeds on a throwaway copy with `--name foo`. No `drill`, `sabermatic`, or `drilotel` strings remain outside this spec file and git history.
 
 ## Attribution
 
