@@ -12,6 +12,22 @@ import type { Timestamp } from "@bufbuild/protobuf/wkt";
 export declare const file_drill_v1_question: GenFile;
 
 /**
+ * @generated from message drill.v1.CreateQuestionRequest
+ */
+export declare type CreateQuestionRequest = Message<"drill.v1.CreateQuestionRequest"> & {
+  /**
+   * @generated from field: drill.v1.Question question = 1;
+   */
+  question?: Question;
+};
+
+/**
+ * Describes the message drill.v1.CreateQuestionRequest.
+ * Use `create(CreateQuestionRequestSchema)` to create a new message.
+ */
+export declare const CreateQuestionRequestSchema: GenMessage<CreateQuestionRequest>;
+
+/**
  * @generated from message drill.v1.ListQuestionsRequest
  */
 export declare type ListQuestionsRequest = Message<"drill.v1.ListQuestionsRequest"> & {
@@ -180,6 +196,14 @@ export declare const QuestionService: GenService<{
     methodKind: "unary";
     input: typeof ListQuestionsRequestSchema;
     output: typeof ListQuestionsResponseSchema;
+  },
+  /**
+   * @generated from rpc drill.v1.QuestionService.CreateQuestion
+   */
+  createQuestion: {
+    methodKind: "unary";
+    input: typeof CreateQuestionRequestSchema;
+    output: typeof QuestionSchema;
   },
 }>;
 

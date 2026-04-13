@@ -5,6 +5,7 @@ modules:
     name: buf.build/btc/drill
 deps:
   - buf.build/protocolbuffers/wellknowntypes
+  - buf.build/googleapis/googleapis
 lint:
   use:
     - STANDARD

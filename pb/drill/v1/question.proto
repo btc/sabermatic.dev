@@ -3,6 +3,7 @@ package drill.v1;
 
 option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
 
+import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
 
 enum Difficulty {
@@ -20,6 +21,11 @@ enum QuestionSource {
 
 service QuestionService {
   rpc ListQuestions(ListQuestionsRequest) returns (ListQuestionsResponse);
+  rpc CreateQuestion(CreateQuestionRequest) returns (Question);
+}
+
+message CreateQuestionRequest {
+  Question question = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
 message ListQuestionsRequest {
@@ -33,14 +39,14 @@ message ListQuestionsResponse {
 }
 
 message Question {
-  string id = 1;
-  optional string user_id = 2;
-  string title = 3;
-  string prompt = 4;
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  optional string user_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string title = 3 [(google.api.field_behavior) = REQUIRED];
+  string prompt = 4 [(google.api.field_behavior) = REQUIRED];
   Difficulty difficulty = 5;
   repeated string tags = 6;
   optional string hints = 7;
-  QuestionSource source = 8;
-  google.protobuf.Timestamp create_time = 9;
-  optional string image_url = 10;
+  QuestionSource source = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp create_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  optional string image_url = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

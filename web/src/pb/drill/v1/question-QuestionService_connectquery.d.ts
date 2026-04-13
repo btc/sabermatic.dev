@@ -8,3 +8,7 @@ import { QuestionService } from "./question_pb";
  * @generated from rpc drill.v1.QuestionService.ListQuestions
  */
 export const listQuestions: typeof QuestionService["method"]["listQuestions"];
+/**
+ * @generated from rpc drill.v1.QuestionService.CreateQuestion
+ */
+export const createQuestion: typeof QuestionService["method"]["createQuestion"];

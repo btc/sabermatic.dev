@@ -3,34 +3,42 @@
 /* eslint-disable */
 
 import { enumDesc, fileDesc, messageDesc, serviceDesc, tsEnum } from "@bufbuild/protobuf/codegenv2";
+import { file_google_api_field_behavior } from "../../google/api/field_behavior_pb";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 
 /**
  * Describes the file drill/v1/question.proto.
  */
 export const file_drill_v1_question = /*@__PURE__*/
-  fileDesc("ChdkcmlsbC92MS9xdWVzdGlvbi5wcm90bxIIZHJpbGwudjEiPQoUTGlzdFF1ZXN0aW9uc1JlcXVlc3QSEQoJcGFnZV9zaXplGAEgASgFEhIKCnBhZ2VfdG9rZW4YAiABKAkiVwoVTGlzdFF1ZXN0aW9uc1Jlc3BvbnNlEiUKCXF1ZXN0aW9ucxgBIAMoCzISLmRyaWxsLnYxLlF1ZXN0aW9uEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCSKuAgoIUXVlc3Rpb24SCgoCaWQYASABKAkSFAoHdXNlcl9pZBgCIAEoCUgAiAEBEg0KBXRpdGxlGAMgASgJEg4KBnByb21wdBgEIAEoCRIoCgpkaWZmaWN1bHR5GAUgASgOMhQuZHJpbGwudjEuRGlmZmljdWx0eRIMCgR0YWdzGAYgAygJEhIKBWhpbnRzGAcgASgJSAGIAQESKAoGc291cmNlGAggASgOMhguZHJpbGwudjEuUXVlc3Rpb25Tb3VyY2USLwoLY3JlYXRlX3RpbWUYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhYKCWltYWdlX3VybBgKIAEoCUgCiAEBQgoKCF91c2VyX2lkQggKBl9oaW50c0IMCgpfaW1hZ2VfdXJsKlQKCkRpZmZpY3VsdHkSGgoWRElGRklDVUxUWV9VTlNQRUNJRklFRBAAEhUKEURJRkZJQ1VMVFlfTUVESVVNEAESEwoPRElGRklDVUxUWV9IQVJEEAIqjAEKDlF1ZXN0aW9uU291cmNlEh8KG1FVRVNUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEhgKFFFVRVNUSU9OX1NPVVJDRV9TRUVEEAESGgoWUVVFU1RJT05fU09VUkNFX0NVU1RPTRACEiMKH1FVRVNUSU9OX1NPVVJDRV9DT0FDSF9HRU5FUkFURUQQAzJjCg9RdWVzdGlvblNlcnZpY2USUAoNTGlzdFF1ZXN0aW9ucxIeLmRyaWxsLnYxLkxpc3RRdWVzdGlvbnNSZXF1ZXN0Gh8uZHJpbGwudjEuTGlzdFF1ZXN0aW9uc1Jlc3BvbnNlQjNaMWdpdGh1Yi5jb20vYnRjL2RyaWxsL2ludGVybmFsL3BiL2RyaWxsL3YxO2RyaWxsdjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("ChdkcmlsbC92MS9xdWVzdGlvbi5wcm90bxIIZHJpbGwudjEiQgoVQ3JlYXRlUXVlc3Rpb25SZXF1ZXN0EikKCHF1ZXN0aW9uGAEgASgLMhIuZHJpbGwudjEuUXVlc3Rpb25CA+BBAiI9ChRMaXN0UXVlc3Rpb25zUmVxdWVzdBIRCglwYWdlX3NpemUYASABKAUSEgoKcGFnZV90b2tlbhgCIAEoCSJXChVMaXN0UXVlc3Rpb25zUmVzcG9uc2USJQoJcXVlc3Rpb25zGAEgAygLMhIuZHJpbGwudjEuUXVlc3Rpb24SFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJItECCghRdWVzdGlvbhIPCgJpZBgBIAEoCUID4EEDEhkKB3VzZXJfaWQYAiABKAlCA+BBA0gAiAEBEhIKBXRpdGxlGAMgASgJQgPgQQISEwoGcHJvbXB0GAQgASgJQgPgQQISKAoKZGlmZmljdWx0eRgFIAEoDjIULmRyaWxsLnYxLkRpZmZpY3VsdHkSDAoEdGFncxgGIAMoCRISCgVoaW50cxgHIAEoCUgBiAEBEi0KBnNvdXJjZRgIIAEoDjIYLmRyaWxsLnYxLlF1ZXN0aW9uU291cmNlQgPgQQMSNAoLY3JlYXRlX3RpbWUYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQgPgQQMSGwoJaW1hZ2VfdXJsGAogASgJQgPgQQNIAogBAUIKCghfdXNlcl9pZEIICgZfaGludHNCDAoKX2ltYWdlX3VybCpUCgpEaWZmaWN1bHR5EhoKFkRJRkZJQ1VMVFlfVU5TUEVDSUZJRUQQABIVChFESUZGSUNVTFRZX01FRElVTRABEhMKD0RJRkZJQ1VMVFlfSEFSRBACKowBCg5RdWVzdGlvblNvdXJjZRIfChtRVUVTVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIYChRRVUVTVElPTl9TT1VSQ0VfU0VFRBABEhoKFlFVRVNUSU9OX1NPVVJDRV9DVVNUT00QAhIjCh9RVUVTVElPTl9TT1VSQ0VfQ09BQ0hfR0VORVJBVEVEEAMyqgEKD1F1ZXN0aW9uU2VydmljZRJQCg1MaXN0UXVlc3Rpb25zEh4uZHJpbGwudjEuTGlzdFF1ZXN0aW9uc1JlcXVlc3QaHy5kcmlsbC52MS5MaXN0UXVlc3Rpb25zUmVzcG9uc2USRQoOQ3JlYXRlUXVlc3Rpb24SHy5kcmlsbC52MS5DcmVhdGVRdWVzdGlvblJlcXVlc3QaEi5kcmlsbC52MS5RdWVzdGlvbkIzWjFnaXRodWIuY29tL2J0Yy9kcmlsbC9pbnRlcm5hbC9wYi9kcmlsbC92MTtkcmlsbHYxYgZwcm90bzM", [file_google_api_field_behavior, file_google_protobuf_timestamp]);
+
+/**
+ * Describes the message drill.v1.CreateQuestionRequest.
+ * Use `create(CreateQuestionRequestSchema)` to create a new message.
+ */
+export const CreateQuestionRequestSchema = /*@__PURE__*/
+  messageDesc(file_drill_v1_question, 0);
 
 /**
  * Describes the message drill.v1.ListQuestionsRequest.
  * Use `create(ListQuestionsRequestSchema)` to create a new message.
  */
 export const ListQuestionsRequestSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_question, 0);
+  messageDesc(file_drill_v1_question, 1);
 
 /**
  * Describes the message drill.v1.ListQuestionsResponse.
  * Use `create(ListQuestionsResponseSchema)` to create a new message.
  */
 export const ListQuestionsResponseSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_question, 1);
+  messageDesc(file_drill_v1_question, 2);
 
 /**
  * Describes the message drill.v1.Question.
  * Use `create(QuestionSchema)` to create a new message.
  */
 export const QuestionSchema = /*@__PURE__*/
-  messageDesc(file_drill_v1_question, 2);
+  messageDesc(file_drill_v1_question, 3);
 
 /**
  * Describes the enum drill.v1.Difficulty.

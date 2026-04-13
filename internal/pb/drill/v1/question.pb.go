@@ -7,6 +7,7 @@
 package drillv1
 
 import (
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -123,6 +124,50 @@ func (QuestionSource) EnumDescriptor() ([]byte, []int) {
 	return file_drill_v1_question_proto_rawDescGZIP(), []int{1}
 }
 
+type CreateQuestionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Question      *Question              `protobuf:"bytes,1,opt,name=question,proto3" json:"question,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateQuestionRequest) Reset() {
+	*x = CreateQuestionRequest{}
+	mi := &file_drill_v1_question_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateQuestionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateQuestionRequest) ProtoMessage() {}
+
+func (x *CreateQuestionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_drill_v1_question_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateQuestionRequest.ProtoReflect.Descriptor instead.
+func (*CreateQuestionRequest) Descriptor() ([]byte, []int) {
+	return file_drill_v1_question_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *CreateQuestionRequest) GetQuestion() *Question {
+	if x != nil {
+		return x.Question
+	}
+	return nil
+}
+
 type ListQuestionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
@@ -133,7 +178,7 @@ type ListQuestionsRequest struct {
 
 func (x *ListQuestionsRequest) Reset() {
 	*x = ListQuestionsRequest{}
-	mi := &file_drill_v1_question_proto_msgTypes[0]
+	mi := &file_drill_v1_question_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -145,7 +190,7 @@ func (x *ListQuestionsRequest) String() string {
 func (*ListQuestionsRequest) ProtoMessage() {}
 
 func (x *ListQuestionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_question_proto_msgTypes[0]
+	mi := &file_drill_v1_question_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -158,7 +203,7 @@ func (x *ListQuestionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListQuestionsRequest.ProtoReflect.Descriptor instead.
 func (*ListQuestionsRequest) Descriptor() ([]byte, []int) {
-	return file_drill_v1_question_proto_rawDescGZIP(), []int{0}
+	return file_drill_v1_question_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ListQuestionsRequest) GetPageSize() int32 {
@@ -185,7 +230,7 @@ type ListQuestionsResponse struct {
 
 func (x *ListQuestionsResponse) Reset() {
 	*x = ListQuestionsResponse{}
-	mi := &file_drill_v1_question_proto_msgTypes[1]
+	mi := &file_drill_v1_question_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -197,7 +242,7 @@ func (x *ListQuestionsResponse) String() string {
 func (*ListQuestionsResponse) ProtoMessage() {}
 
 func (x *ListQuestionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_question_proto_msgTypes[1]
+	mi := &file_drill_v1_question_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -210,7 +255,7 @@ func (x *ListQuestionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListQuestionsResponse.ProtoReflect.Descriptor instead.
 func (*ListQuestionsResponse) Descriptor() ([]byte, []int) {
-	return file_drill_v1_question_proto_rawDescGZIP(), []int{1}
+	return file_drill_v1_question_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ListQuestionsResponse) GetQuestions() []*Question {
@@ -245,7 +290,7 @@ type Question struct {
 
 func (x *Question) Reset() {
 	*x = Question{}
-	mi := &file_drill_v1_question_proto_msgTypes[2]
+	mi := &file_drill_v1_question_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -257,7 +302,7 @@ func (x *Question) String() string {
 func (*Question) ProtoMessage() {}
 
 func (x *Question) ProtoReflect() protoreflect.Message {
-	mi := &file_drill_v1_question_proto_msgTypes[2]
+	mi := &file_drill_v1_question_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -270,7 +315,7 @@ func (x *Question) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Question.ProtoReflect.Descriptor instead.
 func (*Question) Descriptor() ([]byte, []int) {
-	return file_drill_v1_question_proto_rawDescGZIP(), []int{2}
+	return file_drill_v1_question_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Question) GetId() string {
@@ -347,29 +392,31 @@ var File_drill_v1_question_proto protoreflect.FileDescriptor
 
 const file_drill_v1_question_proto_rawDesc = "" +
 	"\n" +
-	"\x17drill/v1/question.proto\x12\bdrill.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"R\n" +
+	"\x17drill/v1/question.proto\x12\bdrill.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"L\n" +
+	"\x15CreateQuestionRequest\x123\n" +
+	"\bquestion\x18\x01 \x01(\v2\x12.drill.v1.QuestionB\x03\xe0A\x02R\bquestion\"R\n" +
 	"\x14ListQuestionsRequest\x12\x1b\n" +
 	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\x02 \x01(\tR\tpageToken\"q\n" +
 	"\x15ListQuestionsResponse\x120\n" +
 	"\tquestions\x18\x01 \x03(\v2\x12.drill.v1.QuestionR\tquestions\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x80\x03\n" +
-	"\bQuestion\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n" +
-	"\auser_id\x18\x02 \x01(\tH\x00R\x06userId\x88\x01\x01\x12\x14\n" +
-	"\x05title\x18\x03 \x01(\tR\x05title\x12\x16\n" +
-	"\x06prompt\x18\x04 \x01(\tR\x06prompt\x124\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xa3\x03\n" +
+	"\bQuestion\x12\x13\n" +
+	"\x02id\x18\x01 \x01(\tB\x03\xe0A\x03R\x02id\x12!\n" +
+	"\auser_id\x18\x02 \x01(\tB\x03\xe0A\x03H\x00R\x06userId\x88\x01\x01\x12\x19\n" +
+	"\x05title\x18\x03 \x01(\tB\x03\xe0A\x02R\x05title\x12\x1b\n" +
+	"\x06prompt\x18\x04 \x01(\tB\x03\xe0A\x02R\x06prompt\x124\n" +
 	"\n" +
 	"difficulty\x18\x05 \x01(\x0e2\x14.drill.v1.DifficultyR\n" +
 	"difficulty\x12\x12\n" +
 	"\x04tags\x18\x06 \x03(\tR\x04tags\x12\x19\n" +
-	"\x05hints\x18\a \x01(\tH\x01R\x05hints\x88\x01\x01\x120\n" +
-	"\x06source\x18\b \x01(\x0e2\x18.drill.v1.QuestionSourceR\x06source\x12;\n" +
-	"\vcreate_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"createTime\x12 \n" +
+	"\x05hints\x18\a \x01(\tH\x01R\x05hints\x88\x01\x01\x125\n" +
+	"\x06source\x18\b \x01(\x0e2\x18.drill.v1.QuestionSourceB\x03\xe0A\x03R\x06source\x12@\n" +
+	"\vcreate_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
+	"createTime\x12%\n" +
 	"\timage_url\x18\n" +
-	" \x01(\tH\x02R\bimageUrl\x88\x01\x01B\n" +
+	" \x01(\tB\x03\xe0A\x03H\x02R\bimageUrl\x88\x01\x01B\n" +
 	"\n" +
 	"\b_user_idB\b\n" +
 	"\x06_hintsB\f\n" +
@@ -384,9 +431,10 @@ const file_drill_v1_question_proto_rawDesc = "" +
 	"\x1bQUESTION_SOURCE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14QUESTION_SOURCE_SEED\x10\x01\x12\x1a\n" +
 	"\x16QUESTION_SOURCE_CUSTOM\x10\x02\x12#\n" +
-	"\x1fQUESTION_SOURCE_COACH_GENERATED\x10\x032c\n" +
+	"\x1fQUESTION_SOURCE_COACH_GENERATED\x10\x032\xaa\x01\n" +
 	"\x0fQuestionService\x12P\n" +
-	"\rListQuestions\x12\x1e.drill.v1.ListQuestionsRequest\x1a\x1f.drill.v1.ListQuestionsResponseB3Z1github.com/btc/drill/internal/pb/drill/v1;drillv1b\x06proto3"
+	"\rListQuestions\x12\x1e.drill.v1.ListQuestionsRequest\x1a\x1f.drill.v1.ListQuestionsResponse\x12E\n" +
+	"\x0eCreateQuestion\x12\x1f.drill.v1.CreateQuestionRequest\x1a\x12.drill.v1.QuestionB3Z1github.com/btc/drill/internal/pb/drill/v1;drillv1b\x06proto3"
 
 var (
 	file_drill_v1_question_proto_rawDescOnce sync.Once
@@ -401,27 +449,31 @@ func file_drill_v1_question_proto_rawDescGZIP() []byte {
 }
 
 var file_drill_v1_question_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_drill_v1_question_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_drill_v1_question_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_drill_v1_question_proto_goTypes = []any{
 	(Difficulty)(0),               // 0: drill.v1.Difficulty
 	(QuestionSource)(0),           // 1: drill.v1.QuestionSource
-	(*ListQuestionsRequest)(nil),  // 2: drill.v1.ListQuestionsRequest
-	(*ListQuestionsResponse)(nil), // 3: drill.v1.ListQuestionsResponse
-	(*Question)(nil),              // 4: drill.v1.Question
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*CreateQuestionRequest)(nil), // 2: drill.v1.CreateQuestionRequest
+	(*ListQuestionsRequest)(nil),  // 3: drill.v1.ListQuestionsRequest
+	(*ListQuestionsResponse)(nil), // 4: drill.v1.ListQuestionsResponse
+	(*Question)(nil),              // 5: drill.v1.Question
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_drill_v1_question_proto_depIdxs = []int32{
-	4, // 0: drill.v1.ListQuestionsResponse.questions:type_name -> drill.v1.Question
-	0, // 1: drill.v1.Question.difficulty:type_name -> drill.v1.Difficulty
-	1, // 2: drill.v1.Question.source:type_name -> drill.v1.QuestionSource
-	5, // 3: drill.v1.Question.create_time:type_name -> google.protobuf.Timestamp
-	2, // 4: drill.v1.QuestionService.ListQuestions:input_type -> drill.v1.ListQuestionsRequest
-	3, // 5: drill.v1.QuestionService.ListQuestions:output_type -> drill.v1.ListQuestionsResponse
-	5, // [5:6] is the sub-list for method output_type
-	4, // [4:5] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 0: drill.v1.CreateQuestionRequest.question:type_name -> drill.v1.Question
+	5, // 1: drill.v1.ListQuestionsResponse.questions:type_name -> drill.v1.Question
+	0, // 2: drill.v1.Question.difficulty:type_name -> drill.v1.Difficulty
+	1, // 3: drill.v1.Question.source:type_name -> drill.v1.QuestionSource
+	6, // 4: drill.v1.Question.create_time:type_name -> google.protobuf.Timestamp
+	3, // 5: drill.v1.QuestionService.ListQuestions:input_type -> drill.v1.ListQuestionsRequest
+	2, // 6: drill.v1.QuestionService.CreateQuestion:input_type -> drill.v1.CreateQuestionRequest
+	4, // 7: drill.v1.QuestionService.ListQuestions:output_type -> drill.v1.ListQuestionsResponse
+	5, // 8: drill.v1.QuestionService.CreateQuestion:output_type -> drill.v1.Question
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_drill_v1_question_proto_init() }
@@ -429,14 +481,14 @@ func file_drill_v1_question_proto_init() {
 	if File_drill_v1_question_proto != nil {
 		return
 	}
-	file_drill_v1_question_proto_msgTypes[2].OneofWrappers = []any{}
+	file_drill_v1_question_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_drill_v1_question_proto_rawDesc), len(file_drill_v1_question_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

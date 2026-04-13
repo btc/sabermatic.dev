@@ -36,11 +36,15 @@ const (
 	// QuestionServiceListQuestionsProcedure is the fully-qualified name of the QuestionService's
 	// ListQuestions RPC.
 	QuestionServiceListQuestionsProcedure = "/drill.v1.QuestionService/ListQuestions"
+	// QuestionServiceCreateQuestionProcedure is the fully-qualified name of the QuestionService's
+	// CreateQuestion RPC.
+	QuestionServiceCreateQuestionProcedure = "/drill.v1.QuestionService/CreateQuestion"
 )
 
 // QuestionServiceClient is a client for the drill.v1.QuestionService service.
 type QuestionServiceClient interface {
 	ListQuestions(context.Context, *connect.Request[v1.ListQuestionsRequest]) (*connect.Response[v1.ListQuestionsResponse], error)
+	CreateQuestion(context.Context, *connect.Request[v1.CreateQuestionRequest]) (*connect.Response[v1.Question], error)
 }
 
 // NewQuestionServiceClient constructs a client for the drill.v1.QuestionService service. By
@@ -60,12 +64,19 @@ func NewQuestionServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(questionServiceMethods.ByName("ListQuestions")),
 			connect.WithClientOptions(opts...),
 		),
+		createQuestion: connect.NewClient[v1.CreateQuestionRequest, v1.Question](
+			httpClient,
+			baseURL+QuestionServiceCreateQuestionProcedure,
+			connect.WithSchema(questionServiceMethods.ByName("CreateQuestion")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // questionServiceClient implements QuestionServiceClient.
 type questionServiceClient struct {
-	listQuestions *connect.Client[v1.ListQuestionsRequest, v1.ListQuestionsResponse]
+	listQuestions  *connect.Client[v1.ListQuestionsRequest, v1.ListQuestionsResponse]
+	createQuestion *connect.Client[v1.CreateQuestionRequest, v1.Question]
 }
 
 // ListQuestions calls drill.v1.QuestionService.ListQuestions.
@@ -73,9 +84,15 @@ func (c *questionServiceClient) ListQuestions(ctx context.Context, req *connect.
 	return c.listQuestions.CallUnary(ctx, req)
 }
 
+// CreateQuestion calls drill.v1.QuestionService.CreateQuestion.
+func (c *questionServiceClient) CreateQuestion(ctx context.Context, req *connect.Request[v1.CreateQuestionRequest]) (*connect.Response[v1.Question], error) {
+	return c.createQuestion.CallUnary(ctx, req)
+}
+
 // QuestionServiceHandler is an implementation of the drill.v1.QuestionService service.
 type QuestionServiceHandler interface {
 	ListQuestions(context.Context, *connect.Request[v1.ListQuestionsRequest]) (*connect.Response[v1.ListQuestionsResponse], error)
+	CreateQuestion(context.Context, *connect.Request[v1.CreateQuestionRequest]) (*connect.Response[v1.Question], error)
 }
 
 // NewQuestionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -91,10 +108,18 @@ func NewQuestionServiceHandler(svc QuestionServiceHandler, opts ...connect.Handl
 		connect.WithSchema(questionServiceMethods.ByName("ListQuestions")),
 		connect.WithHandlerOptions(opts...),
 	)
+	questionServiceCreateQuestionHandler := connect.NewUnaryHandler(
+		QuestionServiceCreateQuestionProcedure,
+		svc.CreateQuestion,
+		connect.WithSchema(questionServiceMethods.ByName("CreateQuestion")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/drill.v1.QuestionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QuestionServiceListQuestionsProcedure:
 			questionServiceListQuestionsHandler.ServeHTTP(w, r)
+		case QuestionServiceCreateQuestionProcedure:
+			questionServiceCreateQuestionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -106,4 +131,8 @@ type UnimplementedQuestionServiceHandler struct{}
 
 func (UnimplementedQuestionServiceHandler) ListQuestions(context.Context, *connect.Request[v1.ListQuestionsRequest]) (*connect.Response[v1.ListQuestionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.QuestionService.ListQuestions is not implemented"))
+}
+
+func (UnimplementedQuestionServiceHandler) CreateQuestion(context.Context, *connect.Request[v1.CreateQuestionRequest]) (*connect.Response[v1.Question], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.QuestionService.CreateQuestion is not implemented"))
 }

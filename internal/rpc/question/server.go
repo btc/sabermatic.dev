@@ -104,8 +104,84 @@ func (s *Server) ListQuestions(
 	}), nil
 }
 
+// CreateQuestion creates a user-owned custom question.
+// Follows AIP-133: the request embeds the resource; server assigns
+// OUTPUT_ONLY fields (id, user_id, source, create_time, image_url).
+func (s *Server) CreateQuestion(
+	ctx context.Context,
+	req *connect.Request[drillv1.CreateQuestionRequest],
+) (*connect.Response[drillv1.Question], error) {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
+
+	q := req.Msg.Question
+	if q == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("question is required"))
+	}
+	if q.Title == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("title is required"))
+	}
+	if q.Prompt == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("prompt is required"))
+	}
+
+	difficulty := q.Difficulty
+	if difficulty == drillv1.Difficulty_DIFFICULTY_UNSPECIFIED {
+		difficulty = drillv1.Difficulty_DIFFICULTY_MEDIUM
+	}
+	diffStr := difficultyFromProto(difficulty)
+	if diffStr == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid difficulty"))
+	}
+
+	row, err := s.b.CreateQuestion(ctx, user.ID, q.Title, q.Prompt, diffStr, q.Tags)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("create question failed"))
+	}
+
+	return connect.NewResponse(fullQuestionToProto(row)), nil
+}
+
 // questionToProto converts a database row to a proto Question message.
 func questionToProto(row db.ListQuestionsForUserRow) *drillv1.Question {
+	tags := row.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
+	q := &drillv1.Question{
+		Id:         row.ID.String(),
+		Title:      row.Title,
+		Prompt:     row.Prompt,
+		Difficulty: difficultyToProto(row.Difficulty),
+		Tags:       tags,
+		Source:     sourceToProto(row.Source),
+		CreateTime: timestamppb.New(row.CreatedAt),
+	}
+
+	if row.UserID.Valid {
+		uid := uuid.UUID(row.UserID.Bytes).String()
+		q.UserId = &uid
+	}
+
+	if row.Hints.Valid {
+		q.Hints = &row.Hints.String
+	}
+
+	if row.ImageUrl.Valid {
+		q.ImageUrl = &row.ImageUrl.String
+	}
+
+	return q
+}
+
+// fullQuestionToProto converts a full database Question row to a proto
+// Question message. Used by CreateQuestion where GetQuestion returns all
+// columns. Separate from questionToProto which handles the list-specific row
+// type with fewer columns.
+func fullQuestionToProto(row db.Question) *drillv1.Question {
 	tags := row.Tags
 	if tags == nil {
 		tags = []string{}
@@ -145,6 +221,17 @@ func difficultyToProto(s string) drillv1.Difficulty {
 		return drillv1.Difficulty_DIFFICULTY_HARD
 	default:
 		return drillv1.Difficulty_DIFFICULTY_UNSPECIFIED
+	}
+}
+
+func difficultyFromProto(d drillv1.Difficulty) string {
+	switch d {
+	case drillv1.Difficulty_DIFFICULTY_MEDIUM:
+		return "medium"
+	case drillv1.Difficulty_DIFFICULTY_HARD:
+		return "hard"
+	default:
+		return ""
 	}
 }
 
