@@ -12,12 +12,16 @@
 
 ---
 
-### Task 1: Proto & codegen — add CreateQuestion RPC with AIP-203 annotations
+### Task 1: Proto, backend, and RPC handler — CreateQuestion end-to-end
+
+Proto codegen adds `CreateQuestion` to the `QuestionServiceHandler` interface. The existing compile guard (`var _ drillv1connect.QuestionServiceHandler = (*Server)(nil)`) means the build breaks until the handler exists. Proto + backend + handler must ship as one commit.
 
 **Files:**
 - Modify: `buf.yaml` (add googleapis dep)
 - Modify: `pb/drill/v1/question.proto`
 - Regenerate: `internal/pb/drill/v1/` (Go), `web/src/pb/drill/v1/` (TypeScript)
+- Modify: `internal/backend/question.go`
+- Modify: `internal/rpc/question/server.go`
 
 - [ ] **Step 1: Add googleapis dependency to buf.yaml**
 
@@ -93,12 +97,10 @@ message Question {
 }
 ```
 
-- [ ] **Step 3: Run buf generate**
+- [ ] **Step 3: Run buf generate and verify**
 
 Run: `buf generate`
 Expected: No errors. Generated files updated in `internal/pb/drill/v1/` and `web/src/pb/drill/v1/`.
-
-- [ ] **Step 4: Verify generated code includes CreateQuestion**
 
 Run: `grep -r "CreateQuestion" internal/pb/drill/v1/drillv1connect/`
 Expected: `CreateQuestion` appears in the generated Connect service interface and handler.
@@ -106,32 +108,10 @@ Expected: `CreateQuestion` appears in the generated Connect service interface an
 Run: `grep "createQuestion" web/src/pb/drill/v1/question-QuestionService_connectquery.js`
 Expected: `export const createQuestion = QuestionService.method.createQuestion;`
 
-- [ ] **Step 5: Verify buf lint passes**
-
 Run: `buf lint`
 Expected: No errors.
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add buf.yaml buf.lock pb/drill/v1/question.proto internal/pb/ web/src/pb/
-git commit -m "proto: add CreateQuestion RPC with AIP-203 field behavior annotations
-
-Follows AIP-133 (Standard Create) with embedded resource. Adds
-google/api/field_behavior.proto annotations to Question message:
-OUTPUT_ONLY for server-assigned fields, REQUIRED for title/prompt.
-
-Part of #152."
-```
-
----
-
-### Task 2: Backend — add CreateQuestion method to Backend
-
-**Files:**
-- Modify: `internal/backend/question.go`
-
-- [ ] **Step 1: Add CreateQuestion method**
+- [ ] **Step 4: Add CreateQuestion backend method**
 
 Add to `internal/backend/question.go`, below the existing `ListQuestions` method:
 
@@ -171,31 +151,7 @@ func (b *Backend) CreateQuestion(ctx context.Context, userID uuid.UUID, title, p
 
 The `pgtype` import is already used in `ListQuestions`. No new imports needed.
 
-- [ ] **Step 2: Verify it compiles**
-
-Run: `go build ./internal/backend/...`
-Expected: No errors.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add internal/backend/question.go
-git commit -m "backend: add CreateQuestion method
-
-Inserts a custom question and returns the full row via GetQuestion.
-Source is always 'custom', user_id from caller, coach_rationale NULL.
-
-Part of #152."
-```
-
----
-
-### Task 3: RPC handler — implement CreateQuestion with validation
-
-**Files:**
-- Modify: `internal/rpc/question/server.go`
-
-- [ ] **Step 1: Add fullQuestionToProto converter**
+- [ ] **Step 5: Add fullQuestionToProto converter to server.go**
 
 Add to `internal/rpc/question/server.go`, below the existing `questionToProto` function:
 
@@ -237,7 +193,7 @@ func fullQuestionToProto(row db.Question) *drillv1.Question {
 }
 ```
 
-- [ ] **Step 2: Add difficultyFromProto helper**
+- [ ] **Step 6: Add difficultyFromProto helper to server.go**
 
 Add below `difficultyToProto`:
 
@@ -254,7 +210,7 @@ func difficultyFromProto(d drillv1.Difficulty) string {
 }
 ```
 
-- [ ] **Step 3: Add CreateQuestion handler**
+- [ ] **Step 7: Add CreateQuestion handler to server.go**
 
 Add to `internal/rpc/question/server.go`, below `ListQuestions`:
 
@@ -300,27 +256,30 @@ func (s *Server) CreateQuestion(
 }
 ```
 
-- [ ] **Step 4: Verify it compiles**
+- [ ] **Step 8: Verify full build**
 
-Run: `go build ./internal/rpc/...`
+Run: `go build ./...`
 Expected: No errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add internal/rpc/question/server.go
-git commit -m "rpc: implement CreateQuestion handler with AIP-133 validation
+git add buf.yaml buf.lock pb/drill/v1/question.proto internal/pb/ web/src/pb/ internal/backend/question.go internal/rpc/question/server.go
+git commit -m "feat: add CreateQuestion RPC with AIP-133 and AIP-203
 
-Validates REQUIRED fields (title, prompt), defaults DIFFICULTY_UNSPECIFIED
-to MEDIUM, assigns source=custom and user_id from auth context. Returns
-the full Question resource per AIP-133.
+Add CreateQuestion to QuestionService proto with field behavior
+annotations. Implement backend method (insert + get-by-id) and RPC
+handler with REQUIRED field validation and difficulty defaulting.
+
+Proto + backend + handler ship together because the compile guard
+requires all interface methods to be implemented.
 
 Part of #152."
 ```
 
 ---
 
-### Task 4: Tests — CreateQuestion RPC handler tests
+### Task 2: Tests — CreateQuestion RPC handler tests
 
 **Files:**
 - Modify: `internal/rpc/question/server_test.go`
@@ -508,7 +467,7 @@ Part of #152."
 
 ---
 
-### Task 5: Frontend — switch useCreateQuestion to ConnectRPC
+### Task 3: Frontend — switch useCreateQuestion to ConnectRPC
 
 **Files:**
 - Modify: `web/src/api/queries.ts`
@@ -621,7 +580,7 @@ Closes #152."
 
 ---
 
-### Task 6: Dead code removal — REST client, types, CSRF, handler stubs
+### Task 4: Dead code removal — REST client, types, CSRF, handler stubs
 
 **Files:**
 - Delete: `web/src/api/client.ts`
@@ -732,7 +691,7 @@ Part of #152."
 
 ---
 
-### Task 7: Full verification
+### Task 5: Full verification
 
 - [ ] **Step 1: Run full CI**
 
