@@ -451,6 +451,25 @@ func TestCreateQuestion_EmptyPrompt(t *testing.T) {
 	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 }
 
+func TestCreateQuestion_InvalidDifficulty(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	srvURL := startQuestionServer(t, b)
+	token := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, token)
+
+	_, err := client.CreateQuestion(context.Background(), connect.NewRequest(&drillv1.CreateQuestionRequest{
+		Question: &drillv1.Question{
+			Title:      "Design a cache",
+			Prompt:     "Design a distributed cache.",
+			Difficulty: drillv1.Difficulty(99),
+		},
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
 func TestCreateQuestion_Unauthenticated(t *testing.T) {
 	t.Parallel()
 
@@ -556,13 +575,9 @@ export function useCreateQuestion() {
 
 - [ ] **Step 2: Update home.tsx — map difficulty to proto enum**
 
-In `web/src/pages/home.tsx`, add the Difficulty import near the top with the other proto imports:
+In `web/src/pages/home.tsx`, `Difficulty` is already imported from `@/pb/drill/v1/question_pb` (line 33). No new import needed.
 
-```ts
-import { Difficulty } from "@/pb/drill/v1/question_pb";
-```
-
-Then update the `handleSubmit` function in `CreateQuestionDialog`. Replace:
+Update the `handleSubmit` function in `CreateQuestionDialog`. Replace:
 
 ```ts
     createQuestion.mutate(
@@ -704,8 +719,7 @@ Expected: No errors (auth.go removal doesn't break anything — functions were u
 - [ ] **Step 9: Commit**
 
 ```bash
-git add -u web/src/api/client.ts web/src/api/types.ts web/src/api/__tests__/client.test.ts internal/handler/auth.go
-git add web/src/main.tsx web/src/vite-env.d.ts internal/handler/billing.go CLAUDE.md
+git add web/src/api/client.ts web/src/api/types.ts web/src/api/__tests__/ internal/handler/auth.go web/src/main.tsx web/src/vite-env.d.ts internal/handler/billing.go CLAUDE.md
 git commit -m "chore: remove dead app-level REST code
 
 Delete apiClient, types.ts, client.test.ts, handler/auth.go (unused

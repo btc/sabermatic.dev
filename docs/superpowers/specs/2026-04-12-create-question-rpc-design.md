@@ -43,8 +43,9 @@ message Question {
 }
 ```
 
-- Client sends `Question` with `title`, `prompt`, `difficulty`, `tags`, and optionally `hints` populated.
+- Client sends `Question` with `title`, `prompt`, `difficulty`, and `tags` populated.
 - Server ignores `id`, `user_id`, `source`, `create_time`, `image_url` (all OUTPUT_ONLY).
+- `hints` is not settable at creation time (`InsertQuestion` SQL doesn't include it). The field remains unannotated for potential future use via `UpdateQuestion`.
 - Server assigns `source = QUESTION_SOURCE_CUSTOM`, `user_id` from auth context.
 - Returns the fully-populated `Question` (bare resource, no response wrapper per AIP-133).
 
