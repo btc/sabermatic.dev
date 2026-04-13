@@ -349,9 +349,9 @@ Expected: three tests PASS.
 
 Run:
 ```bash
-go build ./cmd/stripescenario
+go build -o /dev/null ./cmd/stripescenario
 ```
-Expected: no output (success), no new files at repo root (build uses module cache).
+Expected: no output, exit 0. (`-o /dev/null` avoids producing a stray `stripescenario` binary at repo root.)
 
 - [ ] **Step 7: Smoke-run `--help`**
 
