@@ -10,8 +10,6 @@ import (
 	"github.com/btc/drill/internal/backend"
 )
 
-// (PostCheckout and PostPortal migrated to ConnectRPC BillingService)
-
 // PostStripeWebhook returns a handler that processes incoming Stripe webhook
 // events. The request body is verified against the Stripe-Signature header
 // using the configured webhook secret. Always returns 200 to avoid Stripe

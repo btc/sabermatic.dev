@@ -23,13 +23,13 @@ Shared test helper packages follow the `httptest` convention: `internal/jobs/job
 
 Proto is the API contract. After editing `.proto` files, run `buf generate` and commit generated code in `internal/pb/` and `web/src/pb/`. Never hand-edit generated files.
 
-ConnectRPC services follow Google AIPs where practical. Standard methods use AIP naming, pagination (AIP-158), error codes (AIP-193). Custom methods use AIP-136. Skip resource names (AIP-122) and field behavior annotations (AIP-203).
+ConnectRPC services follow Google AIPs where practical. Standard methods use AIP naming, pagination (AIP-158), error codes (AIP-193), field behavior annotations (AIP-203). Custom methods use AIP-136. Skip resource names (AIP-122).
 
 `repeated` proto fields must map to empty slices, not nil. Always return initialized slices from db-to-proto converters.
 
 Update methods use field masks for partial updates (AIP-134).
 
-ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are being incrementally migrated. New endpoints should be ConnectRPC services.
+ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are limited to health checks, OAuth flows, and Stripe webhooks — endpoints that are inherently HTTP-level. All resource RPCs use ConnectRPC.
 
 Verify library API signatures against installed versions before writing plan code blocks.
 
