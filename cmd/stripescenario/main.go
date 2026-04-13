@@ -22,7 +22,8 @@ func main() {
 		Commands: []*cli.Command{
 			packBuyCmd(),
 			subStartCmd(),
-			// subCancelCmd(), resendCmd() added in later tasks
+			subCancelCmd(),
+			// resendCmd() added in next task
 		},
 	}
 
