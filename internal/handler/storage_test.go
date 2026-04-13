@@ -49,5 +49,6 @@ func TestStorageRoute_GCSNotRegistered(t *testing.T) {
 	h.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), "<html")
+	require.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"),
+		"gcs-backend request for /storage/* should fall through to the SPA (index.html)")
 }
