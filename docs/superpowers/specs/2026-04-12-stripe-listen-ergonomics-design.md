@@ -135,20 +135,21 @@ func newRunner(ctx context.Context) (*Runner, error) {
 
 **Why SDK-driven for subscriptions.** `stripe trigger invoice.paid` and `stripe trigger customer.subscription.*` are fixture pipelines that pre-create their own `Customer`/`Subscription` objects. Even with `--override subscription:customer=<cus_id>`, downstream pipeline steps (e.g., `invoiceitem` creation) reference the fixture's internally-created customer, so the emitted event's `customer` does not match the one we wrote into `users.stripe_customer_id`. The `handleInvoicePaid` lookup would hit `n==0`. Real SDK calls produce real webhooks with the correct customer.
 
-**`sub-start` SDK flow:**
-1. `customer.New` (package `github.com/stripe/stripe-go/v82/customer`) with optional email metadata for traceability.
-2. Attach a test payment method (`pm_card_visa` is a stable test token in Stripe test mode) to the customer and set it as the customer's default via `customer.Update` with `InvoiceSettings.DefaultPaymentMethod`.
-3. `pool.Exec(ctx, "UPDATE users SET stripe_customer_id = $1, stripe_customer_id_updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL", cust.ID, userID)`. Check `CommandTag.RowsAffected() == 1`; error with a clear "user not found" if zero. (If the `stripe_customer_id_updated_at` column doesn't exist yet, drop it from the UPDATE — this scenario tool is not the place to add columns.)
-4. `sub.New` with `Customer = cust.ID` and `Items = [{Price: STRIPE_PRO_PRICE_ID}]`. Default `collection_method=charge_automatically` causes Stripe to create and charge the invoice immediately in test mode, firing `invoice.paid`.
+**`sub-start` SDK flow** (Stripe SDK packages: `customer`, `paymentmethod`, and `subscription` — the last typically imported as `sub`):
+1. `customer.New` with optional email metadata for traceability.
+2. Attach `pm_card_visa` — a stable test PaymentMethod ID, usable only in Stripe test mode (gated by the `sk_test_` assertion in `newRunner`). Set it as the customer's default via `customer.Update` with `InvoiceSettings.DefaultPaymentMethod`.
+3. Persist the customer link via `db.New(r.pool).UpdateUserStripeCustomerID(ctx, db.UpdateUserStripeCustomerIDParams{ID: userID, StripeCustomerID: pgtype.Text{String: cust.ID, Valid: true}})`. This is the existing sqlc-generated query (`sql/queries/users.sql`), not raw SQL — matches production parity. The query returns no error on zero rows affected, so follow up with a `SELECT 1 FROM users WHERE id = $1` existence check before the UPDATE (or fold the existence check into a new sqlc query if the implementer prefers).
+4. `sub.New` with `Customer = cust.ID` and `Items = [{Price: STRIPE_PRO_PRICE_ID}]`. Default `collection_method=charge_automatically` + `pm_card_visa` causes Stripe to create and charge the invoice synchronously in test mode, firing `invoice.paid`.
 
 If the user already has a `stripe_customer_id`, overwrite. The prior customer is orphaned in the Stripe test account — acceptable (test mode, not prod). Any active subscription on the prior customer will keep billing against its own payment method; running `sub-cancel` only cancels the subscription on the current `stripe_customer_id`.
 
 **`sub-cancel` SDK flow:**
 1. Read `users.stripe_customer_id`; error if null ("run sub-start first").
-2. `sub.List` filtered by `Customer = custID, Status = "active"`.
-3. For each active subscription, `sub.Cancel(subID, nil)` with default immediate cancellation. Emits `customer.subscription.deleted`.
+2. `sub.List` filtered by `Customer = custID` with no `Status` filter — per stripe-go `SubscriptionListParams.Status`, omitting the filter returns all non-canceled subscriptions, which covers `active`, `trialing`, `past_due`, etc. Filtering on just `"active"` would silently miss the others.
+3. If the list is empty, print `no active subscriptions for user <id>` to stderr and exit 0 — the dev isn't left staring at logs for an event that will never fire.
+4. Otherwise, for each listed subscription, `sub.Cancel(subID, nil)` with default immediate cancellation. Emits `customer.subscription.deleted`.
 
-**Orphan leak:** if step 1 of `sub-start` succeeds but step 3 fails (DB update fails), an orphaned `Customer` exists in the Stripe test account. Acceptable in dev tooling — test mode customers are free and listable via `stripe customers list`. Documented caveat, not something the tool handles.
+**Orphan leak in `sub-start`:** any failure after step 1 (customer already exists in Stripe but the flow didn't complete) leaves an orphaned `Customer`. Step 2 failure → customer without a payment method. Step 3 failure → customer + PM but no DB link (subsequent scenarios can't find them). Step 4 failure → customer + PM + DB link but no subscription; rerunning `sub-start` overwrites cleanly. Acceptable in dev tooling — test mode customers are free and listable via `stripe customers list`. Not something the tool handles.
 
 **Shared helpers in `runner.go`:**
 - `(r *Runner) lookupStripeCustomer(ctx, userID) (string, error)` — reads `users.stripe_customer_id`, errors cleanly if null or user missing.
@@ -207,6 +208,8 @@ $ make stripe-pack-buy U=9f1a... MINUTES=120
   │    └─ exec: stripe trigger checkout.session.completed
   │              --add checkout_session:metadata.user_id=9f1a...
   │              --add checkout_session:metadata.pack_minutes=120
+  │       (--add, not --override: the checkout_session fixture does not
+  │        pre-populate metadata, so we're adding, not replacing.)
   │
   ├─ Stripe API receives trigger → emits checkout.session.completed event
   │
