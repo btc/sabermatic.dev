@@ -12,6 +12,7 @@ plugins:
   # TypeScript message types
   - remote: buf.build/bufbuild/es:v2.11.0
     out: web/src/pb
+    include_imports: true
   # TanStack Query hooks
   - remote: buf.build/connectrpc/query-es:v2.2.0
     out: web/src/pb
