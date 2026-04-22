@@ -54,22 +54,37 @@ Location: `web/src/components/ball-mark.tsx`
 
 **Geometry:** Use the detailed geometry from `web/public/mark.svg` (rotated `-28°` CCW, with 14 seam tick lines). Not the simplified `favicon.svg` (no ticks). The hero is the primary showcase; tick detail should be present at large sizes. At small sizes (≤16px effective ball diameter) the ticks will muddy together visually — accepted.
 
-**Sizing:** inline SVG with `width: 0.55em; height: 0.55em;` plus `display: inline-block`. The em-relative size makes a single component work from 13px up to 140px.
+**Sizing:** `width: 0.55em; height: 0.55em;` plus `display: inline-block`. The em-relative size makes a single component work from 13px up to 140px.
 
-**Vertical alignment:** CSS `transform: translateY(...)` to sit the ball as a baseline period at small sizes and rise to roughly cap-height center at hero sizes. Starting value: `translateY(0.05em)`. Acceptance: at `text-sm` (14px) in the nav, the ball reads as a heavy period, with its top roughly at cap-height of the `[` bracket. At 140px hero text, the ball sits below the cap-height of the brackets, reading as a large round punctuation mark. Fine-tune against `[` and `]` bracket glyph metrics in Inter/system-ui during implementation; commit screenshots at 14px, 40px, 140px to the PR.
+**DOM structure — two nodes, specific responsibilities:**
+
+```tsx
+<span className="ball-mark-wrap">   {/* owns baseline translateY */}
+  <svg className={props.className}> {/* caller className lands here — e.g., group-hover animate-spin */}
+    ...
+  </svg>
+</span>
+```
+
+**Why a wrapper span:** Tailwind's `animate-spin` sets `transform: rotate(...)` via CSS animation and replaces any existing `transform` on the same element. If baseline `translateY` sat on the `<svg>`, it would disappear during the spin keyframes, making the ball jump. The wrapper span owns `translateY`; the inner `<svg>` owns caller-supplied animation. The two transforms compose correctly because they live on separate elements.
+
+**Vertical alignment:** `transform: translateY(0.05em)` on the wrapper span (starting value). Acceptance: at `text-sm` (14px) in the nav, the ball reads as a heavy period, with its top roughly at cap-height of the `[` bracket. At 140px hero text, the ball sits below the cap-height of the brackets, reading as a large round punctuation mark. Fine-tune against `[` and `]` bracket glyph metrics in Inter/system-ui during implementation; commit screenshots at 14px, 40px, 140px to the PR.
 
 **Color:** amber fill `#fef3c7`, umber strokes `#92400e` and `#b45309`. Self-colored — holds on cream + dark backgrounds without theme branching.
 
 **API:**
 ```tsx
 interface BallMarkProps {
-  className?: string;  // for surface-specific tuning (hero spin)
+  /** Applied to the inner <svg>. Use for hover animation, etc.
+   *  Do NOT use for transforms — they will clobber the spin animation.
+   *  Use props.style if you need to override wrapper positioning. */
+  className?: string;
 }
 ```
 
 Keep the component prop-thin. Motion is triggered by a CSS class the *caller* applies, not a `spin` prop, so the ball primitive stays agnostic.
 
-**Accessibility:** `aria-hidden="true"` on the `<svg>`, no `<title>` / `<desc>`.
+**Accessibility:** `aria-hidden="true"` on the `<svg>`, no `<title>` / `<desc>`. Wrapper span has no ARIA role.
 
 ### `<BrandName/>` — updated
 
@@ -110,7 +125,7 @@ These differences are deliberate typographic character for the hero, not drift t
 ```tsx
 <h1
   id="hero-heading"
-  className="mb-9 text-[clamp(56px,10vw,140px)] font-extrabold leading-[0.9] tracking-[-0.055em]"
+  className="group mb-9 text-[clamp(56px,10vw,140px)] font-extrabold leading-[0.9] tracking-[-0.055em]"
   aria-label="Sabermatic dot DEV"
 >
   sabermatic<span
@@ -120,7 +135,7 @@ These differences are deliberate typographic character for the hero, not drift t
 </h1>
 ```
 
-Motion (nice-to-have): add `className="group"` directly to the `<h1>` so the hover hit area matches the wordmark itself (not the entire hero section or its wrapper `<div>`). The ball's `className` includes `group-hover:animate-[spin_2s_linear_infinite] motion-reduce:animate-none`. If the rotation feels off, drop the classes — `BallMark` is agnostic, so this doesn't affect other surfaces.
+Motion (nice-to-have): `group` lives on the `<h1>` itself so the hover hit area matches the visible wordmark (not a wrapper `<div>` or the whole `<section>`). The ball's `className` lands on the inner `<svg>` (see BallMark DOM structure) so `animate-spin` composes with the wrapper span's `translateY` instead of clobbering it. If the rotation feels off in practice, drop the classes from the `<h1>` + `<BallMark>` — `BallMark` is agnostic, so this doesn't affect other surfaces.
 
 ### Email wrapper — add PNG mark
 
@@ -263,9 +278,9 @@ Update `internal/handler/spa_test.go` to assert the new tags on the same routes 
 |---|---|
 | Frontend unit (`ball-mark.test.tsx`, new) | Renders SVG with `aria-hidden="true"`, with circle + stitching paths |
 | Frontend unit (`brand-name.test.tsx`, new) | Asserts the net-new ARIA attributes added by this spec: `role="img"` and `aria-label="Sabermatic dot DEV"` on the outer span; `aria-hidden="true"` on the inner styled span; visible text contains `Sabermatic`, `[`, `DEV]`; `<BallMark/>` rendered inside the inner span |
-| Frontend unit (`hero.test.tsx`, new) | Hero renders `<BallMark/>` inside `<h1>` with `aria-label`; does NOT render `<BrandName/>` (guards against accidental refactor) |
-| Backend unit (`internal/email/template_test.go`, update) | **Update existing `TestRenderEmail` to the 3-arg signature (pass a concrete `logoURL`).** Add separate asserts for the logo: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\"")`, `Contains(html, "height=\"28\"")`; assert `alt=""` present; assert wrapper renders without `<img>` when `logoURL == ""` (this exercises the `{{if .LogoURL}}` else branch). This file owns tests for the `email.RenderEmail` public API. |
-| Backend unit (`internal/jobs/render_email_test.go`, update) | This file tests the jobs-internal `renderEvaluationEmail` function. Update existing tests to pass a `baseURL` through and assert the rendered HTML contains the expected `/mark-256.png` URL. Does NOT re-test `email.RenderEmail` directly (that's `template_test.go`'s job). |
+| Frontend unit (`hero.test.tsx`, new) | Hero's `<h1>` contains the `<BallMark/>` SVG as a direct descendant (via a `data-testid` on `BallMark` or by matching the ball SVG's circle); `<h1>` has `aria-label="Sabermatic dot DEV"`; `<h1>` does NOT have `role="img"` (which would only be present if the hero had been refactored to use `<BrandName/>` — this assertion guards against accidental refactor) |
+| Backend unit (`internal/email/template_test.go`, update) | **Update existing `TestRenderEmail` to the 3-arg signature (pass a concrete `logoURL`).** Add separate asserts for the logo: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\" height=\"28\" alt=\"\"")` (matched as an in-order substring to avoid false positives on unrelated `alt=""` attributes), and a dedicated case that passes `logoURL == ""` and asserts the wrapper does NOT contain `<img `, exercising the `{{if .LogoURL}}` else branch. This file owns tests for the `email.RenderEmail` public API. |
+| Backend unit (`internal/jobs/render_email_test.go`, update) | Tests the jobs-internal `renderEvaluationEmail`. The existing `TestRenderEvaluationEmail_EscapesHTML` already passes a `baseURL` ("https://example.com"). Add one new assertion to it: `assert.Contains(t, html, "https://example.com/mark-256.png")`. Does NOT re-test `email.RenderEmail` directly (that's `template_test.go`'s job). |
 | Backend unit (`internal/backend/auth_test.go`) | If existing tests cover verify-email or reset-password rendering paths, update the expected HTML fixtures to include the `<img>` tag. Otherwise no change needed. |
 | Backend unit (`internal/handler/spa_test.go`, update) | Asserts `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description` on routes that already have OG coverage |
 | Manual visual | `/`, `/login`, `/signup`, `/forgot-password`, authed app loading splash, force an error-boundary render. Screenshot each for the PR. |
