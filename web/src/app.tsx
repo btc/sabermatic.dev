@@ -1,8 +1,7 @@
 import { lazy, Suspense } from "react";
-import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 
 import { PublicHeader } from "@/components/public-header";
-import { Button, buttonVariants } from "@/components/ui/button";
 import { useOptionalAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/layouts/app-layout";
 import { ImmersiveLayout } from "@/layouts/immersive-layout";
@@ -30,34 +29,24 @@ function Loading() {
 }
 
 function ConditionalHome() {
-  const { isAuthenticated, isLoading, isAuthError, error, refetch } = useOptionalAuth();
-  if (isLoading) return <Loading />;
-  if (isAuthenticated) {
+  const { isAuthenticated, isLoading, error } = useOptionalAuth();
+
+  // Render Landing immediately for unauthenticated (or still-loading) visitors
+  // — don't block the whole page on GetMe, which can cold-start slowly on
+  // Cloud Run. Authenticated users get flipped to the app once GetMe resolves.
+  if (!isLoading && isAuthenticated) {
     return (
       <AppLayout>
         <Home />
       </AppLayout>
     );
   }
-  if (isAuthError) {
-    return <><PublicHeader /><Landing /></>;
-  }
-  if (error) {
+
+  if (!isLoading && error) {
     console.error("ConditionalHome: unexpected error", error);
   }
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4">
-      <p className="text-sm text-muted-foreground">Something went wrong. Please try again later.</p>
-      <div className="flex gap-3">
-        <Button onClick={() => refetch()} type="button">
-          Try again
-        </Button>
-        <Link to="/about" className={buttonVariants({ variant: "outline" })}>
-          Go to about page
-        </Link>
-      </div>
-    </div>
-  );
+
+  return <><PublicHeader /><Landing /></>;
 }
 
 export function App() {
