@@ -66,9 +66,15 @@ func SPAHandler(fsys fs.FS, baseURL string) (http.Handler, error) {
 				`<meta property="og:description" content="%s">`+
 				`<meta property="og:type" content="website">`+
 				`<meta property="og:url" content="%s%s">`+
-				`<meta property="og:image" content="%s%s">`,
+				`<meta property="og:image" content="%s%s">`+
+				`<meta name="twitter:card" content="summary_large_image">`+
+				`<meta name="twitter:title" content="%s">`+
+				`<meta name="twitter:description" content="%s">`+
+				`<meta name="twitter:image" content="%s%s">`,
 			html.EscapeString(og.title), html.EscapeString(og.description),
 			html.EscapeString(baseURL), html.EscapeString(path),
+			html.EscapeString(baseURL), html.EscapeString(og.image),
+			html.EscapeString(og.title), html.EscapeString(og.description),
 			html.EscapeString(baseURL), html.EscapeString(og.image),
 		)
 		ogPages[path] = []byte(strings.Replace(indexHTML, "</head>", tags+"</head>", 1))
