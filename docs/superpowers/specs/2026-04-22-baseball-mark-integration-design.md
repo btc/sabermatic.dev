@@ -90,10 +90,11 @@ Location: `web/src/components/ball-mark.tsx`
 interface BallMarkProps {
   /** Additional Tailwind classes applied to the inner <svg>.
    *  Use for hover animation (e.g. "group-hover:animate-spin") or
-   *  per-surface color overrides. Do NOT pass transforms — they will
-   *  clobber the caller's own animation. Wrapper positioning is not
-   *  externally overridable by design; if a surface needs a different
-   *  baseline, prefer a new component variant. */
+   *  per-surface color overrides. Do not pass transform utilities —
+   *  they will conflict with animate-spin on the same element (both
+   *  write to `transform`, and CSS animation takes precedence).
+   *  Wrapper positioning is not externally overridable by design;
+   *  if a surface needs a different baseline, prefer a new variant. */
   className?: string;
 }
 ```
@@ -151,7 +152,7 @@ These differences are deliberate typographic character for the hero, not drift t
 </h1>
 ```
 
-Motion (nice-to-have): `group` lives on the `<h1>` itself. An `<h1>` is a block element, so the hover area fills the `<h1>`'s content width (the `max-w-[1120px]` container) rather than tightly hugging the wordmark — accepted as a common pattern; tighter hover would require wrapping the wordmark in an inline container (not worth the markup churn). The ball's `className` lands on the inner `<svg>` (see BallMark DOM structure) so `animate-spin` composes with the wrapper span's `translateY` instead of clobbering it. If the rotation feels off in practice, drop the classes from the `<h1>` + `<BallMark>` — `BallMark` is agnostic, so this doesn't affect other surfaces.
+Motion (nice-to-have): `group` lives on the `<h1>` itself. An `<h1>` is a block element, so the hover area fills the `<h1>`'s block width (inside the hero's `max-w-[1120px]` parent `<div>`) rather than tightly hugging the wordmark — accepted as a common pattern; tighter hover would require wrapping the wordmark in an inline container (not worth the markup churn). The ball's `className` lands on the inner `<svg>` (see BallMark DOM structure) so `animate-spin` composes with the wrapper span's `translateY` instead of clobbering it. If the rotation feels off in practice, drop the classes from the `<h1>` + `<BallMark>` — `BallMark` is agnostic, so this doesn't affect other surfaces.
 
 ### Email wrapper — add PNG mark
 
@@ -219,7 +220,7 @@ func RenderEmail(bodyHTML template.HTML, footer string, logoURL string) (string,
 3. `internal/jobs/evaluate.go:286` (`renderEvaluationEmail`, called from `EvaluateWorker` at line 210 which passes `w.BaseURL`). `renderEvaluationEmail` already receives `baseURL` as a parameter — no signature change needed. Inside the function, compute `logoURL := baseURL + "/mark-256.png"` and pass it as the third arg to `email.RenderEmail`. No redundant parameter duplication.
 
 **URL resolution:**
-- The backend reads `cfg.Auth.BaseURL`, populated from the `BASE_URL` env var (`internal/config/config.go`, field `Auth.BaseURL`, default `http://localhost:3000`).
+- The backend reads `cfg.Auth.BaseURL`, populated from the `BASE_URL` env var (`internal/config/config.go`, field `Auth.BaseURL`, default `http://localhost:3000`). The same value is wired into `EvaluateSessionWorker.BaseURL` at construction, so both auth emails and evaluation emails resolve from a single source.
 - **Local dev architecture**: `Procfile.dev` runs `vite build --watch` + `air`. There is no separate Vite dev server at runtime; `air` serves the entire embedded SPA (including `/mark-256.png`) at `:8080`.
 - The default `BASE_URL=http://localhost:3000` does **not** match the actual backend port (`:8080`). Setting `BASE_URL=http://localhost:8080` in the project root `.env` (which `Procfile.dev` sources via `set -a && . ./.env && set +a`) before running `make dev` makes email `<img src>` URLs resolve locally. Without that override, local-dev emails embed broken URLs — acceptable for routine local work, inconvenient for email smoke tests.
 - In prod, `BASE_URL=https://sabermatic.dev` and `/mark-256.png` is served by the embedded SPA via `spa.go`. Works end-to-end.
@@ -293,12 +294,12 @@ Update `internal/handler/spa_test.go` to assert the new tags on the same routes 
 | Layer | Test |
 |---|---|
 | Frontend unit (`ball-mark.test.tsx`, new) | Renders SVG with `aria-hidden="true"`, with circle + stitching paths |
-| Frontend unit (`brand-name.test.tsx`, new) | Asserts the net-new ARIA attributes added by this spec: `role="img"` and `aria-label="Sabermatic dot DEV"` on the outer span; `aria-hidden="true"` on the inner styled span; visible text contains `Sabermatic`, `[`, `DEV]`; `<BallMark/>` rendered inside the inner span |
-| Frontend unit (`hero.test.tsx`, new) | Hero's `<h1>` contains the `<BallMark/>` SVG as a direct descendant (via a `data-testid` on `BallMark` or by matching the ball SVG's circle); `<h1>` has `aria-label="Sabermatic dot DEV"`; `<h1>` does NOT have `role="img"` (which would only be present if the hero had been refactored to use `<BrandName/>` — this assertion guards against accidental refactor) |
+| Frontend unit (`brand-name.test.tsx`, new) | Asserts the net-new ARIA attributes added by this spec: `role="img"` and `aria-label="Sabermatic dot DEV"` on the outer span; `aria-hidden="true"` on the inner styled span; visible text contains `Sabermatic` and `[DEV]` (matched as distinct substrings to avoid false positives on bare `[`); `<BallMark/>` rendered inside the inner span |
+| Frontend unit (`hero.test.tsx`, new) | Hero's `<h1>` contains the `<BallMark/>` SVG as a descendant (via a `data-testid` on `BallMark` or by matching the ball SVG's circle); `<h1>` has `aria-label="Sabermatic dot DEV"`; `<h1>` does NOT contain a descendant with `role="img"` (guards against accidental refactor to `<BrandName/>`, which adds a `role="img"` span inside the wordmark) |
 | Backend unit (`internal/email/template_test.go`, update) | **Update existing `TestRenderEmail` to the 3-arg signature (pass a concrete `logoURL`).** Add separate asserts for the logo: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\" height=\"28\" alt=\"\"")` (matched as an in-order substring to avoid false positives on unrelated `alt=""` attributes), and a dedicated case that passes `logoURL == ""` and asserts the wrapper does NOT contain `<img `, exercising the `{{if .LogoURL}}` else branch. This file owns tests for the `email.RenderEmail` public API. |
 | Backend unit (`internal/jobs/render_email_test.go`, update) | Tests the jobs-internal `renderEvaluationEmail`. `renderEvaluationEmail`'s signature does **not** change (see Email section caller #3 — logoURL is derived inside the function from the existing `baseURL` param), so existing call sites stay the same. The existing `TestRenderEvaluationEmail_EscapesHTML` already passes a `baseURL` of `"https://example.com"`; add one new assertion: `assert.Contains(t, html, "https://example.com/mark-256.png")`. Does NOT re-test `email.RenderEmail` directly (that's `template_test.go`'s job). |
 | Backend unit (`internal/backend/auth_test.go`) | If existing tests cover verify-email or reset-password rendering paths, update the expected HTML fixtures to include the `<img>` tag. Otherwise no change needed. |
-| Backend unit (`internal/handler/spa_test.go`, update) | Asserts `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description` on routes that already have OG coverage |
+| Backend unit (`internal/handler/spa_test.go`, update) | Asserts `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description` on routes that already have OG coverage. Use the same positional check (`pos < headClose`) the existing OG-tag assertions use, so tags are verified to be injected before `</head>`. |
 | Manual visual | `/`, `/login`, `/signup`, `/forgot-password`, authed app loading splash, force an error-boundary render. Screenshot each for the PR. |
 | Manual visual | Regenerate OG PNGs; visually diff with previous versions; render social-card previews (Twitter/Slack unfurl) |
 | Email smoke | Render one email via `render_email_test.go` fixtures and inspect `<img>` tag + resolved URL. Optional: send a real email to a Gmail + Apple Mail + Outlook.com inbox; screenshot. |
