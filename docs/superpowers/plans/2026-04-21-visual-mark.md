@@ -82,7 +82,7 @@ Run:
 grep -c 'circle\|rotate' web/public/favicon.svg
 ```
 
-Expected output: `2` or higher (the new favicon has a `<circle>` and a `rotate` transform).
+Expected output: `2` (one `<circle>` element and one `rotate` transform on the `<g>` wrapper — no more, no less).
 
 - [ ] **Step 3: Spot-check the mark master has stitches**
 
@@ -339,13 +339,20 @@ Expected: clean (no errors). This validates TypeScript types only — it does no
 
 - [ ] **Step 8: Start the dev server and verify the page loads**
 
-Start `make dev` in the background (for an agent executor, use the Bash tool's `run_in_background: true` parameter; for a human implementer, run it in a separate terminal):
+Start `make dev` in the background. For an agent executor, use the Bash tool's `run_in_background: true` parameter; for a human implementer, run it in a separate terminal:
 
 ```bash
 make dev
 ```
 
-Wait ~15 seconds for Vite to print `VITE v... ready in ...ms` and for `air` to finish the initial Go compile. Then run the following checks (each as an ordinary foreground command; they are independent one-shot curls):
+Context: `make dev` runs `npm install && npm run build` **synchronously** before `overmind start -f Procfile.dev`. On a cold cache this takes 30–90 seconds before the Go server (`air`) begins listening on :8080. `Procfile.dev` uses `npx vite build --watch` (watch-mode build, not `vite dev`), so there is no "VITE ready in Nms" banner — instead, watch emits `built in Nms` messages. The most reliable readiness signal is the Go server accepting connections, so poll it rather than grep the log:
+
+```bash
+# Wait up to 3 minutes for the backend to listen on :8080.
+until curl -sSf -o /dev/null http://localhost:8080/ 2>/dev/null; do sleep 3; done
+```
+
+Once the poll returns, run the following one-shot curl checks from repo root. Each is independent:
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/
@@ -354,10 +361,10 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/
 Expected output: `200`.
 
 ```bash
-curl -sS http://localhost:8080/manifest.json | head -5
+curl -sS http://localhost:8080/manifest.json | python3 -c "import sys, json; d=json.load(sys.stdin); assert d['name'] == 'Sabermatic[.DEV]', d['name']; assert len(d['icons']) == 3, len(d['icons']); print('manifest ok:', d['name'], 'icons:', len(d['icons']))"
 ```
 
-Expected: the first 5 lines of the JSON document, starting with `{` and containing `"name": "Sabermatic[.DEV]"`.
+Expected output: `manifest ok: Sabermatic[.DEV] icons: 3`. This asserts `name` matches and `icons` has exactly 3 entries (192, 256, 512). A malformed JSON or a drifted `name` surfaces loudly via `AssertionError`.
 
 ```bash
 curl -sS -I http://localhost:8080/manifest.json | grep -i '^content-type'
@@ -371,7 +378,7 @@ curl -sS -I http://localhost:8080/mark-180.png | grep -i '^content-type'
 
 Expected: `Content-Type: image/png`.
 
-Stop the dev server (for an agent, use `KillShell` on the backgrounded bash; for a human, Ctrl-C in the terminal running `make dev`).
+Stop the dev server. For an agent, use `KillShell` on the backgrounded bash call. For a human, Ctrl-C in the terminal running `make dev`.
 
 - [ ] **Step 9: Stage both files**
 
@@ -451,10 +458,18 @@ If `make test` fails, read the failure carefully — the only legitimate risk is
 Run:
 
 ```bash
-cd web && npm run build && ls dist | grep -E 'mark|favicon|og-|manifest'
+cd web && npm run build && ls dist | grep -cE 'mark|favicon|og-|manifest'
 ```
 
-Expected behavior: Vite produces `web/dist/` with `index.html`, all `mark-*.png`, `mark.svg`, `favicon.svg`, `og-landing.{png,svg}`, `og-sample.{png,svg}`, and `manifest.json` copied from `web/public/`. The piped `ls | grep` produces exactly 12 entries:
+Expected output: `12`. This counts the public-dir assets Vite copied into `web/dist/`: 5 `mark-*.png` + 1 `mark.svg` + 1 `favicon.svg` + 2 `og-*.png` + 2 `og-*.svg` + 1 `manifest.json` = 12.
+
+For a spot check of the file list itself (optional):
+
+```bash
+cd web && npm run build && ls dist | grep -E 'mark|favicon|og-|manifest' | sort
+```
+
+Expected output (alphabetical):
 
 ```
 favicon.svg
@@ -471,7 +486,7 @@ og-sample.png
 og-sample.svg
 ```
 
-(Chained in a single shell invocation so the `cd web` and `ls dist` share the same cwd; each bash call in the plan is an independent shell, so do not split these.)
+Both variants are chained in a single shell invocation so `cd web` and `ls dist` share the same cwd; each bash call in the plan is an independent shell, so do not split these.
 
 - [ ] **Step 3: Manual browser checks — favicon + manifest**
 
@@ -528,17 +543,19 @@ With the dev server running, open http://localhost:8080/ in Chrome, DevTools →
 
 - [ ] **Step 7: Stop dev server, confirm final state**
 
-Stop `make dev` (Ctrl-C). Run:
+Stop `make dev` (Ctrl-C or `KillShell`). Run:
 
 ```bash
-git status
+git status --porcelain
 git log --oneline -3
 ```
 
 Expected:
-- Working tree clean (`nothing to commit, working tree clean`)
-- HEAD and HEAD~1 are the two new commits from this plan
-- HEAD~2 is the previous commit on main (unrelated)
+- `git status --porcelain` produces no lines for any of the 13 files this plan touched (favicon.svg, mark*, og-*, manifest.json, index.html). Pre-existing untracked files unrelated to this plan (if any) may still appear — that's acceptable as long as none of this plan's target files are listed.
+- HEAD and HEAD~1 are the two new commits from this plan (`feat(web): wire PWA manifest...` on top, `feat(web): Sabermatic[.DEV] visual mark assets` below it).
+- HEAD~2 is the previous commit on main, unrelated to this plan.
+
+If any file from this plan appears in `git status --porcelain` output, something was not committed correctly — stop and reconcile before claiming done.
 
 Implementation complete.
 
