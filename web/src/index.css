@@ -120,3 +120,8 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes sweep {
+  0% { transform: translateX(-100%); }
+  60%, 100% { transform: translateX(100%); }
+}
