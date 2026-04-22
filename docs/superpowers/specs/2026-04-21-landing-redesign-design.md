@@ -14,7 +14,7 @@ Reference bundle: `www-sabermatic-dev/project/index.html` (1060 lines) from the 
 
 ### In scope
 
-- Restyle and recompose the existing 10 section components into the 9 sections of the new design.
+- Restyle and recompose the existing 10 landing files (one of which gets renamed, two deleted) into 9 React components that render as Hero + 8 labeled page sections, matching the new design.
 - Delete `deep-dive.tsx` and `sample-session.tsx` (absorbed elsewhere).
 - Add `library.tsx` — new Question Library section backed by live data.
 - Rename `annotations.tsx` → `transcript.tsx`.
@@ -214,7 +214,7 @@ The total count is scoped to seed questions so the landing's "N questions" headl
 
 ### Tests to write
 
-- `internal/rpc/landing/server_test.go` — happy path (seeded DB with 6 featured rows returns them in `featured_order`; `total_count` equals the count of seed rows with `user_id IS NULL`); empty path (no featured rows → empty `questions` slice, `total_count` still equals the seed count); public-access path (end-to-end via `httptest.Server` with the full `Register()` wiring, request sent without session cookie → 200 with data). Follow the pattern in `internal/rpc/sample/server_test.go` which exercises the same public-registration path.
+- `internal/rpc/landing/server_test.go` — happy path (seeded DB with 6 featured rows returns them in `featured_order`; `total_count` equals the count of seed rows with `user_id IS NULL`); empty path (no featured rows → empty `questions` slice, `total_count` still equals the seed count); public-access path (request without session cookie → 200 with data). Follow the `httptest.Server` + direct `mux.Handle(drillv1connect.NewLandingServiceHandler(...))` pattern from `internal/rpc/sample/server_test.go`. The `Register()`-level wiring (interceptor exclusion) is covered by an additional assertion in `internal/rpc/register_test.go` if that file exists, or noted in the PR description otherwise — do not rewire the full `Register()` graph inside the service-level test.
 - `internal/backend/question_test.go` — unit test for the new `ListFeaturedQuestions` backend method (rows + count in one call).
 - Migration round-trip — run `013` and `014` up then down locally against a dev DB; verify columns, index, CHECK constraint, and seed updates are symmetric. Covered by the existing migration-up test harness if one exists; otherwise manual verification noted in the PR.
 - `web/src/pages/landing/library.test.tsx` — vitest: renders the 6 cards from mocked hook data in `featured_order`, renders `total_count` in the h2 headline, renders skeletons during loading, renders nothing on error or empty.
