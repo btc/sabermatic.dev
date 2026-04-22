@@ -36,8 +36,8 @@ func TestListFeaturedQuestions(t *testing.T) {
 
 func titles(rows []db.ListFeaturedQuestionsRow) []string {
 	out := make([]string, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r.Title)
+	for i := range rows {
+		out = append(out, rows[i].Title)
 	}
 	return out
 }

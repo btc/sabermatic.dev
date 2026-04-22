@@ -42,8 +42,8 @@ func (s *Server) ListFeaturedQuestions(
 	}
 
 	questions := make([]*drillv1.Question, 0, len(rows))
-	for _, row := range rows {
-		questions = append(questions, rowToProto(row))
+	for i := range rows {
+		questions = append(questions, rowToProto(&rows[i]))
 	}
 
 	return connect.NewResponse(&drillv1.ListFeaturedQuestionsResponse{
@@ -55,7 +55,7 @@ func (s *Server) ListFeaturedQuestions(
 // rowToProto converts a ListFeaturedQuestionsRow to a proto Question.
 // Local to this package because the existing questionToProto in the question
 // service binds to db.ListQuestionsForUserRow, a distinct sqlc-generated type.
-func rowToProto(row db.ListFeaturedQuestionsRow) *drillv1.Question {
+func rowToProto(row *db.ListFeaturedQuestionsRow) *drillv1.Question {
 	q := &drillv1.Question{
 		Id:         row.ID.String(),
 		Title:      row.Title,
