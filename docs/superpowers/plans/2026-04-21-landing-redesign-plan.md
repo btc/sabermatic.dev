@@ -240,7 +240,7 @@ WHERE is_featured = true
 ORDER BY featured_order;
 
 -- name: CountSeedQuestions :one
-SELECT COUNT(*) FROM questions
+SELECT COUNT(*)::int AS count FROM questions
 WHERE source = 'seed' AND user_id IS NULL;
 ```
 
@@ -287,6 +287,8 @@ option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
 
 import "drill/v1/question.proto";
 
+// LandingService exposes public, auth-exempt data for the unauthenticated
+// marketing landing page. Registered with publicOpts in internal/rpc/register.go.
 service LandingService {
   rpc ListFeaturedQuestions(ListFeaturedQuestionsRequest) returns (ListFeaturedQuestionsResponse);
 }
@@ -327,7 +329,13 @@ Expected: no errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add pb/drill/v1/landing.proto internal/pb/drill/v1/ web/src/pb/drill/v1/
+git add pb/drill/v1/landing.proto \
+        internal/pb/drill/v1/landing_pb.go \
+        internal/pb/drill/v1/drillv1connect/landing.connect.go \
+        web/src/pb/drill/v1/landing_pb.d.ts \
+        web/src/pb/drill/v1/landing_pb.js \
+        web/src/pb/drill/v1/landing-LandingService_connectquery.d.ts \
+        web/src/pb/drill/v1/landing-LandingService_connectquery.js
 git commit -m "proto: add LandingService.ListFeaturedQuestions"
 ```
 
@@ -341,7 +349,7 @@ git commit -m "proto: add LandingService.ListFeaturedQuestions"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `internal/backend/question_test.go` (if it already exists, append `TestListFeaturedQuestions` to it — `package backend_test`):
+Create `internal/backend/question_test.go` (if it already exists, append `TestListFeaturedQuestions` to it — `package backend_test`). The package already has `internal/backend/main_test.go` which sets up `var pg testutil.PG` via `testutil.SharedPostgres()` — reuse it.
 
 ```go
 package backend_test
@@ -353,16 +361,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/testutil"
 )
 
 func TestListFeaturedQuestions(t *testing.T) {
 	t.Parallel()
 
-	b := testutil.NewBackend(t, nil)
+	b := pg.NewBackend(t)
 	// Migrations 013 and 014 are part of the embedded migration set
-	// (sql/migrations/embed.go), so the six curated rows are already
-	// featured by the time this test runs against the shared test DB.
+	// (sql/migrations/embed.go), and testutil's SharedPostgres applies
+	// all migrations per-database at NewBackend time.
 
 	rows, total, err := b.ListFeaturedQuestions(context.Background())
 	require.NoError(t, err)
@@ -378,7 +385,7 @@ func TestListFeaturedQuestions(t *testing.T) {
 	}, titles(rows))
 
 	// total_count is scoped to seed questions only; 008_seed_questions seeds 18.
-	require.Equal(t, 18, total)
+	require.Equal(t, int32(18), total)
 }
 
 func titles(rows []db.ListFeaturedQuestionsRow) []string {
@@ -410,7 +417,7 @@ Append to `internal/backend/question.go`:
 // to seed questions (source='seed' AND user_id IS NULL) so the public
 // landing's "N questions" headline reflects the curated library, not private
 // user-generated or coach-generated questions.
-func (b *Backend) ListFeaturedQuestions(ctx context.Context) (_ []db.ListFeaturedQuestionsRow, _ int, err error) {
+func (b *Backend) ListFeaturedQuestions(ctx context.Context) (_ []db.ListFeaturedQuestionsRow, _ int32, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.ListFeaturedQuestions")
 	defer func() { drilotel.End(span, err) }()
 
@@ -426,7 +433,7 @@ func (b *Backend) ListFeaturedQuestions(ctx context.Context) (_ []db.ListFeature
 		return nil, 0, fmt.Errorf("count seed questions: %w", err)
 	}
 
-	return rows, int(total), nil
+	return rows, total, nil
 }
 ```
 
@@ -450,10 +457,32 @@ git commit -m "backend: add ListFeaturedQuestions (rows + seed-scoped total)"
 ## Task 7: `LandingService` handler at `internal/rpc/landing/server.go`
 
 **Files:**
+- Create: `internal/rpc/landing/main_test.go`
 - Create: `internal/rpc/landing/server.go`
 - Create: `internal/rpc/landing/server_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the TestMain bootstrap**
+
+Create `internal/rpc/landing/main_test.go` (mirrors `internal/rpc/question/main_test.go`):
+
+```go
+package landing_test
+
+import (
+	"testing"
+
+	"github.com/btc/drill/internal/testutil"
+)
+
+var pg testutil.PG
+
+func TestMain(m *testing.M) {
+	pg = testutil.SharedPostgres()
+	pg.RunTests(m)
+}
+```
+
+- [ ] **Step 2: Write the failing test**
 
 Create `internal/rpc/landing/server_test.go`:
 
@@ -472,14 +501,13 @@ import (
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	landingsvc "github.com/btc/drill/internal/rpc/landing"
-	"github.com/btc/drill/internal/testutil"
 )
 
 // setup starts a LandingService over httptest.Server with no interceptors —
 // the real production posture for a public RPC (see register.go's publicOpts).
 func setup(t *testing.T) drillv1connect.LandingServiceClient {
 	t.Helper()
-	b := testutil.NewBackend(t, nil)
+	b := pg.NewBackend(t)
 
 	mux := http.NewServeMux()
 	mux.Handle(drillv1connect.NewLandingServiceHandler(landingsvc.NewServer(b)))
@@ -524,15 +552,15 @@ func TestListFeaturedQuestions_PublicAccess(t *testing.T) {
 
 Note: empty-featured-set test is covered by the handler-level code path (nothing featured ⇒ empty questions, total still equals seed count). If the existing test DB infra can roll back 014 for a single test, add a third test; otherwise skip — happy path plus public access suffices.
 
-- [ ] **Step 2: Run test — expect compile failure**
+- [ ] **Step 3: Run test — expect compile failure**
 
 ```bash
 go test ./internal/rpc/landing/ -count=1
 ```
 
-Expected: compile error — package `internal/rpc/landing` doesn't exist yet.
+Expected: compile error — `landingsvc.NewServer` doesn't exist yet.
 
-- [ ] **Step 3: Write the handler**
+- [ ] **Step 4: Write the handler**
 
 Create `internal/rpc/landing/server.go`:
 
@@ -587,7 +615,7 @@ func (s *Server) ListFeaturedQuestions(
 
 	return connect.NewResponse(&drillv1.ListFeaturedQuestionsResponse{
 		Questions:  questions,
-		TotalCount: int32(total),
+		TotalCount: total,
 	}), nil
 }
 
@@ -640,7 +668,7 @@ func sourceToProto(s string) drillv1.QuestionSource {
 }
 ```
 
-- [ ] **Step 4: Run test — expect pass**
+- [ ] **Step 5: Run test — expect pass**
 
 ```bash
 go test ./internal/rpc/landing/ -count=1 -race
@@ -648,7 +676,7 @@ go test ./internal/rpc/landing/ -count=1 -race
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add internal/rpc/landing/
@@ -1020,9 +1048,11 @@ const KIND_HEADING: Record<string, string> = {
   missed: "Missed opportunities",
 };
 
-function group(kind: "strength" | "gap" | "missed") {
-  return AnnotationType[kind === "strength" ? "STRENGTH" : kind === "gap" ? "GAP" : "MISSED_OPPORTUNITY"];
-}
+const KIND_TO_TYPE: Record<"strength" | "gap" | "missed", AnnotationType> = {
+  strength: AnnotationType.STRENGTH,
+  gap: AnnotationType.GAP,
+  missed: AnnotationType.MISSED_OPPORTUNITY,
+};
 
 export function StrengthsGaps() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
@@ -1032,9 +1062,9 @@ export function StrengthsGaps() {
   if (annotations.length === 0) return null;
 
   const byKind = {
-    strength: annotations.filter((a) => a.type === group("strength")),
-    gap: annotations.filter((a) => a.type === group("gap")),
-    missed: annotations.filter((a) => a.type === group("missed")),
+    strength: annotations.filter((a) => a.type === KIND_TO_TYPE.strength),
+    gap: annotations.filter((a) => a.type === KIND_TO_TYPE.gap),
+    missed: annotations.filter((a) => a.type === KIND_TO_TYPE.missed),
   };
 
   return (
@@ -1108,6 +1138,9 @@ git commit -m "landing: restyle StrengthsGaps to two-column grouped annotations"
 **Files:**
 - Delete: `web/src/pages/landing/annotations.tsx`
 - Create: `web/src/pages/landing/transcript.tsx`
+- Modify: `web/src/pages/landing/index.tsx` (swap `Annotations` import for `Transcript`)
+
+HEAD must stay green after this commit — swap the `index.tsx` import/usage at the same time.
 
 Target visual reference: `index.html:634-670`. Data sources: `useSampleEvaluation`, `useSampleSession`.
 
@@ -1222,18 +1255,36 @@ export function Transcript() {
 git rm web/src/pages/landing/annotations.tsx
 ```
 
-- [ ] **Step 3: Typecheck**
+- [ ] **Step 3: Update `index.tsx` import to keep HEAD green**
+
+In `web/src/pages/landing/index.tsx`, replace the `Annotations` import and usage with `Transcript`. Minimal diff only — full composition order is set in Task 18.
+
+Replace the import line:
+
+```tsx
+import { Annotations } from "./annotations";
+```
+
+with:
+
+```tsx
+import { Transcript } from "./transcript";
+```
+
+Replace `<Annotations />` in the JSX with `<Transcript />`.
+
+- [ ] **Step 4: Typecheck**
 
 ```bash
 cd web && npx tsc -b
 ```
 
-Expected: errors in `index.tsx` (still imports `Annotations`). That's fixed in Task 18. Field names used match the generated proto as of this spec: `Message.id`, `Message.seq`, `Message.role`, `Message.content`; `Annotation.messageSeq`, `Annotation.content`, `Annotation.type`.
+Expected: no errors. Field names used match the generated proto: `Message.id`, `Message.seq`, `Message.role`, `Message.content`; `Annotation.messageSeq`, `Annotation.content`, `Annotation.type`.
 
-- [ ] **Step 4: Commit** (allow broken state — fixed at task 18)
+- [ ] **Step 5: Commit**
 
 ```bash
-git add web/src/pages/landing/transcript.tsx web/src/pages/landing/annotations.tsx
+git add web/src/pages/landing/transcript.tsx web/src/pages/landing/annotations.tsx web/src/pages/landing/index.tsx
 git commit -m "landing: rename annotations → transcript, restyle as bubble+inline"
 ```
 
@@ -2017,9 +2068,9 @@ Expected: passes end-to-end (buf lint, codegen check, frontend typecheck + lint 
 - [ ] **Step 2: Fix any failures**
 
 Common suspects if anything drifts:
-- `buf lint` complaining about proto comment style — add a doc comment above `service LandingService`.
-- TS strict null checks in `library.tsx` on `q.imageUrl` — the proto field is `optional`, so `q.imageUrl` is `string | undefined`; use `q.imageUrl ? ... : ...`.
-- Lint rule wanting named function props in `library.tsx` — extract the inline `Array.from(...).map(...)` to a `Skeleton` subcomponent.
+- TS strict null checks in `library.tsx` on `q.imageUrl` — the proto field is `optional`, so `q.imageUrl` is `string | undefined`. Use `q.imageUrl ? ... : ...` (already the case in the plan; re-check after codegen).
+- ESLint complaining about inline `Array.from(...).map(...)` in `library.tsx` — extract to a `Skeleton` subcomponent.
+- `package backend_test` — verify `internal/backend/main_test.go` exists with `var pg testutil.PG` before running the new test (it does, per the pattern this plan reuses).
 
 Commit each fix as its own commit if the change is non-trivial (`fix: tsc strict null in library image fallback`, etc.); squash if all cosmetic.
 
