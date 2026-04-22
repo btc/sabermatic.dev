@@ -545,7 +545,10 @@ func TestRenderEmail_WithoutLogo(t *testing.T) {
 	require.NotContains(t, html, "<img ")
 	// The logo branch uses an inner `<table role="presentation">` for layout;
 	// when the else branch renders, that inner layout table must be absent.
-	require.NotContains(t, html, `role="presentation" cellpadding="0" cellspacing="0"><tr>`)
+	// Match on the attributes that identify THIS table specifically (the inner
+	// layout-only one), not `><tr>` suffix — attributes are stable, element
+	// ordering/whitespace is not.
+	require.NotContains(t, html, `role="presentation" cellpadding="0" cellspacing="0"`)
 	// App name still appears in the plain-text branch.
 	require.Contains(t, html, "Sabermatic[.DEV]")
 }
@@ -1051,8 +1054,9 @@ Paste `http://localhost:8080/` (or the deployed preview URL) into a Twitter or S
 Run: `git status`
 Expected: Clean working tree; all commits from prior tasks present.
 
-Run: `git log --oneline main..HEAD`
-Expected: 11 commits, one per code-touching task (Tasks 1–11; Task 12 is verification-only).
+Run: `git log --oneline -12 | cat`
+(Equivalently `git log --oneline <base-branch>..HEAD` if you're on a feature branch; `-12` form works regardless.)
+Expected: the 11 task commits at the top of the log, one per code-touching task (Tasks 1–11; Task 12 is verification-only), plus the plan commit itself.
 
 - [ ] **Step 7: (No commit — this is verification only.)**
 
@@ -1061,5 +1065,5 @@ Expected: 11 commits, one per code-touching task (Tasks 1–11; Task 12 is verif
 ## Post-plan notes
 
 - **Spec open questions carried forward**: brackets-not-announced-by-SR is deliberate; if UX research changes that call, revise `aria-label` (see spec Risks).
-- **OG font rendering drift**: regenerate on macOS (Helvetica fallback) for consistency with the committed baseline. A contributor regenerating on Linux will get DejaVu Sans and may need to re-tune offsets.
+- **OG font rendering drift**: regenerate on macOS (SF Pro / `.AppleSystemUIFont` fallback) for consistency with the committed baseline. A contributor regenerating on Linux will get DejaVu Sans and may need to re-tune offsets.
 - **`BASE_URL` mismatch in dev**: default is `:3000` but backend serves on `:8080`. Email smoke tests need `.env` override — documented in the spec's URL resolution section.
