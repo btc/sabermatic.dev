@@ -33,6 +33,9 @@
   --missed: 263 70% 71%;
   --note: 217 91% 60%;
   --warning: 38 92% 50%;
+
+  --border-strong: hsl(24 6% 80%);
+  --primary-soft: hsl(32 95% 44% / .1);
 }
 
 .dark {
@@ -62,12 +65,16 @@
   --missed: 263 70% 71%;
   --note: 217 91% 60%;
   --warning: 38 92% 50%;
+
+  --border-strong: hsl(20 8% 30%);
+  --primary-soft: hsl(32 95% 44% / .14);
 }
 
 body {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
   background-color: var(--background);
   color: var(--foreground);
+  font-feature-settings: "ss01", "cv11";
 }
 
 @theme inline {
@@ -100,6 +107,9 @@ body {
   --color-missed: hsl(var(--missed));
   --color-note: hsl(var(--note));
   --color-warning: hsl(var(--warning));
+
+  --color-border-strong: var(--border-strong);
+  --color-primary-soft: var(--primary-soft);
 }
 
 @layer base {
