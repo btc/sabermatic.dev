@@ -96,7 +96,7 @@ export function Scoring() {
               <DimRow
                 key={dim.key}
                 label={dim.label}
-                value={(scores as unknown as Record<string, number>)[dim.key]!}
+                value={scores[dim.key]}
                 animate={isVisible}
                 delay={i * 80}
               />
