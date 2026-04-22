@@ -14,7 +14,7 @@ The mark is a baseball, tilted `-28°`, with two amber seam arcs meeting at an a
 
 ### Symbolism
 
-Sabermatic derives from sabermetrics — Bill James's term for empirical baseball analytics (the Society for American Baseball Research, SABR). The mark makes the etymology visual without naming it. Tilt introduces motion and prevents the mark from reading as a clock, coin, or generic circular badge. The asymmetric seam junction (seam control point offset 2 units left, 1 unit down from circle center on a 32-unit viewBox) makes the mark feel hand-crafted — a deliberate counterpoint to the geometric precision of a typographic mark.
+Sabermatic derives from sabermetrics — Bill James's term for empirical baseball analytics (the Society for American Baseball Research, SABR). The mark makes the etymology visual without naming it. Tilt introduces motion and prevents the mark from reading as a clock, coin, or generic circular badge. The asymmetric seam junction (seam control point offset 2 units left, 1 unit down from circle center on a 32-unit viewBox; SVG +y is downward) makes the mark feel hand-crafted — a deliberate counterpoint to the geometric precision of a typographic mark.
 
 The amber colorway is Tailwind's amber scale on a parchment background, evoking vintage leather baseball, old-book binding, and the "analytical rigor on the surface, monk/devotion/craft underneath" register from `2026-04-03-naming-and-branding-design.md`. Intentionally not SaaS-corporate blue/teal.
 
@@ -50,7 +50,7 @@ Stroke weights and stitch detail vary by rendering context. In `mark.svg`: seam 
 | `web/public/mark-256.png` | High-density manifest | 256×256, rasterized from `mark.svg`. |
 | `web/public/mark-512.png` | PWA manifest max | 512×512, rasterized from `mark.svg`. |
 | `web/public/mark-1024.png` | Source / press-kit | 1024×1024, rasterized from `mark.svg`. |
-| `web/public/og-landing.{svg,png}` | Open Graph card — landing | Mark at top center (scale 5.625 = 180 px on 1200×630), wordmark + tagline below. Seams use favicon geometry; 8-stitch accent pattern for unfurler legibility. |
+| `web/public/og-landing.{svg,png}` | Open Graph card — landing | Mark rendered at 180×180 px on the 1200×630 canvas (`translate(510 150) scale(5.625)`, top-left of the glyph at x=510 puts its 180-wide footprint horizontally centered at x=600). Wordmark + tagline below. Seams use favicon geometry; 8-stitch accent pattern for unfurler legibility. |
 | `web/public/og-sample.{svg,png}` | Open Graph card — sample | Same composition, different tagline. |
 
 ### Regenerating PNGs
@@ -85,7 +85,7 @@ The mark currently lives uncommitted in the working tree. This spec commits it a
 Add to `web/index.html` `<head>`:
 
 ```html
-<link rel="apple-touch-icon" href="/mark-180.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="/mark-180.png" />
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#faf5ef" />
 ```
@@ -108,13 +108,13 @@ Create `web/public/manifest.json`:
 }
 ```
 
-Rationale for `theme-color` = `background_color` = `#faf5ef` (parchment): matches the landing page background, so the iOS Safari status bar and Android Chrome address bar blend into the page chrome. Keeps the amber bold-color energy reserved for the mark itself. Consistent with the "quiet confidence" register.
+Rationale for `theme-color` = `background_color` = `#faf5ef` (parchment): matches the landing page background, so the iOS Safari status bar and Android Chrome address bar blend into the page chrome. Keeps the amber bold-color energy reserved for the mark itself. Consistent with the "quiet confidence" register. On Android, a near-white `theme_color` may cause Chrome to auto-invert the status-bar icon glyphs to dark for contrast — accepted trade-off; the light tint is the intended brand register.
 
 ### Serving notes
 
-- **Manifest MIME type.** The `.json` extension is used rather than `.webmanifest`. Go's `net/http` default MIME handler serves `application/json`, which all current user agents accept for `<link rel="manifest">`. The strict form (`application/manifest+json`) would require explicit `mime.AddExtensionType` registration; out of scope here since no current validator fails on the looser form.
+- **Manifest MIME type.** The `.json` extension is used rather than `.webmanifest`. `SPAHandler` (`internal/handler/spa.go`) serves `/manifest.json` via its static-file branch (`fs.Stat` hit → `http.FileServer.ServeHTTP`), which delegates Content-Type to `mime.TypeByExtension(".json")` → `application/json`. All current user agents accept this for `<link rel="manifest">`. The strict form (`application/manifest+json`) would require explicit `mime.AddExtensionType` registration; out of scope here since no current validator fails on the looser form.
 - **CSP.** `internal/handler/middleware.go` sets `default-src 'self'` with no explicit `manifest-src`. Per CSP Level 3, `manifest-src` falls back to `default-src`, which permits same-origin `/manifest.json`. No CSP change needed.
-- **Vite embed.** `web.go` embeds `web/dist`; Vite copies `web/public/*` to `dist/` at build time. No build-config change needed — the new files ship via the existing embed.
+- **Vite embed.** `web.go` embeds `web/dist`; Vite's `publicDir` copies `web/public/*` into `web/dist/` at build time. No build-config change needed — the new files ship via the existing embed.
 - **Apple touch-icon transparency.** `mark-180.png` is rasterized with a transparent background. iOS composites against the user's home-screen wallpaper and applies its own rounded-corner mask; Android does the same for manifest icons. Accepted trade-off: preserves the mark's silhouette over arbitrary wallpapers. If user feedback flags the floating-baseball look as unfinished, re-rasterize onto a `#faf5ef` parchment-filled canvas.
 
 ## Out of scope
@@ -133,11 +133,11 @@ After wiring is in place:
 1. **Favicon** — load `/` in a fresh browser tab. Verify the tab icon shows the tilted baseball, not the `[.D]` text glyph.
 2. **Apple touch icon** — on iOS Safari, Share → Add to Home Screen. Verify the home-screen icon shows the mark.
 3. **PWA manifest** — open Chrome DevTools → Application → Manifest. Verify name, icons, and theme-color render without errors or warnings. Confirm DevTools Console shows no CSP violations on `/manifest.json`.
-4. **Theme-color** — on iOS Safari and Android Chrome, verify the address bar tints to `#faf5ef` on `/`.
+4. **Theme-color** — on iOS Safari and Android Chrome, verify the address bar tints to `#faf5ef` on `/`. Test under both light and dark OS themes — V1 ships a single `theme-color` that applies in both; no `media="(prefers-color-scheme: dark)"` variant.
 5. **OG cards** — post the site URL into Slack, Twitter/X, and iMessage. Verify preview cards show the new mark + wordmark. Force unfurl refresh if cached previews are stale (Slack: `/slack debug unfurl <url>`; Twitter: cards validator).
 6. **Lighthouse** — run a Lighthouse audit on `/`; accessibility and best-practices scores should not regress from baseline.
 
-**Automated tests.** `make test` baseline continues to pass: `spa_test.go` asserts on OG metadata strings that are path-based (`/og-landing.png`, `/og-sample.png`), and no paths change. The new `manifest.json` and icon references in `index.html` have no existing test coverage; no new backend tests are required.
+**Automated tests.** `make test` baseline continues to pass: `spa_test.go` asserts on OG metadata strings that are path-based (`/og-landing.png`, `/og-sample.png`), and no paths change. The new `manifest.json` and icon references in `index.html` have no existing test coverage; no new backend or frontend tests are required.
 
 ## Files changed by implementation
 
