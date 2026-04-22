@@ -15,6 +15,7 @@ import (
 	"github.com/btc/drill/internal/rpc/educator"
 	"github.com/btc/drill/internal/rpc/evaluation"
 	interviewsvc "github.com/btc/drill/internal/rpc/interview"
+	"github.com/btc/drill/internal/rpc/landing"
 	"github.com/btc/drill/internal/rpc/question"
 	samplerpc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/rpc/session"
@@ -36,6 +37,7 @@ func Register(mux *http.ServeMux, b *backend.Backend) error {
 	// Public endpoints (no auth interceptor).
 	publicOpts := connect.WithInterceptors(otelInterceptor)
 	mux.Handle(drillv1connect.NewAuthServiceHandler(authsvc.NewServer(b), publicOpts))
+	mux.Handle(drillv1connect.NewLandingServiceHandler(landing.NewServer(b), publicOpts))
 	mux.Handle(drillv1connect.NewSampleServiceHandler(samplerpc.NewServer(b.SampleService), publicOpts))
 
 	mux.Handle(drillv1connect.NewBillingServiceHandler(billing.NewServer(b), opts))
