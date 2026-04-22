@@ -14,6 +14,6 @@ service LandingService {
 message ListFeaturedQuestionsRequest {}
 
 message ListFeaturedQuestionsResponse {
-  repeated Question questions = 1;
-  int32 total_count = 2;
+  repeated Question questions = 1;  // ordered by featured_order
+  int32 total_count = 2;             // full library size, for the "N questions" header
 }
