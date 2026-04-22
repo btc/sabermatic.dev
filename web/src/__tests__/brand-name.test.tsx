@@ -28,10 +28,9 @@ describe("BrandName", () => {
 
   it("embeds the BallMark primitive inside the inner styled span", () => {
     const { container } = render(<BrandName />);
-    const inner = container.querySelector("span span");
+    const inner = container.querySelector('span[aria-hidden="true"]');
     const svg = inner?.querySelector("svg");
     expect(svg).not.toBeNull();
-    expect(svg?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("forwards caller className to the outer span", () => {
