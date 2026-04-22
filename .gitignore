@@ -51,6 +51,7 @@ web/dist/
 # Go binaries
 /drill
 /drillctl
+/stripescenario
 cov.out
 coverage.out
 coverage-cross.out
@@ -64,4 +65,4 @@ cloud_bootstrap.log
 terraform/.terraform/
 terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
-terraform/tfplan
+terraform/tfplan*
