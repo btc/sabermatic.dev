@@ -29,13 +29,13 @@ The amber colorway is Tailwind's amber scale on a parchment background, evoking 
 
 ### Geometry
 
-All three variants share the same `viewBox="0 0 32 32"` coordinate system:
+The mark geometry is defined in a 32-unit coordinate system. `mark.svg` and `favicon.svg` use it as their outer `viewBox="0 0 32 32"`; the OG variants embed the same 32-unit geometry inside their `1200×630` canvas via `<g transform="translate(510 150) scale(5.625)">`. Invariants across all three:
 
 - Outer group rotated `-28°` about center `(16, 16)`
 - Ball: `<circle cx="16" cy="16" r="12">`
-- Seams: two quadratic Bézier paths with control point `(14, 17)` — the asymmetric junction
+- Seam control point: `(14, 17)` — the asymmetric junction
 
-Stroke weights and stitch detail vary by rendering context. In `mark.svg`: seam stroke `1.0`, ball outline `1.3`, stitch stroke `0.38`, 14 short segments (7 per side) approximately perpendicular to the seam tangents. In `favicon.svg`: seam stroke `2`, ball outline `2.5`, no stitches — at 16–32 px display sizes, fine stitches render as sub-pixel noise. In the OG variants: favicon seams are re-used (stroke `2`, round linecap) plus an 8-stitch accent pattern (stroke `0.55`, opacity `0.85`) that reads cleanly at typical OG-card downsample sizes.
+Variant-specific tuning — seam endpoints, stroke weights, and stitch detail are adjusted per target render size. In `mark.svg`: seam endpoints at `(5.61, 10)` / `(5.61, 22)` / `(26.39, 10)` / `(26.39, 22)` (arcs run slightly past the ball rim for a soft fade); seam stroke `1.0`, ball outline `1.3`, stitch stroke `0.38`, 14 short segments (7 per side) approximately perpendicular to the seam tangents. In `favicon.svg`: seam endpoints pulled inside the ball body at `(7, 11)` / `(7, 21)` / `(25, 11)` / `(25, 21)` for a thicker visual read at small sizes; seam stroke `2`, ball outline `2.5`, no stitches — at 16–32 px display sizes, fine stitches render as sub-pixel noise. In the OG variants: favicon seam endpoints and strokes re-used (stroke `2`, round linecap), plus an 8-stitch accent pattern (stroke `0.55`, opacity `0.85`) that reads cleanly at typical OG-card downsample sizes.
 
 ## File inventory
 
@@ -103,6 +103,7 @@ Create `web/public/manifest.json`:
   "theme_color": "#faf5ef",
   "icons": [
     { "src": "/mark-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/mark-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
     { "src": "/mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }
@@ -115,7 +116,7 @@ Rationale for `theme-color` = `background_color` = `#faf5ef` (parchment): matche
 - **Manifest MIME type.** The `.json` extension is used rather than `.webmanifest`. `SPAHandler` (`internal/handler/spa.go`) serves `/manifest.json` via its static-file branch (`fs.Stat` hit → `http.FileServer.ServeHTTP`), which delegates Content-Type to `mime.TypeByExtension(".json")` → `application/json`. All current user agents accept this for `<link rel="manifest">`. The strict form (`application/manifest+json`) would require explicit `mime.AddExtensionType` registration; out of scope here since no current validator fails on the looser form.
 - **CSP.** `internal/handler/middleware.go` sets `default-src 'self'` with no explicit `manifest-src`. Per CSP Level 3, `manifest-src` falls back to `default-src`, which permits same-origin `/manifest.json`. No CSP change needed.
 - **Vite embed.** `web.go` embeds `web/dist`; Vite's `publicDir` copies `web/public/*` into `web/dist/` at build time. No build-config change needed — the new files ship via the existing embed.
-- **Apple touch-icon transparency.** `mark-180.png` is rasterized with a transparent background. iOS composites against the user's home-screen wallpaper and applies its own rounded-corner mask; Android does the same for manifest icons. Accepted trade-off: preserves the mark's silhouette over arbitrary wallpapers. If user feedback flags the floating-baseball look as unfinished, re-rasterize onto a `#faf5ef` parchment-filled canvas.
+- **Apple touch-icon transparency.** `mark-180.png` and the manifest PNGs are rasterized with transparent backgrounds. iOS applies its own rounded-corner mask to `apple-touch-icon`; Android Chrome applies the adaptive-icon mask to manifest `purpose: "any"` icons and composites transparent pixels against white before masking. Apple's HIG recommends opaque apple-touch-icon bitmaps — transparent pixels render inconsistently across iOS versions (often as black, not as wallpaper). V1 ships transparent PNGs to preserve the mark's silhouette against Android's white composite; trade-off explicitly accepted. If real-device testing shows the iOS icon reading as broken (black backdrop) or the Android icon reading as unfinished, re-rasterize onto a `#faf5ef` parchment-filled canvas.
 
 ## Out of scope
 
@@ -133,8 +134,8 @@ After wiring is in place:
 1. **Favicon** — load `/` in a fresh browser tab. Verify the tab icon shows the tilted baseball, not the `[.D]` text glyph.
 2. **Apple touch icon** — on iOS Safari, Share → Add to Home Screen. Verify the home-screen icon shows the mark.
 3. **PWA manifest** — open Chrome DevTools → Application → Manifest. Verify name, icons, and theme-color render without errors or warnings. Confirm DevTools Console shows no CSP violations on `/manifest.json`.
-4. **Theme-color** — on iOS Safari and Android Chrome, verify the address bar tints to `#faf5ef` on `/`. Test under both light and dark OS themes — V1 ships a single `theme-color` that applies in both; no `media="(prefers-color-scheme: dark)"` variant.
-5. **OG cards** — post the site URL into Slack, Twitter/X, and iMessage. Verify preview cards show the new mark + wordmark. Force unfurl refresh if cached previews are stale (Slack: `/slack debug unfurl <url>`; Twitter: cards validator).
+4. **Theme-color** — on iOS Safari (iOS 15+ required for `<meta name="theme-color">` support) and Android Chrome, verify the address bar tints to `#faf5ef` on `/`. Test under both light and dark OS themes — V1 ships a single `theme-color` that applies in both; no `media="(prefers-color-scheme: dark)"` variant.
+5. **OG cards** — post the site URL into Slack, Twitter/X, and iMessage. Verify preview cards show the new mark + wordmark. Force unfurl refresh if cached previews are stale (Slack: DM the URL to yourself — a fresh message triggers a fresh unfurl; Twitter: use the cards validator).
 6. **Lighthouse** — run a Lighthouse audit on `/`; accessibility and best-practices scores should not regress from baseline.
 
 **Automated tests.** `make test` baseline continues to pass: `spa_test.go` asserts on OG metadata strings that are path-based (`/og-landing.png`, `/og-sample.png`), and no paths change. The new `manifest.json` and icon references in `index.html` have no existing test coverage; no new backend or frontend tests are required.
