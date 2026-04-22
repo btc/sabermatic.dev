@@ -65,18 +65,25 @@ export function Library() {
           {isLoading
             ? Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} data-testid="library-skeleton" className="flex flex-col gap-2.5">
-                  <div className="aspect-square animate-pulse rounded-md bg-muted" />
+                  <div className="aspect-[4/3] animate-pulse rounded-[14px] bg-muted" />
                   <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
                   <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
                 </div>
               ))
             : (data?.questions ?? []).map((q) => (
-                <article
-                  key={q.id}
-                  className="flex flex-col gap-2.5 transition-transform hover:-translate-y-0.5 motion-reduce:transition-none"
-                >
-                  <div className="relative aspect-square overflow-hidden rounded-md bg-muted">
-                    {q.imageUrl ? <img src={q.imageUrl} alt="" className="h-full w-full object-cover" /> : <PlaceholderSvg />}
+                <article key={q.id} className="group flex flex-col gap-2.5">
+                  <div className="overflow-hidden rounded-[14px] bg-muted">
+                    {q.imageUrl ? (
+                      <img
+                        src={q.imageUrl}
+                        alt=""
+                        className="aspect-[4/3] w-full object-cover transition-transform duration-250 ease-out group-hover:scale-[1.02] motion-reduce:transition-none"
+                      />
+                    ) : (
+                      <div className="aspect-[4/3] w-full transition-transform duration-250 ease-out group-hover:scale-[1.02] motion-reduce:transition-none">
+                        <PlaceholderSvg />
+                      </div>
+                    )}
                   </div>
                   <h3 className="mt-1 text-sm font-medium">{q.title}</h3>
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 font-mono text-[11px] text-muted-foreground">
