@@ -1,4 +1,4 @@
-.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend stripe-setup stripe-pack-buy stripe-sub-start stripe-sub-cancel stripe-resend stripe-trigger
+.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend stripe-setup stripe-pack-buy stripe-sub-start stripe-sub-cancel stripe-resend stripe-trigger regen-og
 
 test-protos:
 	@echo "=== buf lint ==="
@@ -160,3 +160,12 @@ stripe-resend:
 # Passthrough for ad-hoc event triggers (unhandled-event exploration).
 stripe-trigger:
 	stripe trigger "$(TYPE)"
+
+# Regenerate OG images from their SVG sources. Requires rsvg-convert (brew install librsvg).
+# Text rendering depends on the host's ui-sans-serif fallback; regenerate on macOS for
+# consistency with the committed baseline.
+regen-og:
+	@which rsvg-convert > /dev/null || (echo "rsvg-convert not found — brew install librsvg"; exit 1)
+	rsvg-convert -w 1200 -h 630 web/public/og-landing.svg -o web/public/og-landing.png
+	rsvg-convert -w 1200 -h 630 web/public/og-sample.svg  -o web/public/og-sample.png
+	@echo "Regenerated web/public/og-landing.png and web/public/og-sample.png"
