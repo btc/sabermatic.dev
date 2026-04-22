@@ -71,8 +71,8 @@ func rowToProto(row *db.ListFeaturedQuestionsRow) *drillv1.Question {
 	if row.ImageUrl.Valid {
 		q.ImageUrl = &row.ImageUrl.String
 	}
-	// Featured seed questions always have user_id NULL (see migration 014),
-	// so UserId is left unset.
+	// Featured seed questions have user_id NULL by invariant; UserId is
+	// intentionally omitted from the public response.
 	return q
 }
 

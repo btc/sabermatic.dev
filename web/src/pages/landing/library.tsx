@@ -80,9 +80,11 @@ export function Library() {
                   </div>
                   <h3 className="mt-1 text-sm font-medium">{q.title}</h3>
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 font-mono text-[11px] text-muted-foreground">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] tracking-wide ${DIFFICULTY_CLASS[q.difficulty] ?? "bg-muted"}`}>
-                      {DIFFICULTY_LABEL[q.difficulty] ?? ""}
-                    </span>
+                    {DIFFICULTY_LABEL[q.difficulty] ? (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] tracking-wide ${DIFFICULTY_CLASS[q.difficulty] ?? "bg-muted"}`}>
+                        {DIFFICULTY_LABEL[q.difficulty]}
+                      </span>
+                    ) : null}
                     {q.tags.join(" ")}
                   </div>
                 </article>

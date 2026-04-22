@@ -28,12 +28,12 @@ export function Coaching() {
   const { data: coachData } = useSampleCoach();
 
   const trend = coachData?.scoreTrend ?? [];
-  if (trend.length === 0) return null;
+  const first = trend[0];
+  const last = trend[trend.length - 1];
+  if (!first || !last) return null;
 
-   
-  const latest = trend[trend.length - 1]!.overallScore;
-   
-  const earliest = trend[0]!.overallScore;
+  const latest = last.overallScore;
+  const earliest = first.overallScore;
   const delta = latest - earliest;
 
   // Map trend to svg coordinates (width=280, height=72, padding=4, scoreMax=5).
