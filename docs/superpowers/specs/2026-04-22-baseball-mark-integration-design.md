@@ -54,37 +54,53 @@ Location: `web/src/components/ball-mark.tsx`
 
 **Geometry:** Use the detailed geometry from `web/public/mark.svg` (rotated `-28°` CCW, with 14 seam tick lines). Not the simplified `favicon.svg` (no ticks). The hero is the primary showcase; tick detail should be present at large sizes. At small sizes (≤16px effective ball diameter) the ticks will muddy together visually — accepted.
 
-**Sizing:** `width: 0.55em; height: 0.55em;` plus `display: inline-block`. The em-relative size makes a single component work from 13px up to 140px.
-
 **DOM structure — two nodes, specific responsibilities:**
 
 ```tsx
-<span className="ball-mark-wrap">   {/* owns baseline translateY */}
-  <svg className={props.className}> {/* caller className lands here — e.g., group-hover animate-spin */}
-    ...
+<span
+  className="inline-block translate-y-[0.05em]"  // wrapper: layout + baseline translateY
+>
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 32 32"
+    className={cn("h-[0.55em] w-[0.55em]", props.className)}  // size + caller extras
+  >
+    {/* circle + seam paths + tick lines from mark.svg */}
   </svg>
 </span>
 ```
 
-**Why a wrapper span:** Tailwind's `animate-spin` sets `transform: rotate(...)` via CSS animation and replaces any existing `transform` on the same element. If baseline `translateY` sat on the `<svg>`, it would disappear during the spin keyframes, making the ball jump. The wrapper span owns `translateY`; the inner `<svg>` owns caller-supplied animation. The two transforms compose correctly because they live on separate elements.
+**Node responsibilities:**
 
-**Vertical alignment:** `transform: translateY(0.05em)` on the wrapper span (starting value). Acceptance: at `text-sm` (14px) in the nav, the ball reads as a heavy period, with its top roughly at cap-height of the `[` bracket. At 140px hero text, the ball sits below the cap-height of the brackets, reading as a large round punctuation mark. Fine-tune against `[` and `]` bracket glyph metrics in Inter/system-ui during implementation; commit screenshots at 14px, 40px, 140px to the PR.
+| Node | Owns | Why |
+|---|---|---|
+| Wrapper `<span>` | `display: inline-block` + `transform: translateY(0.05em)` | `translateY` needs `inline-block` to apply to an inline element; keeps baseline alignment stable through any inner animation |
+| Inner `<svg>` | `width/height: 0.55em`, caller `className`, `aria-hidden="true"` | Em-relative sizing must sit on the rendered element so it scales with the parent `font-size`; caller's `className` (e.g. `group-hover:animate-spin`) applies its own `transform: rotate(...)` without touching the wrapper's `translateY` |
+
+**Why the split:** Tailwind's `animate-spin` sets `transform: rotate(...)` via CSS animation and *replaces* any existing `transform` on the same element. If `translateY` sat on the `<svg>`, it would disappear during each keyframe, making the ball jump. The two transforms now live on separate elements and compose via the DOM tree instead of a single `transform` property.
+
+**Transform mechanism:** use Tailwind arbitrary-value utilities (`inline-block`, `translate-y-[0.05em]`, `h-[0.55em]`, `w-[0.55em]`), not inline `style` attributes. This matches the codebase's existing pattern (hero `text-[clamp(56px,10vw,140px)]` uses the same approach) and keeps everything class-based for easy overrides.
+
+**Vertical alignment:** starting value `translate-y-[0.05em]` on the wrapper. Acceptance: at `text-sm` (14px) in the nav, the ball reads as a heavy period with its top roughly at cap-height of the `[` bracket. At 140px hero text, the ball sits below the cap-height of the brackets, reading as a large round punctuation mark. Fine-tune against `[` and `]` bracket glyph metrics in Inter/system-ui during implementation; commit screenshots at 14px, 40px, 140px to the PR.
 
 **Color:** amber fill `#fef3c7`, umber strokes `#92400e` and `#b45309`. Self-colored — holds on cream + dark backgrounds without theme branching.
 
 **API:**
 ```tsx
 interface BallMarkProps {
-  /** Applied to the inner <svg>. Use for hover animation, etc.
-   *  Do NOT use for transforms — they will clobber the spin animation.
-   *  Use props.style if you need to override wrapper positioning. */
+  /** Additional Tailwind classes applied to the inner <svg>.
+   *  Use for hover animation (e.g. "group-hover:animate-spin") or
+   *  per-surface color overrides. Do NOT pass transforms — they will
+   *  clobber the caller's own animation. Wrapper positioning is not
+   *  externally overridable by design; if a surface needs a different
+   *  baseline, prefer a new component variant. */
   className?: string;
 }
 ```
 
-Keep the component prop-thin. Motion is triggered by a CSS class the *caller* applies, not a `spin` prop, so the ball primitive stays agnostic.
+Keep the component prop-thin. Motion is triggered by a CSS class the *caller* applies, not a `spin` prop, so the ball primitive stays agnostic. No `style` prop — surfaces that need different positioning should compose a new wrapper, not fight the primitive.
 
-**Accessibility:** `aria-hidden="true"` on the `<svg>`, no `<title>` / `<desc>`. Wrapper span has no ARIA role.
+**Accessibility:** `aria-hidden="true"` on the `<svg>`. Wrapper `<span>` has no ARIA role; because its only child is aria-hidden, the wrapper is effectively transparent to the accessibility tree. No `<title>` / `<desc>`.
 
 ### `<BrandName/>` — updated
 
@@ -135,7 +151,7 @@ These differences are deliberate typographic character for the hero, not drift t
 </h1>
 ```
 
-Motion (nice-to-have): `group` lives on the `<h1>` itself so the hover hit area matches the visible wordmark (not a wrapper `<div>` or the whole `<section>`). The ball's `className` lands on the inner `<svg>` (see BallMark DOM structure) so `animate-spin` composes with the wrapper span's `translateY` instead of clobbering it. If the rotation feels off in practice, drop the classes from the `<h1>` + `<BallMark>` — `BallMark` is agnostic, so this doesn't affect other surfaces.
+Motion (nice-to-have): `group` lives on the `<h1>` itself. An `<h1>` is a block element, so the hover area fills the `<h1>`'s content width (the `max-w-[1120px]` container) rather than tightly hugging the wordmark — accepted as a common pattern; tighter hover would require wrapping the wordmark in an inline container (not worth the markup churn). The ball's `className` lands on the inner `<svg>` (see BallMark DOM structure) so `animate-spin` composes with the wrapper span's `translateY` instead of clobbering it. If the rotation feels off in practice, drop the classes from the `<h1>` + `<BallMark>` — `BallMark` is agnostic, so this doesn't affect other surfaces.
 
 ### Email wrapper — add PNG mark
 
@@ -200,12 +216,12 @@ func RenderEmail(bodyHTML template.HTML, footer string, logoURL string) (string,
 
 1. `internal/backend/auth.go:168` (sendVerifyEmail) — has `b.cfg.Auth.BaseURL`. Pass `b.cfg.Auth.BaseURL + "/mark-256.png"`.
 2. `internal/backend/auth.go:323` (sendResetEmail) — same.
-3. `internal/jobs/evaluate.go:286` (`renderEvaluationEmail`, called from `EvaluateWorker` at line 210 which passes `w.BaseURL`). Thread a `logoURL string` parameter through `renderEvaluationEmail`, populated at the caller as `w.BaseURL + "/mark-256.png"`, then passed as the third arg to `email.RenderEmail`.
+3. `internal/jobs/evaluate.go:286` (`renderEvaluationEmail`, called from `EvaluateWorker` at line 210 which passes `w.BaseURL`). `renderEvaluationEmail` already receives `baseURL` as a parameter — no signature change needed. Inside the function, compute `logoURL := baseURL + "/mark-256.png"` and pass it as the third arg to `email.RenderEmail`. No redundant parameter duplication.
 
 **URL resolution:**
 - The backend reads `cfg.Auth.BaseURL`, populated from the `BASE_URL` env var (`internal/config/config.go`, field `Auth.BaseURL`, default `http://localhost:3000`).
 - **Local dev architecture**: `Procfile.dev` runs `vite build --watch` + `air`. There is no separate Vite dev server at runtime; `air` serves the entire embedded SPA (including `/mark-256.png`) at `:8080`.
-- The default `BASE_URL=http://localhost:3000` does **not** match the actual backend port (`:8080`). Setting `BASE_URL=http://localhost:8080` in `.env` before running `make dev` makes email `<img src>` URLs resolve locally. Without that override, local-dev emails embed broken URLs — acceptable for routine local work, inconvenient for email smoke tests.
+- The default `BASE_URL=http://localhost:3000` does **not** match the actual backend port (`:8080`). Setting `BASE_URL=http://localhost:8080` in the project root `.env` (which `Procfile.dev` sources via `set -a && . ./.env && set +a`) before running `make dev` makes email `<img src>` URLs resolve locally. Without that override, local-dev emails embed broken URLs — acceptable for routine local work, inconvenient for email smoke tests.
 - In prod, `BASE_URL=https://sabermatic.dev` and `/mark-256.png` is served by the embedded SPA via `spa.go`. Works end-to-end.
 
 ### OG SVG geometry
@@ -269,7 +285,7 @@ Update `internal/handler/spa_test.go` to assert the new tags on the same routes 
 ## Motion
 
 - `<BallMark/>` primitive: no motion by default. No `spin` prop.
-- **Hero only**: applies `group-hover:animate-[spin_2s_linear_infinite]` via a `className` passed to `<BallMark/>`. `motion-reduce:animate-none` respects `prefers-reduced-motion`. The `group` class goes on the `<h1>`'s parent.
+- **Hero only**: applies `group-hover:animate-[spin_2s_linear_infinite]` via a `className` passed to `<BallMark/>`. `motion-reduce:animate-none` respects `prefers-reduced-motion`. The `group` class goes on the `<h1>` itself (see Hero section for rationale). Hover area is therefore the full `<h1>` block width, not a tight wrap around the wordmark — accepted.
 - If rotation is visually noisy in practice, drop the className. No primitive change needed.
 
 ## Testing
@@ -280,7 +296,7 @@ Update `internal/handler/spa_test.go` to assert the new tags on the same routes 
 | Frontend unit (`brand-name.test.tsx`, new) | Asserts the net-new ARIA attributes added by this spec: `role="img"` and `aria-label="Sabermatic dot DEV"` on the outer span; `aria-hidden="true"` on the inner styled span; visible text contains `Sabermatic`, `[`, `DEV]`; `<BallMark/>` rendered inside the inner span |
 | Frontend unit (`hero.test.tsx`, new) | Hero's `<h1>` contains the `<BallMark/>` SVG as a direct descendant (via a `data-testid` on `BallMark` or by matching the ball SVG's circle); `<h1>` has `aria-label="Sabermatic dot DEV"`; `<h1>` does NOT have `role="img"` (which would only be present if the hero had been refactored to use `<BrandName/>` — this assertion guards against accidental refactor) |
 | Backend unit (`internal/email/template_test.go`, update) | **Update existing `TestRenderEmail` to the 3-arg signature (pass a concrete `logoURL`).** Add separate asserts for the logo: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\" height=\"28\" alt=\"\"")` (matched as an in-order substring to avoid false positives on unrelated `alt=""` attributes), and a dedicated case that passes `logoURL == ""` and asserts the wrapper does NOT contain `<img `, exercising the `{{if .LogoURL}}` else branch. This file owns tests for the `email.RenderEmail` public API. |
-| Backend unit (`internal/jobs/render_email_test.go`, update) | Tests the jobs-internal `renderEvaluationEmail`. The existing `TestRenderEvaluationEmail_EscapesHTML` already passes a `baseURL` ("https://example.com"). Add one new assertion to it: `assert.Contains(t, html, "https://example.com/mark-256.png")`. Does NOT re-test `email.RenderEmail` directly (that's `template_test.go`'s job). |
+| Backend unit (`internal/jobs/render_email_test.go`, update) | Tests the jobs-internal `renderEvaluationEmail`. `renderEvaluationEmail`'s signature does **not** change (see Email section caller #3 — logoURL is derived inside the function from the existing `baseURL` param), so existing call sites stay the same. The existing `TestRenderEvaluationEmail_EscapesHTML` already passes a `baseURL` of `"https://example.com"`; add one new assertion: `assert.Contains(t, html, "https://example.com/mark-256.png")`. Does NOT re-test `email.RenderEmail` directly (that's `template_test.go`'s job). |
 | Backend unit (`internal/backend/auth_test.go`) | If existing tests cover verify-email or reset-password rendering paths, update the expected HTML fixtures to include the `<img>` tag. Otherwise no change needed. |
 | Backend unit (`internal/handler/spa_test.go`, update) | Asserts `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description` on routes that already have OG coverage |
 | Manual visual | `/`, `/login`, `/signup`, `/forgot-password`, authed app loading splash, force an error-boundary render. Screenshot each for the PR. |
