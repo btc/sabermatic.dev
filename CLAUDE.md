@@ -11,7 +11,7 @@ Prototype: ./v0
 
 # Code Conventions
 
-Backend list endpoints must never return nil slices. Go's `json.Marshal(nil)` produces `null`, not `[]`. Coerce in the backend method for REST, in db-to-proto converters for ConnectRPC.
+REST list endpoints must never return nil slices — `json.Marshal(nil)` produces `null`, not `[]`. Coerce in the backend method. ConnectRPC endpoints do not need this coercion: both binary and JSON protobuf codecs treat nil and empty `repeated` fields identically, and protobuf-es on the client always decodes to `[]`.
 
 Never panic at init time. Propagate errors explicitly up to main.
 
@@ -24,8 +24,6 @@ Shared test helper packages follow the `httptest` convention: `internal/jobs/job
 Proto is the API contract. After editing `.proto` files, run `buf generate` and commit generated code in `internal/pb/` and `web/src/pb/`. Never hand-edit generated files.
 
 ConnectRPC services follow Google AIPs where practical. Standard methods use AIP naming, pagination (AIP-158), error codes (AIP-193), field behavior annotations (AIP-203). Custom methods use AIP-136. Skip resource names (AIP-122).
-
-`repeated` proto fields must map to empty slices, not nil. Always return initialized slices from db-to-proto converters.
 
 Update methods use field masks for partial updates (AIP-134).
 
