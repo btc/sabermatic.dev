@@ -1,80 +1,87 @@
-import type { ReactNode } from "react";
-
 import { useSampleEvaluation } from "@/api/sample-queries";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
+import { AnnotationType } from "@/pb/drill/v1/evaluation_pb";
 
-function FadeInCard({
-  children,
-  delay,
-  animate,
-  accent,
-}: {
-  children: ReactNode;
-  delay: number;
-  animate: boolean;
-  accent: "strength" | "gap" | "primary";
-}) {
-  return (
-    <div
-      className={`border-l-2 pl-4 py-2 transition-all duration-500 motion-reduce:transition-none ${
-        accent === "strength" ? "border-strength" : accent === "gap" ? "border-gap" : "border-primary"
-      } ${animate ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
-      style={{
-        transitionDelay: `${delay}ms`,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
+type Kind = "strength" | "gap" | "missed";
+
+const KIND_CLASS: Record<Kind, string> = {
+  strength: "border-strength",
+  gap: "border-gap",
+  missed: "border-missed",
+};
+const KIND_LABEL_CLASS: Record<Kind, string> = {
+  strength: "text-strength",
+  gap: "text-gap",
+  missed: "text-missed",
+};
+const KIND_HEADING: Record<Kind, string> = {
+  strength: "Strengths",
+  gap: "Gaps",
+  missed: "Missed opportunities",
+};
+
+const KIND_TO_TYPE: Record<"strength" | "gap" | "missed", AnnotationType> = {
+  strength: AnnotationType.STRENGTH,
+  gap: AnnotationType.GAP,
+  missed: AnnotationType.MISSED_OPPORTUNITY,
+};
 
 export function StrengthsGaps() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
   const { data: evalData } = useSampleEvaluation();
 
-  const evaluation = evalData?.evaluation;
-  if (!evaluation?.strengths) return null;
+  const annotations = evalData?.evaluation?.annotations ?? [];
+  if (annotations.length === 0) return null;
 
-  // Show first 2 of each for the landing page
-  const strengths = evaluation.strengths.slice(0, 2);
-  const gaps = evaluation.gaps?.slice(0, 2) ?? [];
+  const byKind = {
+    strength: annotations.filter((a) => a.type === KIND_TO_TYPE.strength),
+    gap: annotations.filter((a) => a.type === KIND_TO_TYPE.gap),
+    missed: annotations.filter((a) => a.type === KIND_TO_TYPE.missed),
+  };
 
   return (
-    <section ref={ref} aria-labelledby="strengths-gaps-heading" className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
-      <div className="max-w-2xl text-center">
-        <h2 id="strengths-gaps-heading" className="text-3xl font-light text-foreground sm:text-4xl">
-          Know exactly where you stand
-        </h2>
-      </div>
-      <div className="w-full max-w-2xl space-y-8">
-        {/* Strengths */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Strengths</h3>
-          {strengths.map((s, i) => (
-            <FadeInCard key={i} delay={i * 200} animate={isVisible} accent="strength">
-              <p className="text-sm text-foreground">{s}</p>
-            </FadeInCard>
-          ))}
+    <section ref={ref} id="strengths" className="py-28 px-10 sm:px-6">
+      <div className="mx-auto grid max-w-[1120px] grid-cols-1 items-start gap-20 md:grid-cols-[5fr_6fr]">
+        <header>
+          <div className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 02 — Evidence
+          </div>
+          <h2 className="mb-5 max-w-[20ch] text-[clamp(32px,4.2vw,56px)] font-light leading-[1.05] tracking-[-0.025em]">
+            Know exactly where you stand.
+          </h2>
+          <p className="max-w-[56ch] text-[17px] text-muted-foreground">
+            Specific moments from your transcript, not generic advice. Strengths, gaps, and the ones you nearly caught.
+          </p>
+        </header>
+
+        <div
+          className={`flex flex-col gap-1 transition-opacity duration-700 motion-reduce:transition-none ${
+            isVisible ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          {(["strength", "gap", "missed"] as const).map((kind) =>
+            byKind[kind].length === 0 ? null : (
+              <div key={kind}>
+                <div className="mt-5 mb-2.5 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground first:mt-0">
+                  {KIND_HEADING[kind]}
+                </div>
+                {byKind[kind].map((a, i) => (
+                  <div
+                    key={`${kind}-${i}`}
+                    className={`border-l-2 py-2.5 pl-4 text-sm leading-relaxed ${KIND_CLASS[kind]}`}
+                  >
+                    <span
+                      className={`mr-2 font-mono text-[11px] font-medium uppercase tracking-[0.08em] ${KIND_LABEL_CLASS[kind]}`}
+                    >
+                      {KIND_HEADING[kind].replace(/ opportunities$/, "").replace(/s$/, "")}
+                    </span>
+                    {a.content}
+                  </div>
+                ))}
+              </div>
+            ),
+          )}
         </div>
-        {/* Gaps */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Areas to improve</h3>
-          {gaps.map((g, i) => (
-            <FadeInCard key={i} delay={(strengths.length + i) * 200} animate={isVisible} accent="gap">
-              <p className="text-sm text-foreground">{g}</p>
-            </FadeInCard>
-          ))}
-        </div>
-        {/* Advice */}
-        {evaluation.advice && (
-          <FadeInCard
-            delay={(strengths.length + gaps.length) * 200}
-            animate={isVisible}
-            accent="primary"
-          >
-            <p className="text-sm text-muted-foreground">{evaluation.advice}</p>
-          </FadeInCard>
-        )}
       </div>
     </section>
   );
