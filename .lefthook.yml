@@ -5,7 +5,8 @@ pre-commit:
       root: "web/"
       glob: "web/src/**/*.{ts,tsx}"
       exclude: "web/src/pb/**"
-      run: npx eslint --fix {staged_files} && git add {staged_files}
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
     frontend-typecheck:
       root: "web/"
       glob: "web/src/**/*.{ts,tsx}"
