@@ -29,7 +29,7 @@ On the web, the baseball renders as an inline SVG that sits between the `[` and 
 | `error-fallback` | B — inline ball | Cascades from `BrandName` |
 | Email wrapper (`internal/email/templates/wrapper.html`) | PNG mark + text wordmark | `TemplateData.LogoURL`, new `RenderEmail` signature |
 | `og-landing.svg` + `og-landing.png` | B — inline ball, wordmark-as-hero layout | Hand-edited SVG + regenerated PNG |
-| `og-sample.svg` + `og-sample.png` | B — inline ball, wordmark-as-hero layout | Hand-edited SVG + regenerated PNG |
+| `og-sample.svg` + `og-sample.png` | Same layout as og-landing; only the tagline text differs ("sample evaluation" vs "data-driven system design prep") | Hand-edited SVG + regenerated PNG |
 | `internal/handler/spa.go` (server-side OG injection) | Add `twitter:card` + `twitter:image` | Server already injects `og:*` tags per route |
 
 ### Out of scope
@@ -52,7 +52,7 @@ On the web, the baseball renders as an inline SVG that sits between the `[` and 
 
 Location: `web/src/components/ball-mark.tsx`
 
-**Geometry:** Use the detailed geometry from `web/public/mark.svg` (tilted 28° with 14 seam tick lines), not the simplified `favicon.svg` (no ticks). The hero is the primary showcase; tick detail should be present at large sizes. At small sizes (≤16px effective ball diameter) the ticks will muddy together visually — accepted.
+**Geometry:** Use the detailed geometry from `web/public/mark.svg` (rotated `-28°` CCW, with 14 seam tick lines). Not the simplified `favicon.svg` (no ticks). The hero is the primary showcase; tick detail should be present at large sizes. At small sizes (≤16px effective ball diameter) the ticks will muddy together visually — accepted.
 
 **Sizing:** inline SVG with `width: 0.55em; height: 0.55em;` plus `display: inline-block`. The em-relative size makes a single component work from 13px up to 140px.
 
@@ -89,7 +89,7 @@ Location: `web/src/components/brand-name.tsx` (existing)
 
 **Why `aria-label="Sabermatic dot DEV"`:** Screen readers inconsistently announce `.` as "period", "point", or nothing. "dot" is explicit and matches how the brand would be spoken aloud.
 
-**Why `aria-hidden="true"` on the inner span:** Prevents any child text (the brackets and "DEV") from being re-announced after the label; without it, some readers double-read.
+**Why `aria-hidden="true"` on the inner span (defense-in-depth):** `role="img"` on the outer span should treat descendants as presentational, but some readers (notably JAWS) still read through; `aria-hidden` guarantees children aren't re-announced after the label.
 
 **Opacity decision:** `opacity-60` (unchanged from current `BrandName`). Applied to the `[.DEV]` portion. Hero overrides this in its own markup (see below).
 
@@ -120,7 +120,7 @@ These differences are deliberate typographic character for the hero, not drift t
 </h1>
 ```
 
-Motion (nice-to-have): the hero `<section>` wraps the `<h1>` in a `group` class; on hover, the ball rotates. Gated by `motion-reduce:animate-none`. If the rotation feels off, drop the class — `BallMark` is agnostic, so this doesn't affect other surfaces.
+Motion (nice-to-have): add `className="group"` directly to the `<h1>` so the hover hit area matches the wordmark itself (not the entire hero section or its wrapper `<div>`). The ball's `className` includes `group-hover:animate-[spin_2s_linear_infinite] motion-reduce:animate-none`. If the rotation feels off, drop the classes — `BallMark` is agnostic, so this doesn't affect other surfaces.
 
 ### Email wrapper — add PNG mark
 
@@ -185,18 +185,19 @@ func RenderEmail(bodyHTML template.HTML, footer string, logoURL string) (string,
 
 1. `internal/backend/auth.go:168` (sendVerifyEmail) — has `b.cfg.Auth.BaseURL`. Pass `b.cfg.Auth.BaseURL + "/mark-256.png"`.
 2. `internal/backend/auth.go:323` (sendResetEmail) — same.
-3. `internal/jobs/evaluate.go:286` (sendEvaluationEmail) — has `w.BaseURL`. Pass `w.BaseURL + "/mark-256.png"`.
+3. `internal/jobs/evaluate.go:286` (`renderEvaluationEmail`, called from `EvaluateWorker` at line 210 which passes `w.BaseURL`). Thread a `logoURL string` parameter through `renderEvaluationEmail`, populated at the caller as `w.BaseURL + "/mark-256.png"`, then passed as the third arg to `email.RenderEmail`.
 
 **URL resolution:**
-- `BASE_URL` env var defaults to `http://localhost:3000` (`internal/config/config.go:99`).
-- In local dev, the PNG at `http://localhost:3000/mark-256.png` may not be served by the backend alone (the SPA runs via Vite at `:5173`). This is **acceptable**: local-dev email images will 404 for external recipients. Document the command to test emails against a production-like setup if needed.
+- The backend reads `cfg.Auth.BaseURL`, populated from the `BASE_URL` env var (`internal/config/config.go`, field `Auth.BaseURL`, default `http://localhost:3000`).
+- **Local dev architecture**: `Procfile.dev` runs `vite build --watch` + `air`. There is no separate Vite dev server at runtime; `air` serves the entire embedded SPA (including `/mark-256.png`) at `:8080`.
+- The default `BASE_URL=http://localhost:3000` does **not** match the actual backend port (`:8080`). Setting `BASE_URL=http://localhost:8080` in `.env` before running `make dev` makes email `<img src>` URLs resolve locally. Without that override, local-dev emails embed broken URLs — acceptable for routine local work, inconvenient for email smoke tests.
 - In prod, `BASE_URL=https://sabermatic.dev` and `/mark-256.png` is served by the embedded SPA via `spa.go`. Works end-to-end.
 
 ### OG SVG geometry
 
 Location: `web/public/og-landing.svg`, `web/public/og-sample.svg`
 
-Each SVG is 1200×630. Current layout: standalone ball centered above wordmark + tagline. New layout: single B-treatment wordmark centered, tagline below.
+Each SVG is 1200×630. **Current layout**: detached ball (scaled `<g>` at the top, around y=150) *plus* a text wordmark `Sabermatic[.DEV]` below (at y=410, font-size 44) *plus* tagline (at y=460, font-size 22). **New layout**: ball removed from above the wordmark; a single B-treatment wordmark (with the ball inline replacing the `.`) centered at roughly canvas midline, tagline below.
 
 **Technique** — `rsvg-convert` supports a subset of SVG and does NOT interpret `em` units inside `<g transform>`, so inline-SVG tricks that work in browsers fail. Use absolute coordinates:
 
@@ -213,21 +214,23 @@ Right text:    <text x=<measured-x-plus-ball-width> y=340 font-size=108>DEV]</te
 Tagline:       <text x=600 y=418 text-anchor=middle font-size=28>data-driven system design prep</text>
 ```
 
-**Coordinate resolution:** `rsvg-convert` uses whatever font the host system has matching `ui-sans-serif,system-ui,sans-serif`. Text width is deterministic at a given font size on a given host but differs across hosts (macOS → Helvetica, Linux CI → DejaVu Sans). To avoid per-machine drift, measure `"Sabermatic["` width empirically on the committer's machine, hardcode the resulting `x` offsets, and note in the file comment that regeneration must happen on a host with the same fallback font. Alternative: use a webfont via `<defs>` (skipped — `rsvg-convert` doesn't fetch remote fonts).
+**Coordinate resolution:** `rsvg-convert` uses whatever font the host system has matching `ui-sans-serif,system-ui,sans-serif`. Text width is deterministic at a given font size on a given host but differs across hosts (macOS → Helvetica, Linux CI → DejaVu Sans). To avoid per-machine drift, measure `"Sabermatic["` width empirically on the committer's machine, hardcode the resulting `x` offsets, and note in the file comment that regeneration must happen on a host with the same fallback font. Alternative: use a webfont via `<defs>` (skipped — `rsvg-convert` doesn't fetch remote fonts). **Horizontal centering**: after measuring, set the starting `x` so that the full rendered width (`Sabermatic[` + ball + `DEV]`) is centered with its midpoint at `x=600`.
 
-**Ball geometry:** reuse the same `<g>` block from `og-landing.svg` today (28° rotation, stitching paths), just scaled smaller and repositioned. Target visual size ~0.6× the font cap-height so it reads as a period-dot.
+**Ball geometry:** reuse the **simplified seam geometry** currently in `og-landing.svg` (two curved seam paths + 8 short seam ticks, all rotated `-28°` CCW). Do *not* use the detailed 14-tick `mark.svg` geometry inline — at the ~60px ball size inside the wordmark, the extra ticks muddy into a blob and add SVG file weight for no visual gain. This is a deliberate divergence from the `<BallMark/>` React primitive (which does use the detailed geometry), justified by the rendering medium (`rsvg-convert`) and the smaller target size. Target visual size: ~0.6× the font cap-height so the ball reads as a period-dot.
 
 **Tagline content:**
 - `og-landing.svg`: "data-driven system design prep"
 - `og-sample.svg`: "sample evaluation"
 
+Only the tagline `<text>` differs between the two files; everything else (coordinates, ball geometry, font-size) is identical. Copy-paste the landing SVG once the layout is dialed in, then swap the tagline.
+
 **Why regenerate `og-sample.png` too:** keep both OG assets visually coherent with the live site; otherwise the sample-share OG will look like a relic. Cheap to do.
 
 ### `spa.go` — add Twitter Card tags
 
-Location: `internal/handler/spa.go:61-75`
+Location: `internal/handler/spa.go` — inside the existing `for path, og := range ogRoutes` loop that builds the `tags` string.
 
-Extend the OG tag injection block to also emit:
+Extend the `Sprintf` format string to also emit:
 
 ```html
 <meta name="twitter:card" content="summary_large_image">
@@ -236,7 +239,7 @@ Extend the OG tag injection block to also emit:
 <meta name="twitter:description" content="{og.description}">
 ```
 
-Added to the same `strings.Replace(..., "</head>", tags+"</head>", 1)` call. No new code path; just more tags inside the existing `Sprintf`.
+No new code path — just more tags inside the existing `Sprintf` format string; the per-route `strings.Replace(..., "</head>", tags+"</head>", 1)` stays unchanged.
 
 Update `internal/handler/spa_test.go` to assert the new tags on the same routes it already covers.
 
@@ -259,10 +262,11 @@ Update `internal/handler/spa_test.go` to assert the new tags on the same routes 
 | Layer | Test |
 |---|---|
 | Frontend unit (`ball-mark.test.tsx`, new) | Renders SVG with `aria-hidden="true"`, with circle + stitching paths |
-| Frontend unit (`brand-name.test.tsx`, new) | Renders with `role="img"`, `aria-label="Sabermatic dot DEV"`; visible text contains `Sabermatic`, `[`, `DEV]`; `<BallMark/>` present |
+| Frontend unit (`brand-name.test.tsx`, new) | Asserts the net-new ARIA attributes added by this spec: `role="img"` and `aria-label="Sabermatic dot DEV"` on the outer span; `aria-hidden="true"` on the inner styled span; visible text contains `Sabermatic`, `[`, `DEV]`; `<BallMark/>` rendered inside the inner span |
 | Frontend unit (`hero.test.tsx`, new) | Hero renders `<BallMark/>` inside `<h1>` with `aria-label`; does NOT render `<BrandName/>` (guards against accidental refactor) |
-| Backend unit (`internal/email/template_test.go`, update) | Separate asserts: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\"")`, `Contains(html, "height=\"28\"")`; assert `alt=""` present; assert wrapper renders without `<img>` when `logoURL == ""` |
-| Backend unit (`internal/jobs/render_email_test.go`, update) | Integration smoke: renders a real email with a concrete `logoURL`; confirms `<img>` tag appears in output |
+| Backend unit (`internal/email/template_test.go`, update) | **Update existing `TestRenderEmail` to the 3-arg signature (pass a concrete `logoURL`).** Add separate asserts for the logo: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\"")`, `Contains(html, "height=\"28\"")`; assert `alt=""` present; assert wrapper renders without `<img>` when `logoURL == ""` (this exercises the `{{if .LogoURL}}` else branch). This file owns tests for the `email.RenderEmail` public API. |
+| Backend unit (`internal/jobs/render_email_test.go`, update) | This file tests the jobs-internal `renderEvaluationEmail` function. Update existing tests to pass a `baseURL` through and assert the rendered HTML contains the expected `/mark-256.png` URL. Does NOT re-test `email.RenderEmail` directly (that's `template_test.go`'s job). |
+| Backend unit (`internal/backend/auth_test.go`) | If existing tests cover verify-email or reset-password rendering paths, update the expected HTML fixtures to include the `<img>` tag. Otherwise no change needed. |
 | Backend unit (`internal/handler/spa_test.go`, update) | Asserts `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description` on routes that already have OG coverage |
 | Manual visual | `/`, `/login`, `/signup`, `/forgot-password`, authed app loading splash, force an error-boundary render. Screenshot each for the PR. |
 | Manual visual | Regenerate OG PNGs; visually diff with previous versions; render social-card previews (Twitter/Slack unfurl) |
