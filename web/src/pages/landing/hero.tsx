@@ -69,7 +69,7 @@ export function Hero() {
             className="inline-flex items-center gap-2 rounded-lg bg-foreground px-[22px] py-[13px] text-sm font-medium text-background transition-transform hover:-translate-y-px"
           >
             Start practicing
-            <span className="rounded bg-foreground/20 px-1.5 py-0.5 font-mono text-[10px]">↵</span>
+            <span aria-hidden className="rounded bg-foreground/20 px-1.5 py-0.5 font-mono text-[10px]">↵</span>
           </Link>
           <Link
             to="/sample"
