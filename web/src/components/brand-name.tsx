@@ -1,3 +1,4 @@
+import { BallMark } from "@/components/ball-mark";
 import { cn } from "@/lib/utils";
 
 interface BrandNameProps {
@@ -6,9 +7,15 @@ interface BrandNameProps {
 
 export function BrandName({ className }: BrandNameProps) {
   return (
-    <span className={cn("whitespace-nowrap", className)}>
+    <span
+      role="img"
+      aria-label="Sabermatic dot DEV"
+      className={cn("whitespace-nowrap", className)}
+    >
       Sabermatic
-      <span className="opacity-60">[.DEV]</span>
+      <span className="opacity-60" aria-hidden="true">
+        [<BallMark />DEV]
+      </span>
     </span>
   );
 }
