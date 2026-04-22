@@ -1,0 +1,19 @@
+syntax = "proto3";
+package drill.v1;
+
+option go_package = "github.com/btc/drill/internal/pb/drill/v1;drillv1";
+
+import "drill/v1/question.proto";
+
+// LandingService exposes public, auth-exempt data for the unauthenticated
+// marketing landing page. Registered with publicOpts in internal/rpc/register.go.
+service LandingService {
+  rpc ListFeaturedQuestions(ListFeaturedQuestionsRequest) returns (ListFeaturedQuestionsResponse);
+}
+
+message ListFeaturedQuestionsRequest {}
+
+message ListFeaturedQuestionsResponse {
+  repeated Question questions = 1;
+  int32 total_count = 2;
+}
