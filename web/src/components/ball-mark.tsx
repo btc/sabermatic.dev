@@ -6,6 +6,11 @@ interface BallMarkProps {
    *  per-surface color overrides. Do not pass transform utilities —
    *  they will conflict with animate-spin on the same element (both
    *  write to `transform`, and CSS animation takes precedence).
+   *
+   *  Two-node DOM by design: wrapper span owns baseline `translateY`,
+   *  inner svg owns caller-supplied rotation. Keeping them on separate
+   *  elements lets the transforms compose instead of clobbering.
+   *
    *  Wrapper positioning is not externally overridable by design;
    *  if a surface needs a different baseline, prefer a new variant. */
   className?: string;
@@ -15,7 +20,9 @@ export function BallMark({ className }: BallMarkProps) {
   return (
     <span className="inline-block translate-y-[0.05em]">
       <svg
+        xmlns="http://www.w3.org/2000/svg"
         aria-hidden="true"
+        focusable="false"
         viewBox="0 0 32 32"
         className={cn("h-[0.55em] w-[0.55em]", className)}
       >
