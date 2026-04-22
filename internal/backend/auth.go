@@ -165,7 +165,7 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, 
 		<p style="margin:24px 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-weight:500;">Verify email</a></p>
 		<p style="font-size:13px;color:#666;">Or copy this link: %s</p>`,
 		safeURL, safeURL))
-	verifyHTML, err := intemail.RenderEmail(verifyBody, fmt.Sprintf("You received this email because you signed up for %s.", branding.AppName))
+	verifyHTML, err := intemail.RenderEmail(verifyBody, fmt.Sprintf("You received this email because you signed up for %s.", branding.AppName), "")
 	if err != nil {
 		slog.Error("render verification email template", "error", err)
 		verifyHTML = string(verifyBody) // fallback to unwrapped body
@@ -320,7 +320,7 @@ func (b *Backend) ForgotPassword(ctx context.Context, email string) (err error) 
 		<p style="margin:24px 0;"><a href="%s" style="display:inline-block;padding:12px 24px;background:#b45309;color:#fff;text-decoration:none;border-radius:6px;font-weight:500;">Reset password</a></p>
 		<p style="font-size:13px;color:#666;">Or copy this link: %s</p>`,
 		ttlStr, safeResetURL, safeResetURL))
-	resetHTML, err := intemail.RenderEmail(resetBody, fmt.Sprintf("You received this email because you requested a password reset for %s.", branding.AppName))
+	resetHTML, err := intemail.RenderEmail(resetBody, fmt.Sprintf("You received this email because you requested a password reset for %s.", branding.AppName), "")
 	if err != nil {
 		slog.Error("render reset email template", "error", err)
 		resetHTML = string(resetBody)

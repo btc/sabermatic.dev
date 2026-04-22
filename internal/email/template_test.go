@@ -32,7 +32,8 @@ func TestFormatDurationHuman_SubMinute(t *testing.T) {
 }
 
 func TestRenderEmail(t *testing.T) {
-	html, err := RenderEmail(template.HTML("<p>Hello world</p>"), "Test footer")
+	const logoURL = "https://example.com/mark-256.png"
+	html, err := RenderEmail(template.HTML("<p>Hello world</p>"), "Test footer", logoURL)
 	require.NoError(t, err)
 	require.Contains(t, html, "Sabermatic[.DEV]")
 	require.Contains(t, html, "Hello world")

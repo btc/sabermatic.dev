@@ -31,12 +31,17 @@ func getTemplate() (*template.Template, error) {
 // TemplateData holds the data for the shared email wrapper template.
 type TemplateData struct {
 	AppName string
+	// LogoURL is an absolute URL to a publicly-reachable mark PNG.
+	// When empty, the wrapper renders without a logo image.
+	LogoURL string
 	Body    template.HTML // Pre-rendered inner HTML
 	Footer  string
 }
 
 // RenderEmail renders the shared email wrapper with the given body HTML and footer text.
-func RenderEmail(bodyHTML template.HTML, footer string) (string, error) {
+// logoURL should be an absolute URL to a publicly-reachable mark PNG, or "" to render
+// without a logo (tests, or environments where the asset is unavailable).
+func RenderEmail(bodyHTML template.HTML, footer string, logoURL string) (string, error) {
 	tmpl, err := getTemplate()
 	if err != nil {
 		return "", fmt.Errorf("parse email template: %w", err)
@@ -44,6 +49,7 @@ func RenderEmail(bodyHTML template.HTML, footer string) (string, error) {
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, TemplateData{
 		AppName: branding.AppName,
+		LogoURL: logoURL,
 		Body:    bodyHTML,
 		Footer:  footer,
 	})
