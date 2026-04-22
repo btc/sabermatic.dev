@@ -294,23 +294,44 @@ git commit -m "feat(web): BrandName embeds BallMark with role=img + aria-label"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `web/src/pages/landing/__tests__/hero.test.tsx`:
+Create `web/src/pages/landing/__tests__/hero.test.tsx`. Note: `Hero` imports `Link` from react-router-dom and calls `useScrollReveal` which constructs `IntersectionObserver` — jsdom doesn't implement either, so we wrap in `<MemoryRouter>` and stub `IntersectionObserver` (same pattern as `library.test.tsx`).
 
 ```tsx
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import React from "react";
+import { MemoryRouter } from "react-router-dom";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Hero } from "@/pages/landing/hero";
 
+// jsdom does not implement IntersectionObserver; stub it so useScrollReveal
+// doesn't throw.
+beforeAll(() => {
+  const mockIO = vi.fn().mockImplementation(() => ({
+    observe: vi.fn(),
+    unobserve: vi.fn(),
+    disconnect: vi.fn(),
+  }));
+  vi.stubGlobal("IntersectionObserver", mockIO);
+});
+
+function renderHero() {
+  return render(
+    <MemoryRouter>
+      <Hero />
+    </MemoryRouter>,
+  );
+}
+
 describe("Hero", () => {
   it("gives the <h1> a canonical aria-label", () => {
-    render(<Hero />);
+    renderHero();
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.getAttribute("aria-label")).toBe("Sabermatic dot DEV");
   });
 
   it("embeds the BallMark SVG as a descendant of the <h1>", () => {
-    render(<Hero />);
+    renderHero();
     const heading = screen.getByRole("heading", { level: 1 });
     const svg = heading.querySelector("svg");
     expect(svg).not.toBeNull();
@@ -318,15 +339,24 @@ describe("Hero", () => {
     expect(svg?.getAttribute("viewBox")).toBe("0 0 32 32");
   });
 
+  it("passes the hover-spin className (motion-reduce aware) to BallMark", () => {
+    renderHero();
+    const heading = screen.getByRole("heading", { level: 1 });
+    const svg = heading.querySelector("svg")!;
+    const classAttr = svg.getAttribute("class") ?? "";
+    expect(classAttr).toContain("group-hover:animate-[spin_2s_linear_infinite]");
+    expect(classAttr).toContain("motion-reduce:animate-none");
+  });
+
   it("does NOT wrap the wordmark in <BrandName/> (guards against accidental refactor)", () => {
-    render(<Hero />);
+    renderHero();
     const heading = screen.getByRole("heading", { level: 1 });
     // BrandName introduces a role="img" span inside its wordmark region.
     expect(heading.querySelector('[role="img"]')).toBeNull();
   });
 
   it("keeps the hero's lowercase casing and bracketed opacity treatment", () => {
-    render(<Hero />);
+    renderHero();
     const heading = screen.getByRole("heading", { level: 1 });
     const text = heading.textContent ?? "";
     expect(text).toContain("sabermatic"); // lowercase, deliberately
@@ -335,7 +365,7 @@ describe("Hero", () => {
   });
 
   it("adds the group class to <h1> to enable group-hover animation on the ball", () => {
-    render(<Hero />);
+    renderHero();
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.className.split(/\s+/)).toContain("group");
   });
@@ -390,7 +420,7 @@ Run: `make dev` in one terminal. Open `http://localhost:8080/` in a browser. Con
 - Hover over the hero `<h1>`: ball slowly rotates (2s spin). Release hover: rotation stops cleanly.
 - Zoom browser to 75% / 100% / 150%: ball scales correctly with font-size at every zoom.
 
-If the ball's vertical position looks off at 14px (nav) or 140px (hero), fine-tune `translate-y-[0.05em]` in `ball-mark.tsx` — try `translate-y-[0.03em]`, `translate-y-[0.07em]` until both nav and hero read correctly. Commit screenshots to the PR at 14px, 40px (auth layout), and 140px (hero).
+If the ball's vertical position looks off at 14px (nav) or 140px (hero), fine-tune `translate-y-[0.05em]` in `ball-mark.tsx` — try `translate-y-[0.03em]`, `translate-y-[0.07em]` until both nav and hero read correctly. Attach screenshots to the PR description at 14px, 40px (auth layout), and 140px (hero) — don't commit image files to the repo.
 
 - [ ] **Step 8: Commit**
 
@@ -478,6 +508,8 @@ Expected: PASS (the email package itself compiles).
 Run: `go build ./...`
 Expected: FAIL with "not enough arguments in call to email.RenderEmail" at `internal/backend/auth.go` and `internal/jobs/evaluate.go`. This is expected — fixed in Tasks 6 and 7.
 
+> **⚠️ Do NOT run `make test` after this task.** `make test` invokes `go test ./internal/... ./cmd/...` which requires `go build ./...` to succeed. The tree is intentionally uncompilable until Task 7 is committed. If you need to verify backend changes in the middle of this sequence, run `go test ./internal/email/... -count=1` (scoped to the email package only). Full `make test` resumes in Task 12.
+
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -511,6 +543,9 @@ func TestRenderEmail_WithoutLogo(t *testing.T) {
 	html, err := RenderEmail(template.HTML("<p>body</p>"), "footer", "")
 	require.NoError(t, err)
 	require.NotContains(t, html, "<img ")
+	// The logo branch uses an inner `<table role="presentation">` for layout;
+	// when the else branch renders, that inner layout table must be absent.
+	require.NotContains(t, html, `role="presentation" cellpadding="0" cellspacing="0"><tr>`)
 	// App name still appears in the plain-text branch.
 	require.Contains(t, html, "Sabermatic[.DEV]")
 }
@@ -568,6 +603,11 @@ git commit -m "feat(email): conditional PNG mark in wrapper header"
 
 **Files:**
 - Modify: `internal/backend/auth.go:168, 323`
+
+- [ ] **Step 0: Pre-flight — confirm `auth_test.go` doesn't assert rendered email HTML**
+
+Run: `grep -n "verifyHTML\|resetHTML\|RenderEmail\|mark-256" internal/backend/auth_test.go`
+Expected: No output. If there ARE matches, update those tests to tolerate the new `<img>` tag (either by checking structural behavior instead of full HTML content, or by passing a known `logoURL` and asserting it appears). At time of writing, no such assertions exist, so this step is usually a silent no-op.
 
 - [ ] **Step 1: Pass logoURL to sendVerifyEmail's RenderEmail call**
 
@@ -694,8 +734,9 @@ Replace the full contents of `web/public/og-landing.svg` with:
 
 ```xml
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
-  <!-- Regenerated on macOS; rsvg-convert falls back to Helvetica. If regenerating
-       on Linux (DejaVu Sans), text widths will shift and offsets below may need
+  <!-- Regenerated on macOS; rsvg-convert picks the system's ui-sans-serif fallback
+       (typically SF Pro / .AppleSystemUIFont). If regenerating on Linux the fallback
+       is usually DejaVu Sans, text widths will shift, and the offsets below may need
        re-tuning so the wordmark stays centered on x=600. -->
   <rect width="1200" height="630" fill="#faf5ef"/>
 
@@ -804,7 +845,9 @@ git commit -m "assets(og): regenerate og-sample with B-treatment wordmark"
 
 - [ ] **Step 1: Add the target**
 
-Open `Makefile`. Add `regen-og` to the `.PHONY` list at the top (space-separated), then append a new target section to the end of the file:
+Open `Makefile`. Add `regen-og` to the `.PHONY` list at the top (space-separated), then append a new target section to the end of the file.
+
+**Critical:** Makefile recipe lines MUST begin with a literal TAB character, not spaces. If you paste the block below, verify each recipe line (the four lines after `regen-og:`) starts with a tab. A common symptom of spaces: `Makefile:<N>: *** missing separator.  Stop.` One reliable way to insert: in your editor, ensure "insert tab character" (not "expand tab to spaces") for this file, or use `printf '\t'` when scripting the edit.
 
 ```makefile
 # Regenerate OG images from their SVG sources. Requires rsvg-convert (brew install librsvg).
@@ -868,7 +911,57 @@ with:
 		}},
 ```
 
-Do the same for the `/about` and `/sample` test cases (use each route's existing `og:title`, `og:description`, `og:image` values as the corresponding `twitter:*` values).
+For `/about`, replace:
+
+```go
+		{"/about", []string{
+			`og:title" content="` + branding.AppName + `"`,
+			`og:description" content="data-driven system design prep"`,
+			`og:url" content="https://sabermatic.dev/about"`,
+			`og:image" content="https://sabermatic.dev/og-landing.png"`,
+		}},
+```
+
+with:
+
+```go
+		{"/about", []string{
+			`og:title" content="` + branding.AppName + `"`,
+			`og:description" content="data-driven system design prep"`,
+			`og:url" content="https://sabermatic.dev/about"`,
+			`og:image" content="https://sabermatic.dev/og-landing.png"`,
+			`twitter:card" content="summary_large_image"`,
+			`twitter:title" content="` + branding.AppName + `"`,
+			`twitter:description" content="data-driven system design prep"`,
+			`twitter:image" content="https://sabermatic.dev/og-landing.png"`,
+		}},
+```
+
+For `/sample`, replace:
+
+```go
+		{"/sample", []string{
+			`og:title" content="` + branding.AppName + ` — sample evaluation"`,
+			`og:url" content="https://sabermatic.dev/sample"`,
+			`og:image" content="https://sabermatic.dev/og-sample.png"`,
+		}},
+```
+
+with:
+
+```go
+		{"/sample", []string{
+			`og:title" content="` + branding.AppName + ` — sample evaluation"`,
+			`og:url" content="https://sabermatic.dev/sample"`,
+			`og:image" content="https://sabermatic.dev/og-sample.png"`,
+			`twitter:card" content="summary_large_image"`,
+			`twitter:title" content="` + branding.AppName + ` — sample evaluation"`,
+			`twitter:description" content="See a real system design interview evaluated across 5 dimensions"`,
+			`twitter:image" content="https://sabermatic.dev/og-sample.png"`,
+		}},
+```
+
+(Description for `/sample` is taken from `spa.go`'s `ogRoutes["/sample"].description`.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -959,7 +1052,7 @@ Run: `git status`
 Expected: Clean working tree; all commits from prior tasks present.
 
 Run: `git log --oneline main..HEAD`
-Expected: ~11 commits, one per task.
+Expected: 11 commits, one per code-touching task (Tasks 1–11; Task 12 is verification-only).
 
 - [ ] **Step 7: (No commit — this is verification only.)**
 
