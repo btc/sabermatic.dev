@@ -20,7 +20,7 @@ const KIND_HEADING: Record<Kind, string> = {
   missed: "Missed opportunities",
 };
 
-const KIND_TO_TYPE: Record<"strength" | "gap" | "missed", AnnotationType> = {
+const KIND_TO_TYPE: Record<Kind, AnnotationType> = {
   strength: AnnotationType.STRENGTH,
   gap: AnnotationType.GAP,
   missed: AnnotationType.MISSED_OPPORTUNITY,
