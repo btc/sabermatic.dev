@@ -283,7 +283,7 @@ func renderEvaluationEmail(baseURL, questionTitle string, result *evaluation.Eva
 		sessionsURL,
 	)
 
-	rendered, err := email.RenderEmail(template.HTML(innerHTML), fmt.Sprintf("You received this email because you use %s.", branding.AppName), "")
+	rendered, err := email.RenderEmail(template.HTML(innerHTML), fmt.Sprintf("You received this email because you use %s.", branding.AppName), baseURL+"/mark-256.png")
 	if err != nil {
 		// Fall back to inner HTML if template rendering fails.
 		slog.Error("render evaluation email template", "error", err)

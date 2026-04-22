@@ -23,4 +23,5 @@ func TestRenderEvaluationEmail_EscapesHTML(t *testing.T) {
 	assert.NotContains(t, html, "<b>evil")
 	assert.Contains(t, html, "&lt;script&gt;")
 	assert.Contains(t, html, "&lt;b&gt;evil")
+	assert.Contains(t, html, "https://example.com/mark-256.png")
 }
