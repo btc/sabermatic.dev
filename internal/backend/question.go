@@ -28,6 +28,32 @@ func (b *Backend) ListQuestions(ctx context.Context, userID uuid.UUID) (_ []db.L
 	return rows, nil
 }
 
+// ListFeaturedQuestions returns the curated list of featured questions for
+// the public landing page along with the total count of seed questions.
+//
+// The featured list is ordered by featured_order. The total_count is scoped
+// to seed questions (source='seed' AND user_id IS NULL) so the public
+// landing's "N questions" headline reflects the curated library, not private
+// user-generated or coach-generated questions.
+func (b *Backend) ListFeaturedQuestions(ctx context.Context) (_ []db.ListFeaturedQuestionsRow, _ int32, err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ListFeaturedQuestions")
+	defer func() { drilotel.End(span, err) }()
+
+	queries := db.New(b.pool)
+
+	rows, err := queries.ListFeaturedQuestions(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list featured questions: %w", err)
+	}
+
+	total, err := queries.CountSeedQuestions(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count seed questions: %w", err)
+	}
+
+	return rows, total, nil
+}
+
 // CreateQuestion inserts a user-created custom question and returns the
 // fully-populated row. The caller provides only the writable fields; source
 // is always "custom" and user_id comes from the authenticated context.
