@@ -28,11 +28,15 @@ export declare const ListFeaturedQuestionsRequestSchema: GenMessage<ListFeatured
  */
 export declare type ListFeaturedQuestionsResponse = Message<"drill.v1.ListFeaturedQuestionsResponse"> & {
   /**
+   * ordered by featured_order
+   *
    * @generated from field: repeated drill.v1.Question questions = 1;
    */
   questions: Question[];
 
   /**
+   * full library size, for the "N questions" header
+   *
    * @generated from field: int32 total_count = 2;
    */
   totalCount: number;

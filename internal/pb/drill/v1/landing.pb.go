@@ -59,8 +59,8 @@ func (*ListFeaturedQuestionsRequest) Descriptor() ([]byte, []int) {
 
 type ListFeaturedQuestionsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Questions     []*Question            `protobuf:"bytes,1,rep,name=questions,proto3" json:"questions,omitempty"`
-	TotalCount    int32                  `protobuf:"varint,2,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`
+	Questions     []*Question            `protobuf:"bytes,1,rep,name=questions,proto3" json:"questions,omitempty"`                      // ordered by featured_order
+	TotalCount    int32                  `protobuf:"varint,2,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"` // full library size, for the "N questions" header
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
