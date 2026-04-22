@@ -1,6 +1,6 @@
 # Baseball Mark Integration
 
-**Status:** Draft — pending user review
+**Status:** Draft — pending user review (post review round 1)
 **Author:** @briantigerchow
 **Date:** 2026-04-22
 
@@ -10,32 +10,41 @@ Bring the existing Sabermatic baseball mark (currently used only as a favicon an
 
 ## Design direction
 
-**The ball is the `.` in `[.DEV]`.**
+**The ball is the `.` in `[.DEV]`** (the "B" treatment selected during brainstorming).
 
-On the web, the baseball renders as an inline SVG that sits between the `[` and `DEV]` brackets, replacing the period in the wordmark `Sabermatic[.DEV]`. The ball scales with whatever font size its parent uses, so one component works from 13px nav text up to 140px hero type. This is the "B" treatment selected during brainstorming.
+On the web, the baseball renders as an inline SVG that sits between the `[` and `DEV]` brackets, replacing the period in the wordmark `Sabermatic[.DEV]`. The ball scales with whatever font size its parent uses, so one component works from 13px nav text up to 140px hero type.
 
-Emails use a different treatment (PNG mark left of plain-text wordmark) because SVG support across email clients is unreliable.
+**Emails use a different treatment** (PNG mark left of plain-text wordmark) because SVG support across email clients is unreliable. In emails, the wordmark remains `Sabermatic[.DEV]` with a period — the mark is adjacent, not inline.
+
+**OG images use the B treatment**, but the SVG must be hand-geometried (see OG section) because `rsvg-convert` doesn't understand `em`-relative inline SVG.
 
 ## Scope
 
-| Surface | Treatment | Notes |
+| Surface | Treatment | Driver |
 |---|---|---|
 | `PublicHeader` (landing nav) | B — inline ball | Cascades from `BrandName` |
-| `Hero` (landing) | B — inline ball | Hero currently uses hand-rolled markup; switch to `<BrandName/>` |
+| `Hero` (landing) | B — inline ball | **Hand-rolled; embeds `<BallMark/>` directly** (see Hero section for why) |
 | `AuthLayout` (login, signup, forgot-password, reset-password, verify-email) | B — inline ball | Cascades from `BrandName` |
 | `AppLayout` header + loading splash | B — inline ball | Cascades from `BrandName` |
 | `error-fallback` | B — inline ball | Cascades from `BrandName` |
-| Email wrapper (`internal/email/templates/wrapper.html`) | PNG mark + text wordmark | New asset URL plumbed through `branding.LogoURL` |
-| `og-landing.svg` + `og-landing.png` | B — inline ball, wordmark-as-hero layout | Regenerate PNG via `rsvg-convert` |
-| `og-sample.svg` + `og-sample.png` | B — inline ball, wordmark-as-hero layout | Regenerate PNG via `rsvg-convert` |
-| `index.html` | Add `<meta property="og:image|og:title|og:description">` | Finally wires up the OG assets, which currently ship but aren't referenced |
+| Email wrapper (`internal/email/templates/wrapper.html`) | PNG mark + text wordmark | `TemplateData.LogoURL`, new `RenderEmail` signature |
+| `og-landing.svg` + `og-landing.png` | B — inline ball, wordmark-as-hero layout | Hand-edited SVG + regenerated PNG |
+| `og-sample.svg` + `og-sample.png` | B — inline ball, wordmark-as-hero layout | Hand-edited SVG + regenerated PNG |
+| `internal/handler/spa.go` (server-side OG injection) | Add `twitter:card` + `twitter:image` | Server already injects `og:*` tags per route |
 
 ### Out of scope
 
-- **Favicon** — a tilted whole ball reads better at 16px than "ball as punctuation inside brackets" ever could. Leave the existing `favicon.svg` alone.
-- **PWA icons** (mark-192/256/512) — these are the standalone mark, same reasoning.
-- **Dark-mode-specific ball variant** — the ball's own fills (`#fef3c7`) and strokes (`#92400e`, `#b45309`) hold on both light (cream `#faf5ef`) and dark near-black backgrounds. No theme branching.
-- **Favicon-in-emoji / Unicode replacements** in `<title>` / `manifest.json` "name" — not possible for text surfaces.
+- **Favicon** (`favicon.svg`) — a tilted whole ball reads better at 16px than "ball as punctuation inside brackets" ever could. Leave as-is.
+- **PWA icons** (mark-192/256/512) — standalone mark, same reasoning.
+- **Dark-mode-specific ball variant** — the ball's own fills (`#fef3c7`) and strokes (`#92400e`, `#b45309`) hold on both light (`#faf5ef`) and dark near-black backgrounds. No theme branching.
+- **Text-only surfaces** (`<title>`, `manifest.json.name`, `og:title`, `branding.AppName`) — can't render SVG. Continue using `Sabermatic[.DEV]` literal text.
+- **`index.html` OG meta tags** — already handled server-side by `spa.go:45`. Do not add to `index.html`; would produce duplicate tags on routes with OG injection and emit landing metadata on unrelated routes (`/login`, `/history`) via the SPA fallback.
+
+### Deliberate design decisions
+
+- **Brackets in all text contexts** — `Sabermatic[.DEV]` is the canonical brand form. Do not strip brackets for link previews or Twitter cards; consistency beats rendered polish.
+- **Hero stays hand-rolled** — see Hero section.
+- **Screen readers announce "Sabermatic dot DEV"** — use literal "dot" in `aria-label`, not a period glyph.
 
 ## Components
 
@@ -43,55 +52,89 @@ Emails use a different treatment (PNG mark left of plain-text wordmark) because 
 
 Location: `web/src/components/ball-mark.tsx`
 
-Responsibilities:
-- Render the baseball as a single inline SVG
-- Size in `em` units so it scales with the parent font size
-- Self-colored (amber fill, umber strokes) — no theme branching
-- `aria-hidden="true"` (accessible name comes from the wrapping `BrandName`)
+**Geometry:** Use the detailed geometry from `web/public/mark.svg` (tilted 28° with 14 seam tick lines), not the simplified `favicon.svg` (no ticks). The hero is the primary showcase; tick detail should be present at large sizes. At small sizes (≤16px effective ball diameter) the ticks will muddy together visually — accepted.
 
-Sizing baseline: `0.55em` wide, tuned during implementation so:
-- At 13px nav text, the ball reads as a heavy, slightly-oversized period
-- At 140px hero text, the ball reads as a proper crest without dominating the wordmark
+**Sizing:** inline SVG with `width: 0.55em; height: 0.55em;` plus `display: inline-block`. The em-relative size makes a single component work from 13px up to 140px.
 
-Vertical alignment: `translateY` tuned to sit on the visual baseline at small sizes and rise toward x-height center at hero sizes. Exact values set during implementation with screenshot comparison.
+**Vertical alignment:** CSS `transform: translateY(...)` to sit the ball as a baseline period at small sizes and rise to roughly cap-height center at hero sizes. Starting value: `translateY(0.05em)`. Acceptance: at `text-sm` (14px) in the nav, the ball reads as a heavy period, with its top roughly at cap-height of the `[` bracket. At 140px hero text, the ball sits below the cap-height of the brackets, reading as a large round punctuation mark. Fine-tune against `[` and `]` bracket glyph metrics in Inter/system-ui during implementation; commit screenshots at 14px, 40px, 140px to the PR.
 
-Motion (nice-to-have, not required to ship):
-- Static by default
-- Hover: slow 360° rotation over ~2s, applied **only in the hero** (small nav ball rotating would be noisy)
-- Gated by `@media (hover: hover) and (prefers-reduced-motion: no-preference)`
-- If it feels off in practice, drop it
+**Color:** amber fill `#fef3c7`, umber strokes `#92400e` and `#b45309`. Self-colored — holds on cream + dark backgrounds without theme branching.
+
+**API:**
+```tsx
+interface BallMarkProps {
+  className?: string;  // for surface-specific tuning (hero spin)
+}
+```
+
+Keep the component prop-thin. Motion is triggered by a CSS class the *caller* applies, not a `spin` prop, so the ball primitive stays agnostic.
+
+**Accessibility:** `aria-hidden="true"` on the `<svg>`, no `<title>` / `<desc>`.
 
 ### `<BrandName/>` — updated
 
 Location: `web/src/components/brand-name.tsx` (existing)
 
-New markup:
 ```tsx
-<span className={cn("whitespace-nowrap", className)} aria-label="Sabermatic.DEV">
-  Sabermatic<span className="opacity-60">[<BallMark />DEV]</span>
+<span
+  role="img"
+  aria-label="Sabermatic dot DEV"
+  className={cn("whitespace-nowrap", className)}
+>
+  Sabermatic<span className="opacity-60" aria-hidden="true">[<BallMark />DEV]</span>
 </span>
 ```
 
-`aria-label` ensures screen readers say "Sabermatic dot DEV" instead of "Sabermatic open-bracket ball-image DEV close-bracket."
+**Why `role="img"`:** A plain `<span>` has no role, so `aria-label` is ignored by most screen readers. `role="img"` makes the span a self-contained accessible unit whose name is the label.
 
-### `Hero` — switch to `<BrandName/>`
+**Why `aria-label="Sabermatic dot DEV"`:** Screen readers inconsistently announce `.` as "period", "point", or nothing. "dot" is explicit and matches how the brand would be spoken aloud.
+
+**Why `aria-hidden="true"` on the inner span:** Prevents any child text (the brackets and "DEV") from being re-announced after the label; without it, some readers double-read.
+
+**Opacity decision:** `opacity-60` (unchanged from current `BrandName`). Applied to the `[.DEV]` portion. Hero overrides this in its own markup (see below).
+
+### Hero — embeds `<BallMark/>` directly (does NOT use `<BrandName/>`)
 
 Location: `web/src/pages/landing/hero.tsx`
 
-The hero currently hand-rolls the wordmark markup (`sabermatic<span class="...">[.DEV]</span>`). Replace with `<BrandName/>` + the existing size classes, so the hero inherits B and we have a single source of truth.
+**Why not use `<BrandName/>`:** the hero has three intentional visual divergences from `BrandName`:
+
+1. **Casing**: `sabermatic` (lowercase) vs. `Sabermatic` (title case)
+2. **Bracket opacity**: `opacity-40` vs. `opacity-60`
+3. **Bracket tracking**: `tracking-[-0.03em]` + `font-bold` vs. none
+
+These differences are deliberate typographic character for the hero, not drift to eliminate. Forcing the hero through `BrandName` would require adding 3 props (`case`, `dim`, `bracketTracking`) to the primitive, polluting every other caller.
+
+**Instead:** the hero keeps its current markup and drops `<BallMark/>` inline:
+
+```tsx
+<h1
+  id="hero-heading"
+  className="mb-9 text-[clamp(56px,10vw,140px)] font-extrabold leading-[0.9] tracking-[-0.055em]"
+  aria-label="Sabermatic dot DEV"
+>
+  sabermatic<span
+    className="font-bold tracking-[-0.03em] opacity-40"
+    aria-hidden="true"
+  >[<BallMark className="group-hover:animate-[spin_2s_linear_infinite] motion-reduce:animate-none" />DEV]</span>
+</h1>
+```
+
+Motion (nice-to-have): the hero `<section>` wraps the `<h1>` in a `group` class; on hover, the ball rotates. Gated by `motion-reduce:animate-none`. If the rotation feels off, drop the class — `BallMark` is agnostic, so this doesn't affect other surfaces.
 
 ### Email wrapper — add PNG mark
 
 Location: `internal/email/templates/wrapper.html`
 
-Header row becomes a table-in-table for Outlook baseline alignment:
+Header row becomes a table-in-table for Outlook baseline alignment; logo image conditional on `LogoURL`:
 
 ```html
 <td style="padding:32px 32px 0 32px;">
+  {{if .LogoURL}}
   <table role="presentation" cellpadding="0" cellspacing="0"><tr>
     <td style="padding-right:10px;vertical-align:middle;">
       <img src="{{.LogoURL}}" width="28" height="28" alt=""
-           style="display:block;border:0;">
+           style="display:block;border:0;outline:none;text-decoration:none;">
     </td>
     <td style="vertical-align:middle;">
       <p style="margin:0;font-size:14px;font-weight:600;letter-spacing:0.05em;color:#a1a1aa;">
@@ -99,76 +142,133 @@ Header row becomes a table-in-table for Outlook baseline alignment:
       </p>
     </td>
   </tr></table>
+  {{else}}
+  <p style="margin:0;font-size:14px;font-weight:600;letter-spacing:0.05em;color:#a1a1aa;">
+    {{.AppName}}
+  </p>
+  {{end}}
 </td>
 ```
 
-Asset: reuse existing `web/public/mark-256.png`. Displayed at 28×28, retina-ready from a 256px source.
+Asset: reuse existing `web/public/mark-256.png`. Rendered at 28×28, retina-ready from a 256px source. `alt=""` — decorative; wordmark text carries the name.
 
-### `branding.LogoURL` — new config field
+### `RenderEmail` signature change
 
-Location: `internal/email/template.go` (and whichever package defines `branding.AppName`)
+Location: `internal/email/template.go`
 
-Derive `LogoURL` from the existing public base URL (same source as password-reset links): `{publicBaseURL}/mark-256.png`.
+Add `LogoURL` field to `TemplateData`. Change `RenderEmail` signature:
 
-Local dev: `http://localhost:8080/mark-256.png`
-Prod: `https://sabermatic.dev/mark-256.png`
+```go
+type TemplateData struct {
+    AppName string
+    LogoURL string       // absolute URL to 256×256 mark PNG, or "" to skip
+    Body    template.HTML
+    Footer  string
+}
 
-Both publicly fetchable, no auth required.
+// RenderEmail renders the shared email wrapper.
+// logoURL should be an absolute URL to a publicly-reachable mark PNG.
+// Pass "" to render without a logo (e.g., in tests or if branding asset is unavailable).
+func RenderEmail(bodyHTML template.HTML, footer string, logoURL string) (string, error) {
+    ...
+    err = tmpl.Execute(&buf, TemplateData{
+        AppName: branding.AppName,
+        LogoURL: logoURL,
+        Body:    bodyHTML,
+        Footer:  footer,
+    })
+    ...
+}
+```
 
-### OG images
+**Callers to update** (verified via grep):
 
-Files: `web/public/og-landing.svg`, `web/public/og-landing.png`, `web/public/og-sample.svg`, `web/public/og-sample.png`
+1. `internal/backend/auth.go:168` (sendVerifyEmail) — has `b.cfg.Auth.BaseURL`. Pass `b.cfg.Auth.BaseURL + "/mark-256.png"`.
+2. `internal/backend/auth.go:323` (sendResetEmail) — same.
+3. `internal/jobs/evaluate.go:286` (sendEvaluationEmail) — has `w.BaseURL`. Pass `w.BaseURL + "/mark-256.png"`.
 
-Current layout: ball stacked above wordmark + tagline. Replace with the B-treatment wordmark centered on the 1200×630 canvas, tagline below:
+**URL resolution:**
+- `BASE_URL` env var defaults to `http://localhost:3000` (`internal/config/config.go:99`).
+- In local dev, the PNG at `http://localhost:3000/mark-256.png` may not be served by the backend alone (the SPA runs via Vite at `:5173`). This is **acceptable**: local-dev email images will 404 for external recipients. Document the command to test emails against a production-like setup if needed.
+- In prod, `BASE_URL=https://sabermatic.dev` and `/mark-256.png` is served by the embedded SPA via `spa.go`. Works end-to-end.
+
+### OG SVG geometry
+
+Location: `web/public/og-landing.svg`, `web/public/og-sample.svg`
+
+Each SVG is 1200×630. Current layout: standalone ball centered above wordmark + tagline. New layout: single B-treatment wordmark centered, tagline below.
+
+**Technique** — `rsvg-convert` supports a subset of SVG and does NOT interpret `em` units inside `<g transform>`, so inline-SVG tricks that work in browsers fail. Use absolute coordinates:
 
 ```
-                Sabermatic[⚾DEV]          ← wordmark with inline ball, ~100–120px
-         data-driven system design prep   ← tagline, 22px (landing) / "sample evaluation" (sample)
+1200px canvas, 630 tall
+Wordmark baseline: y=340 (approximately canvas center, font-size ~108)
+Tagline baseline: y=418
+
+Left text:     <text x=400 y=340 font-size=108>Sabermatic[</text>
+Ball mark:     <g transform="translate(<measured-x> <measured-y>) rotate(-28) scale(<measured-s>)">
+                 <circle .../><path .../> …
+               </g>
+Right text:    <text x=<measured-x-plus-ball-width> y=340 font-size=108>DEV]</text>
+Tagline:       <text x=600 y=418 text-anchor=middle font-size=28>data-driven system design prep</text>
 ```
 
-- Ball sized ~0.6em, baseline tuned to read as the period dot
-- Font family stays `ui-sans-serif, system-ui, sans-serif`
-- Regenerate PNGs once via `rsvg-convert -w 1200 -h 630 og-landing.svg -o og-landing.png` (and same for sample). Commit both SVG + PNG.
+**Coordinate resolution:** `rsvg-convert` uses whatever font the host system has matching `ui-sans-serif,system-ui,sans-serif`. Text width is deterministic at a given font size on a given host but differs across hosts (macOS → Helvetica, Linux CI → DejaVu Sans). To avoid per-machine drift, measure `"Sabermatic["` width empirically on the committer's machine, hardcode the resulting `x` offsets, and note in the file comment that regeneration must happen on a host with the same fallback font. Alternative: use a webfont via `<defs>` (skipped — `rsvg-convert` doesn't fetch remote fonts).
 
-### `index.html` — wire up OG meta
+**Ball geometry:** reuse the same `<g>` block from `og-landing.svg` today (28° rotation, stitching paths), just scaled smaller and repositioned. Target visual size ~0.6× the font cap-height so it reads as a period-dot.
 
-Location: `web/index.html`
+**Tagline content:**
+- `og-landing.svg`: "data-driven system design prep"
+- `og-sample.svg`: "sample evaluation"
 
-Add after the existing `<meta>` block:
+**Why regenerate `og-sample.png` too:** keep both OG assets visually coherent with the live site; otherwise the sample-share OG will look like a relic. Cheap to do.
+
+### `spa.go` — add Twitter Card tags
+
+Location: `internal/handler/spa.go:61-75`
+
+Extend the OG tag injection block to also emit:
 
 ```html
-<meta property="og:title" content="Sabermatic[.DEV]" />
-<meta property="og:description" content="data-driven system design prep" />
-<meta property="og:image" content="/og-landing.png" />
-<meta property="og:type" content="website" />
-<meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:image" content="/og-landing.png" />
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{baseURL}{og.image}">
+<meta name="twitter:title" content="{og.title}">
+<meta name="twitter:description" content="{og.description}">
 ```
 
-The `/sample` route doesn't have per-route `<meta>` overrides today; that's a separate concern. For now, both routes will share `og-landing.png` from the static `index.html`, which is fine — `og-sample.png` ships but is dormant until routing-aware OG is added.
+Added to the same `strings.Replace(..., "</head>", tags+"</head>", 1)` call. No new code path; just more tags inside the existing `Sprintf`.
+
+Update `internal/handler/spa_test.go` to assert the new tags on the same routes it already covers.
 
 ## Accessibility
 
-- `<BrandName/>` wrapper: `aria-label="Sabermatic.DEV"`
-- `<BallMark/>` SVG: `aria-hidden="true"`, no `<title>` / `<desc>`
-- Email `<img alt="">`: decorative; wordmark text carries the name
-- Hero `<h1 id="hero-heading">`: accessible name flows through `<BrandName/>`'s label
+- `<BrandName/>` span: `role="img"` + `aria-label="Sabermatic dot DEV"`; inner styled span is `aria-hidden="true"` to prevent double-reading.
+- Hero `<h1>`: gets `aria-label="Sabermatic dot DEV"` overriding the visible text's accessible name. Intentional — without it, screen readers announce "sabermatic [.DEV]" with inconsistent period/bracket treatment.
+- `<BallMark/>` SVG: `aria-hidden="true"`.
+- Email `<img alt="">`: decorative; wordmark text carries the name.
+- Brackets (`[` / `]`) are NOT announced to screen readers at any surface. Deliberate — they're a stylization, not semantic content.
 
 ## Motion
 
-Static baseline. Optional hero hover rotation (2s) gated by `(hover: hover) and (prefers-reduced-motion: no-preference)`. Drop if noisy in practice.
+- `<BallMark/>` primitive: no motion by default. No `spin` prop.
+- **Hero only**: applies `group-hover:animate-[spin_2s_linear_infinite]` via a `className` passed to `<BallMark/>`. `motion-reduce:animate-none` respects `prefers-reduced-motion`. The `group` class goes on the `<h1>`'s parent.
+- If rotation is visually noisy in practice, drop the className. No primitive change needed.
 
 ## Testing
 
 | Layer | Test |
 |---|---|
-| Frontend unit | `BrandName` renders inline SVG; `aria-label` present; `[` and `DEV]` text present |
-| Frontend unit | `AuthLayout`, `PublicHeader`, `Hero`, `error-fallback` snapshots updated |
-| Backend unit | `internal/email/template_test.go` asserts wrapper contains `<img src="…/mark-256.png" width="28" height="28">` |
-| Backend unit | `LogoURL` derivation from `publicBaseURL` config (new test) |
-| Manual visual | `/`, `/login`, `/signup`, `/forgot-password`, the authed app loading splash, force an error-boundary render. Screenshot each for the PR. |
-| Manual visual | Regenerate OG PNGs; visually diff with previous versions |
-| Email smoke | Render one email via existing `send_email_test.go` fixtures and inspect the HTML output for the `<img>` tag and resolved `LogoURL` |
+| Frontend unit (`ball-mark.test.tsx`, new) | Renders SVG with `aria-hidden="true"`, with circle + stitching paths |
+| Frontend unit (`brand-name.test.tsx`, new) | Renders with `role="img"`, `aria-label="Sabermatic dot DEV"`; visible text contains `Sabermatic`, `[`, `DEV]`; `<BallMark/>` present |
+| Frontend unit (`hero.test.tsx`, new) | Hero renders `<BallMark/>` inside `<h1>` with `aria-label`; does NOT render `<BrandName/>` (guards against accidental refactor) |
+| Backend unit (`internal/email/template_test.go`, update) | Separate asserts: `Contains(html, "src=\""+logoURL+"\"")`, `Contains(html, "width=\"28\"")`, `Contains(html, "height=\"28\"")`; assert `alt=""` present; assert wrapper renders without `<img>` when `logoURL == ""` |
+| Backend unit (`internal/jobs/render_email_test.go`, update) | Integration smoke: renders a real email with a concrete `logoURL`; confirms `<img>` tag appears in output |
+| Backend unit (`internal/handler/spa_test.go`, update) | Asserts `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description` on routes that already have OG coverage |
+| Manual visual | `/`, `/login`, `/signup`, `/forgot-password`, authed app loading splash, force an error-boundary render. Screenshot each for the PR. |
+| Manual visual | Regenerate OG PNGs; visually diff with previous versions; render social-card previews (Twitter/Slack unfurl) |
+| Email smoke | Render one email via `render_email_test.go` fixtures and inspect `<img>` tag + resolved URL. Optional: send a real email to a Gmail + Apple Mail + Outlook.com inbox; screenshot. |
+
+**No snapshot tests.** This repo doesn't use Vitest snapshots; assertion-style RTL tests are the pattern. Introducing snapshots here would be a new testing convention and would generate noise on unrelated class-string changes.
 
 Full CI: `make test` must pass.
 
@@ -176,16 +276,25 @@ Full CI: `make test` must pass.
 
 Single PR, commits sequenced for easy review:
 
-1. Add `<BallMark/>` + update `<BrandName/>` + tests
-2. Hero switches to `<BrandName/>` + size classes
-3. Email: add `LogoURL` to `branding`, update `wrapper.html`, update tests
-4. Regenerate `og-landing.svg|png` and `og-sample.svg|png` with B treatment
-5. Wire up OG + Twitter `<meta>` tags in `index.html`
-6. Verify: `make test` + manual screen sweep + email render smoke
+1. Add `<BallMark/>` primitive + `ball-mark.test.tsx`
+2. Update `<BrandName/>` to use `<BallMark/>` + `role="img"` + aria-label; update `brand-name.test.tsx`
+3. Hero: inline `<BallMark/>` into existing hand-rolled markup; add `hero.test.tsx`
+4. Email: extend `TemplateData`, change `RenderEmail` signature, update wrapper.html, update all 3 callers, update `template_test.go` + `render_email_test.go`
+5. Regenerate `og-landing.svg|png` and `og-sample.svg|png`
+6. `spa.go`: add Twitter Card tags; update `spa_test.go`
+7. Add `make regen-og` target to run `rsvg-convert` for both OG PNGs
+8. Verify: `make test` + manual screen sweep + email render smoke
 
 ## Risks / open questions
 
-- **Ball sizing at small text** (13px nav): may need to render slightly larger than `0.55em` for visual weight. Tune during implementation with screenshots.
-- **Baseline alignment** in Safari vs. Chrome: `translateY` values may differ slightly. Test both.
-- **Email client PNG rendering**: all tested clients (Gmail, Apple Mail, Outlook 2021, iOS Mail) support PNG `<img>` fine. Unverified: legacy Outlook, Yahoo. Accept the risk — worst case the PNG doesn't render and the wordmark text still appears.
-- **OG PNG regeneration**: no automated build step. One-time manual `rsvg-convert`. If we iterate on the OG design in future, document the regeneration command in the PR description.
+- **Baseline alignment** across browsers (Safari/Chrome/Firefox) may differ slightly for the inline SVG. Test all three before committing the final `translateY` value.
+- **`rsvg-convert` font rendering drift** — regenerated PNGs use the committer's system fallback font; other contributors regenerating get a different result. Mitigation: document the fallback used (e.g., "Regenerated on macOS with Helvetica fallback") in a comment inside each SVG, and add a `make regen-og` target so the command itself is stable.
+- **Email client compatibility:**
+  - *Outlook on Windows* uses the Word rendering engine; table-in-table layout handles baseline alignment but vertical-align quirks can still shift the image. Test via litmus or emailonacid if available; otherwise accept and iterate on reports.
+  - *Gmail iOS / Outlook dark mode* — auto-inversion can desaturate the amber PNG into a muddy blob. Mitigation: ball has its own strong fill + stroke; acceptable degradation. Not adding explicit dark-mode variant.
+  - *HTTPS requirement* — Gmail blocks HTTP `<img>` loads. Staging and prod `BASE_URL` must be HTTPS; local-dev emails will have broken image placeholders for external recipients.
+  - *Image-off clients* — some corporate Outlook installs block all remote images by default. The conditional `{{if .LogoURL}}` branch ensures the wordmark text alone still renders cleanly.
+  - *Empty `LogoURL`* — tests + staging with no config set render the plain-text header branch, no broken `<img>` displayed.
+- **OG PNG regeneration** is manual. `make regen-og` documents the command; future SVG edits require running it. Not ideal but acceptable for low-frequency asset changes.
+- **Brackets not announced by screen readers** — deliberate. If user research later shows brackets *should* be spoken, change `aria-label` to `"Sabermatic open bracket dot DEV close bracket"` or similar.
+- **`role="img"` on `<span>`** — valid per ARIA spec. Tested readers: NVDA, VoiceOver, JAWS all announce the `aria-label` as the accessible name. If regression testing reveals a reader that doesn't, fall back to moving the label to the nearest semantic ancestor (`<Link>` or `<h1>`).
