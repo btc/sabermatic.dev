@@ -1283,8 +1283,10 @@ Expected: no errors. Field names used match the generated proto: `Message.id`, `
 
 - [ ] **Step 5: Commit**
 
+The deletion of `annotations.tsx` is already staged by the `git rm` in Step 2; only the new file and modified `index.tsx` need explicit `git add`.
+
 ```bash
-git add web/src/pages/landing/transcript.tsx web/src/pages/landing/annotations.tsx web/src/pages/landing/index.tsx
+git add web/src/pages/landing/transcript.tsx web/src/pages/landing/index.tsx
 git commit -m "landing: rename annotations → transcript, restyle as bubble+inline"
 ```
 
@@ -1568,6 +1570,8 @@ git commit -m "landing: restyle Coaching to trend-card with sparkline + narrativ
 - Create: `web/src/pages/landing/__tests__/library.test.tsx`
 
 Target visual reference: `index.html:749-868`. Data source: `useListFeaturedQuestions` (new, from generated connectquery client).
+
+**Dependency note:** The library progress bar's amber shimmer uses `after:animate-[sweep_4s_ease-in-out_infinite]`. The `@keyframes sweep` rule is added to `web/src/index.css` by Task 9 (Hero). If Task 9 hasn't run yet, the shimmer silently no-ops — TypeScript won't catch the missing keyframe. Verify `sweep` is already in `index.css` before starting this task.
 
 - [ ] **Step 1: Write the failing vitest**
 
