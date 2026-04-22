@@ -68,13 +68,15 @@ If any file is missing or an unexpected asset is present, stop and reconcile wit
 
 - [ ] **Step 2: Spot-check the favicon swap**
 
+Two `grep -c` checks. General note: `grep -c` prints the match count on stdout and exits with status 1 when the count is 0 (status 0 when ≥ 1 match). For the first check below the count IS 0, so the command exits 1 by design — read stdout, don't rely on exit code. The second check expects a non-zero count, so it exits 0 normally; treat its exit code like any other grep invocation.
+
 Run:
 
 ```bash
 grep -c '\[.D\]\|\[\.DEV\]\|text-anchor' web/public/favicon.svg
 ```
 
-Expected stdout: `0` (the new favicon has no text content; the `[.D]` glyph is gone). Note: `grep -c` exits with status 1 when the count is 0. Check stdout, not exit code.
+Expected stdout: `0` (the new favicon has no text content; the `[.D]` glyph is gone). Exit code: 1 (expected per the note above — not a failure).
 
 Run:
 
@@ -82,7 +84,7 @@ Run:
 grep -c 'circle\|rotate' web/public/favicon.svg
 ```
 
-Expected output: `2` (one `<circle>` element and one `rotate` transform on the `<g>` wrapper — no more, no less).
+Expected stdout: `2` (one `<circle>` element and one `rotate` transform on the `<g>` wrapper — no more, no less). Exit code: 0.
 
 - [ ] **Step 3: Spot-check the mark master has stitches**
 
@@ -109,10 +111,10 @@ Expected: each file contains at least one `Sabermatic` occurrence. Total count �
 Run:
 
 ```bash
-find web/public -name 'mark-*.png' -o -name 'og-*.png' | xargs ls -l
+find web/public \( -name 'mark-*.png' -o -name 'og-*.png' \) -exec ls -l {} +
 ```
 
-All files should show non-zero byte sizes. Rough expectations from spec: `mark-180.png` ~10 KB, `mark-512.png` ~32 KB, `mark-1024.png` ~69 KB, `og-landing.png` ~28 KB, `og-sample.png` ~26 KB. Don't block on exact bytes, just non-zero.
+The parenthesized `\( … \)` groups the two `-name` predicates so `-exec` applies to both; `-exec ls -l {} +` avoids `xargs` filename-handling pitfalls (though the filenames here are safe either way). All 7 files should show non-zero byte sizes. Rough expectations from spec: `mark-180.png` ~10 KB, `mark-512.png` ~32 KB, `mark-1024.png` ~69 KB, `og-landing.png` ~28 KB, `og-sample.png` ~26 KB. Don't block on exact bytes — just verify non-zero.
 
 - [ ] **Step 6: Stage the assets explicitly (not `git add -A`)**
 
@@ -348,9 +350,15 @@ make dev
 Context: `make dev` runs `npm install && npm run build` **synchronously** before `overmind start -f Procfile.dev`. On a cold cache this takes 30–90 seconds before the Go server (`air`) begins listening on :8080. `Procfile.dev` uses `npx vite build --watch` (watch-mode build, not `vite dev`), so there is no "VITE ready in Nms" banner — instead, watch emits `built in Nms` messages. The most reliable readiness signal is the Go server accepting connections, so poll it rather than grep the log:
 
 ```bash
-# Wait up to 3 minutes for the backend to listen on :8080.
-until curl -sSf -o /dev/null http://localhost:8080/ 2>/dev/null; do sleep 3; done
+# Wait up to ~3 minutes for the backend to listen on :8080; abort on timeout.
+for i in $(seq 1 60); do
+  curl -sSf -o /dev/null http://localhost:8080/ 2>/dev/null && break
+  sleep 3
+done
+curl -sSf -o /dev/null http://localhost:8080/ || { echo "dev server did not come up within 180s" >&2; exit 1; }
 ```
+
+The final `curl || { … exit 1; }` guards against the agent-executor hanging if `make dev` never succeeds (Go build failure, port 8080 occupied, overmind crash). Surface the failure loudly rather than sleeping forever.
 
 Once the poll returns, run the following one-shot curl checks from repo root. Each is independent:
 
