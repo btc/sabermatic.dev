@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Library } from "../library";
 
@@ -12,17 +12,6 @@ function renderLibrary() {
     </MemoryRouter>,
   );
 }
-
-// jsdom does not implement IntersectionObserver; stub it so useScrollReveal
-// doesn't throw.
-beforeAll(() => {
-  const mockIO = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-  }));
-  vi.stubGlobal("IntersectionObserver", mockIO);
-});
 
 // Mock the connect-query hook to return canned data.
 vi.mock("@connectrpc/connect-query", () => ({

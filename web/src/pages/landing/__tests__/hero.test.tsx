@@ -1,34 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { Hero } from "@/pages/landing/hero";
-
-// jsdom does not implement IntersectionObserver or window.matchMedia; stub
-// both so useScrollReveal and the tagline cycling effect don't throw.
-beforeAll(() => {
-  const mockIO = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-  }));
-  vi.stubGlobal("IntersectionObserver", mockIO);
-
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  );
-});
 
 function renderHero() {
   return render(
