@@ -75,7 +75,7 @@ type Querier interface {
 	GetMessagesBySessionOffset(ctx context.Context, arg GetMessagesBySessionOffsetParams) ([]Message, error)
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
-	GetQuestion(ctx context.Context, id uuid.UUID) (GetQuestionRow, error)
+	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
 	GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]Question, error)
 	GetRecentLedgerEntries(ctx context.Context, arg GetRecentLedgerEntriesParams) ([]GetRecentLedgerEntriesRow, error)
 	GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)

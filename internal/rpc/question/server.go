@@ -183,7 +183,7 @@ func questionToProto(row db.ListQuestionsForUserRow) *drillv1.Question {
 // Question message. Used by CreateQuestion where GetQuestion returns all
 // columns. Separate from questionToProto which handles the list-specific row
 // type with fewer columns.
-func fullQuestionToProto(row db.GetQuestionRow) *drillv1.Question {
+func fullQuestionToProto(row db.Question) *drillv1.Question {
 	tags := row.Tags
 	if tags == nil {
 		tags = []string{}

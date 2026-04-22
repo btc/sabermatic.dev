@@ -5,7 +5,7 @@ WHERE source = 'seed' AND user_id IS NULL
 ORDER BY created_at;
 
 -- name: GetQuestion :one
-SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url, is_featured, featured_order
 FROM questions
 WHERE id = $1;
 

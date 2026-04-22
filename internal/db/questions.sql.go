@@ -26,29 +26,14 @@ func (q *Queries) CountSeedQuestions(ctx context.Context) (int32, error) {
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url, is_featured, featured_order
 FROM questions
 WHERE id = $1
 `
 
-type GetQuestionRow struct {
-	ID             uuid.UUID   `json:"id"`
-	UserID         pgtype.UUID `json:"user_id"`
-	Title          string      `json:"title"`
-	Prompt         string      `json:"prompt"`
-	Difficulty     string      `json:"difficulty"`
-	Tags           []string    `json:"tags"`
-	Hints          pgtype.Text `json:"hints"`
-	Source         string      `json:"source"`
-	CoachRationale pgtype.Text `json:"coach_rationale"`
-	CreatedAt      time.Time   `json:"created_at"`
-	UpdatedAt      time.Time   `json:"updated_at"`
-	ImageUrl       pgtype.Text `json:"image_url"`
-}
-
-func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (GetQuestionRow, error) {
+func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (Question, error) {
 	row := q.db.QueryRow(ctx, getQuestion, id)
-	var i GetQuestionRow
+	var i Question
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -62,6 +47,8 @@ func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (GetQuestionRow
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ImageUrl,
+		&i.IsFeatured,
+		&i.FeaturedOrder,
 	)
 	return i, err
 }
