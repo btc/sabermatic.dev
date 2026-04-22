@@ -29,7 +29,7 @@ function Loading() {
 }
 
 function ConditionalHome() {
-  const { isAuthenticated, isLoading, error } = useOptionalAuth();
+  const { isAuthenticated, isLoading, isAuthError, error } = useOptionalAuth();
 
   // Render Landing immediately for unauthenticated (or still-loading) visitors
   // — don't block the whole page on GetMe, which can cold-start slowly on
@@ -42,7 +42,9 @@ function ConditionalHome() {
     );
   }
 
-  if (!isLoading && error) {
+  // Log only truly unexpected errors. An Unauthenticated response from GetMe
+  // (`isAuthError`) is the normal unauthed-visitor path and should stay quiet.
+  if (!isLoading && error && !isAuthError) {
     console.error("ConditionalHome: unexpected error", error);
   }
 
