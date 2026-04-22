@@ -36,6 +36,11 @@
         "content": "Good scale quantification - provided concrete numbers (1B users, 100 messages/day) that can drive design decisions."
       },
       {
+        "message_seq": 10,
+        "type": "ANNOTATION_TYPE_MISSED_OPPORTUNITY",
+        "content": "Accepted the interviewer's opening for more requirements with only a group-size cap - didn't probe delivery guarantees, message ordering, or end-to-end encryption, all first-order constraints for a WhatsApp-style product that shape the rest of the design."
+      },
+      {
         "message_seq": 12,
         "type": "ANNOTATION_TYPE_STRENGTH",
         "content": "Strong back-of-envelope calculations - correctly derived 1M writes/second and 50TB/month, immediately identified this exceeds single-server database capacity."

@@ -1,8 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Library } from "../library";
+
+function renderLibrary() {
+  return render(
+    <MemoryRouter>
+      <Library />
+    </MemoryRouter>,
+  );
+}
 
 // jsdom does not implement IntersectionObserver; stub it so useScrollReveal
 // doesn't throw.
@@ -39,7 +48,7 @@ describe("Library", () => {
       isError: false,
     });
 
-    render(<Library />);
+    renderLibrary();
 
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(titles).toEqual([
@@ -60,7 +69,7 @@ describe("Library", () => {
       isError: false,
     });
 
-    render(<Library />);
+    renderLibrary();
     expect(screen.getAllByTestId("library-skeleton")).toHaveLength(6);
   });
 
@@ -71,7 +80,7 @@ describe("Library", () => {
       isError: true,
     });
 
-    const { container } = render(<Library />);
+    const { container } = renderLibrary();
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -82,7 +91,7 @@ describe("Library", () => {
       isError: false,
     });
 
-    const { container } = render(<Library />);
+    const { container } = renderLibrary();
     expect(container).toBeEmptyDOMElement();
   });
 });

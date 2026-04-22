@@ -25,11 +25,11 @@ export function useRequireAuth() {
 
   useEffect(() => {
     if (!isLoading && isError) {
-      navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`, {
+      navigate(`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`, {
         replace: true,
       });
     }
-  }, [isLoading, isError, navigate, location.pathname]);
+  }, [isLoading, isError, navigate, location.pathname, location.search]);
 
   return { user, isLoading, isAuthenticated: !!user };
 }

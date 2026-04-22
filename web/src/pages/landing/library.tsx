@@ -1,4 +1,5 @@
 import { useQuery } from "@connectrpc/connect-query";
+import { Link } from "react-router-dom";
 
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 import { listFeaturedQuestions } from "@/pb/drill/v1/landing-LandingService_connectquery";
@@ -71,7 +72,11 @@ export function Library() {
                 </div>
               ))
             : (data?.questions ?? []).map((q) => (
-                <article key={q.id} className="group flex flex-col gap-2.5">
+                <Link
+                  key={q.id}
+                  to={`/sessions/new?question=${q.id}`}
+                  className="group flex flex-col gap-2.5 no-underline text-inherit"
+                >
                   <div className="overflow-hidden rounded-[14px] bg-muted">
                     {q.imageUrl ? (
                       <img
@@ -94,7 +99,7 @@ export function Library() {
                     ) : null}
                     {q.tags.join(" ")}
                   </div>
-                </article>
+                </Link>
               ))}
         </div>
       </div>
