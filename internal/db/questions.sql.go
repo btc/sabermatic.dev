@@ -13,15 +13,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countSeedQuestions = `-- name: CountSeedQuestions :one
+SELECT COUNT(*)::int AS count FROM questions
+WHERE source = 'seed' AND user_id IS NULL
+`
+
+func (q *Queries) CountSeedQuestions(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countSeedQuestions)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getQuestion = `-- name: GetQuestion :one
 SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url
 FROM questions
 WHERE id = $1
 `
 
-func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (Question, error) {
+type GetQuestionRow struct {
+	ID             uuid.UUID   `json:"id"`
+	UserID         pgtype.UUID `json:"user_id"`
+	Title          string      `json:"title"`
+	Prompt         string      `json:"prompt"`
+	Difficulty     string      `json:"difficulty"`
+	Tags           []string    `json:"tags"`
+	Hints          pgtype.Text `json:"hints"`
+	Source         string      `json:"source"`
+	CoachRationale pgtype.Text `json:"coach_rationale"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+	ImageUrl       pgtype.Text `json:"image_url"`
+}
+
+func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (GetQuestionRow, error) {
 	row := q.db.QueryRow(ctx, getQuestion, id)
-	var i Question
+	var i GetQuestionRow
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -40,7 +67,7 @@ func (q *Queries) GetQuestion(ctx context.Context, id uuid.UUID) (Question, erro
 }
 
 const getQuestionsForUser = `-- name: GetQuestionsForUser :many
-SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url FROM questions
+SELECT id, user_id, title, prompt, difficulty, tags, hints, source, coach_rationale, created_at, updated_at, image_url, is_featured, featured_order FROM questions
 WHERE user_id IS NULL OR user_id = $1
 ORDER BY created_at
 `
@@ -67,6 +94,8 @@ func (q *Queries) GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) (
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ImageUrl,
+			&i.IsFeatured,
+			&i.FeaturedOrder,
 		); err != nil {
 			return nil, err
 		}
@@ -107,6 +136,55 @@ func (q *Queries) InsertQuestion(ctx context.Context, arg InsertQuestionParams) 
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listFeaturedQuestions = `-- name: ListFeaturedQuestions :many
+SELECT id, title, prompt, difficulty, tags, hints, source, image_url, created_at
+FROM questions
+WHERE is_featured = true
+ORDER BY featured_order
+`
+
+type ListFeaturedQuestionsRow struct {
+	ID         uuid.UUID   `json:"id"`
+	Title      string      `json:"title"`
+	Prompt     string      `json:"prompt"`
+	Difficulty string      `json:"difficulty"`
+	Tags       []string    `json:"tags"`
+	Hints      pgtype.Text `json:"hints"`
+	Source     string      `json:"source"`
+	ImageUrl   pgtype.Text `json:"image_url"`
+	CreatedAt  time.Time   `json:"created_at"`
+}
+
+func (q *Queries) ListFeaturedQuestions(ctx context.Context) ([]ListFeaturedQuestionsRow, error) {
+	rows, err := q.db.Query(ctx, listFeaturedQuestions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFeaturedQuestionsRow
+	for rows.Next() {
+		var i ListFeaturedQuestionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Prompt,
+			&i.Difficulty,
+			&i.Tags,
+			&i.Hints,
+			&i.Source,
+			&i.ImageUrl,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listQuestionsForUser = `-- name: ListQuestionsForUser :many

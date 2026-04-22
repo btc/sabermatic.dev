@@ -32,3 +32,13 @@ WHERE image_url IS NULL;
 -- name: SetQuestionImageURL :exec
 UPDATE questions SET image_url = $2, updated_at = NOW()
 WHERE id = $1;
+
+-- name: ListFeaturedQuestions :many
+SELECT id, title, prompt, difficulty, tags, hints, source, image_url, created_at
+FROM questions
+WHERE is_featured = true
+ORDER BY featured_order;
+
+-- name: CountSeedQuestions :one
+SELECT COUNT(*)::int AS count FROM questions
+WHERE source = 'seed' AND user_id IS NULL;

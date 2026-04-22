@@ -31,7 +31,7 @@ func (b *Backend) ListQuestions(ctx context.Context, userID uuid.UUID) (_ []db.L
 // CreateQuestion inserts a user-created custom question and returns the
 // fully-populated row. The caller provides only the writable fields; source
 // is always "custom" and user_id comes from the authenticated context.
-func (b *Backend) CreateQuestion(ctx context.Context, userID uuid.UUID, title, prompt, difficulty string, tags []string) (_ db.Question, err error) {
+func (b *Backend) CreateQuestion(ctx context.Context, userID uuid.UUID, title, prompt, difficulty string, tags []string) (_ db.GetQuestionRow, err error) {
 	ctx, span := tracer.Start(ctx, "Backend.CreateQuestion")
 	defer func() { drilotel.End(span, err) }()
 
@@ -50,12 +50,12 @@ func (b *Backend) CreateQuestion(ctx context.Context, userID uuid.UUID, title, p
 		CoachRationale: pgtype.Text{}, // NULL — not applicable for custom questions
 	})
 	if err != nil {
-		return db.Question{}, fmt.Errorf("insert question: %w", err)
+		return db.GetQuestionRow{}, fmt.Errorf("insert question: %w", err)
 	}
 
 	row, err := queries.GetQuestion(ctx, id)
 	if err != nil {
-		return db.Question{}, fmt.Errorf("get question after insert: %w", err)
+		return db.GetQuestionRow{}, fmt.Errorf("get question after insert: %w", err)
 	}
 	return row, nil
 }

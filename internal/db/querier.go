@@ -28,6 +28,7 @@ type Querier interface {
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	// Count completed interviewer turns for turn_count derivation.
 	CountInterviewerMessages(ctx context.Context, sessionID uuid.UUID) (int32, error)
+	CountSeedQuestions(ctx context.Context) (int32, error)
 	// Creates an admin grant + ledger entry atomically.
 	CreateAdminGrant(ctx context.Context, arg CreateAdminGrantParams) error
 	CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error)
@@ -74,7 +75,7 @@ type Querier interface {
 	GetMessagesBySessionOffset(ctx context.Context, arg GetMessagesBySessionOffsetParams) ([]Message, error)
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
-	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
+	GetQuestion(ctx context.Context, id uuid.UUID) (GetQuestionRow, error)
 	GetQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]Question, error)
 	GetRecentLedgerEntries(ctx context.Context, arg GetRecentLedgerEntriesParams) ([]GetRecentLedgerEntriesRow, error)
 	GetReviewedSessionIDsForUser(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
@@ -105,6 +106,7 @@ type Querier interface {
 	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
 	LinkOAuthAccount(ctx context.Context, arg LinkOAuthAccountParams) (OauthAccount, error)
 	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
+	ListFeaturedQuestions(ctx context.Context) ([]ListFeaturedQuestionsRow, error)
 	ListQuestionsForUser(ctx context.Context, userID pgtype.UUID) ([]ListQuestionsForUserRow, error)
 	ListQuestionsWithoutImages(ctx context.Context) ([]uuid.UUID, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)

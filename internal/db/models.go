@@ -159,6 +159,8 @@ type Question struct {
 	CreatedAt      time.Time   `json:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at"`
 	ImageUrl       pgtype.Text `json:"image_url"`
+	IsFeatured     bool        `json:"is_featured"`
+	FeaturedOrder  pgtype.Int4 `json:"featured_order"`
 }
 
 type User struct {
