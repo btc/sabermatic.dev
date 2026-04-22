@@ -74,7 +74,7 @@ Run:
 grep -c '\[.D\]\|\[\.DEV\]\|text-anchor' web/public/favicon.svg
 ```
 
-Expected output: `0` (the new favicon has no text content; the `[.D]` glyph is gone).
+Expected stdout: `0` (the new favicon has no text content; the `[.D]` glyph is gone). Note: `grep -c` exits with status 1 when the count is 0. Check stdout, not exit code.
 
 Run:
 
@@ -182,6 +182,8 @@ Expected: HEAD shows 11 files changed. Commit subject begins `feat(web): Saberma
 
 - [ ] **Step 10: Run existing tests (sanity baseline)**
 
+Optional but recommended: before proceeding, capture a clean-baseline reference point. If `make test` was green on `HEAD~1` (before this commit), any failure here is provably from the asset commit — which only changed static files and cannot break tests — and any unrelated breakage in the ambient working tree (other untracked files, stale caches) is not attributable to this task.
+
 Run:
 
 ```bash
@@ -196,7 +198,7 @@ Expected: full CI passes (`buf lint`, codegen check, `tsc -b`, frontend lint + v
 
 **Files:**
 - Create: `web/public/manifest.json`
-- Modify: `web/index.html` (`<head>` section, currently lines 4–7)
+- Modify: `web/index.html` (`<head>` element spans lines 3–8; new tags inserted inside)
 - Test: none (existing `internal/handler/spa_test.go` OG-tag assertions remain path-based and unchanged; no new test coverage required per spec)
 
 - [ ] **Step 1: Create `web/public/manifest.json` with exact spec contents**
@@ -333,23 +335,17 @@ Run:
 cd web && npx tsc -b
 ```
 
-Expected: clean (no errors). This catches accidental malformed HTML that breaks Vite's index parse (rare but possible).
-
-Return to repo root:
-
-```bash
-cd ..
-```
+Expected: clean (no errors). This validates TypeScript types only — it does not validate the HTML edit. HTML parsing will be exercised by the `make dev` + `curl` checks in Step 8.
 
 - [ ] **Step 8: Start the dev server and verify the page loads**
 
-Run (in one terminal):
+Start `make dev` in the background (for an agent executor, use the Bash tool's `run_in_background: true` parameter; for a human implementer, run it in a separate terminal):
 
 ```bash
 make dev
 ```
 
-Wait for Vite to print `VITE v... ready in ...ms` and for `air` to compile the backend. In a second terminal, run:
+Wait ~15 seconds for Vite to print `VITE v... ready in ...ms` and for `air` to finish the initial Go compile. Then run the following checks (each as an ordinary foreground command; they are independent one-shot curls):
 
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/
@@ -357,31 +353,25 @@ curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/
 
 Expected output: `200`.
 
-Run:
-
 ```bash
 curl -sS http://localhost:8080/manifest.json | head -5
 ```
 
-Expected: the first 5 lines of the JSON document, starting with `{` and `"name": "Sabermatic[.DEV]"`.
-
-Run:
+Expected: the first 5 lines of the JSON document, starting with `{` and containing `"name": "Sabermatic[.DEV]"`.
 
 ```bash
-curl -sS -I http://localhost:8080/manifest.json | grep -i content-type
+curl -sS -I http://localhost:8080/manifest.json | grep -i '^content-type'
 ```
 
-Expected: `Content-Type: application/json` (per `mime.TypeByExtension(".json")`; see spec "Serving notes"). If you get `application/octet-stream` or another value, investigate before proceeding.
-
-Run:
+Expected: `Content-Type: application/json` (per `mime.TypeByExtension(".json")`; see spec "Serving notes"). Go's default MIME registration produces exactly this — no charset suffix. Header name matching is case-insensitive (`grep -i`); if your `curl -I` emits lowercased names, the match still succeeds. If you get `application/octet-stream` or `application/manifest+json`, investigate before proceeding.
 
 ```bash
-curl -sS -I http://localhost:8080/mark-180.png | grep -i content-type
+curl -sS -I http://localhost:8080/mark-180.png | grep -i '^content-type'
 ```
 
 Expected: `Content-Type: image/png`.
 
-Stop the dev server (Ctrl-C in the first terminal).
+Stop the dev server (for an agent, use `KillShell` on the backgrounded bash; for a human, Ctrl-C in the terminal running `make dev`).
 
 - [ ] **Step 9: Stage both files**
 
@@ -461,18 +451,10 @@ If `make test` fails, read the failure carefully — the only legitimate risk is
 Run:
 
 ```bash
-cd web && npm run build
+cd web && npm run build && ls dist | grep -E 'mark|favicon|og-|manifest'
 ```
 
-Expected: Vite produces `web/dist/` with `index.html`, all `mark-*.png`, `mark.svg`, `favicon.svg`, `og-landing.{png,svg}`, `og-sample.{png,svg}`, and `manifest.json` copied from `web/public/`.
-
-Run:
-
-```bash
-ls dist | grep -E 'mark|favicon|og-|manifest'
-```
-
-Expected output (12 entries):
+Expected behavior: Vite produces `web/dist/` with `index.html`, all `mark-*.png`, `mark.svg`, `favicon.svg`, `og-landing.{png,svg}`, `og-sample.{png,svg}`, and `manifest.json` copied from `web/public/`. The piped `ls | grep` produces exactly 12 entries:
 
 ```
 favicon.svg
@@ -489,11 +471,7 @@ og-sample.png
 og-sample.svg
 ```
 
-Return to repo root:
-
-```bash
-cd ..
-```
+(Chained in a single shell invocation so the `cd web` and `ls dist` share the same cwd; each bash call in the plan is an independent shell, so do not split these.)
 
 - [ ] **Step 3: Manual browser checks — favicon + manifest**
 
