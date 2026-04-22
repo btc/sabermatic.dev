@@ -10,7 +10,10 @@ interface ScrollRevealOptions {
 export function useScrollReveal<T extends HTMLElement>(
   options: ScrollRevealOptions = {},
 ) {
-  const { threshold = 0.2, rootMargin = "0px", once = true } = options;
+  // threshold defaults to 0: fire as soon as any pixel enters the viewport.
+  // A non-zero default silently fails for sections taller than viewport /
+  // threshold (the max achievable intersection ratio is capped by that).
+  const { threshold = 0, rootMargin = "0px", once = true } = options;
   const [node, setNode] = useState<T | null>(null);
   const [isVisible, setIsVisible] = useState(false);
 
