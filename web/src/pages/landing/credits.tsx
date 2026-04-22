@@ -32,11 +32,10 @@ export function Credits() {
             isVisible ? "opacity-100" : "opacity-0"
           }`}
         >
-          {CREDITS.map((c, i) => (
+          {CREDITS.map((c) => (
             <div
               key={c.role}
-              className={`flex items-baseline justify-between border-b border-border px-6 py-5 sm:[&:nth-child(3n)]:border-r-0 sm:border-r`}
-              style={{ transitionDelay: `${i * 40}ms` }}
+              className="flex items-baseline justify-between border-b border-border px-6 py-5 sm:border-r sm:[&:nth-child(3n)]:border-r-0"
             >
               <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">{c.role}</span>
               <span className="text-sm font-medium">{c.tech}</span>
