@@ -1,9 +1,8 @@
 import { Coaching } from "./coaching";
 import { Credits } from "./credits";
 import { CTARepeat } from "./cta-repeat";
-import { DeepDivePreview } from "./deep-dive";
 import { Hero } from "./hero";
-import { SampleSessionLink } from "./sample-session";
+import { Library } from "./library";
 import { Scoring } from "./scoring";
 import { StrengthsGaps } from "./strengths-gaps";
 import { Transcript } from "./transcript";
@@ -16,10 +15,9 @@ export default function Landing() {
       <Scoring />
       <StrengthsGaps />
       <Transcript />
-      <DeepDivePreview />
-      <Coaching />
       <VoicePipeline />
-      <SampleSessionLink />
+      <Coaching />
+      <Library />
       <Credits />
       <CTARepeat />
     </div>
