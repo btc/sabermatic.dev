@@ -187,3 +187,109 @@ func TestOAuthCallback_UnknownProvider(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// ---------------------------------------------------------------------------
+// Redirect preservation across the OAuth round-trip
+// ---------------------------------------------------------------------------
+
+func TestOAuthStart_SetsRedirectCookie_WhenSafe(t *testing.T) {
+	b := pg.NewBackend(t)
+	h := testutil.NewTestHandler(t, b)
+
+	goth.ClearProviders()
+	goth.UseProviders(&faux.Provider{})
+	t.Cleanup(goth.ClearProviders)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux?redirect=%2Fsessions%2Fnew%3Fquestion%3Dabc", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	var rd *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == auth.OAuthRedirectCookieName {
+			rd = c
+			break
+		}
+	}
+	require.NotNil(t, rd, "OAuth start should stash the return URL")
+	assert.Equal(t, "/sessions/new?question=abc", rd.Value)
+	assert.True(t, rd.HttpOnly)
+	assert.Positive(t, rd.MaxAge)
+}
+
+func TestOAuthStart_RejectsUnsafeRedirect(t *testing.T) {
+	b := pg.NewBackend(t)
+	h := testutil.NewTestHandler(t, b)
+
+	goth.ClearProviders()
+	goth.UseProviders(&faux.Provider{})
+	t.Cleanup(goth.ClearProviders)
+
+	// Protocol-relative URL would send the user to evil.com — must not be stashed.
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux?redirect=%2F%2Fevil.com%2Fpwn", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	for _, c := range w.Result().Cookies() {
+		assert.NotEqual(t, auth.OAuthRedirectCookieName, c.Name, "unsafe redirect should not be stashed")
+	}
+}
+
+func TestOAuthCallback_HonorsRedirectCookie(t *testing.T) {
+	cfg := pg.ConfigWithOverrides(t, map[string]string{
+		"BASE_URL": "http://localhost:3000",
+	})
+	b := testutil.NewBackend(t, cfg)
+	h := testutil.NewTestHandler(t, b)
+
+	setupGothForTest(t, goth.User{
+		Provider: "faux",
+		UserID:   "oauth-redir-1",
+		Email:    "oauth-redir@example.com",
+		Name:     "Redir User",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
+	req.AddCookie(&http.Cookie{Name: auth.OAuthRedirectCookieName, Value: "/sessions/new?question=abc"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "http://localhost:3000/sessions/new?question=abc", w.Header().Get("Location"))
+
+	// The redirect cookie must be cleared (max-age 0 or negative) on consumption.
+	var cleared *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == auth.OAuthRedirectCookieName {
+			cleared = c
+			break
+		}
+	}
+	require.NotNil(t, cleared, "callback should clear the redirect cookie")
+	assert.LessOrEqual(t, cleared.MaxAge, 0)
+}
+
+func TestOAuthCallback_IgnoresUnsafeRedirectCookie(t *testing.T) {
+	cfg := pg.ConfigWithOverrides(t, map[string]string{
+		"BASE_URL": "http://localhost:3000",
+	})
+	b := testutil.NewBackend(t, cfg)
+	h := testutil.NewTestHandler(t, b)
+
+	setupGothForTest(t, goth.User{
+		Provider: "faux",
+		UserID:   "oauth-redir-2",
+		Email:    "oauth-redir-2@example.com",
+		Name:     "Redir User 2",
+	})
+
+	// A tampered cookie with a protocol-relative URL must be ignored —
+	// fall back to the default landing rather than honoring the attacker's URL.
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux/callback", nil)
+	req.AddCookie(&http.Cookie{Name: auth.OAuthRedirectCookieName, Value: "//evil.com/pwn"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "http://localhost:3000/", w.Header().Get("Location"))
+}

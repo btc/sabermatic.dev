@@ -22,6 +22,10 @@ export default function Login() {
 
   const rawRedirect = searchParams.get("redirect") ?? "/";
   const redirect = rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/";
+  // Forward the redirect hint across every alternative authentication path
+  // (signup cross-link, OAuth starts) so visitors bounced here from a
+  // question card land back on that question after whichever flow they pick.
+  const redirectQuery = redirect !== "/" ? `?redirect=${encodeURIComponent(redirect)}` : "";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,14 +51,14 @@ export default function Login() {
         <form onSubmit={handleSubmit}>
           <CardContent className="pt-6 pb-2 space-y-4">
             <a
-              href="/api/auth/oauth/google"
+              href={`/api/auth/oauth/google${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
             >
               <GoogleIcon className="mr-2 h-4 w-4" />
               Sign in with Google
             </a>
             <a
-              href="/api/auth/oauth/github"
+              href={`/api/auth/oauth/github${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
             >
               <GitHubIcon className="mr-2 h-4 w-4" />
@@ -102,7 +106,7 @@ export default function Login() {
             </Button>
           </CardContent>
           <CardFooter className="text-sm text-muted-foreground">
-            <Link to="/signup" className="hover:text-foreground">
+            <Link to={`/signup${redirectQuery}`} className="hover:text-foreground">
               Don't have an account? Sign up
             </Link>
           </CardFooter>

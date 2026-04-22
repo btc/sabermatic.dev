@@ -3,6 +3,7 @@ package handler
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/gothic"
@@ -10,6 +11,19 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 )
+
+// oauthRedirectMaxAge bounds how long the post-OAuth return URL cookie lives.
+// Five minutes covers a reasonable OAuth round-trip (including provider
+// consent screens) without leaving a stale redirect hint around.
+const oauthRedirectMaxAge = 5 * 60
+
+// isSafeRedirect reports whether target is a same-origin relative URL.
+// Must start with "/" and not "//" (protocol-relative), to prevent
+// open-redirect abuse where a hostile redirect sends the user off-site
+// after a successful login.
+func isSafeRedirect(target string) bool {
+	return strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "//")
+}
 
 // OAuthStart returns a handler that begins the OAuth flow for the given provider.
 // If the provider is not configured, returns 404.
@@ -20,6 +34,14 @@ func OAuthStart(b *backend.Backend) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+
+		// Stash the optional return URL in a short-lived cookie so the
+		// callback can send the user back where they started after the
+		// provider round-trip. Same-origin validated to block open redirects.
+		if rd := r.URL.Query().Get("redirect"); rd != "" && isSafeRedirect(rd) {
+			http.SetCookie(w, auth.OAuthRedirectCookie(rd, oauthRedirectMaxAge, b.Config().Auth.SecureCookies()))
+		}
+
 		// gothic reads "provider" from query params or gorilla/mux vars.
 		// With stdlib mux, we need to set it as a query param.
 		q := r.URL.Query()
@@ -74,9 +96,21 @@ func OAuthCallback(b *backend.Backend) http.HandlerFunc {
 			b.Config().Auth.SecureCookies(),
 		))
 
+		// Always clear the return-URL cookie — whether we consume it or
+		// not, it's single-use.
+		secure := b.Config().Auth.SecureCookies()
+		http.SetCookie(w, auth.OAuthRedirectCookie("", -1, secure))
+
 		redirectURL := b.Config().Auth.BaseURL + "/"
-		if result.NeedsProfile {
+		switch {
+		case result.NeedsProfile:
+			// Profile completion takes precedence — the stashed redirect is
+			// dropped in this case rather than bounced through profile setup.
 			redirectURL = b.Config().Auth.BaseURL + "/complete-profile"
+		default:
+			if c, err := r.Cookie(auth.OAuthRedirectCookieName); err == nil && isSafeRedirect(c.Value) {
+				redirectURL = b.Config().Auth.BaseURL + c.Value
+			}
 		}
 		http.Redirect(w, r, redirectURL, http.StatusFound)
 	}

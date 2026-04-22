@@ -40,3 +40,24 @@ func SessionCookie(token string, maxAge int, secure bool) *http.Cookie {
 		MaxAge:   maxAge,
 	}
 }
+
+// OAuthRedirectCookieName is the cookie that survives the OAuth round-trip
+// to remember where to send the user after a successful callback. Separate
+// from the session cookie so it can be cleared independently on consumption.
+const OAuthRedirectCookieName = "drill_oauth_redirect"
+
+// OAuthRedirectCookie builds a cookie that carries the post-OAuth return
+// URL across the provider round-trip. Pass an empty value and maxAge -1 to
+// clear it after consumption. SameSite=Lax so it flows through the
+// same-origin callback redirect.
+func OAuthRedirectCookie(value string, maxAge int, secure bool) *http.Cookie {
+	return &http.Cookie{
+		Name:     OAuthRedirectCookieName,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}
+}

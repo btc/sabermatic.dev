@@ -1,6 +1,6 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useSignup } from "@/api/queries";
 import { GitHubIcon, GoogleIcon } from "@/components/oauth-icons";
@@ -17,8 +17,16 @@ export default function Signup() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const signup = useSignup();
+
+  // Forward the redirect hint to the sign-in cross-link and OAuth starts.
+  // Email/password signup success still drops the hint (the flow pauses for
+  // email verification, which is out of the client-side URL chain).
+  const rawRedirect = searchParams.get("redirect") ?? "/";
+  const redirect = rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/";
+  const redirectQuery = redirect !== "/" ? `?redirect=${encodeURIComponent(redirect)}` : "";
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -46,14 +54,14 @@ export default function Signup() {
         <form onSubmit={handleSubmit}>
           <CardContent className="pt-6 pb-2 space-y-4">
             <a
-              href="/api/auth/oauth/google"
+              href={`/api/auth/oauth/google${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
             >
               <GoogleIcon className="mr-2 h-4 w-4" />
               Sign up with Google
             </a>
             <a
-              href="/api/auth/oauth/github"
+              href={`/api/auth/oauth/github${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
             >
               <GitHubIcon className="mr-2 h-4 w-4" />
@@ -107,7 +115,7 @@ export default function Signup() {
             </Button>
           </CardContent>
           <CardFooter className="text-sm text-muted-foreground">
-            <Link to="/login" className="hover:text-foreground">
+            <Link to={`/login${redirectQuery}`} className="hover:text-foreground">
               Already have an account? Sign in
             </Link>
           </CardFooter>
