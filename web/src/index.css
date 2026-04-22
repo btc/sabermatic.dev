@@ -125,3 +125,10 @@ body {
   0% { transform: translateX(-100%); }
   60%, 100% { transform: translateX(100%); }
 }
+@keyframes wav {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}

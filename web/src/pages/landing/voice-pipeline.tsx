@@ -1,77 +1,99 @@
-import { useEffect, useState } from "react";
-
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 
-type Stage = "waveform" | "transcript" | "annotations";
-
-// Deterministic pseudo-random variation per bar index
-function barVariation(i: number): number {
-  return ((i * 7 + 3) % 11) * 0.73;
+function barHeights(seedShift: number) {
+  return Array.from({ length: 28 }, (_, i) => {
+    const seed = i + seedShift;
+    return 12 + Math.sin(seed * 0.5) * 14 + ((seed * 7 + 3) % 11) * 0.8;
+  });
 }
 
-const BAR_HEIGHTS = Array.from(
-  { length: 24 },
-  (_, i) => 12 + Math.sin(i * 0.5) * 12 + barVariation(i),
-);
+function Waveform({ bars }: { bars: number[] }) {
+  return (
+    <div className="flex h-12 items-center gap-[3px]" aria-hidden>
+      {bars.map((h, i) => (
+        <span
+          key={i}
+          className="w-[3px] rounded-sm bg-primary animate-[wav_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
+          style={{ height: `${h}px`, animationDelay: `${i * 0.05}s` }}
+        />
+      ))}
+    </div>
+  );
+}
 
 export function VoicePipeline() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
-  const [stage, setStage] = useState<Stage>("waveform");
-
-  useEffect(() => {
-    if (!isVisible) return;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const t1 = setTimeout(() => setStage("transcript"), reducedMotion ? 0 : 1500);
-    const t2 = setTimeout(() => setStage("annotations"), reducedMotion ? 0 : 3000);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [isVisible]);
 
   return (
-    <section ref={ref} aria-labelledby="voice-heading" className="flex min-h-screen flex-col items-center justify-center gap-12 px-4">
-      <div className="max-w-2xl text-center">
-        <h2 id="voice-heading" className="text-3xl font-light text-foreground sm:text-4xl">
-          Speak naturally. We handle the rest.
-        </h2>
-      </div>
-      <div className="flex w-full max-w-md flex-col items-center gap-6">
-        {/* Waveform */}
+    <section ref={ref} id="pipeline" className="py-28 px-10 sm:px-6">
+      <div className="mx-auto max-w-[1120px]">
+        <header className="mb-16">
+          <div className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 04 — Conversation
+          </div>
+          <h2 className="mb-5 max-w-[20ch] text-[clamp(32px,4.2vw,56px)] font-light leading-[1.05] tracking-[-0.025em]">
+            You speak. The interviewer speaks back.
+          </h2>
+          <p className="max-w-[56ch] text-[17px] text-muted-foreground">
+            A conversation, not a form. Follow-ups out loud. Pushback when you hand-wave. Silence when you're mid-thought. Built to feel like the real thing.
+          </p>
+        </header>
+
         <div
-          className={`flex items-center gap-1 transition-opacity duration-500 motion-reduce:transition-none ${
+          className={`grid grid-cols-1 overflow-hidden rounded-xl border border-border bg-card md:grid-cols-3 transition-opacity duration-700 motion-reduce:transition-none ${
             isVisible ? "opacity-100" : "opacity-0"
           }`}
         >
-          {BAR_HEIGHTS.map((h, i) => (
-            <div
-              key={i}
-              className={`w-1 rounded-full bg-primary ${stage === "waveform" ? "animate-pulse" : ""}`}
-              style={{ height: `${h}px` }}
-            />
-          ))}
-        </div>
+          {/* Col 1 — You */}
+          <div className="flex min-h-[220px] flex-col gap-4.5 border-b border-border p-8 md:border-b-0 md:border-r">
+            <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <span>01 · You</span>
+              <span className="text-primary">Voice in</span>
+            </div>
+            <div className="text-[15px] font-medium">Think out loud.</div>
+            <div className="flex flex-1 flex-col justify-center">
+              <Waveform bars={barHeights(0)} />
+              <div className="mt-4 font-mono text-xs leading-[1.7] text-muted-foreground">
+                "I'd start by defining the API contract — POST /shorten, GET /:slug
+                <span className="ml-1 inline-block h-3.5 w-2 animate-[blink_1s_steps(2)_infinite] bg-primary align-middle motion-reduce:animate-none" />
+                "
+              </div>
+            </div>
+          </div>
 
-        {/* Transcript — illustrative example, not verbatim session 27 data */}
-        <div
-          className={`w-full rounded-lg bg-muted px-4 py-3 text-sm text-foreground transition-all duration-500 motion-reduce:transition-none ${
-            stage === "transcript" || stage === "annotations"
-              ? "opacity-100 translate-y-0"
-              : "opacity-0 translate-y-4"
-          }`}
-        >
-          "I'd start by defining the API contract — the key endpoints for creating and retrieving resources..."
-        </div>
+          {/* Col 2 — Interviewer */}
+          <div className="flex min-h-[220px] flex-col gap-4.5 border-b border-border p-8 md:border-b-0 md:border-r">
+            <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <span>02 · Interviewer</span>
+              <span className="text-primary">Voice back</span>
+            </div>
+            <div className="text-[15px] font-medium">A follow-up, out loud.</div>
+            <div className="flex flex-1 flex-col justify-center">
+              <Waveform bars={barHeights(5)} />
+              <div className="mt-4 font-mono text-xs leading-[1.7] text-foreground">
+                "Good start. What happens when two users generate the same slug at the same time?"
+              </div>
+            </div>
+          </div>
 
-        {/* Annotation — illustrative example */}
-        <div
-          className={`ml-8 border-l-2 border-strength pl-3 py-1 text-xs text-strength transition-all duration-500 motion-reduce:transition-none ${
-            stage === "annotations"
-              ? "opacity-100 translate-x-0"
-              : "opacity-0 -translate-x-4"
-          }`}
-        >
-          <span className="font-medium">Strength:</span> Candidate leads with API design before jumping to infrastructure
+          {/* Col 3 — Afterward */}
+          <div className="flex min-h-[220px] flex-col gap-4.5 p-8">
+            <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              <span>03 · Afterward</span>
+              <span className="text-primary">Annotated</span>
+            </div>
+            <div className="text-[15px] font-medium">Every moment, graded.</div>
+            <div className="flex flex-1 flex-col justify-start gap-2.5 pt-1.5">
+              <div className="border-l-2 border-strength px-3 py-2.5 text-xs text-strength leading-snug">
+                <b className="mb-1 block font-mono text-[10px] font-medium uppercase tracking-[0.08em]">Strength</b>
+                Leads with API contract.
+              </div>
+              <div className="border-l-2 border-gap px-3 py-2.5 text-xs text-gap leading-snug">
+                <b className="mb-1 block font-mono text-[10px] font-medium uppercase tracking-[0.08em]">Gap</b>
+                Collision strategy hand-waved.
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
