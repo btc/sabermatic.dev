@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { BallMark } from "@/components/ball-mark";
 import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 
 const TAGLINES = [
@@ -49,9 +50,10 @@ export function Hero() {
 
         <h1
           id="hero-heading"
-          className="mb-9 text-[clamp(56px,10vw,140px)] font-extrabold leading-[0.9] tracking-[-0.055em]"
+          className="group mb-9 text-[clamp(56px,10vw,140px)] font-extrabold leading-[0.9] tracking-[-0.055em]"
+          aria-label="Sabermatic dot DEV"
         >
-          sabermatic<span className="font-bold tracking-[-0.03em] opacity-40">[.DEV]</span>
+          sabermatic<span className="font-bold tracking-[-0.03em] opacity-40" aria-hidden="true">[<BallMark className="group-hover:animate-[spin_2s_linear_infinite] motion-reduce:animate-none" />DEV]</span>
         </h1>
 
         <p
