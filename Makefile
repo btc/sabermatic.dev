@@ -162,8 +162,9 @@ stripe-trigger:
 	stripe trigger "$(TYPE)"
 
 # Regenerate OG images from their SVG sources. Requires rsvg-convert (brew install librsvg).
-# Text rendering depends on the host's ui-sans-serif fallback; regenerate on macOS for
-# consistency with the committed baseline.
+# NOTE: run on macOS only — ui-sans-serif fallback differs across hosts (macOS: SF Pro;
+# Linux: DejaVu Sans), so regenerating on Linux produces different pixels and would
+# drift the committed baseline.
 regen-og:
 	@which rsvg-convert > /dev/null || (echo "rsvg-convert not found — brew install librsvg"; exit 1)
 	rsvg-convert -w 1200 -h 630 web/public/og-landing.svg -o web/public/og-landing.png

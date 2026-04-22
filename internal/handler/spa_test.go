@@ -76,8 +76,13 @@ func TestSPAHandlerOGTags(t *testing.T) {
 						t.Errorf("OG tag %q appears after </head>", tag)
 					}
 				}
-			} else if strings.Contains(body, "og:title") {
-				t.Errorf("unexpected OG tag in body")
+			} else {
+				if strings.Contains(body, "og:title") {
+					t.Errorf("unexpected OG tag in body")
+				}
+				if strings.Contains(body, "twitter:card") {
+					t.Errorf("unexpected Twitter Card tag in body")
+				}
 			}
 		})
 	}
