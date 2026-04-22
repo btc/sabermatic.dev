@@ -16,25 +16,30 @@ export function Credits() {
   const { ref, isVisible } = useScrollReveal<HTMLElement>();
 
   return (
-    <section ref={ref} aria-labelledby="credits-heading" className="py-24 px-4">
-      <div className="mx-auto max-w-sm">
-        <h2
-          id="credits-heading"
-          className="mb-6 text-xs font-medium uppercase tracking-wider text-muted-foreground text-center"
+    <section ref={ref} id="stack" className="py-28 px-10 sm:px-6">
+      <div className="mx-auto max-w-[1120px]">
+        <header className="mb-10 text-center">
+          <div className="mb-5 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 07 — Built with
+          </div>
+          <h2 className="mx-auto max-w-none text-[clamp(32px,4.2vw,56px)] font-light leading-[1.05] tracking-[-0.025em]">
+            No magic. Good tools.
+          </h2>
+        </header>
+
+        <div
+          className={`grid grid-cols-1 border-t border-border sm:grid-cols-3 transition-opacity duration-700 motion-reduce:transition-none ${
+            isVisible ? "opacity-100" : "opacity-0"
+          }`}
         >
-          Built with
-        </h2>
-        <div className="space-y-2">
           {CREDITS.map((c, i) => (
             <div
               key={c.role}
-              className={`flex justify-between text-sm transition-opacity duration-300 motion-reduce:transition-none ${
-                isVisible ? "opacity-100" : "opacity-0"
-              }`}
-              style={{ transitionDelay: `${i * 50}ms` }}
+              className={`flex items-baseline justify-between border-b border-border px-6 py-5 sm:[&:nth-child(3n)]:border-r-0 sm:border-r`}
+              style={{ transitionDelay: `${i * 40}ms` }}
             >
-              <span className="text-muted-foreground">{c.role}</span>
-              <span className="text-foreground">{c.tech}</span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">{c.role}</span>
+              <span className="text-sm font-medium">{c.tech}</span>
             </div>
           ))}
         </div>
