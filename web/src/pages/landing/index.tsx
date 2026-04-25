@@ -1,5 +1,4 @@
 import { Coaching } from "./coaching";
-import { Credits } from "./credits";
 import { CTARepeat } from "./cta-repeat";
 import { Hero } from "./hero";
 import { Library } from "./library";
@@ -18,7 +17,6 @@ export default function Landing() {
       <VoicePipeline />
       <Coaching />
       <Library />
-      <Credits />
       <CTARepeat />
     </div>
   );
