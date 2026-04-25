@@ -312,8 +312,8 @@ function AccountDeletionSection() {
     deleteAccount.mutate({}, {
       onSuccess: () => {
         logout.mutate({}, {
-          onSuccess: () => navigate("/login"),
-          onError: () => navigate("/login"),
+          onSuccess: () => navigate("/"),
+          onError: () => navigate("/"),
         });
       },
       onError: (err) => {
