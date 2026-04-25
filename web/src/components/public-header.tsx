@@ -5,7 +5,6 @@ import { BrandName } from "@/components/brand-name";
 const LANDING_NAV = [
   { href: "#library", label: "Questions" },
   { href: "#pipeline", label: "How it works" },
-  { href: "#stack", label: "Stack" },
 ];
 
 const LANDING_PATHS = new Set(["/", "/about"]);
