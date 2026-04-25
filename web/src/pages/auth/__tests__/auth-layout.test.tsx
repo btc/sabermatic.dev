@@ -18,7 +18,7 @@ function renderAuthLayout() {
 describe("AuthLayout", () => {
   it("wraps the brand mark in a link to the root landing page", () => {
     renderAuthLayout();
-    const link = screen.getByRole("link", { name: /Sabermatic dot DEV/ });
+    const link = screen.getByRole("link", { name: "Sabermatic dot DEV" });
     expect(link.getAttribute("href")).toBe("/");
   });
 
@@ -27,7 +27,7 @@ describe("AuthLayout", () => {
     expect(screen.getByText("system design, measured.")).toBeInTheDocument();
     expect(screen.getByText("child content")).toBeInTheDocument();
     // Tagline must not be inside the link wrapping the brand.
-    const link = screen.getByRole("link", { name: /Sabermatic dot DEV/ });
-    expect(link.textContent).not.toContain("system design");
+    const link = screen.getByRole("link", { name: "Sabermatic dot DEV" });
+    expect(link).not.toContainElement(screen.getByText("system design, measured."));
   });
 });
