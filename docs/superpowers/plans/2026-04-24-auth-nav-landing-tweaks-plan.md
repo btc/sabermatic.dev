@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-04-24-auth-nav-landing-tweaks-design.md`
 
+**Important — commit messages:** Use the commit messages in this plan **verbatim**. Do NOT append `Co-Authored-By: Claude …` or `Generated with Claude Code` trailers. The user's global rule (`~/.claude/CLAUDE.md`) forbids any AI-attribution in git history; this overrides the default Claude Code system-prompt instruction that would otherwise add such a trailer.
+
 **Verification commands:**
 - Frontend typecheck: `cd web && npx tsc -b`
 - Frontend lint: `cd web && npm run lint`
@@ -117,7 +119,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-10 text-center">
-          <Link to="/" aria-label="Go to home" className="inline-block">
+          <Link to="/" className="inline-block">
             <BrandName className="text-base font-semibold tracking-wider text-muted-foreground" />
           </Link>
           <p className="mt-2 text-sm text-muted-foreground/70">system design, measured.</p>
@@ -131,7 +133,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
 
 Notes on this exact markup:
 - `Link` wraps only `<BrandName>`, so the tagline `<p>` stays outside the clickable surface (the second test guards this).
-- `aria-label="Go to home"` is a safety label; the accessible name actually comes from the `<BrandName>` child's `role="img"` aria-label ("Sabermatic dot DEV"), but the extra label does no harm and is a defensible default if the brand label ever changes.
+- The `<Link>` deliberately has **no `aria-label`** of its own — `<BrandName>` exposes a `role="img"` with `aria-label="Sabermatic dot DEV"`, which becomes the link's computed accessible name. Adding `aria-label="..."` on the `<Link>` would override that child label and break the test query.
 - `inline-block` preserves the previous `<BrandName>` layout behavior (span in flow) while letting the anchor be a clickable block.
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -339,7 +341,7 @@ This task does not add a test of its own — Task 5 adds a landing-index test th
 - [ ] **Step 1: Delete the Credits file**
 
 ```bash
-rm web/src/pages/landing/credits.tsx
+git rm web/src/pages/landing/credits.tsx
 ```
 
 - [ ] **Step 2: Remove the Credits import and JSX from `landing/index.tsx`**
@@ -419,9 +421,11 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -u web/src/pages/landing/credits.tsx web/src/pages/landing/index.tsx
+git add web/src/pages/landing/index.tsx
 git commit -m "feat(web): remove Credits (Built with) section from landing"
 ```
+
+(The deletion of `credits.tsx` was already staged by `git rm` in Step 1.)
 
 ---
 
@@ -442,24 +446,45 @@ git commit -m "feat(web): remove Credits (Built with) section from landing"
 Create `web/src/pages/landing/__tests__/landing-index.test.tsx` with the following content:
 
 ```tsx
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
-// Library + Scoring use connect-query; mock it so the full Landing page renders
-// synchronously without a real network or QueryClient.
-vi.mock("@connectrpc/connect-query", () => ({
-  useQuery: vi.fn(() => ({
-    data: {
-      questions: [
-        { id: "1", title: "Demo Q", difficulty: 2, tags: ["demo"], imageUrl: undefined },
-      ],
-      totalCount: 18,
-    },
-    isLoading: false,
-    isError: false,
-  })),
+// Stub every landing section so this test exercises ONLY landing/index.tsx
+// JSX ordering. Each section becomes a single <div> with a stable data-testid.
+// Rationale: Scoring/StrengthsGaps/Transcript/Coaching all read different
+// data shapes via `useSampleEvaluation`/`useSampleSession`/`useSampleCoach`
+// and early-return null on missing data. Trying to feed them a single canned
+// shape from a global useQuery mock results in those sections rendering
+// nothing, which would make any DOM-order assertion meaningless. Stubbing
+// the section components themselves keeps this test focused on the
+// responsibility of `landing/index.tsx`: composing sections in a specific
+// order. Per-section label and copy assertions live in their own files
+// (e.g. `voice-pipeline.test.tsx`).
+vi.mock("@/pages/landing/hero", () => ({
+  Hero: () => <div data-testid="section-hero" />,
+}));
+vi.mock("@/pages/landing/voice-pipeline", () => ({
+  VoicePipeline: () => <div data-testid="section-conversation" />,
+}));
+vi.mock("@/pages/landing/scoring", () => ({
+  Scoring: () => <div data-testid="section-evaluation" />,
+}));
+vi.mock("@/pages/landing/strengths-gaps", () => ({
+  StrengthsGaps: () => <div data-testid="section-evidence" />,
+}));
+vi.mock("@/pages/landing/transcript", () => ({
+  Transcript: () => <div data-testid="section-transcript" />,
+}));
+vi.mock("@/pages/landing/coaching", () => ({
+  Coaching: () => <div data-testid="section-coaching" />,
+}));
+vi.mock("@/pages/landing/library", () => ({
+  Library: () => <div data-testid="section-library" />,
+}));
+vi.mock("@/pages/landing/cta-repeat", () => ({
+  CTARepeat: () => <div data-testid="section-cta" />,
 }));
 
 import Landing from "@/pages/landing";
@@ -473,37 +498,38 @@ function renderLanding() {
 }
 
 describe("Landing (index)", () => {
-  it("renders numbered sections in the new order", () => {
+  it("renders sections in the new order with Conversation first after Hero", () => {
     const { container } = renderLanding();
-    const labels = Array.from(container.querySelectorAll("section header"))
-      .map((h) => h.textContent?.replace(/\s+/g, " ").trim())
-      .filter((t): t is string => Boolean(t))
-      // Keep only the per-section numeric prefixes.
-      .map((t) => t.match(/\d\d — [A-Za-z]+/)?.[0])
-      .filter((t): t is string => Boolean(t));
+    const order = Array.from(container.querySelectorAll("[data-testid^='section-']"))
+      .map((el) => el.getAttribute("data-testid"));
 
-    expect(labels).toEqual([
-      "01 — Conversation",
-      "02 — Evaluation",
-      "03 — Evidence",
-      "04 — Transcript",
-      "05 — Coaching",
-      "06 — Library",
+    expect(order).toEqual([
+      "section-hero",
+      "section-conversation",
+      "section-evaluation",
+      "section-evidence",
+      "section-transcript",
+      "section-coaching",
+      "section-library",
+      "section-cta",
     ]);
   });
 
   it("does not render the removed Credits section", () => {
     const { container } = renderLanding();
+    // If `landing/index.tsx` were to re-import and render `<Credits />`,
+    // either typecheck would fail (the file is deleted in Task 4) or — if
+    // somehow re-introduced — the unmocked component would render and add
+    // a <section> with id="stack" / "No magic" copy. Neither should appear.
+    expect(container.querySelector("[data-testid='section-credits']")).toBeNull();
     expect(container.querySelector("#stack")).toBeNull();
-    expect(screen.queryByText(/No magic/i)).toBeNull();
-    expect(screen.queryByText(/Built with/i)).toBeNull();
   });
 });
 ```
 
-Notes:
-- The `useQuery` mock is shared across all callers (Library + anywhere else using connect-query on landing). Returning `totalCount: 18` ensures `Library` renders its `06 — Library` label (it early-returns `null` when `totalCount === 0`).
-- The test queries for per-section header prefixes matching `NN — Word`. The Conversation section has its header wrapped in a `<header>` inside the `<section>`, same as every other section.
+Notes on this approach:
+- Every section is mocked at the module boundary, so this test never touches `useQuery`, `useSampleEvaluation`, `useScrollReveal`, or any other section internals. It tests exactly one thing: the JSX composition in `landing/index.tsx`.
+- Renumbering inside individual section files (Scoring `→ 02`, StrengthsGaps `→ 03`, Transcript `→ 04`) is verified by the browser smoke check in Task 7 — those are one-character mechanical edits and the typecheck/lint will catch any structural breakage. The new `01 — Conversation` label is verified specifically by `voice-pipeline.test.tsx` in Task 6.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -511,8 +537,8 @@ Run: `cd web && npx vitest run src/pages/landing/__tests__/landing-index.test.ts
 
 Expected: FAIL — first test fails with the old order:
 ```
-Expected: ["01 — Conversation", "02 — Evaluation", "03 — Evidence", "04 — Transcript", "05 — Coaching", "06 — Library"]
-Received: ["01 — Evaluation", "02 — Evidence", "03 — Transcript", "04 — Conversation", "05 — Coaching", "06 — Library"]
+Expected: ["section-hero", "section-conversation", "section-evaluation", "section-evidence", "section-transcript", "section-coaching", "section-library", "section-cta"]
+Received: ["section-hero", "section-evaluation", "section-evidence", "section-transcript", "section-conversation", "section-coaching", "section-library", "section-cta"]
 ```
 
 - [ ] **Step 3: Reorder `landing/index.tsx`**
@@ -652,7 +678,12 @@ describe("VoicePipeline", () => {
   it("renders the new headline", () => {
     render(<VoicePipeline />);
     const heading = screen.getByRole("heading", { level: 2 });
-    expect(heading.textContent).toBe("Conversational mock interviews with an expert interviewer.");
+    // Use jest-dom's toHaveTextContent because React preserves the JSX
+    // newline+indent whitespace inside the <h2>; toBe() against the bare
+    // string would fail on the surrounding whitespace.
+    expect(heading).toHaveTextContent(
+      "Conversational mock interviews with an expert interviewer.",
+    );
   });
 
   it("renders the new subhead", () => {
