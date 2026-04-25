@@ -32,10 +32,10 @@ export function VoicePipeline() {
             <span className="block h-px w-6 bg-border-strong" aria-hidden /> 01 — Conversation
           </div>
           <h2 className="mb-5 max-w-[20ch] text-[clamp(32px,4.2vw,56px)] font-light leading-[1.05] tracking-[-0.025em]">
-            You speak. The interviewer speaks back.
+            Conversational mock interviews with an expert interviewer.
           </h2>
           <p className="max-w-[56ch] text-[17px] text-muted-foreground">
-            A conversation, not a form. Follow-ups out loud. Pushback when you hand-wave. Silence when you're mid-thought. Built to feel like the real thing.
+            Adaptive follow-ups. Pushback when you hand-wave. Patient when you're mid-thought.
           </p>
         </header>
 
