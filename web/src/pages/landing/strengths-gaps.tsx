@@ -44,7 +44,7 @@ export function StrengthsGaps() {
       <div className="mx-auto grid max-w-[1120px] grid-cols-1 items-start gap-20 md:grid-cols-[5fr_6fr]">
         <header>
           <div className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 02 — Evidence
+            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 03 — Evidence
           </div>
           <h2 className="mb-5 max-w-[20ch] text-[clamp(32px,4.2vw,56px)] font-light leading-[1.05] tracking-[-0.025em]">
             Know exactly where you stand.

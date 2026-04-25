@@ -50,7 +50,7 @@ export function Transcript() {
       <div className="mx-auto max-w-[1120px]">
         <header className="mb-16">
           <div className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 03 — Transcript
+            <span className="block h-px w-6 bg-border-strong" aria-hidden /> 04 — Transcript
           </div>
           <h2 className="mb-5 max-w-[20ch] text-[clamp(32px,4.2vw,56px)] font-light leading-[1.05] tracking-[-0.025em]">
             Feedback on what you actually said.
