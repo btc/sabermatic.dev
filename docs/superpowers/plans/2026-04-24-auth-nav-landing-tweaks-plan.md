@@ -425,7 +425,7 @@ git add web/src/pages/landing/index.tsx
 git commit -m "feat(web): remove Credits (Built with) section from landing"
 ```
 
-(The deletion of `credits.tsx` was already staged by `git rm` in Step 1.)
+(Step 1's `git rm` already staged the deletion of `credits.tsx`; this commit captures both the deletion and the `index.tsx` edit under one message.)
 
 ---
 
@@ -535,11 +535,14 @@ Notes on this approach:
 
 Run: `cd web && npx vitest run src/pages/landing/__tests__/landing-index.test.tsx`
 
-Expected: FAIL — first test fails with the old order:
+Expected: ONE test fails (the first, "renders sections in the new order"); the SECOND test ("does not render the removed Credits section") passes immediately because Task 4 already deleted `credits.tsx` and removed it from `landing/index.tsx`. The first test's failure looks like:
+
 ```
 Expected: ["section-hero", "section-conversation", "section-evaluation", "section-evidence", "section-transcript", "section-coaching", "section-library", "section-cta"]
 Received: ["section-hero", "section-evaluation", "section-evidence", "section-transcript", "section-conversation", "section-coaching", "section-library", "section-cta"]
 ```
+
+If both tests pass at this step, you've already done the reorder — back out the change in `landing/index.tsx` and re-run to confirm the failing case before proceeding to Step 3.
 
 - [ ] **Step 3: Reorder `landing/index.tsx`**
 
