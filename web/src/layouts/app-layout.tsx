@@ -28,10 +28,9 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
   const initials = user?.displayName?.slice(0, 2).toUpperCase() ?? "?";
 
   const handleLogout = () => {
-    // Full-page navigate after logout: useRequireAuth observes the cleared
-    // getMe cache and would race us to /login?redirect=… via client navigation.
-    // window.location.replace tears down the React tree before that effect can fire.
-    logout.mutate({}, { onSuccess: () => window.location.replace("/") });
+    // useLogout owns the post-logout navigation (full-page reload to /). See
+    // the comment in useLogout for the race details.
+    logout.mutate({});
   };
 
   if (isLoading || !isAuthenticated) {

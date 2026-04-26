@@ -305,14 +305,13 @@ function AccountDeletionSection() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteAccount = useDeleteAccount();
   const logout = useLogout();
+
   function handleDelete() {
     setDeleteError(null);
     deleteAccount.mutate({}, {
       onSuccess: () => {
-        logout.mutate({}, {
-          onSuccess: () => window.location.replace("/"),
-          onError: () => window.location.replace("/"),
-        });
+        // useLogout handles its own navigation home; no per-call callbacks needed.
+        logout.mutate({});
       },
       onError: (err) => {
         const msg = err instanceof ConnectError

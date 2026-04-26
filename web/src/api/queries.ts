@@ -114,8 +114,21 @@ export function useSignup() {
 
 export function useLogout() {
   const qc = useQueryClient();
+  // Logout always navigates to / via a full-page reload. window.location.replace
+  // (rather than React-Router navigate) avoids racing with useRequireAuth, which
+  // observes the cleared getMe cache, sees isError, and would otherwise redirect
+  // to /login?redirect=<pathname>. The full reload also clears all in-memory
+  // state, which is the right default for a logout. We replace on both success
+  // and error: an account-deletion failure (the only practical caller of the
+  // error path) leaves a destroyed-server-side session, so taking the user home
+  // is correct regardless.
+  const finishLogout = () => {
+    qc.clear();
+    window.location.replace("/");
+  };
   return useConnectMutation(logoutMethod, {
-    onSuccess: () => qc.clear(),
+    onSuccess: finishLogout,
+    onError: finishLogout,
   });
 }
 
