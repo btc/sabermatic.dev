@@ -28,7 +28,10 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
   const initials = user?.displayName?.slice(0, 2).toUpperCase() ?? "?";
 
   const handleLogout = () => {
-    logout.mutate({}, { onSuccess: () => navigate("/") });
+    // Full-page navigate after logout: useRequireAuth observes the cleared
+    // getMe cache and would race us to /login?redirect=… via client navigation.
+    // window.location.replace tears down the React tree before that effect can fire.
+    logout.mutate({}, { onSuccess: () => window.location.replace("/") });
   };
 
   if (isLoading || !isAuthenticated) {

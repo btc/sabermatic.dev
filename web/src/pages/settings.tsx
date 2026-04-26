@@ -2,7 +2,7 @@ import { create } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
 import { useMutation, useQuery } from "@connectrpc/connect-query";
 import { KeyboardEvent, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 import { useDeleteAccount, useLogout } from "@/api/queries";
@@ -305,15 +305,13 @@ function AccountDeletionSection() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteAccount = useDeleteAccount();
   const logout = useLogout();
-  const navigate = useNavigate();
-
   function handleDelete() {
     setDeleteError(null);
     deleteAccount.mutate({}, {
       onSuccess: () => {
         logout.mutate({}, {
-          onSuccess: () => navigate("/"),
-          onError: () => navigate("/"),
+          onSuccess: () => window.location.replace("/"),
+          onError: () => window.location.replace("/"),
         });
       },
       onError: (err) => {
