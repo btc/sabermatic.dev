@@ -39,4 +39,36 @@ describe("BrandName", () => {
     expect(outer.className).toContain("text-red-500");
     expect(outer.className).toContain("whitespace-nowrap");
   });
+
+  describe("with responsiveCompact", () => {
+    it("renders the mobile 'S' fragment and the desktop 'Sabermatic' fragment with the right Tailwind tokens", () => {
+      const { container } = render(<BrandName responsiveCompact />);
+      const desktop = container.querySelector("span.hidden.sm\\:inline");
+      const mobile = container.querySelector("span.sm\\:hidden");
+      expect(desktop?.textContent).toBe("Sabermatic");
+      expect(mobile?.textContent).toBe("S");
+    });
+
+    it("places the bracketed [DEV] suffix immediately after the mobile 'S' fragment", () => {
+      const { container } = render(<BrandName responsiveCompact />);
+      const mobile = container.querySelector("span.sm\\:hidden");
+      const next = mobile?.nextElementSibling as HTMLElement | null;
+      expect(next).not.toBeNull();
+      expect(next?.getAttribute("aria-hidden")).toBe("true");
+      expect(next?.textContent).toContain("[");
+      expect(next?.textContent).toContain("DEV");
+      expect(next?.textContent).toContain("]");
+    });
+
+    it("keeps aria-label canonical regardless of the visible variant", () => {
+      const compact = render(<BrandName responsiveCompact />);
+      const compactImg = compact.getByRole("img", { name: "Sabermatic dot DEV" });
+      expect(compactImg).toBeInTheDocument();
+      compact.unmount();
+
+      const full = render(<BrandName />);
+      const fullImg = full.getByRole("img", { name: "Sabermatic dot DEV" });
+      expect(fullImg).toBeInTheDocument();
+    });
+  });
 });
