@@ -41,7 +41,7 @@ export function Hero() {
   }, [isLast]);
 
   return (
-    <section aria-labelledby="hero-heading" className="px-10 pt-36 pb-28 text-center sm:px-6">
+    <section aria-labelledby="hero-heading" className="px-5 pt-36 pb-28 text-center sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1120px]">
         <div className="mb-8 inline-flex items-center gap-2.5 rounded-full border border-border bg-card px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
           <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden />

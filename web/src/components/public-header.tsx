@@ -15,7 +15,7 @@ export function PublicHeader() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
-      <div className="mx-auto flex h-[60px] max-w-[1120px] items-center justify-between px-10 sm:px-6">
+      <div className="mx-auto flex h-[60px] max-w-[1120px] items-center justify-between px-5 sm:px-6 lg:px-10">
         <Link to="/" className="text-sm font-medium tracking-[-0.01em]">
           <BrandName />
         </Link>

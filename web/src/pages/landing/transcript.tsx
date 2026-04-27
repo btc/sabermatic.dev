@@ -46,7 +46,7 @@ export function Transcript() {
   if (features.length === 0) return null;
 
   return (
-    <section ref={ref} id="transcript" className="py-28 px-10 sm:px-6">
+    <section ref={ref} id="transcript" className="py-28 px-5 sm:px-6 lg:px-10">
       <div className="mx-auto max-w-[1120px]">
         <header className="mb-16">
           <div className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">

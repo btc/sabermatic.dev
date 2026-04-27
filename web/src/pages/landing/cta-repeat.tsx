@@ -4,7 +4,7 @@ export function CTARepeat() {
   return (
     <section
       aria-label="Call to action"
-      className="border-t border-border px-10 py-40 text-center sm:px-6"
+      className="border-t border-border px-5 py-40 text-center sm:px-6 lg:px-10"
     >
       <div className="mx-auto max-w-[1120px]">
         <h2 className="mb-10 text-[clamp(40px,6vw,80px)] font-light leading-none tracking-[-0.035em]">
