@@ -43,7 +43,7 @@ function DimRow({
   const rowBorder = isOverall ? "border-t-2 border-foreground mt-2 pt-[22px]" : "border-b border-border";
 
   return (
-    <div className={`grid grid-cols-[160px_1fr_80px] items-center gap-5 py-[18px] last:border-b-0 ${rowBorder}`}>
+    <div className={`grid grid-cols-[110px_1fr_56px] sm:grid-cols-[160px_1fr_80px] items-center gap-5 py-[18px] last:border-b-0 ${rowBorder}`}>
       <div className="text-sm font-medium">{label}</div>
       <div className={`relative overflow-hidden bg-muted ${barThickness}`}>
         <div
