@@ -16,6 +16,9 @@ export function PublicHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
       <div className="mx-auto flex h-[60px] max-w-[1120px] items-center justify-between px-5 sm:px-6 lg:px-10">
+        {/* -mx-1 -my-3 cancels px-1 py-3 in flex layout: the link's hit area
+            grows to ~44px (line-height 20 + 12 + 12) without shifting siblings.
+            inline-block is required for vertical padding to actually grow an <a>. */}
         <Link
           to="/"
           className="inline-block -mx-1 -my-3 px-1 py-3 text-sm font-medium tracking-[-0.01em]"
