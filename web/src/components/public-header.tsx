@@ -16,13 +16,20 @@ export function PublicHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
       <div className="mx-auto flex h-[60px] max-w-[1120px] items-center justify-between px-5 sm:px-6 lg:px-10">
-        <Link to="/" className="text-sm font-medium tracking-[-0.01em]">
-          <BrandName />
+        <Link
+          to="/"
+          className="inline-block -mx-1 -my-3 px-1 py-3 text-sm font-medium tracking-[-0.01em]"
+        >
+          <BrandName responsiveCompact />
         </Link>
         <nav aria-label="Public navigation" className="flex items-center gap-7 text-[13px] text-muted-foreground">
           {showAnchors &&
             LANDING_NAV.map((a) => (
-              <a key={a.href} href={a.href} className="hover:text-foreground transition-colors">
+              <a
+                key={a.href}
+                href={a.href}
+                className="hidden sm:inline-block hover:text-foreground transition-colors"
+              >
                 {a.label}
               </a>
             ))}
