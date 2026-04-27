@@ -37,8 +37,10 @@ visibility fix is independently correct regardless of what we do next.
   `getMe` error (commit `ec21538`). That is the secondary suspect — separate
   spec if logs end up implicating it.
 - Preserving the `redirect` cookie across an OAuth failure. The cookie has a
-  5-minute TTL and is left in place by the failure-redirect path, so the
-  next OAuth attempt will still honor it. No change needed.
+  5-minute TTL (`internal/handler/oauth.go:18`) and is only cleared on the
+  success path (`internal/handler/oauth.go:102`); the two failure-redirect
+  paths return without touching it, so the next OAuth attempt will still
+  honor it. No change needed.
 - Changing the backend error codes themselves. We work with what the backend
   already emits.
 
@@ -62,18 +64,34 @@ that use it.
 - Renders the message in a `<p role="alert">` with the same orange-muted
   styling already used for the inline form error in `login.tsx:101-103`
   (`text-sm text-orange-500`). `role="alert"` causes screen readers to
-  announce the message.
+  announce the message. This is deliberately *louder* than the existing
+  form-submission errors (which have no role): the OAuth error appears
+  after a navigation, not in response to a button click the user just made,
+  so the user has no immediate frame of reference to expect a message —
+  active announcement is appropriate. The form-submission errors could
+  arguably gain the same role too; that is a follow-up, not in scope here.
 
 ### Integration
 
 In `web/src/pages/auth/login.tsx` and `web/src/pages/auth/signup.tsx`:
 
-- Read `searchParams.get("error")` (the `searchParams` object is already in
-  scope in both pages).
-- Render `<OAuthError code={searchParams.get("error")} />` immediately above
-  the Google + GitHub OAuth buttons. This places the message contextually
-  next to the action it concerns; the existing form-submission error stays
-  in its current position next to the password field.
+- `searchParams` is already destructured from `useSearchParams()` in both
+  files (`login.tsx:19`, `signup.tsx:20`). No new hook call is needed.
+- Render `<OAuthError code={searchParams.get("error")} />` as the **first
+  child of `<CardContent>`**, immediately before the Google `<a>` element
+  (currently the first child at `login.tsx:53` and `signup.tsx:56`). The
+  parent uses `className="pt-6 pb-2 space-y-4"`, so the OAuth error becomes
+  another flow-spaced sibling and inherits the right gap automatically — the
+  new component must NOT add `mb-*` / `mt-*` / margin classes of its own,
+  or it will double-space. This places the message contextually next to the
+  action it concerns; the existing form-submission error stays in its
+  current position next to the password field.
+
+`signup.tsx` is included for defensive symmetry. The backend currently only
+redirects to `/login?error=…` (`internal/handler/oauth.go:73,89`) — there is
+no existing path that puts an error param on `/signup`. Adding `<OAuthError>`
+to `signup.tsx` covers a future signup-specific failure-redirect without
+requiring a coordinated change at that time, and costs one line.
 
 No URL cleanup. Refreshing a page that has `?error=…` in the URL will re-show
 the message — that is acceptable: the only path that puts the param in the
@@ -82,9 +100,14 @@ costly than a silent failure.
 
 ### Tests
 
-`web/src/pages/auth/__tests__/oauth-error.test.tsx` (new):
+`web/src/pages/auth/__tests__/oauth-error.test.tsx` (new). Import the
+component via the `@/pages/auth/oauth-error` path alias to match the
+convention used in `auth-layout.test.tsx` (`import { AuthLayout } from
+"@/pages/auth/auth-layout"`).
 
-- `code={null}` → renders nothing (assert `container` is empty).
+- `code={null}` → renders nothing. Assert with
+  `expect(container).toBeEmptyDOMElement()` (from `@testing-library/jest-dom`,
+  already registered globally via `web/src/test-setup.ts`).
 - `code="oauth_failed"` → renders "Sign-in didn't complete. Please try
   again." inside an element with `role="alert"`.
 - `code="internal"` → renders "Something went wrong on our end. Please try
@@ -92,9 +115,11 @@ costly than a silent failure.
 - `code="future_unknown_code"` → renders the same fallback message as
   `oauth_failed` (locks in the "don't silently drop unknown codes" behavior).
 
-The component is pure presentation, so no router or query-client mocking is
-needed. Tests live alongside the component file under
-`web/src/pages/auth/__tests__/`.
+The component is pure presentation: no router and no query-client mocking is
+needed, and no `<MemoryRouter>` wrapper is required (unlike
+`auth-layout.test.tsx`, which wraps because `AuthLayout` contains a `<Link>`).
+Render `<OAuthError code={…} />` directly. Tests live alongside the component
+file under `web/src/pages/auth/__tests__/`.
 
 No new tests are added to `login.tsx` or `signup.tsx`. Both pages already
 pull connect-query mutations (`useLogin`, `useSignup`) and adding render
@@ -120,5 +145,10 @@ test coverage.
 - The friendly messages may not match every future failure mode if the
   backend adds new error codes. The fallback message handles that case
   gracefully (shown rather than dropped).
+- A user could manually craft `/login?error=anything` and share the URL to
+  show a generic "try again" message to a recipient. The worst case is a
+  confusing message; there is no exploitable behavior. The param is read,
+  not followed; the messages are static; no redirect or state change is
+  triggered.
 - Adds ~30 lines of code (1 component + 1 test file + 2 one-line JSX
   insertions in existing pages). No dependency changes.
