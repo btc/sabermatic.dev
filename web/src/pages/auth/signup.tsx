@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 
 import { AuthLayout } from "./auth-layout";
+import { OAuthError } from "./oauth-error";
 
 export default function Signup() {
   const [displayName, setDisplayName] = useState("");
@@ -53,6 +54,7 @@ export default function Signup() {
       <Card>
         <form onSubmit={handleSubmit}>
           <CardContent className="pt-6 pb-2 space-y-4">
+            <OAuthError code={searchParams.get("error")} />
             <a
               href={`/api/auth/oauth/google${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
