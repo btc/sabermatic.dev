@@ -1,4 +1,4 @@
-.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend stripe-setup stripe-pack-buy stripe-sub-start stripe-sub-cancel stripe-resend stripe-trigger regen-og
+.PHONY: dev dev-log seed test test-short cover cover-html cover-func clean-cover clean-test-containers deps generate lint drillctl grant cloudsql-proxy db-password test-protos test-frontend test-backend stripe-setup stripe-pack-buy stripe-sub-start stripe-sub-cancel stripe-resend stripe-trigger regen-og
 
 test-protos:
 	@echo "=== buf lint ==="
@@ -25,7 +25,7 @@ test-backend:
 	@echo "=== backend tests ==="
 	go test ./internal/... ./cmd/... -race -count=1 -timeout=300s
 
-test: test-protos test-frontend test-backend
+test: clean-test-containers test-protos test-frontend test-backend
 	@echo ""
 	@echo "=== go mod tidy ==="
 	go mod tidy
@@ -35,8 +35,17 @@ test: test-protos test-frontend test-backend
 	@echo ""
 	@echo "=== all checks passed ==="
 
-deploy: test
+deploy: clean-test-containers test
 	./scripts/deploy.sh
+
+# Remove stale testcontainers-managed containers from prior runs. When a test
+# panics during container startup, ryuk may not register the orphan, so it
+# accumulates and slows Docker Desktop until new containers can't acquire a
+# mapped port within the wait timeout. The org.testcontainers=true label is
+# applied by testcontainers-go to every container it creates, so this filter
+# only touches test artifacts, never user-started containers.
+clean-test-containers:
+	@docker ps -aq --filter label=org.testcontainers=true | xargs -r docker rm -f >/dev/null 2>&1 || true
 # Start dev server via overmind. Ctrl-C kills all processes cleanly.
 # Runs: npm build, vite watch, air (Go rebuild). One origin on :8080.
 dev:

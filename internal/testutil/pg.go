@@ -8,16 +8,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	migrations "github.com/btc/drill/sql/migrations"
 )
@@ -44,11 +41,12 @@ func SharedPostgres() PG {
 		postgres.WithDatabase("drill_test"),
 		postgres.WithUsername("test"),
 		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(30*time.Second),
-		),
+		// BasicWaitStrategies waits both for the readiness log (twice, since
+		// postgres restarts after init) AND for the host port to be published.
+		// The port wait is required on macOS/Windows where Docker Desktop's
+		// proxy needs extra time after the container starts, otherwise
+		// ConnectionString races MappedPort and panics with "port 5432/tcp not found".
+		postgres.BasicWaitStrategies(),
 	)
 	if err != nil {
 		panic(fmt.Sprintf("testutil.SharedPostgres: start container: %v", err))
