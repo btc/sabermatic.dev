@@ -10,11 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func mustJSON(v any) []byte {
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
 	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
 	return b
 }
 
@@ -49,8 +48,8 @@ func TestBuildPrompt_HistorySummaryIncludesScores(t *testing.T) {
 			ScoreScalability:   3,
 			ScoreCommunication: 4,
 			ScoreOverall:       3,
-			Strengths:          mustJSON([]string{"Good requirements"}),
-			Gaps:               mustJSON([]string{"Missing cache layer"}),
+			Strengths:          mustJSON(t, []string{"Good requirements"}),
+			Gaps:               mustJSON(t, []string{"Missing cache layer"}),
 			Advice:             "Practice deep dives.",
 		},
 	}
