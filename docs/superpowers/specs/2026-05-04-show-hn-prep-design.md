@@ -242,7 +242,7 @@ Logical columns the view exposes (what queries see):
 | `utm_campaign` | STRING | Same |
 | `path` | STRING | URL path on emission |
 | `user_agent` | STRING | |
-| `properties` | JSON / RECORD | Event-specific extras |
+| `properties` | RECORD (auto-typed) | Event-specific extras. Access via `properties.<field>`. (BQ may infer JSON instead if first-write data is heterogeneous; fall back to `JSON_VALUE(properties, '$.<field>')` in queries if so.) |
 
 Funnel attribution semantic: `referer` and `utm_*` are stamped only on `landing_view`. Other events join back to landing_view by `visitor_id` for first-touch source. No mutable cookie state.
 
@@ -402,9 +402,9 @@ All queries reference the `analytics_events` view (not the raw table). Schema co
 2. **Source attribution** (HN vs. Twitter vs. organic) — first-touch join on `visitor_id` to the `landing_view` row's `referer`/`utm_source`
 3. **Funnel conversion** — single SELECT with COUNTIF per `event_name`
 4. **Time-to-first-session** — APPROX_QUANTILES on TIMESTAMP_DIFF between `landing_view.event_time` and `first_message_sent.event_time` per `visitor_id`
-5. **Auth method preference & activation** — `JSON_VALUE(properties, '$.auth_method')` (or direct path access if RECORD)
+5. **Auth method preference & activation** — `properties.auth_method` (direct RECORD field access; `JSON_VALUE(properties, '$.auth_method')` as fallback only if BQ types `properties` as JSON instead of RECORD)
 6. **Sample-page impact** — visitors who saw `sample_view` vs. those who didn't, signup conversion
-7. **Power users** — `COUNT(DISTINCT session_id)` grouped by `user_id`, filtered to `event_name='session_ended' AND JSON_VALUE(properties, '$.reason')='completed'`
+7. **Power users** — `COUNT(DISTINCT session_id)` grouped by `user_id`, filtered to `event_name='session_ended' AND properties.reason='completed'`
 
 ### Testing
 
@@ -490,12 +490,12 @@ Workstreams are mostly independent, but ordering matters for safety:
 
 Before posting Show HN:
 
-- [ ] `DATABASE_MAX_POOL_SIZE` defaults to 15; `sql/queries/advisory_locks.sql` deleted; `sqlc generate` produces no diff (`sqlc diff` exits 0); generated `internal/db/advisory_locks.sql.go` and querier methods removed; `go build ./...` passes; `make test` passes
-- [ ] AI-worker DB-tx audit complete (Workstream 1 verification step) — confirmation that no River AI worker holds a transaction open across an external API call, OR refactor done if any did
+- [ ] `DATABASE_MAX_POOL_SIZE` defaults to 25; `sql/queries/advisory_locks.sql` deleted; `sqlc generate` produces no diff (`sqlc diff` exits 0); generated `internal/db/advisory_locks.sql.go` and querier methods removed; `go build ./...` passes; `make test` passes
+- [ ] `SHOW max_connections;` against prod Cloud SQL recorded in W1 (verifies 100 vs 50 — gates W2 sizing)
 - [ ] `terraform plan` shows max_instance_count=3 and the new analytics resources, no other unintended drift
 - [ ] `/api/beacon` returns 204 for `landing_view` and `signup_started`; rejects unknown event names with 400
 - [ ] Manual `track({event: 'landing_view'})` from browser → row visible in `analytics_events` view within 5 minutes
-- [ ] `properties` field queryable: `SELECT JSON_VALUE(properties, '$.auth_method') FROM analytics_events WHERE event_name='oauth_completed' LIMIT 1` returns a value (after a manual oauth signup test)
+- [ ] `properties` field queryable: `SELECT properties.auth_method FROM analytics_events WHERE event_name='oauth_completed' LIMIT 1` returns a value (after a manual oauth signup test). If RECORD typing is not what BQ chose, fall back to `JSON_VALUE(properties, '$.auth_method')` and update the view to cast properties accordingly.
 - [ ] `/about`, `/terms`, `/privacy` render with real content; linked in footer; meta description present in `index.html` source view
 - [ ] `robots.txt` and `sitemap.xml` resolve; `/login` and `/signup` carry `<meta name="robots" content="noindex">`
 - [ ] `terraform apply` clean against production
@@ -505,7 +505,7 @@ After posting Show HN, validate within 1 hour:
 - [ ] Funnel query (Q3) returns non-zero numbers across all stages
 - [ ] Source attribution query (Q2) shows traffic split
 - [ ] No 5xx error spike in Cloud Run logs
-- [ ] Cloud SQL "current connections" metric stays comfortably under 45 across the cluster
+- [ ] Cloud SQL "current connections" metric stays comfortably under 75 across the cluster (the pool=25 × 3 instances ceiling); under ~25 per instance steady-state means we have headroom
 - [ ] If event drops detected: backfill from Cloud Logging `_Default` bucket using a one-shot script
 
 ---
