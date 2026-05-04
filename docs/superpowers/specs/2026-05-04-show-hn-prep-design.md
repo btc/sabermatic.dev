@@ -13,7 +13,7 @@ Show HN is for the product, not the repo. The repo's GitHub-link polish (root RE
 3. Sign up and try the product
 4. Be measured — we want to reconstruct the funnel after the spike
 
-There's also a vestigial liability we want to clear: the DB connection pool was sized at 80 per instance for a now-removed advisory-lock architecture (each session held a dedicated connection). With 2 instances at 80 connections that's a 160-connection target on a Cloud SQL `db-g1-small` instance whose default `max_connections` is 100 (Postgres default; not overridden in Terraform). The cluster has not failed only because it's never actually scaled to 2 instances simultaneously. Without right-sizing, bumping the Cloud Run cap (Workstream 2) would expose the over-provisioning.
+There's also a vestigial liability we want to clear: the DB connection pool was sized at 80 per instance for a now-removed advisory-lock architecture (each session held a dedicated connection). With 2 instances at 80 conns that's a 160-conn target on a Cloud SQL `db-g1-small` instance whose default `max_connections` is **50** (Cloud SQL applies a per-tier default computed from instance memory, overriding the Postgres default of 100; documented at cloud.google.com/sql/docs/postgres/flags). The cluster has not failed only because pgx is lazy-allocating and we've never actually opened 80 concurrent connections. Without right-sizing, bumping the Cloud Run cap (Workstream 2) would expose the over-provisioning.
 
 ## Out of scope
 
@@ -35,23 +35,27 @@ There's also a vestigial liability we want to clear: the DB connection pool was 
 
 `internal/config/config.go` defaults `DATABASE_MAX_POOL_SIZE` to 80, with a comment justifying it as "each active session pins a connection for its advisory lock." The advisory-lock architecture is gone — production code has zero callers of `PGTryAdvisoryLock` / `PGAdvisoryUnlock`. The pool is sized for an architecture that no longer exists.
 
-`db-g1-small` (current Cloud SQL tier) does not have a `max_connections` override in Terraform, so the value is the Postgres default of 100. The original comment in the code uses this number; the system has been running with pool=80 successfully against that ceiling for weeks, which empirically confirms it.
+Cloud SQL applies a per-tier default for `max_connections`: for `db-g1-small` (~1.7 GB), that's **50** (researched and verified against GCP docs and an authoritative Google Cloud Community deep-dive). No Terraform override exists. The existing `internal/config/config.go` comment that says *"Postgres default of 100 max_connections"* is incorrect and must be rewritten as part of this workstream — it has always been wrong; we just never approached the cap because pgx is lazy-allocating.
 
 ### Design
 
-Reduce default to `25` per instance. Math: 25 × max 3 instances = 75 conns, leaves 25 for psql/migrations/superuser/monitoring under a 100-conn cap.
+Reduce default to `16` per instance. Math: 16 × max 3 instances = 48 conns, fits under the 50-conn cap with 2 conns of reserve.
 
-**Why 25, not 15** (revised after code audit): the original 15-conn estimate assumed River AI workers would release their connection during external API calls. **The audit (now complete) shows they do not.** `internal/jobs/evaluate.go`, `coach.go`, and `educator.go` each open a transaction at the top of the work function, then call `w.LLM.CallToolAndLog(ctx, tx, ...)` — passing the in-flight tx into the LLM call so the call's metadata is logged in the same atomic unit as the evaluation/coach/educator results. The connection is held for the full LLM round-trip (multi-second to multi-minute).
+The reserve is small (just enough for an admin psql session + the migrator's transient connections at startup). This is deliberately tight; we accept it because:
 
-Worst-case per-instance concurrent connections from this:
-- 10 AI workers × 1 conn each = 10 (held during LLM)
-- 5 default + 5 notify + 2 maint + 2 gemini workers, each potentially holding ~1 conn briefly = ~5 average concurrent
+1. The architectural alternatives — refactoring AI workers or upgrading Cloud SQL tier — are out of scope (user decision).
+2. `pgx` queues acquire-waiters with backoff if the pool is saturated, rather than erroring immediately, so brief over-spikes degrade gracefully rather than failing requests.
+3. We accept a tighter ceiling in exchange for staying on the current tier ($0 cost) and not refactoring AI workers.
+
+**AI-worker tx behavior — confirmed and accepted as-is:** `internal/jobs/evaluate.go`, `coach.go`, and `educator.go` each open a transaction at the top of the work function, then call `w.LLM.CallToolAndLog(ctx, tx, ...)` — passing the in-flight tx into the LLM call. The connection is held for the full LLM round-trip (multi-second to multi-minute). With River configured for 10 AI workers per instance, worst-case AI-worker DB usage is 10 conns held simultaneously per instance.
+
+Per-instance peak concurrent connections (worst case):
+- 10 AI workers × 1 conn = 10 (held during LLM, the dominant consumer)
+- 5 default + 5 notify + 2 maint + 2 gemini workers, each potentially holding ~1 conn briefly = ~3–5 average
 - HTTP handlers at 100 concurrent reqs × ~10ms queries ≈ 1–2 concurrent
-- River internal queue polling, leadership = ~1–2
+- River internal queue polling, leadership = ~1
 
-Realistic peak: ~15–18 conns per instance. Pool of 25 gives ~30% headroom for transient bursts. 25 × 3 = 75 < 100, comfortably under the cap.
-
-Going lower (e.g., to 15) requires refactoring the AI workers to release the tx before the LLM call and re-acquire after — see follow-up below. That's the right boy-scout fix but is out of scope for Show HN.
+Realistic peak: 14–17 conns per instance. Pool of 16 sits at the upper end of this band. **The pool is sized to support the steady-state including AI workers, with very little burst headroom.** Show HN traffic skews toward browse/signup (short-lived HTTP) rather than active interview running, so the AI-worker dimension is unlikely to be saturated during the spike — but if 10 AI workers ARE all busy + a small HTTP burst hits, pgx will queue a few waiters until a worker finishes.
 
 Delete the dead advisory-lock SQL source; run `sqlc generate` to remove the generated artifacts.
 
@@ -69,7 +73,7 @@ This is the pattern `internal/jobs/generate_image.go` already uses correctly. Af
 
 | File | Change |
 |---|---|
-| `internal/config/config.go` | `DATABASE_MAX_POOL_SIZE` default `80` → `25`; rewrite comment to drop advisory-lock justification (use the math above; reflect the AI-worker tx pattern explicitly) |
+| `internal/config/config.go` | `DATABASE_MAX_POOL_SIZE` default `80` → `16`; rewrite comment to drop advisory-lock justification AND correct the wrong "Postgres default of 100" claim (real cap is 50 for db-g1-small per Cloud SQL tier defaults). Reflect AI-worker tx pattern in the new comment. |
 | `sql/queries/advisory_locks.sql` | Delete |
 | `internal/db/advisory_locks.sql.go` | Removed by `sqlc generate` after the SQL source is deleted |
 | `internal/db/querier.go` | `PGTryAdvisoryLock` and `PGAdvisoryUnlock` methods removed by `sqlc generate` |
@@ -86,20 +90,32 @@ No new tests; removing dead code.
 
 ### Pre-deploy verification
 
-Run `SHOW max_connections;` against prod Cloud SQL once and record the actual value in this spec section before merging W1. Reviewers disagree on whether `db-g1-small`'s default is the Postgres default 100 or a Cloud SQL tier-specific 50:
-- Existing `internal/config/config.go` comment (written when pool=80 was set) says 100
-- The system has run with pool=80 successfully for weeks — empirically the cap must be ≥ pool peak, suggesting 100
-- Cloud SQL documentation cites 50 as a common shared-core tier default
-
-The pool=25 target works under either ceiling for a single instance (25 < 50), and works for 3 instances under 100 (75 < 100). If the verified value turns out to be 50, then `max_instance_count = 3` exceeds the cap (75 > 50) and W2 must downsize either the cap or the pool. **Ship the verification before W2 applies.**
+Run `SHOW max_connections;` against prod Cloud SQL once before merging W1 to confirm the documented value of 50 matches reality. (Tier defaults are well-documented but instances created in older cohorts may differ; a 30-second sanity check is cheap.) If the value differs, the pool/cap math must be redone. If it matches 50, proceed.
 
 ### Monitoring criterion (post-deploy)
 
-Watch Cloud SQL "current connections" metric during HN spike. If it regularly approaches the per-instance ceiling, bump pool via env override (no code change) or downsize Cloud Run cap. If it stays comfortably below ~15 per instance, the sizing is conservative and W1's known follow-up (AI-worker refactor) becomes higher-leverage.
+Watch Cloud SQL "current connections" metric during the HN spike. The cluster ceiling is 16 × 3 = 48; the cap is 50.
+
+- **Steady-state under ~10 per instance**: comfortable, sizing is conservative for browse/signup traffic.
+- **10–14 per instance**: working as designed; AI workers + light HTTP usage.
+- **Approaching 16 per instance**: pool saturated; pgx is queueing waiters. Tolerable for short bursts but signals that either (a) too many concurrent active interviews, or (b) the AI-worker refactor (post-Show-HN spec) is now the next leverage point.
+
+If we approach the 50-cluster cap (e.g., 48+), env-override `DATABASE_MAX_POOL_SIZE` cannot help (we're already maxed out under the SQL ceiling). The mitigation is to downscale Cloud Run momentarily (`max_instance_count` lower) until traffic subsides — at the cost of capacity. Treat this as a known trade-off of staying on db-g1-small.
 
 ### Risk
 
-Low for the deletion (pure removal of unreferenced code). Low for the sizing change at pool=25 (accommodates current AI-worker tx pattern with margin). Risk concentrates on the unverified `max_connections` ceiling — resolved by the verification step above. Rollback is `DATABASE_MAX_POOL_SIZE=80` env override, no code change.
+**Deletion of advisory-lock code** — near-zero. Pure removal of unreferenced code.
+
+**Pool sizing reduction (80 → 16)** — medium. Reserve under the 50-cap is small (2 conns). Defensible because:
+- Realistic peak per instance is in the 14–17 band; 16 sits at the upper end with pgx-queueing as graceful-degradation backstop.
+- The Show HN traffic pattern (short browse/signup requests) is unlikely to saturate AI workers, which are the dominant DB consumer.
+- This was an explicit user choice (over the alternatives of AI-worker refactor or tier upgrade).
+
+**Rollback** — `DATABASE_MAX_POOL_SIZE=80` env override returns to the prior over-sized pool, no code change. (Note: this restores the original mis-sized state but is recoverable; useful as an emergency lever if pool=16 turns out to be too tight.)
+
+### Known additional follow-up
+
+**Cloud SQL tier upgrade** — `db-custom-1-3840` (~3.75 GB, max_conn=100) at ~$25/mo extra. Becomes attractive if the 50-conn cap becomes a hard ceiling on growth (separately from the AI-worker refactor follow-up above).
 
 ---
 
@@ -111,7 +127,7 @@ Low for the deletion (pure removal of unreferenced code). Low for the sizing cha
 
 ### Design
 
-Bump to `3`. Bounded by Workstream 1's pool sizing: 25 × 3 = 75 < 100 max_connections (gated on verification step in W1; if real cap is 50, this workstream must downsize before applying).
+Bump to `3`. Bounded by Workstream 1's pool sizing: 16 × 3 = 48 < 50 max_connections. Tight (2-conn reserve under the cap), accepted per W1 design discussion.
 
 Capacity math: 100 concurrent reqs/instance × 3 instances = 300 in-flight requests. At ~200ms per request, that's 300 / 0.2s = 1500 requests/sec sustained ceiling for short read requests. Comfortable for realistic HN spike (5–50 RPS sustained, occasional bursts).
 
@@ -133,7 +149,7 @@ Low. `min_instance_count` stays at default (0); we accept 1–2 second cold star
 
 ### Open follow-ups (not in this spec)
 
-- If the spike exceeds capacity at 3 instances, the next bump options are: (a) refactor AI workers to release the LLM-call tx (W1 follow-up spec) and lower pool to 10–15, freeing room to add instances; (b) upgrade Cloud SQL tier (e.g., `db-custom-1-3840`, ~$25/mo more, gives more memory and a higher computed `max_connections` floor). Defer the decision.
+- If the spike exceeds capacity at 3 instances: there is **no headroom** to add a 4th instance under the 50-conn cap. Options are (a) refactor AI workers to release the LLM-call tx (W1 follow-up spec) and lower pool to ~10, freeing budget for a 4th instance, or (b) upgrade Cloud SQL tier (e.g., `db-custom-1-3840`, ~$25/mo more, max_conn=100). Defer the decision; both are real-money or real-engineering work and Show HN unlikely to need either.
 
 ---
 
@@ -481,7 +497,7 @@ Low. New pages, no behavior changes to existing flows.
 
 Workstreams are mostly independent, but ordering matters for safety:
 
-1. **Workstream 1 (DB cleanup)** — must land before Workstream 2 (the new cap depends on the right-sized pool to stay under 100 conns). Includes the AI-worker tx audit gate.
+1. **Workstream 1 (DB cleanup)** — must land before Workstream 2 (the new instance cap depends on the right-sized pool to stay under the 50-conn ceiling). Pre-deploy: confirm `SHOW max_connections;` returns 50 on the prod instance.
 2. **Workstream 4 (Trust pages)** — independent of 1/2/3 codewise; **gated on user confirming the three open decisions in W4 (refund, Mailgun, Stripe cancel behavior)** before drafting goes live.
 3. **Workstream 3 (Analytics)** — independent of 1/2/4; biggest scope, schedule first if you want measurement during early ramp-up traffic.
 4. **Workstream 2 (Cloud Run cap)** — last; depends on Workstream 1 being deployed and the Cloud SQL connections metric showing stable pool usage under nominal load.
@@ -490,8 +506,8 @@ Workstreams are mostly independent, but ordering matters for safety:
 
 Before posting Show HN:
 
-- [ ] `DATABASE_MAX_POOL_SIZE` defaults to 25; `sql/queries/advisory_locks.sql` deleted; `sqlc generate` produces no diff (`sqlc diff` exits 0); generated `internal/db/advisory_locks.sql.go` and querier methods removed; `go build ./...` passes; `make test` passes
-- [ ] `SHOW max_connections;` against prod Cloud SQL recorded in W1 (verifies 100 vs 50 — gates W2 sizing)
+- [ ] `DATABASE_MAX_POOL_SIZE` defaults to 16; `sql/queries/advisory_locks.sql` deleted; `sqlc generate` produces no diff (`sqlc diff` exits 0); generated `internal/db/advisory_locks.sql.go` and querier methods removed; `go build ./...` passes; `make test` passes
+- [ ] `SHOW max_connections;` against prod Cloud SQL returns 50 (matches expected tier default; gates W2)
 - [ ] `terraform plan` shows max_instance_count=3 and the new analytics resources, no other unintended drift
 - [ ] `/api/beacon` returns 204 for `landing_view` and `signup_started`; rejects unknown event names with 400
 - [ ] Manual `track({event: 'landing_view'})` from browser → row visible in `analytics_events` view within 5 minutes
@@ -505,7 +521,7 @@ After posting Show HN, validate within 1 hour:
 - [ ] Funnel query (Q3) returns non-zero numbers across all stages
 - [ ] Source attribution query (Q2) shows traffic split
 - [ ] No 5xx error spike in Cloud Run logs
-- [ ] Cloud SQL "current connections" metric stays comfortably under 75 across the cluster (the pool=25 × 3 instances ceiling); under ~25 per instance steady-state means we have headroom
+- [ ] Cloud SQL "current connections" metric stays comfortably under 48 across the cluster (the pool=16 × 3 instances ceiling); steady-state below ~14 per instance means we have burst headroom for AI workers; approaching 16 per instance signals saturation (graceful — pgx queues — but next-leverage is the AI-worker refactor follow-up)
 - [ ] If event drops detected: backfill from Cloud Logging `_Default` bucket using a one-shot script
 
 ---
