@@ -39,22 +39,37 @@ There's also a vestigial liability we want to clear: the DB connection pool was 
 
 ### Design
 
-Reduce default to `15` per instance. Math: 15 × max 3 instances = 45, leaves 55 connections for psql/migrations/superuser/monitoring — generous headroom under the 100-conn cap.
+Reduce default to `25` per instance. Math: 25 × max 3 instances = 75 conns, leaves 25 for psql/migrations/superuser/monitoring under a 100-conn cap.
 
-Sized for the realistic peak DB concurrency from a single Cloud Run instance:
-- River workers (24 max) — mostly idle on external API calls (Anthropic/OpenAI/Gemini); estimated peak concurrent DB ops ~5–8
-- HTTP handlers at 100 concurrent reqs × ~10ms queries ≈ 1–2 concurrent DB ops on average
-- Headroom for transient bursts (NOTIFY storms, periodic-job inserts)
+**Why 25, not 15** (revised after code audit): the original 15-conn estimate assumed River AI workers would release their connection during external API calls. **The audit (now complete) shows they do not.** `internal/jobs/evaluate.go`, `coach.go`, and `educator.go` each open a transaction at the top of the work function, then call `w.LLM.CallToolAndLog(ctx, tx, ...)` — passing the in-flight tx into the LLM call so the call's metadata is logged in the same atomic unit as the evaluation/coach/educator results. The connection is held for the full LLM round-trip (multi-second to multi-minute).
 
-**Implementation verification step (HIGH-priority pre-condition):** before merging, audit each River AI worker (`internal/jobs/evaluate*.go`, `educator*.go`, `coach*.go`) to confirm it releases its DB connection (commits or rolls back the transaction) BEFORE making the external API call, and re-acquires only to write results. If any worker holds a transaction open across an LLM call, the realistic peak DB concurrency could rise toward the 24-worker limit and 15 conns will be insufficient. If found, refactor before reducing the pool. (This is a verification step, not a guess — read the code; do not trust the estimate without confirmation.)
+Worst-case per-instance concurrent connections from this:
+- 10 AI workers × 1 conn each = 10 (held during LLM)
+- 5 default + 5 notify + 2 maint + 2 gemini workers, each potentially holding ~1 conn briefly = ~5 average concurrent
+- HTTP handlers at 100 concurrent reqs × ~10ms queries ≈ 1–2 concurrent
+- River internal queue polling, leadership = ~1–2
+
+Realistic peak: ~15–18 conns per instance. Pool of 25 gives ~30% headroom for transient bursts. 25 × 3 = 75 < 100, comfortably under the cap.
+
+Going lower (e.g., to 15) requires refactoring the AI workers to release the tx before the LLM call and re-acquire after — see follow-up below. That's the right boy-scout fix but is out of scope for Show HN.
 
 Delete the dead advisory-lock SQL source; run `sqlc generate` to remove the generated artifacts.
+
+### Known follow-up (separate spec)
+
+**AI worker LLM-call decoupling.** Refactor `evaluate.go`, `coach.go`, `educator.go` to:
+1. Call LLM standalone (no tx held), capture toolInput + call metadata (tokens, latency).
+2. Open tx.
+3. Insert llm_call row using captured metadata + insert evaluation/coach/educator results + mark messages.
+4. Commit.
+
+This is the pattern `internal/jobs/generate_image.go` already uses correctly. After this refactor, the pool can be reduced further (10–15 per instance is plausible) and we get cleaner separation of "external API" from "DB work." Out of scope here because (a) it requires careful idempotency design (what if step 3 fails after step 1 succeeded — re-run the LLM?), and (b) Show HN doesn't depend on it. Add to the post-Show-HN backlog as its own spec.
 
 ### Components
 
 | File | Change |
 |---|---|
-| `internal/config/config.go` | `DATABASE_MAX_POOL_SIZE` default `80` → `15`; rewrite comment to drop advisory-lock justification (use the math above) |
+| `internal/config/config.go` | `DATABASE_MAX_POOL_SIZE` default `80` → `25`; rewrite comment to drop advisory-lock justification (use the math above; reflect the AI-worker tx pattern explicitly) |
 | `sql/queries/advisory_locks.sql` | Delete |
 | `internal/db/advisory_locks.sql.go` | Removed by `sqlc generate` after the SQL source is deleted |
 | `internal/db/querier.go` | `PGTryAdvisoryLock` and `PGAdvisoryUnlock` methods removed by `sqlc generate` |
@@ -69,13 +84,22 @@ Implementation step: after deleting `sql/queries/advisory_locks.sql`, run `sqlc 
 
 No new tests; removing dead code.
 
+### Pre-deploy verification
+
+Run `SHOW max_connections;` against prod Cloud SQL once and record the actual value in this spec section before merging W1. Reviewers disagree on whether `db-g1-small`'s default is the Postgres default 100 or a Cloud SQL tier-specific 50:
+- Existing `internal/config/config.go` comment (written when pool=80 was set) says 100
+- The system has run with pool=80 successfully for weeks — empirically the cap must be ≥ pool peak, suggesting 100
+- Cloud SQL documentation cites 50 as a common shared-core tier default
+
+The pool=25 target works under either ceiling for a single instance (25 < 50), and works for 3 instances under 100 (75 < 100). If the verified value turns out to be 50, then `max_instance_count = 3` exceeds the cap (75 > 50) and W2 must downsize either the cap or the pool. **Ship the verification before W2 applies.**
+
 ### Monitoring criterion (post-deploy)
 
-Watch Cloud SQL "current connections" metric during HN spike. If it regularly hits 12–15 of 15 per instance (i.e., pool is saturated and pgx is queueing), bump pool to 20 (20 × 3 = 60, still under 100) — env-override-only, no code change. If it stays comfortably under 10, the sizing is correct.
+Watch Cloud SQL "current connections" metric during HN spike. If it regularly approaches the per-instance ceiling, bump pool via env override (no code change) or downsize Cloud Run cap. If it stays comfortably below ~15 per instance, the sizing is conservative and W1's known follow-up (AI-worker refactor) becomes higher-leverage.
 
 ### Risk
 
-Low for the deletion (pure removal of unreferenced code). Medium for the sizing reduction *if* the AI-worker audit reveals open transactions across LLM calls — the verification step above is the gate. Rollback is `DATABASE_MAX_POOL_SIZE=80` env override, no code change.
+Low for the deletion (pure removal of unreferenced code). Low for the sizing change at pool=25 (accommodates current AI-worker tx pattern with margin). Risk concentrates on the unverified `max_connections` ceiling — resolved by the verification step above. Rollback is `DATABASE_MAX_POOL_SIZE=80` env override, no code change.
 
 ---
 
@@ -87,7 +111,7 @@ Low for the deletion (pure removal of unreferenced code). Medium for the sizing 
 
 ### Design
 
-Bump to `3`. Bounded by Workstream 1's pool sizing: 15 × 3 = 45 < 100 max_connections.
+Bump to `3`. Bounded by Workstream 1's pool sizing: 25 × 3 = 75 < 100 max_connections (gated on verification step in W1; if real cap is 50, this workstream must downsize before applying).
 
 Capacity math: 100 concurrent reqs/instance × 3 instances = 300 in-flight requests. At ~200ms per request, that's 300 / 0.2s = 1500 requests/sec sustained ceiling for short read requests. Comfortable for realistic HN spike (5–50 RPS sustained, occasional bursts).
 
@@ -109,7 +133,7 @@ Low. `min_instance_count` stays at default (0); we accept 1–2 second cold star
 
 ### Open follow-ups (not in this spec)
 
-- If the spike exceeds capacity at 3 instances, the next bump options are: (a) bump pool ceiling — pool is currently sized to leave 55-conn reserve under 100, so we have room to scale instances or pool further without changing tier; (b) upgrade Cloud SQL tier (e.g., `db-custom-1-3840`, ~$25/mo more, gives more memory and a higher computed `max_connections` floor). Defer the decision.
+- If the spike exceeds capacity at 3 instances, the next bump options are: (a) refactor AI workers to release the LLM-call tx (W1 follow-up spec) and lower pool to 10–15, freeing room to add instances; (b) upgrade Cloud SQL tier (e.g., `db-custom-1-3840`, ~$25/mo more, gives more memory and a higher computed `max_connections` floor). Defer the decision.
 
 ---
 
@@ -144,14 +168,14 @@ Single events table. One row per event. Funnel queries: `WHERE event_name IN (..
 | Event | Emitted from | Identifies |
 |---|---|---|
 | `landing_view` | Frontend beacon (`POST /api/beacon`) on landing mount | visitor |
-| `sample_view` | `Backend.GetSampleSession` success | visitor |
+| `sample_view` | `(*sample.Server).GetSampleSession` success | visitor |
 | `signup_started` | Frontend beacon when user clicks "Sign up" / "Continue with Google" | visitor |
 | `signup_completed` | `Backend.Signup` success | visitor + new user_id |
-| `oauth_completed` | OAuth callback success (`internal/handler/oauth.go`) | visitor + user_id |
+| `oauth_completed` | `Backend.OAuthLogin` success | visitor + user_id |
 | `email_verified` | `Backend.VerifyEmail` success | user_id |
 | `session_created` | `Backend.CreateSession` success | user_id + session_id |
 | `first_message_sent` | `Backend.ExecuteTurn` first turn for a session | user_id + session_id |
-| `session_completed` | Session end-state transition | user_id + session_id |
+| `session_ended` | Three terminal-state paths (see handler table) — `reason` property distinguishes | user_id + session_id |
 
 ### BigQuery destination — raw table + flattening view
 
@@ -167,28 +191,39 @@ Note: Cloud Logging's built-in `trace` field already provides Cloud Trace correl
 
 A BQ view (Terraform: `google_bigquery_table` with `view` block) flattens `jsonPayload` into the clean column shape we want for queries. This is what all read-time queries reference.
 
+**Sink jsonPayload typing — RECORD assumed.** Cloud Logging Logs Router → BigQuery sinks default to writing `jsonPayload` as a RECORD with auto-discovered subfields (BOOL/STRING/NUMBER native typed columns under `jsonPayload.*`). JSON typing is opt-in via newer schema options; we do not opt in. The view DDL below uses **direct field access** (`jsonPayload.event_name`), not `JSON_VALUE()` — using `JSON_VALUE` on RECORD-typed columns is a type error and will fail at view creation.
+
 ```sql
 CREATE OR REPLACE VIEW `sabermatic_analytics.analytics_events` AS
 SELECT
   timestamp                                                  AS event_time,
-  JSON_VALUE(jsonPayload.event_id)                           AS event_id,
-  JSON_VALUE(jsonPayload.event_name)                         AS event_name,
-  JSON_VALUE(jsonPayload.visitor_id)                         AS visitor_id,
-  NULLIF(JSON_VALUE(jsonPayload.user_id), '')                AS user_id,
-  NULLIF(JSON_VALUE(jsonPayload.session_id), '')             AS session_id,
+  jsonPayload.event_id                                       AS event_id,
+  jsonPayload.event_name                                     AS event_name,
+  jsonPayload.visitor_id                                     AS visitor_id,
+  NULLIF(jsonPayload.user_id,    '')                         AS user_id,
+  NULLIF(jsonPayload.session_id, '')                         AS session_id,
   REGEXP_EXTRACT(trace, r'traces/(.+)$')                     AS trace_id,
-  NULLIF(JSON_VALUE(jsonPayload.referer), '')                AS referer,
-  NULLIF(JSON_VALUE(jsonPayload.utm_source), '')             AS utm_source,
-  NULLIF(JSON_VALUE(jsonPayload.utm_medium), '')             AS utm_medium,
-  NULLIF(JSON_VALUE(jsonPayload.utm_campaign), '')           AS utm_campaign,
-  NULLIF(JSON_VALUE(jsonPayload.path), '')                   AS path,
-  NULLIF(JSON_VALUE(jsonPayload.user_agent), '')             AS user_agent,
+  NULLIF(jsonPayload.referer,      '')                       AS referer,
+  NULLIF(jsonPayload.utm_source,   '')                       AS utm_source,
+  NULLIF(jsonPayload.utm_medium,   '')                       AS utm_medium,
+  NULLIF(jsonPayload.utm_campaign, '')                       AS utm_campaign,
+  NULLIF(jsonPayload.path,         '')                       AS path,
+  NULLIF(jsonPayload.user_agent,   '')                       AS user_agent,
   jsonPayload.properties                                     AS properties
 FROM `sabermatic_analytics.analytics_events_raw`
-WHERE JSON_VALUE(jsonPayload.analytics_event) = 'true'
+WHERE jsonPayload.analytics_event IS TRUE
 ```
 
-(Exact `JSON_VALUE` syntax depends on whether the sink writes `jsonPayload` as RECORD or JSON. Verify in smoke test; adjust to direct field access `jsonPayload.event_name` if RECORD typing is used. If RECORD, the view is even simpler.)
+The `WHERE jsonPayload.analytics_event IS TRUE` filter is redundant with the sink's filter (the sink only routes matching log entries to this table) but is kept as defense-in-depth in case the sink filter is ever loosened.
+
+**Subfield auto-discovery caveat:** BQ infers RECORD subfield types from observed values. If a slog field is sometimes-missing or sometimes-typed-differently, BQ may classify it as JSON or STRING. This affects only first-write schema setup — once the column is typed, all subsequent writes coerce to it. Mitigation: always emit every event field (use empty string for missing, never omit), and always emit the same Go type per field. The pre-flight smoke test (next section) catches typing surprises before the spike.
+
+**Bootstrap order (resolves view-vs-table ordering):** BigQuery permits view creation against a non-existent underlying table — view creation succeeds; queries against the view error until the table appears. So `terraform apply` order is:
+1. `google_bigquery_dataset.analytics`
+2. `google_logging_project_sink.analytics`
+3. `google_bigquery_table.analytics_events_view` (`depends_on = [google_bigquery_dataset.analytics]` is sufficient)
+
+The sink lazily creates `analytics_events_raw` on first write. After deployment, smoke-test by emitting one event from the browser and querying via the view within ~5 minutes.
 
 Logical columns the view exposes (what queries see):
 
@@ -213,7 +248,7 @@ Funnel attribution semantic: `referer` and `utm_*` are stamped only on `landing_
 
 Why view, not pre-created table or scheduled query: a view is free, always-fresh, no operational moving parts. Querying through it is essentially querying the raw table with a SELECT projection — BQ optimizes through the view.
 
-Performance: queries via the view scan the raw table. Date partitioning (sink: `use_partitioned_tables=true`) keeps query cost bounded. We do NOT get clustering on `event_name`/`visitor_id` since the sink controls the table — accept this; at HN-spike scale (~10K events/day), full-table scans cost cents.
+Performance: queries via the view scan the raw table. The sink writes with `use_partitioned_tables=true`, which partitions by **ingestion time** (`_PARTITIONTIME`), not by our `event_time` column. Queries that filter on `event_time` will NOT trigger partition pruning unless they also constrain `_PARTITIONTIME`. At HN-spike scale (~10K events/day), full-table scans cost cents — accept this. If volume grows, expose `_PARTITIONTIME` as `event_partition_date` in the view so queries can use it for pruning. Clustering on `event_name`/`visitor_id` is not available since the sink controls the table — accept this for the same reason.
 
 ### Components
 
@@ -246,13 +281,29 @@ func (e *Emitter) Emit(ctx context.Context, name string, props ...slog.Attr)
 - Parses `utm_source`, `utm_medium`, `utm_campaign` from URL query string.
 - Stashes one `events.ContextValues` struct in `ctx`.
 
-**Mount point — must wrap the top-level mux including ConnectRPC paths.** Existing handler chain in `internal/handler/server.go` is `SecurityHeaders(otelHandler(mux))`. Modify to `SecurityHeaders(otelHandler(AnalyticsContextMiddleware(mux)))` so analytics context is populated for every request including ConnectRPC handlers (sample/session/etc.). Verify after wiring with a smoke test: from inside a Connect handler, `events.ContextValuesFromContext(ctx)` returns non-nil with a populated `visitor_id`.
+**Mount point — must wrap the top-level mux including ConnectRPC paths.** Existing handler chain in `internal/handler/server.go:53-55` is `SecurityHeaders(secureCookies, otelhttp.NewMiddleware(...)(mux))`. Modify by wrapping `mux` with `AnalyticsContextMiddleware` BEFORE the otel middleware sees it, so OTel still observes the wrapped chain and analytics context is populated for every request including ConnectRPC handlers (sample/session/etc.).
+
+Concretely, change the assignment so that `mux` is replaced by `AnalyticsContextMiddleware(mux)` at line 44 (or where the SPA route is registered) before being passed into `otelhttp.NewMiddleware(...)(...)`. Then `SecurityHeaders(secureCookies, otelHandler)` stays untouched.
+
+Verify after wiring with a smoke test: from inside a Connect handler, `events.ContextValuesFromContext(ctx)` returns non-nil with a populated `visitor_id`.
 
 **HttpOnly rationale:** visitor_id is HttpOnly so it's not reachable from JavaScript / XSS. Frontend does not need to read it — all events flow through the backend (either directly via Connect handlers, or via the `/api/beacon` POST), and the backend reads the cookie server-side.
 
 **Cookie bootstrap on the initial HTML response:** the SPA's `index.html` is served by Cloud Run too (Vite-built static SPA). Ensure `AnalyticsContextMiddleware` runs on the initial HTML GET so the `Set-Cookie` header arrives before any beacon fires. Without this, `navigator.sendBeacon` may race ahead of cookie storage on the very first visit.
 
-The existing auth middleware at `internal/handler/middleware.go:51` already attaches `user_id` to spans; extend it to also call `events.WithUserID(ctx, userID)` so the analytics context picks up the authenticated user.
+**User_id propagation — TWO auth paths to extend:**
+
+The codebase has two separate authentication mechanisms:
+
+1. `internal/rpc/interceptor.go:67` — `AuthInterceptor.authenticate()` for ConnectRPC handlers (sample, session, billing, etc. — where almost all events emit)
+2. `internal/handler/middleware.go:51` — `RequireAuth` for the `/admin/jobs/` REST routes only
+
+Extend BOTH to attach user_id to the analytics context:
+
+- In `interceptor.go`: after `auth.WithUser(ctx, user)`, also `ctx = events.WithUserID(ctx, user.ID.String())`
+- In `middleware.go`: after the existing span attribute set, also `ctx = events.WithUserID(ctx, user.ID.String())` and pass via `r = r.WithContext(ctx)`
+
+Without the interceptor extension, all authenticated event emissions (signup_completed, oauth_completed, session_*, etc.) would lack user_id since they fire from inside Connect handlers.
 
 #### New: `internal/handler/beacon.go`
 
@@ -303,27 +354,32 @@ Call sites:
 
 Inject `*events.Emitter` into both `Backend` (for backend method emissions) and `internal/rpc/sample/Server` (for sample handler emissions). Constructor signature changes in both. Emit events at success boundaries (line numbers omitted — function names are stable, line numbers shift):
 
+Note: `(*sample.Server).GetSampleSession` currently has signature `(_ context.Context, _ *connect.Request[...])` — it ignores ctx. Implementation must change the signature to use ctx for visitor_id lookup. (Also: emit at the *inner* methods for sessions — `CompleteSession` and `CancelSession` — not the `Wait*` wrappers, so the event emits regardless of which entry path the caller used.)
+
 | Handler | Event | Properties |
 |---|---|---|
 | `(*sample.Server).GetSampleSession` (`internal/rpc/sample/server.go`) | `sample_view` | — |
 | `Backend.Signup` (`internal/backend/auth.go`) | `signup_completed` | `auth_method=password`, `new_user_id` |
-| `Backend.OAuthLogin` (`internal/backend/oauth.go`) — emit before returning success | `oauth_completed` | `auth_method=google`/`github`, `new_user_id`, `is_new_user` (true when internal `path == pathNewUser` or `path == pathReactivated`) |
+| `Backend.OAuthLogin` (`internal/backend/oauth.go`) — emit before returning success | `oauth_completed` | `auth_method=google`/`github`, `new_user_id`, `is_new_user` (true when internal `path == pathNewUser`), `is_reactivated` (true when `path == pathReactivated`) |
 | `Backend.VerifyEmail` (`internal/backend/auth.go`) | `email_verified` | — |
 | `Backend.CreateSession` (`internal/backend/session.go`) | `session_created` | `session_id`, `question_id` |
 | `Backend.ExecuteTurn` (`internal/backend/turn.go`) — guard with check on existing message count | `first_message_sent` | `session_id` (only on first user turn) |
-| `Backend.CompleteSession` (`internal/backend/session.go`) | `session_ended` | `session_id`, `reason=completed`, `turn_count` |
-| `Backend.WaitAndCancelSession` (`internal/backend/session.go`) — emit after successful cancel | `session_ended` | `session_id`, `reason=cancelled` |
-| `internal/jobs/cleanup.go` — emit one event per ID returned by `CompleteAbandonedActiveSessions` | `session_ended` | `session_id`, `reason=abandoned` |
+| `Backend.CompleteSession` (`internal/backend/session.go`) — inner method; called by `WaitAndCompleteSession` | `session_ended` | `session_id`, `reason=completed`, `turn_count` |
+| `Backend.CancelSession` (`internal/backend/session.go`) — inner method; called by `WaitAndCancelSession` | `session_ended` | `session_id`, `reason=cancelled` |
+| `internal/jobs/cleanup.go` — emit per ID returned by `CompleteAbandonedActiveSessions` | `session_ended` | `session_id`, `reason=abandoned` |
+| `internal/jobs/cleanup.go` — emit per ID returned by `CancelAbandonedEmptySessions` | `session_ended` | `session_id`, `reason=abandoned_empty` |
 
-**`is_new_user` exposure:** `OAuthLoginResult` does not currently carry this. Two options:
-1. Add `IsNewUser bool` field to `OAuthLoginResult`, set inside `Backend.OAuthLogin` based on the `path` constant
-2. Emit `oauth_completed` from inside `Backend.OAuthLogin` before returning, where `path` is in scope — keeps the result struct clean
+**`is_new_user` / `is_reactivated` exposure:** `OAuthLoginResult` does not currently carry these. Emit `oauth_completed` from inside `Backend.OAuthLogin` before returning, where the `path` string constant (`pathNewUser`, `pathReactivated`, etc.) is in scope. Keeps the result struct clean and emits at the source where the truth lives. (The two flags are kept separate rather than collapsed into "new" — reactivation is product-meaningfully different from a brand-new signup; let the queries decide whether to count them together.)
 
-Recommend option 2: emit at the source where the truth is known, no struct surface area change.
+**`session_ended` rationale:** there are four terminal paths for sessions (user-completed, user-cancelled, maintenance-cleanup of abandoned-with-messages, maintenance-cleanup of abandoned-empty). Using one event name with a `reason` property keeps funnel queries simple while preserving the distinction. Funnel queries that count "real completions" filter on `reason='completed'`; activation queries that count "any end state on a session that had messages" filter on `reason IN ('completed', 'cancelled', 'abandoned')` (excluding `abandoned_empty`); analyses of "users who started a session but never sent a message" use `reason='abandoned_empty'`.
 
-**`session_ended` rationale:** there are three terminal paths for sessions (user-completed, user-cancelled, maintenance-cleanup of abandoned). Using one event name with a `reason` property keeps funnel queries simple while preserving the distinction. Funnel queries that count "real completions" filter on `reason='completed'`; activation queries that count "any end state" don't filter.
+A fifth potential terminal path exists in code: `Backend.FailSession` (`internal/backend/session.go:361`) for platform-error session failures. It currently has no production callers; **out of scope** for this spec. If it gains callers, add a row to this table for `reason=failed`.
 
-**Cleanup-job emission detail:** `CleanupAbandonedActiveSessions` returns the list of IDs it completed. Emit `session_ended` per ID with `reason=abandoned`. The cleanup worker has no per-session visitor/user context (it's a maintenance job), so emit with whatever context is available — this means many properties (like the user_id of the abandoning session) require a separate query inside the worker. Alternatively, the cleanup query can be modified to RETURN both IDs and user_ids; do this if querying inline is awkward.
+**Cleanup-job emission detail:** the cleanup worker (`internal/jobs/cleanup.go`) calls TWO terminal SQL methods and gets back `[]uuid.UUID` from each:
+- `q.CompleteAbandonedActiveSessions(ctx)` → IDs of sessions that had messages but were inactive past the threshold
+- `q.CancelAbandonedEmptySessions(ctx)` → IDs of sessions created but never had a candidate message
+
+Emit `session_ended` per ID from each list with the appropriate `reason`. The cleanup worker is a maintenance job with no per-session visitor/user context. To attach `user_id` to events, either (a) extend the SQL queries to RETURN session_id + user_id, or (b) issue a follow-up `SELECT user_id FROM sessions WHERE id = ANY(...)` after the cleanup. Option (a) is cleaner — modify `sql/queries/sessions.sql` and regenerate sqlc.
 
 #### New: `terraform/analytics.tf`
 
@@ -332,7 +388,7 @@ Recommend option 2: emit at the source where the truth is known, no struct surfa
 | `google_bigquery_dataset.analytics` | Dataset `sabermatic_analytics`, region matches Cloud Run, no default table expiration |
 | `google_logging_project_sink.analytics` | Filter: `resource.type="cloud_run_revision" AND resource.labels.service_name="sabermatic" AND jsonPayload.analytics_event="true"`. Destination: the BQ dataset. `unique_writer_identity = true`. `bigquery_options.use_partitioned_tables = true`. |
 | `google_bigquery_dataset_iam_member.sink_writer` | Grant the sink's `writer_identity` `roles/bigquery.dataEditor` on the dataset |
-| `google_bigquery_table.analytics_events_view` | View `analytics_events` defined by the SELECT in the previous section. Created after first sink write so the underlying table exists (or use `depends_on = [google_logging_project_sink.analytics]` and create the table-first via a one-shot bq command in CI/manual step — implementation choice) |
+| `google_bigquery_table.analytics_events_view` | View `analytics_events` defined by the SELECT in the previous section. `depends_on = [google_bigquery_dataset.analytics]` is sufficient — BQ permits view creation against a non-existent table; queries return errors until the sink writes the first row. |
 
 **Sink filter caveat:** Cloud Logging filter syntax compares strings; slog writes booleans as `true`/`false` JSON. Empirically the filter expression `jsonPayload.analytics_event="true"` works because Cloud Logging coerces bool to string in filters. Verify during smoke test by checking the sink's exported entries.
 
@@ -533,7 +589,7 @@ User explicitly requested plain, simple, honest, straightforward language. Draft
 >
 > If you delete your account (Settings → Delete Account), we revoke access immediately and sign you out of all devices. Your account is marked deleted and can no longer be used to sign in. Practice content (transcripts, recordings, evaluations) is retained on our servers and removed on request — email brian@spanda.llc to request immediate deletion of your content.
 >
-> Encrypted database backups are retained for 7 days, after which deleted records are permanently removed.
+> Encrypted database backups are retained for approximately 7 days before expiry.
 >
 > ## Your rights
 >
