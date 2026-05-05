@@ -48,11 +48,17 @@ type Database struct {
 	URL string `env:"DATABASE_URL,required"`
 	// Cloud SQL db-g1-small applies a per-tier max_connections of 50 (Cloud SQL
 	// overrides the Postgres default of 100; see cloud.google.com/sql/docs/postgres/flags).
-	// 16 conns/instance × max 3 instances = 48, leaves 2 conns reserve under the cap.
+	// 16 conns/instance × max 3 instances = 48, leaves 2 conns steady-state reserve
+	// under the cap. Coupled to terraform/cloud_run.tf:max_instance_count=3 — keep
+	// these in lockstep; raising the Cloud Run cap requires recomputing this value
+	// or upgrading the Cloud SQL tier. Brief deploy-time overlap (old + new revisions)
+	// can momentarily exceed steady-state if both revisions saturate; acceptable
+	// because pgx queues acquire-waiters and overlap is brief.
 	// Sized to accommodate up to 10 concurrent AI workers (each holds a tx across
-	// the full LLM call duration in evaluate.go/coach.go/educator.go) plus a small
-	// HTTP burst margin. Reducing further requires refactoring AI workers to release
-	// the tx before the LLM call (tracked as a separate post-Show-HN spec).
+	// the full LLM call duration in internal/jobs/evaluate.go, coach.go, educator.go)
+	// plus a small HTTP burst margin. Reducing further requires refactoring AI
+	// workers to release the tx before the LLM call (tracked as a separate
+	// post-Show-HN spec).
 	MaxPoolConns int32 `env:"DATABASE_MAX_POOL_SIZE,default=16"`
 }
 
