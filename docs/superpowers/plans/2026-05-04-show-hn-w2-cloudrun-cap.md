@@ -4,9 +4,9 @@
 
 **Goal:** Bump Cloud Run `max_instance_count` from 2 to 3 to give Show HN traffic room to scale.
 
-**Architecture:** Conceptually a one-line Terraform edit, but `terraform/cloud_run.tf` has `lifecycle.ignore_changes = [scaling, ...]` (added in commit `0159e45` to suppress GCP provider drift on `manual_instance_count`). That means **`terraform apply` will silently swallow the `2 → 3` change** — the Terraform diff is the documented intent only. The actual bump must be applied out-of-band via `gcloud run services update`. The Terraform value is updated to keep the documented intent in sync with reality. Bounded by W1's pool sizing: 16 conns × 3 instances = 48 conns < 50 max_connections. **Hard prerequisite:** W1 must be deployed and running stably before this applies, otherwise the cluster will exceed the Cloud SQL connection cap on the first scale-up.
+**Architecture:** One-line Terraform edit. The `lifecycle.ignore_changes = [scaling, ...]` in `terraform/cloud_run.tf` (added in `0159e45` to suppress drift on `manual_instance_count`) targets the resource's **top-level** `scaling` argument, NOT the nested `template.scaling` block where `max_instance_count` lives. Verified via `terraform plan` — the diff shows `~ max_instance_count = 2 -> 3` under template.scaling and `terraform apply` applies it normally. Bounded by W1's pool sizing: 16 conns × 3 instances = 48 conns < 50 max_connections. **Hard prerequisite:** W1 must be deployed and running stably before this applies, otherwise the cluster will exceed the Cloud SQL connection cap on the first scale-up.
 
-**Tech Stack:** Terraform (documentation), Google Cloud Run, gcloud CLI.
+**Tech Stack:** Terraform, Google Cloud Run.
 
 **Spec:** `docs/superpowers/specs/2026-05-04-show-hn-prep-design.md` (Workstream 2).
 
@@ -101,7 +101,7 @@ If any other lines are in the diff, revert (`git checkout terraform/cloud_run.tf
 
 ---
 
-### Task 3: Confirm `terraform plan` will NOT apply this change (sanity check)
+### Task 3: Terraform plan
 
 **Files:** none modified — verification.
 
@@ -111,27 +111,27 @@ If any other lines are in the diff, revert (`git checkout terraform/cloud_run.tf
 cd terraform && terraform plan
 ```
 
-Expected: **no change** to `google_cloud_run_v2_service.sabermatic`'s `scaling` block (the diff is suppressed by `lifecycle.ignore_changes = [..., scaling, ...]` at line 233). If terraform plan shows the scaling change, the `ignore_changes` was modified upstream — investigate before applying.
+Expected: a single change to `google_cloud_run_v2_service.sabermatic` showing `~ max_instance_count: 2 -> 3` under `template.scaling`. No other resource modifications should appear (other than any pre-existing unrelated state drift the operator already knows about). If the plan shows additional drift (e.g., env vars, image tags), investigate — that's unrelated state divergence and should not be applied as part of this workstream.
 
-This is the opposite of a normal "verify your change is in the plan" check: we expect the plan to ignore the change because gcloud is the application channel for scaling settings.
+- [ ] **Step 2: Confirm no other infra changes**
+
+If the plan output is anything other than `Plan: 0 to add, 1 to change, 0 to destroy.` (modulo known pre-existing drift), **STOP** and review the additional changes with the spec author before proceeding.
 
 ---
 
-### Task 4: Apply via gcloud (NOT terraform apply)
+### Task 4: Apply
 
-**Files:** none — live infrastructure change via gcloud.
+**Files:** none — Terraform state change only.
 
-- [ ] **Step 1: Apply the cap bump**
+- [ ] **Step 1: Apply**
 
 ```bash
-gcloud run services update sabermatic \
-  --region=$(gcloud config get-value run/region) \
-  --max-instances=3
+cd terraform && terraform apply
 ```
 
-Expected: `Service [sabermatic] revision [...] is deploying...` then `Done.` in ~10–30 seconds. Cloud Run does NOT shift traffic or cold-start; this is a metadata-only revision update.
+Confirm at the prompt: `yes`.
 
-Do NOT run `terraform apply` for this change — it is a no-op (per Task 3). Running it has no effect but is misleading and may produce surprising drift output if other unrelated resources happen to have pending changes.
+Expected: change applies in ~10–30 seconds; Cloud Run service revision updates in place (no traffic shift, no cold start since `max_instance_count` is a configuration-only field).
 
 - [ ] **Step 2: Verify the new ceiling is live**
 

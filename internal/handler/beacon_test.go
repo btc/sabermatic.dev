@@ -149,6 +149,34 @@ func TestBeacon_RejectsTooManyProperties(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// Property string values are truncated at the same beaconMaxFieldLen as
+// referrer/UTM. Caller-supplied long strings would otherwise bloat row
+// sizes and BQ properties RECORD column storage.
+func TestBeacon_TruncatesPropertyStringValues(t *testing.T) {
+	em, buf := newRecorder(t)
+	longValue := strings.Repeat("x", 1024) // exceeds 256-char cap
+	body, err := json.Marshal(map[string]any{
+		"event_name": "signup_started",
+		"properties": map[string]any{
+			"auth_method": "password",
+			"long_field":  longValue,
+		},
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/beacon", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.BeaconHandler(em).ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	var rec1 map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &rec1))
+	props, ok := rec1["properties"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "password", props["auth_method"], "scalar string passes through unchanged when within cap")
+	truncated, _ := props["long_field"].(string)
+	require.Len(t, truncated, 256, "long string property value must be truncated at beaconMaxFieldLen")
+}
+
 // Non-POST returns 405 with an Allow: POST header per RFC 7231 §6.5.5.
 func TestBeacon_NonPostSetsAllowHeader(t *testing.T) {
 	em, _ := newRecorder(t)
