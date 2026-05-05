@@ -49,11 +49,17 @@ resource "google_bigquery_dataset_iam_member" "sink_writer" {
   member     = google_logging_project_sink.analytics.writer_identity
 }
 
-# Flattening view. Reads from the sink-managed table `analytics_events_raw`
-# (created lazily by Logs Router on first matching log entry) and projects
-# the slog payload fields into named columns. BQ permits view creation
-# against a non-existent table; queries will return errors until the first
-# write — that's expected.
+# Flattening view. Reads from the sink-managed table created by Logs Router.
+#
+# IMPORTANT: with `use_partitioned_tables = true`, Cloud Logging names the
+# destination table after the source log stream, NOT after the sink. The
+# Cloud Run app emits to stderr, so the sink writes to `run_googleapis_com_stderr`.
+# (If the app ever switches to stdout, this view's FROM must be updated to
+# `run_googleapis_com_stdout`, or use a UNION ALL across both.)
+#
+# The Terraform provider validates view queries at create time — the FROM
+# table must exist. Bootstrap order: deploy the app, fire one event so the
+# sink lazily creates the destination table, THEN terraform apply this view.
 resource "google_bigquery_table" "analytics_events" {
   dataset_id = google_bigquery_dataset.analytics.dataset_id
   table_id   = "analytics_events"
@@ -86,7 +92,7 @@ resource "google_bigquery_table" "analytics_events" {
         NULLIF(jsonPayload.path,         '')                       AS path,
         NULLIF(jsonPayload.user_agent,   '')                       AS user_agent,
         jsonPayload.properties                                     AS properties
-      FROM `${var.project_id}.${google_bigquery_dataset.analytics.dataset_id}.analytics_events_raw`
+      FROM `${var.project_id}.${google_bigquery_dataset.analytics.dataset_id}.run_googleapis_com_stderr`
       WHERE jsonPayload.analytics_event IS TRUE
     EOT
   }
