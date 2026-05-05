@@ -14,7 +14,7 @@
 
 ## License
 
-Sabermatic is released under the [Functional Source License, Version 1.1, Apache 2.0 Future License](LICENSE.md). You may read, fork, run, modify, and learn from the code. You may not run it as a competing service. The license converts to Apache 2.0 on 2028-05-05.
+Sabermatic is released under the [Functional Source License, Version 1.1, Apache 2.0 Future License](LICENSE.md). You may read, fork, run, modify, and learn from the code. You may not run it as a competing service. This release converts to Apache 2.0 on 2028-05-05; subsequent releases convert two years after their publication.
 
 ## Why this exists
 
@@ -25,7 +25,7 @@ Sabermatic was built end-to-end with [Claude Code](https://docs.claude.com/claud
 ```mermaid
 flowchart LR
   Browser[Browser - React/Vite] -->|ConnectRPC| API[Go API - Cloud Run]
-  Browser -.->|WebSocket audio| API
+  Browser -.->|audio (server-stream)| API
   API --> DB[(Postgres - Cloud SQL)]
   API --> SM[GCP Secret Manager]
   API --> LLM[Anthropic / OpenAI]
