@@ -4,3 +4,6 @@
 *.tfvars
 !terraform.tfvars.example
 .terraform.lock.hcl
+showHN
+*.zip
+*.bin
