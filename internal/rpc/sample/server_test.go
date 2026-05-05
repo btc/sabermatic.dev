@@ -20,7 +20,7 @@ func setup(t *testing.T) drillv1connect.SampleServiceClient {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	mux.Handle(drillv1connect.NewSampleServiceHandler(samplesvc.NewServer(ss)))
+	mux.Handle(drillv1connect.NewSampleServiceHandler(samplesvc.NewServer(ss, nil)))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 

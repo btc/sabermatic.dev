@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	"github.com/btc/drill/internal/sample"
 
@@ -72,19 +73,20 @@ func NewSampleService() (*SampleService, error) {
 // Server implements the ConnectRPC SampleServiceHandler interface.
 type Server struct {
 	ss *SampleService
+	em *events.Emitter
 }
 
 var _ drillv1connect.SampleServiceHandler = (*Server)(nil)
 
 // NewServer creates a new SampleService handler. It takes a pre-constructed
-// SampleService directly (no backend dependency required).
-func NewServer(ss *SampleService) *Server {
-	return &Server{ss: ss}
+// SampleService and an analytics emitter.
+func NewServer(ss *SampleService, em *events.Emitter) *Server {
+	return &Server{ss: ss, em: em}
 }
 
 // GetSampleSession returns the pre-parsed sample session and its messages.
 func (s *Server) GetSampleSession(
-	_ context.Context,
+	ctx context.Context,
 	_ *connect.Request[drillv1.GetSampleSessionRequest],
 ) (*connect.Response[drillv1.GetSampleSessionResponse], error) {
 	return connect.NewResponse(s.ss.session), nil

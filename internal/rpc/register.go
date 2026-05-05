@@ -38,7 +38,7 @@ func Register(mux *http.ServeMux, b *backend.Backend) error {
 	publicOpts := connect.WithInterceptors(otelInterceptor)
 	mux.Handle(drillv1connect.NewAuthServiceHandler(authsvc.NewServer(b), publicOpts))
 	mux.Handle(drillv1connect.NewLandingServiceHandler(landing.NewServer(b), publicOpts))
-	mux.Handle(drillv1connect.NewSampleServiceHandler(samplerpc.NewServer(b.SampleService), publicOpts))
+	mux.Handle(drillv1connect.NewSampleServiceHandler(samplerpc.NewServer(b.SampleService, b.Events()), publicOpts))
 
 	mux.Handle(drillv1connect.NewBillingServiceHandler(billing.NewServer(b), opts))
 	mux.Handle(drillv1connect.NewEducatorServiceHandler(educator.NewServer(b), opts))
