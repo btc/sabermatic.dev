@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	cloud.google.com/go/storage v1.61.3
-	connectrpc.com/connect v1.19.1
+	connectrpc.com/connect v1.19.2
 	connectrpc.com/otelconnect v0.9.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.31.0
