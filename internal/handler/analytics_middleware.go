@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/events"
 )
 
@@ -60,7 +59,3 @@ func AnalyticsContextMiddleware(secureCookies bool) func(http.Handler) http.Hand
 	}
 }
 
-// Compile-time assertion that auth package's session cookie name doesn't
-// collide with our visitor cookie name. (Belt and suspenders against future
-// renames.)
-var _ = auth.SessionCookieName

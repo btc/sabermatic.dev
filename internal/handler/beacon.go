@@ -16,27 +16,45 @@ var allowedBeaconEvents = map[string]struct{}{
 	"signup_started": {},
 }
 
+const (
+	// beaconMaxBodyBytes caps the JSON request body. Beacon payloads carry
+	// short event metadata; an unauth'd public endpoint must not let a single
+	// request hold arbitrary memory.
+	beaconMaxBodyBytes = 16 * 1024
+
+	// beaconMaxProperties caps custom property keys per event. BigQuery's
+	// auto-discovered properties RECORD column would accumulate columns from
+	// any caller-supplied key; bound the cardinality at the door so a buggy
+	// or hostile client can't bloat the schema.
+	beaconMaxProperties = 16
+
+	// beaconMaxFieldLen truncates string-typed fields (UTM, referrer) before
+	// emission. Defense against a client sending megabyte-long values.
+	beaconMaxFieldLen = 256
+)
+
 type beaconRequest struct {
 	EventName   string         `json:"event_name"`
-	Referrer    string         `json:"referrer,omitempty"`
-	UTMSource   string         `json:"utm_source,omitempty"`
-	UTMMedium   string         `json:"utm_medium,omitempty"`
-	UTMCampaign string         `json:"utm_campaign,omitempty"`
+	Referrer    string         `json:"referrer"`
+	UTMSource   string         `json:"utm_source"`
+	UTMMedium   string         `json:"utm_medium"`
+	UTMCampaign string         `json:"utm_campaign"`
 	Properties  map[string]any `json:"properties,omitempty"`
 }
 
 // BeaconHandler returns an http.HandlerFunc for POST /api/beacon. The handler
-// validates the event_name against an allowlist, then constructs explicit
-// emission attributes from the body (referrer/UTM take precedence over what
-// the AnalyticsContextMiddleware captured from headers, since for beacon
-// requests the browser-side document.referrer is the only source of truth).
+// validates the event_name against an allowlist, caps body size and property
+// cardinality, then emits via the Emitter using body-provided referrer/UTM
+// (the frontend SDK is the contract: it always sends those fields, and only
+// the browser sees the external document.referrer for a beacon request).
 func BeaconHandler(em *events.Emitter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, beaconMaxBodyBytes)
 		var req beaconRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -46,17 +64,22 @@ func BeaconHandler(em *events.Emitter) http.HandlerFunc {
 			http.Error(w, "unknown event_name", http.StatusBadRequest)
 			return
 		}
+		if len(req.Properties) > beaconMaxProperties {
+			http.Error(w, "too many properties", http.StatusBadRequest)
+			return
+		}
 
-		// Body-provided referrer/UTM take precedence over middleware-captured
-		// header values (which point to the SPA page that fired the beacon,
-		// not the external referrer the browser remembers).
+		// Frontend SDK is the source of truth for referrer/UTM on beacon
+		// requests; the middleware-captured Referer header points at the SPA
+		// URL, not the external referrer. Always overwrite with body values
+		// (including empty strings — the frontend means "no external referrer").
 		ctx := r.Context()
-		if req.Referrer != "" {
-			ctx = events.WithReferer(ctx, req.Referrer)
-		}
-		if req.UTMSource != "" || req.UTMMedium != "" || req.UTMCampaign != "" {
-			ctx = events.WithUTM(ctx, req.UTMSource, req.UTMMedium, req.UTMCampaign)
-		}
+		ctx = events.WithReferer(ctx, truncate(req.Referrer))
+		ctx = events.WithUTM(ctx,
+			truncate(req.UTMSource),
+			truncate(req.UTMMedium),
+			truncate(req.UTMCampaign),
+		)
 
 		// Convert properties map to slog.Attr slice.
 		var props []slog.Attr
@@ -67,4 +90,13 @@ func BeaconHandler(em *events.Emitter) http.HandlerFunc {
 		em.Emit(ctx, req.EventName, props...)
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// truncate caps a string at beaconMaxFieldLen characters; defensive against
+// caller-supplied UTM/referrer values that bloat log lines or BQ columns.
+func truncate(s string) string {
+	if len(s) > beaconMaxFieldLen {
+		return s[:beaconMaxFieldLen]
+	}
+	return s
 }
