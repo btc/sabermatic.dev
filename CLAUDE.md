@@ -1,3 +1,5 @@
+<!-- This file gives Claude Code context for working in this repo. See README.md for human onboarding. -->
+
 # Code Organization
 
 Docs: ./docs
@@ -7,7 +9,6 @@ Backend: ./internal
 Frontend: ./web
 Local deploys: ./scripts/deploy.sh
 Bootstrap: ./scripts/cloud_bootstrap.py
-Prototype: ./v0
 
 # Code Conventions
 
