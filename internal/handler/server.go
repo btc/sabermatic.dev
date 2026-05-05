@@ -43,6 +43,7 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 	}
 	mux.Handle("/", spaHandler)
 
+	analyticsMux := AnalyticsContextMiddleware(secureCookies)(mux)
 	otelHandler := otelhttp.NewMiddleware(drilotel.AppName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			if r.Pattern != "" {
@@ -50,7 +51,7 @@ func NewHandler(b *backend.Backend, spaFS fs.FS) (http.Handler, error) {
 			}
 			return r.Method + " " + r.URL.Path
 		}),
-	)(mux)
+	)(analyticsMux)
 
 	return SecurityHeaders(secureCookies, otelHandler), nil
 }
