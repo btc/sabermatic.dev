@@ -180,7 +180,7 @@ describe("LegalPage", () => {
 Run:
 
 ```bash
-cd web && npx vitest run src/components/__tests__/legal-page.test.tsx
+cd web && npx vitest run src/__tests__/legal-page.test.tsx
 ```
 
 Expected: 1 test pass.
@@ -255,7 +255,7 @@ describe("PublicFooter", () => {
 - [ ] **Step 3: Run test**
 
 ```bash
-cd web && npx vitest run src/components/__tests__/public-footer.test.tsx
+cd web && npx vitest run src/__tests__/public-footer.test.tsx
 ```
 
 Expected: 1 test pass.

@@ -854,12 +854,12 @@ var allowedBeaconEvents = map[string]struct{}{
 }
 
 type beaconRequest struct {
-	EventName   string                 `json:"event_name"`
-	Referrer    string                 `json:"referrer,omitempty"`
-	UTMSource   string                 `json:"utm_source,omitempty"`
-	UTMMedium   string                 `json:"utm_medium,omitempty"`
-	UTMCampaign string                 `json:"utm_campaign,omitempty"`
-	Properties  map[string]interface{} `json:"properties,omitempty"`
+	EventName   string         `json:"event_name"`
+	Referrer    string         `json:"referrer,omitempty"`
+	UTMSource   string         `json:"utm_source,omitempty"`
+	UTMMedium   string         `json:"utm_medium,omitempty"`
+	UTMCampaign string         `json:"utm_campaign,omitempty"`
+	Properties  map[string]any `json:"properties,omitempty"`
 }
 
 // BeaconHandler returns an http.HandlerFunc for POST /api/beacon. The handler
@@ -1373,6 +1373,8 @@ Update `internal/jobs/cleanup_test.go` — there are THREE worker constructions,
 ```
 
 (Strictly speaking, omitting `Events` does not break compilation — Go zero-values the pointer, and `Emit` on a nil `*Emitter` is safe per the nil-receiver guard in `events.go`. But add the field for completeness and to make the test reader's intent obvious.)
+
+Add to `cleanup_test.go` imports if missing: `"io"`, `"log/slog"`, and `"github.com/btc/drill/internal/events"`.
 
 - [ ] **Step 5: Update `cleanup.go` work logic — collect IDs during tx, emit AFTER commit**
 
