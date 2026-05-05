@@ -13,7 +13,7 @@ Two truths shape every decision below:
 
 ## 1. License
 
-Adopt **FSL-1.1-Apache-2.0** (Functional Source License, 2-year non-compete, converts to Apache 2.0).
+Adopt **FSL-1.1-ALv2** (Functional Source License, 2-year non-compete, converts to Apache 2.0).
 
 - File: `LICENSE.md` at repo root.
 - Source: published FSL text from fsl.software, no edits to the body.
@@ -41,7 +41,7 @@ Three audiences, top to bottom. Each section gets only what its audience needs.
 
 - One-sentence product description: what Sabermatic is and who it's for.
 - Hero screenshot or short GIF.
-- Three badges: license (FSL-1.1-Apache-2.0), CI status (`![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)`), Go version.
+- Three badges: license (FSL-1.1-ALv2), CI status (`![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)`), Go version.
 - Link to sabermatic.dev.
 - One-paragraph license posture in plain English.
 - One disambiguation line: "This repo's git slug is `drill` (project codename); the product is Sabermatic."
@@ -194,7 +194,7 @@ The filter-repo invocation must use:
   - Strip trailing blank lines orphaned by trailer removal.
 - `--email-callback` to rewrite `noreply@anthropic.com` → the canonical author email. Without this, the 1 commit authored directly by Claude remains visible on GitHub even after message rewrite.
 - `--name-callback` to rewrite `Claude` → the canonical author name. Same reason.
-- `--replace-text <patterns.txt>` if any secrets surfaced in the secret-scan phase (Section 6).
+- `--replace-text </tmp/replace-text.txt>` if any secrets surfaced in the secret-scan phase (Section 6).
 
 ### 5.2 Verification (replaces the previously broken `--grep` command)
 
@@ -255,7 +255,7 @@ Both walk reachable history. Run `git reflog expire --expire=now --all && git gc
 
 ### 6.3 Surgical removal
 
-- For specific strings: `git filter-repo --replace-text <patterns.txt>` (combined into the Section 5 rewrite).
+- For specific strings: `git filter-repo --replace-text </tmp/replace-text.txt>` (combined into the Section 5 rewrite).
 - For whole files: `git filter-repo --invert-paths --path <file>`.
 
 ### 6.4 Re-scan after rewrite
@@ -315,7 +315,7 @@ The history rewrite must come **after** all file-level cleanup, so the rewrite o
 2. `make test` green; `go mod verify` green.
 3. Tag `pre-oss-rewrite` rollback point.
 4. `git reflog expire --expire=now --all && git gc --prune=now --aggressive` (drop unreachable history before scanning).
-5. Run gitleaks + trufflehog; triage findings; build `patterns.txt` for `--replace-text` if needed.
+5. Run gitleaks + trufflehog; triage findings; build `/tmp/replace-text.txt` for `--replace-text` if needed.
 6. **Single** `git filter-repo` invocation: `--message-callback` (strip trailers), `--email-callback` + `--name-callback` (rewrite Claude author identity), `--replace-text` (if secrets to remove). One rewrite, one new set of SHAs.
 7. Verification per Section 5.2 — all four checks must pass.
 8. Re-run gitleaks + trufflehog on rewritten history (Section 6.4).
@@ -330,7 +330,7 @@ The history rewrite must come **after** all file-level cleanup, so the rewrite o
 Explicitly **not** addressed in this work:
 
 - Closing the residual coverage gaps (`rpc/auth.ResetPassword` at 33%, `backend.WaitAndCancelSession` at 0%). Not Show-HN blockers.
-- Renaming the repo from `drill` to `sabermatic` — codename `drill` stays; README disambiguates. (If the fresh-public-repo path is taken in Section 5.3, the new repo can be named `sabermatic` directly; that's a publish-time decision, not a content decision.)
+- Renaming the repo from `drill` to `sabermatic` — codename `drill` stays; README disambiguates. (Repo can be renamed via GitHub UI any time post-publish; redirects auto-handled.)
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue templates, PR templates. We're not courting contributors.
 - Decoupling the codebase from Sabermatic-specific infra (e.g., making it generic enough that anyone could host it). The license discourages that path; the code shouldn't pretend otherwise.
 - Documentation site, API reference, tutorials.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Take the private `btc/drill` repo, scrub it, rewrite history, and ship it as a public source-available release of Sabermatic under FSL-1.1-Apache-2.0. Existing remote stays at `github.com/btc/drill`; visibility flips from private to public after force-push.
+**Goal:** Take the private `btc/drill` repo, scrub it, rewrite history, and ship it as a public source-available release of Sabermatic under FSL-1.1-ALv2. Existing remote stays at `github.com/btc/drill`; visibility flips from private to public after force-push.
 
 **Architecture:** Linear pipeline. Phase 1 makes file-level changes as ordinary commits. Phase 2 verifies. Phase 3 rewrites history once (combined trailer-strip + author-rewrite + secret-removal). Phase 4 force-pushes to `btc/drill` and flips visibility. The single-rewrite design ensures one rollback point and one final SHA set.
 
@@ -30,27 +30,27 @@ Each task in this phase is a standalone commit. Order matters only where noted; 
 **Files:**
 - Create: `LICENSE.md`
 
-- [ ] **Step 1: Fetch the canonical FSL-1.1-Apache-2.0 template (with redirect-following)**
+- [ ] **Step 1: Fetch the canonical FSL-1.1-ALv2 template**
 
-`fsl.software` issues a 301 to a slightly different filename. Use `-L` to follow:
-
-```bash
-curl -sL https://fsl.software/FSL-1.1-Apache-2.0.template.md -o LICENSE.md
-```
-
-Verify the file is real markdown (not an HTML redirect page):
+The canonical filename is `FSL-1.1-ALv2.template.md`. The older `FSL-1.1-Apache-2.0.template.md` URL still 301-redirects, so `-L` is included for safety either way:
 
 ```bash
-head -1 LICENSE.md
+curl -sL https://fsl.software/FSL-1.1-ALv2.template.md -o LICENSE.md
 ```
 
-Expected first line: `# Functional Source License, Version 1.1, Apache 2.0 Future License` (or similar; some published variants title it `# Functional Source License, Version 1.1, ALv2 Future License` — the body is identical, only the heading differs by license abbreviation).
+Verify the file is real markdown (not an HTML error page):
 
-If the first line is HTML, abort and re-run with explicit redirect handling.
+```bash
+head -1 LICENSE.md | grep "^# Functional Source License" || echo "ERROR: not a valid FSL file"
+```
+
+Expected: the grep prints the heading and no ERROR is emitted. Heading reads `# Functional Source License, Version 1.1, ALv2 Future License`.
+
+If the ERROR line appears, abort, re-fetch, or use a fallback method (e.g., manual download from fsl.software).
 
 - [ ] **Step 2: Substitute the Notice block**
 
-The template has one substitution point: the `Notice` block. After substitution it must read exactly:
+The template's `Notice` block has one line containing two variables — `${year}` and `${licensor name}`. Both must be substituted. After substitution the block must read exactly:
 
 ```
 ## Notice
@@ -58,7 +58,7 @@ The template has one substitution point: the `Notice` block. After substitution 
 Copyright 2026 Spanda, LLC
 ```
 
-Edit `LICENSE.md` to set the Notice line correctly. Do not edit any other section.
+Edit `LICENSE.md` so both placeholders are replaced. Do not edit any other section.
 
 - [ ] **Step 3: Verify the file**
 
@@ -77,7 +77,7 @@ Expected:
 
 ```bash
 git add LICENSE.md
-git commit -m "license: add FSL-1.1-Apache-2.0"
+git commit -m "license: add FSL-1.1-ALv2"
 ```
 
 ---
@@ -190,7 +190,7 @@ The README references `docs/assets/hero.png`. The image must exist before commit
 
 Capture a screenshot of `https://sabermatic.dev` showing a representative session. Save to `docs/assets/hero.png` (create the directory: `mkdir -p docs/assets`). Aim for ~1600px wide.
 
-If you cannot capture a screenshot in this session, comment out the `![Sabermatic hero]` line in Step 2's README template before committing — do not commit a broken image link.
+If you cannot capture a screenshot in this session, edit Step 2's README heredoc before committing: wrap the line `![Sabermatic hero](docs/assets/hero.png)` in HTML comment markers — `<!-- ![Sabermatic hero](docs/assets/hero.png) -->` — so the image reference doesn't render. Also remove `docs/assets/` from Step 4's `git add` since no file was created.
 
 - [ ] **Step 2: Write the README**
 
@@ -202,7 +202,7 @@ Save to `README.md`:
 > System-design interview practice with an AI coach. Voice-driven, real-time, structured feedback.
 
 [![CI](https://github.com/btc/drill/actions/workflows/ci.yml/badge.svg)](https://github.com/btc/drill/actions/workflows/ci.yml)
-[![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/license-FSL--1.1--Apache--2.0-blue.svg)](LICENSE.md)
+[![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg)](LICENSE.md)
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8.svg)](go.mod)
 
 ![Sabermatic hero](docs/assets/hero.png)
@@ -302,7 +302,7 @@ Sabermatic is source-available, not open source. We are not currently accepting 
 test -f README.md
 test -f docs/assets/hero.png || echo "WARNING: hero image missing — confirm the line is commented out"
 head -3 README.md
-grep -c "FSL-1.1-Apache-2.0" README.md
+grep -c "FSL-1.1-ALv2" README.md
 grep -c "btc/drill" README.md
 ```
 
@@ -310,7 +310,7 @@ Expected:
 - README exists; first line: `# Sabermatic`.
 - Hero image exists OR the warning is acknowledged (with the README line commented out).
 - License grep ≥1.
-- `btc/drill` grep ≥3 (badges + clone URL + advisory).
+- `btc/drill` grep ≥2 (CI badge URL + clone URL). The advisory URL lives in `SECURITY.md`, not README.
 
 - [ ] **Step 4: Commit**
 
@@ -446,9 +446,9 @@ For each match, read the file and write a one-sentence rationale (keep / drop) u
 
 Save the candidate list to `/tmp/triage-candidates.md` for the human checkpoint.
 
-- [ ] **Step 3: Human checkpoint**
+- [ ] **Step 3: Human checkpoint (STOP)**
 
-Surface `/tmp/triage-candidates.md` to the owner. Get explicit confirmation per file before deleting. Do NOT delete on your own judgment.
+Print the contents of `/tmp/triage-candidates.md` and STOP execution. Wait for the owner to respond with explicit per-file decisions in the form `delete: <file1>, <file2>; keep: <file3>, ...`. Do not proceed to Step 4 until that response is received. Do NOT delete on your own judgment.
 
 - [ ] **Step 4: Delete confirmed files**
 
@@ -467,14 +467,14 @@ ls docs/superpowers/plans/ | wc -l
 
 - [ ] **Step 6: Commit**
 
+Replace `N` below with the actual count of additionally-deleted files (write `0` if only `saas-starter-extraction.md` was dropped):
+
 ```bash
 git commit -m "docs: triage internal plans — drop business-strategy specs
 
 Removed: saas-starter-extraction.md + N other business/growth plans.
 Kept architecture/refactor/system-design plans."
 ```
-
-(Replace `N`.)
 
 ---
 
@@ -554,7 +554,7 @@ git commit -m "docs(frd): reframe purpose statement; drop consultant references"
 ls docs/superpowers/plans/ | grep -E "http-package|auth-nav|landing-mobile"
 ```
 
-Edit only the files that still exist. Files deleted in Task 8 don't need editing — the history rewrite in Task 16 handles their old content.
+Edit only the files that still exist. Files deleted in Task 8 don't need editing — they're already gone from HEAD, so their content won't appear in the public repo. (The history rewrite in Task 16 does NOT remove file content from old commits; it only rewrites commit messages and author metadata. Deletion at HEAD is what protects the public-facing tree.)
 
 - [ ] **Step 2: Edit code-block form (`2026-04-12-http-package-refactor.md`)**
 
@@ -645,9 +645,11 @@ Replace with:
 - [ ] **Step 2: Untrack the two files**
 
 ```bash
-git rm --cached .claude/settings.local.json
-git rm --cached '.claude/projects/-Users-btc-Projects-src-drill/memory/feedback_fix_all_issues.md'
+git rm --cached --ignore-unmatch .claude/settings.local.json
+git rm --cached --ignore-unmatch '.claude/projects/-Users-btc-Projects-src-drill/memory/feedback_fix_all_issues.md'
 ```
+
+`--ignore-unmatch` makes the step idempotent — if either file was already untracked by a prior run, the command no-ops instead of erroring.
 
 - [ ] **Step 3: Verify**
 
@@ -794,12 +796,15 @@ Expected: empty (neither file tracked).
 ls docs/bugs/
 ```
 
-For each post-mortem, skim the framing. Confirm each reads as "we caught and fixed it" rather than "live customer-impacting incident without resolution." If any read poorly for public consumption, redact or remove and commit.
+For each post-mortem, skim the framing. The criterion: "we caught and fixed it" is fine; "live customer-impacting incident without resolution" is not. If you have any uncertainty about a post-mortem's tone, surface the file path and a one-line summary to the owner and wait for keep/redact/remove decision. Do not redact on your own judgment.
 
 - [ ] **Step 9: One-pass eyeball read**
 
+Use `git log` to find Phase 1's first commit, then diff from before it:
+
 ```bash
-git diff HEAD~12..HEAD --name-only
+PHASE1_FIRST=$(git log --reverse --pretty=format:"%H %s" | grep -E "^[a-f0-9]+ license: add" | head -1 | cut -d' ' -f1)
+git diff "${PHASE1_FIRST}^..HEAD" --name-only
 ```
 
 Read each Phase 1 file for tone, typos, embarrassing inline comments. This is the spec's pre-publish "eyeball pass" gate.
@@ -822,14 +827,17 @@ Verification only.
 
 - [ ] **Step 1: Mirror-clone backup (offline insurance)**
 
-Before any destructive operation, take an offline mirror clone:
+Before any destructive operation, take an offline mirror clone. Use a timestamp with seconds so re-runs in the same day don't collide:
 
 ```bash
-git clone --mirror git@github.com:btc/drill.git /tmp/drill-backup-$(date +%Y%m%d).git
-du -sh /tmp/drill-backup-$(date +%Y%m%d).git
+BACKUP=/tmp/drill-backup-$(date +%Y%m%d-%H%M%S).git
+git clone --mirror git@github.com:btc/drill.git "$BACKUP"
+git -C "$BACKUP" fsck --no-progress
+du -sh "$BACKUP"
+echo "Backup at: $BACKUP"
 ```
 
-If the local rewrite fails catastrophically, recovery is `git clone /tmp/drill-backup-*.git fresh-drill`.
+`fsck` confirms object-DB integrity. Note the `$BACKUP` path printed at the end — recovery is `git clone "$BACKUP" fresh-drill` if you ever need it.
 
 - [ ] **Step 2: Verify `git filter-repo` is installed and working**
 
@@ -1015,15 +1023,17 @@ return name
   --dry-run --force
 ```
 
-Inspect:
+Inspect with explicit before/after counts (the message-callback DOES run during dry-run; only embedded-SHA translation is disabled):
 
 ```bash
 ls .git/filter-repo/
-diff <(grep -ciE "Co-Authored-By:.*Claude" .git/filter-repo/fast-export.original) \
-     <(grep -ciE "Co-Authored-By:.*Claude" .git/filter-repo/fast-export.filtered)
+echo "Original trailer count:"
+grep -ciE "Co-Authored-By:.*Claude" .git/filter-repo/fast-export.original
+echo "Filtered trailer count (expect 0):"
+grep -ciE "Co-Authored-By:.*Claude" .git/filter-repo/fast-export.filtered
 ```
 
-Expected: original count high (~1,100+), filtered count = 0.
+Expected: original ~1,100+, filtered = 0. If filtered > 0, the regex needs adjustment — do not proceed to Step 3.
 
 - [ ] **Step 3: Run for real**
 
@@ -1251,7 +1261,7 @@ Expected: name and email match the canonical Brian identity.
 Read `.github/workflows/ci.yml` and `.github/workflows/deploy.yml`. Confirm:
 
 - `ci.yml`'s `pull_request` trigger does NOT use any deployment secret (`WIF_PROVIDER`, `DEPLOYER_SA`).
-- `deploy.yml` is gated on `push` to `main` or `workflow_dispatch` only — never `pull_request`.
+- `deploy.yml` is NOT triggered by `pull_request`.
 
 If any secret is reachable from a `pull_request` trigger (which, post-public, would mean fork PRs could exfiltrate secrets): fix the workflow file, commit, force-push.
 
@@ -1274,7 +1284,7 @@ This cannot be done via `gh` CLI without elevated tokens. Manual UI step.
 Visit `https://github.com/btc/drill` in an incognito browser window. Confirm:
 - Repo loads (no auth required).
 - README renders with badges, hero image, all sections.
-- License sidebar reads "FSL-1.1-Apache-2.0".
+- License sidebar reads "FSL-1.1-ALv2".
 - Most recent commits show canonical Brian author.
 
 - [ ] **Step 8: No commit needed (unless workflow fix)**
@@ -1380,7 +1390,7 @@ GitHub UI: Repo → Settings → General → Social preview → Upload a 1280×6
 
 Open `https://github.com/btc/drill` in a clean browser:
 - README renders with badges, hero image, license link.
-- License sidebar reads "FSL-1.1-Apache-2.0".
+- License sidebar reads "FSL-1.1-ALv2".
 - Topics show in the About panel.
 - Issues tab visible; Discussions tab not visible.
 - Branch protection visible at Settings → Branches.
