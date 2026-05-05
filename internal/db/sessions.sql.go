@@ -44,24 +44,29 @@ WHERE status = 'active'
     SELECT 1 FROM messages m
     WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
   )
-RETURNING id
+RETURNING id, user_id
 `
+
+type CancelAbandonedEmptySessionsRow struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
 
 // Batch-cancels abandoned sessions that have zero candidate messages.
 // These are empty sessions where no interview happened.
-func (q *Queries) CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error) {
+func (q *Queries) CancelAbandonedEmptySessions(ctx context.Context) ([]CancelAbandonedEmptySessionsRow, error) {
 	rows, err := q.db.Query(ctx, cancelAbandonedEmptySessions)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []CancelAbandonedEmptySessionsRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i CancelAbandonedEmptySessionsRow
+		if err := rows.Scan(&i.ID, &i.UserID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -94,24 +99,29 @@ WHERE status = 'active'
     SELECT 1 FROM messages m
     WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
   )
-RETURNING id
+RETURNING id, user_id
 `
+
+type CompleteAbandonedActiveSessionsRow struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
 
 // Batch-completes abandoned sessions that have at least one candidate message.
 // These are real interviews that the user forgot to end.
-func (q *Queries) CompleteAbandonedActiveSessions(ctx context.Context) ([]uuid.UUID, error) {
+func (q *Queries) CompleteAbandonedActiveSessions(ctx context.Context) ([]CompleteAbandonedActiveSessionsRow, error) {
 	rows, err := q.db.Query(ctx, completeAbandonedActiveSessions)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []CompleteAbandonedActiveSessionsRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i CompleteAbandonedActiveSessionsRow
+		if err := rows.Scan(&i.ID, &i.UserID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

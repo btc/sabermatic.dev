@@ -18,13 +18,13 @@ type Querier interface {
 	ArchiveSessionsBulk(ctx context.Context, arg ArchiveSessionsBulkParams) (int64, error)
 	// Batch-cancels abandoned sessions that have zero candidate messages.
 	// These are empty sessions where no interview happened.
-	CancelAbandonedEmptySessions(ctx context.Context) ([]uuid.UUID, error)
+	CancelAbandonedEmptySessions(ctx context.Context) ([]CancelAbandonedEmptySessionsRow, error)
 	CancelSession(ctx context.Context, arg CancelSessionParams) error
 	// Reset sessions stuck in 'generating' for too long (crash recovery).
 	CleanupStaleGenerating(ctx context.Context) error
 	// Batch-completes abandoned sessions that have at least one candidate message.
 	// These are real interviews that the user forgot to end.
-	CompleteAbandonedActiveSessions(ctx context.Context) ([]uuid.UUID, error)
+	CompleteAbandonedActiveSessions(ctx context.Context) ([]CompleteAbandonedActiveSessionsRow, error)
 	CountActiveSessionsByUser(ctx context.Context, userID uuid.UUID) (int32, error)
 	// Count completed interviewer turns for turn_count derivation.
 	CountInterviewerMessages(ctx context.Context, sessionID uuid.UUID) (int32, error)

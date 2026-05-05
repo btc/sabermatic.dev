@@ -125,7 +125,7 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
-	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store)
+	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store, em)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:      {MaxWorkers: cfg.River.NumDefaultWorkers},

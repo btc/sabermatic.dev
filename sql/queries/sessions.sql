@@ -52,7 +52,7 @@ WHERE status = 'active'
     SELECT 1 FROM messages m
     WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
   )
-RETURNING id;
+RETURNING id, user_id;
 
 -- name: CompleteAbandonedActiveSessions :many
 -- Batch-completes abandoned sessions that have at least one candidate message.
@@ -65,7 +65,7 @@ WHERE status = 'active'
     SELECT 1 FROM messages m
     WHERE m.session_id = interview_sessions.id AND m.role = 'candidate'
   )
-RETURNING id;
+RETURNING id, user_id;
 
 -- name: UpdateSessionStatusOnly :exec
 -- NB: Unlike UpdateSessionStatus, this does NOT touch ended_at or turn_count.

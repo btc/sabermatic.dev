@@ -2,6 +2,8 @@ package jobs_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/jobs"
 	"github.com/btc/drill/internal/jobs/jobtest"
 )
@@ -69,8 +72,9 @@ func TestCleanupAbandonedSessions_CancelsEmptySessions(t *testing.T) {
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
 	require.NoError(t, err)
 	worker := &jobs.CleanupAbandonedSessionsWorker{
-		Pool: pool,
-		Jobs: riverClient,
+		Pool:   pool,
+		Jobs:   riverClient,
+		Events: events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil))),
 	}
 
 	err = worker.Work(ctx, &river.Job[jobs.CleanupAbandonedSessionsArgs]{
@@ -147,8 +151,9 @@ func TestCleanupAbandonedSessions_CompletesSessionsWithMessages(t *testing.T) {
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
 	require.NoError(t, err)
 	worker := &jobs.CleanupAbandonedSessionsWorker{
-		Pool: pool,
-		Jobs: riverClient,
+		Pool:   pool,
+		Jobs:   riverClient,
+		Events: events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil))),
 	}
 
 	err = worker.Work(ctx, &river.Job[jobs.CleanupAbandonedSessionsArgs]{
@@ -191,8 +196,9 @@ func TestCleanupAbandonedSessions_RecentSessionNotAffected(t *testing.T) {
 	riverClient2, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
 	require.NoError(t, err)
 	worker := &jobs.CleanupAbandonedSessionsWorker{
-		Pool: pool,
-		Jobs: riverClient2,
+		Pool:   pool,
+		Jobs:   riverClient2,
+		Events: events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil))),
 	}
 
 	err = worker.Work(ctx, &river.Job[jobs.CleanupAbandonedSessionsArgs]{

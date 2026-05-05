@@ -37,7 +37,7 @@ func TestSendEmail_Integration(t *testing.T) {
 
 	// Set up workers with log sender
 	logSender := email.NewLogSender()
-	workers, _ := jobs.RegisterWorkers(cfg, logSender, pool, nil, nil, nil)
+	workers, _ := jobs.RegisterWorkers(cfg, logSender, pool, nil, nil, nil, nil)
 
 	// Create and start River client
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
