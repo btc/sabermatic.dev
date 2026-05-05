@@ -45,7 +45,7 @@ web/dist/
 # Claude Code / Superpowers
 .superpowers/
 .worktrees/
-.claude/worktrees/
+.claude/
 .playwright-mcp/
 
 # Go binaries
