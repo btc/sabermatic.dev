@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-01
 **Status**: Approved
-**Purpose**: Input for a third-party system design consultant who will design a production-grade, multi-tenant SaaS architecture from first principles and industry best practice.
+**Purpose**: Functional requirements specification for a production-grade, multi-tenant SaaS architecture.
 
 ---
 
@@ -12,7 +12,7 @@
 
 Drill is an AI-powered system design interview practice platform offered as a multi-tenant SaaS. Candidates practice realistic system design interviews conducted by an AI interviewer, receive structured scoring and feedback, get personalized educational content explaining their gaps, and receive strategic coaching that tracks their improvement over time.
 
-The system exists today as a working single-user prototype. This document specifies the functional requirements for a production system that is reliable, scalable, and maintainable. The consultant is expected to choose technologies, design the architecture, and make all infrastructure decisions. This document specifies *what* the system must do, not *how*.
+The system exists today as a working single-user prototype. This document specifies the functional requirements for a production system that is reliable, scalable, and maintainable. This document specifies *what* the system must do, not *how*.
 
 ### 1.2 Actors
 
@@ -177,7 +177,7 @@ The AI interviewer's behavioral rules are product requirements, not implementati
 | **FR-073** | The history view shall display all sessions with: question title, date, duration, turn count, overall score, per-dimension scores, and archived status. |
 | **FR-074** | The history view shall include a score trend visualization showing the candidate's overall scores over time. |
 | **FR-075** | Sessions shall be sortable and filterable (active/archived/all). |
-| **FR-076** | Whether candidates can permanently delete sessions shall be designed to satisfy GDPR requirements. The specific behavior is a design decision for the consultant. |
+| **FR-076** | Whether candidates can permanently delete sessions shall be designed to satisfy GDPR requirements. |
 
 ---
 
