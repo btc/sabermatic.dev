@@ -402,11 +402,11 @@ Emit `session_ended` per ID from each list with the appropriate `reason`. The cl
 | Resource | Purpose |
 |---|---|
 | `google_bigquery_dataset.analytics` | Dataset `sabermatic_analytics`, region matches Cloud Run, no default table expiration |
-| `google_logging_project_sink.analytics` | Filter: `resource.type="cloud_run_revision" AND resource.labels.service_name="sabermatic" AND jsonPayload.analytics_event="true"`. Destination: the BQ dataset. `unique_writer_identity = true`. `bigquery_options.use_partitioned_tables = true`. |
+| `google_logging_project_sink.analytics` | Filter: `resource.type="cloud_run_revision" AND resource.labels.service_name="sabermatic" AND jsonPayload.analytics_event = true` (unquoted boolean — slog emits native JSON booleans, not strings). Destination: the BQ dataset. `unique_writer_identity = true`. `bigquery_options.use_partitioned_tables = true`. |
 | `google_bigquery_dataset_iam_member.sink_writer` | Grant the sink's `writer_identity` `roles/bigquery.dataEditor` on the dataset |
 | `google_bigquery_table.analytics_events_view` | View `analytics_events` defined by the SELECT in the previous section. `depends_on = [google_bigquery_dataset.analytics]` is sufficient — BQ permits view creation against a non-existent table; queries return errors until the sink writes the first row. |
 
-**Sink filter caveat:** Cloud Logging filter syntax compares strings; slog writes booleans as `true`/`false` JSON. Empirically the filter expression `jsonPayload.analytics_event="true"` works because Cloud Logging coerces bool to string in filters. Verify during smoke test by checking the sink's exported entries.
+**Sink filter syntax note:** slog writes booleans as native JSON booleans (`"analytics_event":true`, not `"analytics_event":"true"`). Cloud Logging's filter language supports unquoted boolean literals — use `jsonPayload.analytics_event = true` (unquoted). Quoting the value to `"true"` will silently match zero entries because the field type doesn't match the comparison value.
 
 **Trace correlation:** Cloud Logging's built-in `trace` field carries `projects/<project>/traces/<trace_id>` automatically when the slog handler is wired with the OTel context. The view extracts the trace_id from this field. We do not separately stamp `trace_id` in the slog payload.
 

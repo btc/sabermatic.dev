@@ -35,7 +35,9 @@
 | `internal/backend/oauth.go` | Modify | Emit `oauth_completed` from `OAuthLogin` before returning, with `is_new_user` / `is_reactivated` derived from `path` |
 | `internal/backend/session.go` | Modify | Emit `session_created` (CreateSession), `session_ended` (CompleteSession + CancelSession inner methods) |
 | `internal/backend/turn.go` | Modify | Emit `first_message_sent` (ExecuteTurn, guarded by candidate-message-count check) |
-| `internal/jobs/cleanup.go` | Modify | Emit one `session_ended` per ID returned by both `CompleteAbandonedActiveSessions` (`reason=abandoned`) and `CancelAbandonedEmptySessions` (`reason=abandoned_empty`); fetch user_ids for each via the modified queries |
+| `internal/jobs/cleanup.go` | Modify | Add `Events *events.Emitter` field; emit one `session_ended` per ID returned by both `CompleteAbandonedActiveSessions` (`reason=abandoned`) and `CancelAbandonedEmptySessions` (`reason=abandoned_empty`) AFTER tx commits; fetch user_ids via the modified queries |
+| `internal/jobs/workers.go` | Modify | Add `em *events.Emitter` parameter to `RegisterWorkers`; pass it into the new `CleanupAbandonedSessionsWorker.Events` field |
+| `internal/jobs/cleanup_test.go` | Modify | Update all 3 worker constructions (lines ~71, ~149, ~193) to set `Events:` to a discard-emitter |
 | `sql/queries/sessions.sql` | Modify | Change two `:many` queries to RETURN both `id` and `user_id` so cleanup can attach user_id to events |
 | `internal/db/sessions.sql.go` | Auto-regen | sqlc regenerates the two query functions to return rows with both fields |
 
@@ -411,10 +413,13 @@ Expected callers:
 
 (Note: `internal/backendtest/backendtest.go` only contains `SeedUser`, which takes an existing `*backend.Backend`; no constructor change needed there.)
 
-In `cmd/drill/main.go`, instantiate the emitter from the application logger and pass it:
+In `cmd/drill/main.go`, the application logger is built locally (around line 48–54): `buildLogWriter(cfg.Log.File)` → `slog.NewJSONHandler` → `drilotel.NewTraceHandler` → `slog.New(...)`. The result is the `logger` variable. **Do NOT pass `slog.Default()`** — that would lose the trace-correlated handler that injects Cloud Trace IDs into log entries (which the BQ view depends on for trace_id correlation).
+
+Pass the constructed `logger` into the emitter, then thread `em` into `backend.New`:
 
 ```go
-em := events.NewEmitter(slog.Default())
+// (around line 54, after `logger := slog.New(drilotel.NewTraceHandler(...))`)
+em := events.NewEmitter(logger)
 b, err := backend.New(cfg, em)
 if err != nil {
     return fmt.Errorf("backend: %w", err)
@@ -1290,17 +1295,29 @@ b.events.Emit(ctx, "session_ended",
 
 - [ ] **Step 2: Emit in `Backend.CancelSession`**
 
-Locate `func (b *Backend) CancelSession(...)` (line ~334). Same pattern, AFTER commit:
+Locate `func (b *Backend) CancelSession(...)` (line ~334). The function currently ends with `return tx.Commit(ctx)` directly (line 357). To place the emit AFTER commit, restructure the tail:
+
+Replace:
 
 ```go
+return tx.Commit(ctx)
+```
+
+with:
+
+```go
+if err := tx.Commit(ctx); err != nil {
+    return fmt.Errorf("commit cancel-session: %w", err)
+}
 ctx = events.WithSessionID(ctx, sessionID.String())
 b.events.Emit(ctx, "session_ended",
     slog.String("reason", "cancelled"),
     slog.Int("turn_count", turnCount),
 )
+return nil
 ```
 
-(Both place the emit AFTER commit so a commit failure does not produce a "session ended" event for a session that didn't actually end — same publish-after-commit pattern as in the cleanup job below.)
+(Both `CompleteSession` and `CancelSession` place the emit AFTER commit so a commit failure does not produce a "session ended" event for a session that didn't actually end — same publish-after-commit pattern as in the cleanup job below.)
 
 - [ ] **Step 3: Add `Events *events.Emitter` to the cleanup worker (avoid circular import)**
 
@@ -1339,11 +1356,26 @@ func RegisterWorkers(
 }
 ```
 
-Update the caller in `internal/backend/backend.go` (the line `workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store)`) to pass `b.events`. Since this happens inside `New` AFTER `b.events = em` has been assigned, that field is in scope.
+Update the caller in `internal/backend/backend.go` at line 126 (`workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store)`) to pass `em`. Use the `em` parameter directly — `b.events` does NOT work because the `&Backend{...}` struct literal isn't constructed until later in `New` (around line 202); `b` does not exist at line 126. The new line:
 
-Update `internal/jobs/cleanup_test.go` to construct the worker with `Events: events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil)))` (or a recording emitter if the test asserts on emitted events).
+```go
+workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store, em)
+```
+
+Update `internal/jobs/cleanup_test.go` — there are THREE worker constructions, at lines ~71, ~149, ~193. Each is `&jobs.CleanupAbandonedSessionsWorker{Pool: pool, Jobs: riverClient}` (or similar). Add `Events:` to each:
+
+```go
+&jobs.CleanupAbandonedSessionsWorker{
+    Pool:   pool,
+    Jobs:   riverClient,
+    Events: events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil))),
+}
+```
+
+(Strictly speaking, omitting `Events` does not break compilation — Go zero-values the pointer, and `Emit` on a nil `*Emitter` is safe per the nil-receiver guard in `events.go`. But add the field for completeness and to make the test reader's intent obvious.)
 
 - [ ] **Step 5: Update `cleanup.go` work logic — collect IDs during tx, emit AFTER commit**
+
 
 The current cleanup job runs both terminal SQL queries and commits. The plan must place emits AFTER the commit, otherwise a commit-fail produces phantom "ended" events. Refactor (pseudo-diff):
 
@@ -1384,7 +1416,7 @@ return nil
 
 Add imports `"log/slog"` and `"github.com/btc/drill/internal/events"` if missing.
 
-- [ ] **Step 4: Verify build + run job tests**
+- [ ] **Step 6: Verify build + run job tests**
 
 ```bash
 go build ./...
@@ -1392,11 +1424,12 @@ go test ./internal/jobs/... -run Cleanup -v
 go test ./internal/backend/... -run Session -v
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add sql/queries/sessions.sql internal/db/sessions.sql.go internal/db/querier.go \
-        internal/backend/session.go internal/jobs/cleanup.go
+        internal/backend/session.go internal/backend/backend.go \
+        internal/jobs/cleanup.go internal/jobs/workers.go internal/jobs/cleanup_test.go
 git commit -m "events: emit session_ended from all four terminal paths with reason property"
 ```
 

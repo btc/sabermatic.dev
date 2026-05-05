@@ -23,8 +23,8 @@
 | `web/src/pages/privacy.tsx` | Create |
 | `web/src/components/public-footer.tsx` | Create |
 | `web/src/components/legal-page.tsx` | Create — shared layout shell for about/terms/privacy (header + footer + max-width content area) |
-| `web/src/components/__tests__/legal-page.test.tsx` | Create — render-smoke test |
-| `web/src/components/__tests__/public-footer.test.tsx` | Create — render-smoke test |
+| `web/src/__tests__/legal-page.test.tsx` | Create — render-smoke test |
+| `web/src/__tests__/public-footer.test.tsx` | Create — render-smoke test |
 | `web/src/App.tsx` | Modify — replace `/about` route, add `/terms` and `/privacy` routes; mount footer alongside ConditionalHome's Landing render |
 | `web/src/pages/sample.tsx` | Modify — convert to flex column; mount `<PublicFooter />` |
 | `web/src/pages/auth/auth-layout.tsx` | Modify — wrap centered card in flex column; mount `<PublicFooter />` (per spec "mount in landing/sample/auth layouts") |
@@ -153,7 +153,7 @@ Expected: no errors related to `legal-page.tsx`. (Will error on `public-footer` 
 
 - [ ] **Step 3: Smoke-test render**
 
-Create `web/src/components/__tests__/legal-page.test.tsx`:
+Create `web/src/__tests__/legal-page.test.tsx`:
 
 ```tsx
 import { describe, it, expect } from "vitest";
@@ -191,9 +191,9 @@ Expected: 1 test pass.
 
 **Files:**
 - Create: `web/src/components/public-footer.tsx`
-- Create: `web/src/components/__tests__/public-footer.test.tsx`
+- Create: `web/src/__tests__/public-footer.test.tsx`
 
-(Test file location follows the existing convention seen in `web/src/pages/auth/__tests__/`.)
+(Test file location follows the existing convention for component tests, all of which live in `web/src/__tests__/` — see `ball-mark.test.tsx`, `brand-name.test.tsx`, `public-header.test.tsx`, etc.)
 
 - [ ] **Step 1: Create the file**
 
@@ -228,7 +228,7 @@ export function PublicFooter() {
 
 - [ ] **Step 2: Smoke test renders**
 
-Create `web/src/components/__tests__/public-footer.test.tsx`:
+Create `web/src/__tests__/public-footer.test.tsx`:
 
 ```tsx
 import { describe, it, expect } from "vitest";
@@ -787,14 +787,26 @@ Per the spec ("mount in landing/sample/auth layouts"), the footer also belongs o
 
 Read `web/src/pages/auth/auth-layout.tsx`. The current structure is `<div className="flex min-h-screen items-center justify-center bg-background px-4">` — that flex centers content vertically. Wrap the centering div with a column-flex parent so the footer sits at the bottom without disrupting the card centering.
 
-Replace:
+Add the import at the top of the file:
+
+```tsx
+import { PublicFooter } from "@/components/public-footer";
+```
+
+Replace the function body:
 
 ```tsx
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
-        {/* ... existing brand + children ... */}
+        <div className="mb-10 text-center">
+          <Link to="/" className="inline-block">
+            <BrandName className="text-base font-semibold tracking-wider text-muted-foreground" />
+          </Link>
+          <p className="mt-2 text-sm text-muted-foreground/70">system design, measured.</p>
+        </div>
+        {children}
       </div>
     </div>
   );
@@ -804,15 +816,18 @@ export function AuthLayout({ children }: { children: ReactNode }) {
 with:
 
 ```tsx
-import { PublicFooter } from "@/components/public-footer";
-// ... existing imports unchanged
-
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <div className="flex flex-1 items-center justify-center px-4">
         <div className="w-full max-w-sm">
-          {/* ... existing brand + children unchanged ... */}
+          <div className="mb-10 text-center">
+            <Link to="/" className="inline-block">
+              <BrandName className="text-base font-semibold tracking-wider text-muted-foreground" />
+            </Link>
+            <p className="mt-2 text-sm text-muted-foreground/70">system design, measured.</p>
+          </div>
+          {children}
         </div>
       </div>
       <PublicFooter />
@@ -820,6 +835,8 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   );
 }
 ```
+
+(Only the outer wrapper changes from `flex items-center justify-center` to `flex flex-col` with an inner centering wrapper that gets `flex-1`. The brand+tagline+children block is preserved verbatim.)
 
 - [ ] **Step 5: Verify build**
 
@@ -1057,8 +1074,8 @@ Expected: all stages pass (frontend typecheck/lint/tests + backend tests).
 ```bash
 git add web/package.json web/package-lock.json web/src/index.css \
         web/src/components/legal-page.tsx web/src/components/public-footer.tsx \
-        web/src/components/__tests__/legal-page.test.tsx \
-        web/src/components/__tests__/public-footer.test.tsx \
+        web/src/__tests__/legal-page.test.tsx \
+        web/src/__tests__/public-footer.test.tsx \
         web/src/pages/about.tsx web/src/pages/terms.tsx web/src/pages/privacy.tsx \
         web/src/App.tsx web/src/pages/sample.tsx web/src/pages/auth/auth-layout.tsx \
         web/src/pages/auth/login.tsx web/src/pages/auth/signup.tsx \
