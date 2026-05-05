@@ -16,17 +16,24 @@
 
 | File | Action |
 |---|---|
+| `web/package.json` | Modify — add `@tailwindcss/typography` devDependency |
+| `web/src/index.css` | Modify — add `@plugin "@tailwindcss/typography";` |
 | `web/src/pages/about.tsx` | Create — replaces existing route that aliased `/about` to `<Landing />` |
 | `web/src/pages/terms.tsx` | Create |
 | `web/src/pages/privacy.tsx` | Create |
 | `web/src/components/public-footer.tsx` | Create |
 | `web/src/components/legal-page.tsx` | Create — shared layout shell for about/terms/privacy (header + footer + max-width content area) |
+| `web/src/components/__tests__/legal-page.test.tsx` | Create — render-smoke test |
+| `web/src/components/__tests__/public-footer.test.tsx` | Create — render-smoke test |
 | `web/src/App.tsx` | Modify — replace `/about` route, add `/terms` and `/privacy` routes; mount footer alongside ConditionalHome's Landing render |
+| `web/src/pages/sample.tsx` | Modify — convert to flex column; mount `<PublicFooter />` |
+| `web/src/pages/auth/auth-layout.tsx` | Modify — wrap centered card in flex column; mount `<PublicFooter />` (per spec "mount in landing/sample/auth layouts") |
 | `web/index.html` | Modify — add `<meta name="description">` |
 | `web/public/robots.txt` | Create |
 | `web/public/sitemap.xml` | Create |
-| `web/src/pages/auth/login.tsx` | Modify — add `<meta name="robots" content="noindex">` via a small head-effect (no react-helmet dep — use a tiny useEffect that sets/cleans a meta tag, or document the choice to skip if a head-management lib isn't already in use) |
-| `web/src/pages/auth/signup.tsx` | Modify — same noindex addition |
+| `web/src/hooks/use-noindex.ts` | Create — small hook adding/removing noindex meta on mount/unmount |
+| `web/src/pages/auth/login.tsx` | Modify — call `useNoindex()` |
+| `web/src/pages/auth/signup.tsx` | Modify — call `useNoindex()` |
 
 No tests required for static pages beyond the existing typecheck/lint/vitest. The `<PublicFooter />` and `<LegalPage />` get one render-smoke test each.
 
@@ -59,7 +66,45 @@ If any answer is "different from spec," edit the corresponding draft in this pla
 
 ---
 
-### Task 2: Create shared `<LegalPage />` shell
+### Task 2a: Install Tailwind Typography plugin
+
+**Files:**
+- Modify: `web/package.json` (add devDependency)
+- Modify: `web/src/index.css` (add `@plugin` directive)
+
+The codebase uses Tailwind v4 (`@tailwindcss/vite` 4.x with `@import "tailwindcss"` in `index.css`). The `prose` family of classes used by LegalPage is provided by `@tailwindcss/typography`, which is NOT currently installed. Without this, the legal pages render with no typographic styling — headings the same size as body text, no list bullets, no paragraph spacing.
+
+- [ ] **Step 1: Install the plugin**
+
+```bash
+cd web && npm install --save-dev @tailwindcss/typography
+```
+
+Expected: package added to devDependencies; lockfile updated.
+
+- [ ] **Step 2: Register the plugin in `web/src/index.css`**
+
+Read the current file (it imports tailwindcss + tw-animate-css + shadcn/tailwind.css). Add a `@plugin` directive AFTER `@import "tailwindcss";`:
+
+```css
+@import "@fontsource/jetbrains-mono";
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+```
+
+- [ ] **Step 3: Verify the plugin loads**
+
+```bash
+cd web && npm run build
+```
+
+Expected: build succeeds with no Tailwind warnings about unrecognized `prose` classes.
+
+---
+
+### Task 2b: Create shared `<LegalPage />` shell
 
 **Files:**
 - Create: `web/src/components/legal-page.tsx`
@@ -81,7 +126,8 @@ interface LegalPageProps {
 
 /**
  * LegalPage is the shell for /about, /terms, /privacy — public header,
- * max-width prose content, public footer.
+ * max-width prose content, public footer. Relies on @tailwindcss/typography
+ * for the `prose` classes (installed in Task 2a).
  */
 export function LegalPage({ title, children }: LegalPageProps) {
   return (
@@ -100,10 +146,44 @@ export function LegalPage({ title, children }: LegalPageProps) {
 - [ ] **Step 2: Verify imports compile**
 
 ```bash
-cd web && npx tsc --noEmit -p tsconfig.app.json
+cd web && npx tsc -b
 ```
 
 Expected: no errors related to `legal-page.tsx`. (Will error on `public-footer` until Task 3 — that's fine; we'll re-run after.)
+
+- [ ] **Step 3: Smoke-test render**
+
+Create `web/src/components/__tests__/legal-page.test.tsx`:
+
+```tsx
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+
+import { LegalPage } from "@/components/legal-page";
+
+describe("LegalPage", () => {
+  it("renders the title and children inside the prose region", () => {
+    render(
+      <MemoryRouter>
+        <LegalPage title="Test Title">
+          <p>Body paragraph</p>
+        </LegalPage>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Test Title" })).toBeInTheDocument();
+    expect(screen.getByText("Body paragraph")).toBeInTheDocument();
+  });
+});
+```
+
+Run:
+
+```bash
+cd web && npx vitest run src/components/__tests__/legal-page.test.tsx
+```
+
+Expected: 1 test pass.
 
 ---
 
@@ -111,6 +191,9 @@ Expected: no errors related to `legal-page.tsx`. (Will error on `public-footer` 
 
 **Files:**
 - Create: `web/src/components/public-footer.tsx`
+- Create: `web/src/components/__tests__/public-footer.test.tsx`
+
+(Test file location follows the existing convention seen in `web/src/pages/auth/__tests__/`.)
 
 - [ ] **Step 1: Create the file**
 
@@ -120,8 +203,9 @@ Content:
 import { Link } from "react-router-dom";
 
 /**
- * PublicFooter is mounted on landing, sample, and /about, /terms, /privacy.
- * Provides trust-signal links visible to unauthenticated visitors.
+ * PublicFooter is mounted on landing, sample, the auth layout, and the legal
+ * pages (/about, /terms, /privacy). Provides trust-signal links visible to
+ * unauthenticated visitors.
  */
 export function PublicFooter() {
   return (
@@ -144,7 +228,7 @@ export function PublicFooter() {
 
 - [ ] **Step 2: Smoke test renders**
 
-Create `web/src/__tests__/public-footer.test.tsx`:
+Create `web/src/components/__tests__/public-footer.test.tsx`:
 
 ```tsx
 import { describe, it, expect } from "vitest";
@@ -171,7 +255,7 @@ describe("PublicFooter", () => {
 - [ ] **Step 3: Run test**
 
 ```bash
-cd web && npx vitest run src/__tests__/public-footer.test.tsx
+cd web && npx vitest run src/components/__tests__/public-footer.test.tsx
 ```
 
 Expected: 1 test pass.
@@ -219,7 +303,7 @@ export default function About() {
 - [ ] **Step 2: Verify file compiles**
 
 ```bash
-cd web && npx tsc --noEmit -p tsconfig.app.json
+cd web && npx tsc -b
 ```
 
 Expected: no errors.
@@ -444,7 +528,7 @@ export default function Privacy() {
 - [ ] **Step 2: Verify compile**
 
 ```bash
-cd web && npx tsc --noEmit -p tsconfig.app.json
+cd web && npx tsc -b
 ```
 
 Expected: no errors.
@@ -602,7 +686,7 @@ export default function Terms() {
 - [ ] **Step 2: Verify compile**
 
 ```bash
-cd web && npx tsc --noEmit -p tsconfig.app.json
+cd web && npx tsc -b
 ```
 
 Expected: no errors.
@@ -670,9 +754,72 @@ import { PublicFooter } from "@/components/public-footer";
 
 - [ ] **Step 4: Mount footer on `/sample` layout**
 
-In `web/src/pages/sample.tsx`, after the closing `</main>`, add `<PublicFooter />` (and import). Verify by reading the existing structure first; the sample page wraps content in a `min-h-screen` div, so add the footer inside that div, after the main.
+Read `web/src/pages/sample.tsx`. The wrapper is `<div className="min-h-screen bg-background text-foreground">` containing a `<PublicHeader />` and a `<main>`. Without flex layout, a footer placed after `</main>` floats mid-page when content is short.
 
-Concretely, read `web/src/pages/sample.tsx`. Locate the `<div className="min-h-screen bg-background text-foreground">` wrapper. Add `import { PublicFooter } from "@/components/public-footer";` at the top, and place `<PublicFooter />` as the last child of that wrapper div (after `</main>`).
+Convert the wrapper to a flex column and add the footer. Replace:
+
+```tsx
+<div className="min-h-screen bg-background text-foreground">
+  <PublicHeader />
+  <main className="mx-auto max-w-5xl px-4 py-6">
+    {/* ... existing content ... */}
+  </main>
+</div>
+```
+
+with:
+
+```tsx
+<div className="min-h-screen bg-background text-foreground flex flex-col">
+  <PublicHeader />
+  <main className="flex-1 mx-auto max-w-5xl w-full px-4 py-6">
+    {/* ... existing content unchanged ... */}
+  </main>
+  <PublicFooter />
+</div>
+```
+
+Add `import { PublicFooter } from "@/components/public-footer";` at the top.
+
+- [ ] **Step 4b: Mount footer on `<AuthLayout />`**
+
+Per the spec ("mount in landing/sample/auth layouts"), the footer also belongs on the auth layout used by login, signup, forgot-password, reset-password, verify-email.
+
+Read `web/src/pages/auth/auth-layout.tsx`. The current structure is `<div className="flex min-h-screen items-center justify-center bg-background px-4">` — that flex centers content vertically. Wrap the centering div with a column-flex parent so the footer sits at the bottom without disrupting the card centering.
+
+Replace:
+
+```tsx
+export function AuthLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm">
+        {/* ... existing brand + children ... */}
+      </div>
+    </div>
+  );
+}
+```
+
+with:
+
+```tsx
+import { PublicFooter } from "@/components/public-footer";
+// ... existing imports unchanged
+
+export function AuthLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen flex-col bg-background">
+      <div className="flex flex-1 items-center justify-center px-4">
+        <div className="w-full max-w-sm">
+          {/* ... existing brand + children unchanged ... */}
+        </div>
+      </div>
+      <PublicFooter />
+    </div>
+  );
+}
+```
 
 - [ ] **Step 5: Verify build**
 
@@ -908,12 +1055,14 @@ Expected: all stages pass (frontend typecheck/lint/tests + backend tests).
 - [ ] **Step 2: Stage and commit**
 
 ```bash
-git add web/src/components/legal-page.tsx web/src/components/public-footer.tsx \
+git add web/package.json web/package-lock.json web/src/index.css \
+        web/src/components/legal-page.tsx web/src/components/public-footer.tsx \
+        web/src/components/__tests__/legal-page.test.tsx \
+        web/src/components/__tests__/public-footer.test.tsx \
         web/src/pages/about.tsx web/src/pages/terms.tsx web/src/pages/privacy.tsx \
-        web/src/App.tsx web/src/pages/sample.tsx \
+        web/src/App.tsx web/src/pages/sample.tsx web/src/pages/auth/auth-layout.tsx \
         web/src/pages/auth/login.tsx web/src/pages/auth/signup.tsx \
         web/src/hooks/use-noindex.ts \
-        web/src/__tests__/public-footer.test.tsx \
         web/index.html web/public/robots.txt web/public/sitemap.xml
 git commit -m "web: add about/terms/privacy pages, public footer, sitemap, robots.txt, noindex on auth pages"
 ```

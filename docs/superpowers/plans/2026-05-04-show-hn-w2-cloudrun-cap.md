@@ -30,10 +30,12 @@ No tests; verification is via `terraform plan` output and post-deploy capacity c
 
 - [ ] **Step 1: Confirm W1 is deployed**
 
-Run:
+Run (use the `google_cloud_run_v2_service` schema — `template.containers[0].env`, not `spec.template.spec.containers[0].env`):
 
 ```bash
-gcloud run services describe sabermatic --region=$(gcloud config get-value run/region) --format='value(spec.template.spec.containers[0].env)' | grep -i DATABASE_MAX_POOL_SIZE
+gcloud run services describe sabermatic \
+  --region=$(gcloud config get-value run/region) \
+  --format='value(template.containers[0].env)' | tr ';' '\n' | grep -i DATABASE_MAX_POOL_SIZE
 ```
 
 Expected: empty output (we don't override; pool defaults to 16 from the new code) OR explicit `DATABASE_MAX_POOL_SIZE=16`. If you see `=80` or any value > 16, **STOP** — W1 is not yet on the deployed revision; ship that first.
@@ -134,10 +136,12 @@ Expected: change applies in ~10–30 seconds; Cloud Run service revision updates
 - [ ] **Step 2: Verify the new ceiling is live**
 
 ```bash
-gcloud run services describe sabermatic --region=$(gcloud config get-value run/region) --format='value(spec.template.metadata.annotations.run.googleapis.com/maxScale)'
+gcloud run services describe sabermatic \
+  --region=$(gcloud config get-value run/region) \
+  --format='value(template.scaling.maxInstanceCount)'
 ```
 
-Expected: `3`.
+Expected: `3`. (The legacy `--format='value(spec.template.metadata.annotations.run.googleapis.com/maxScale)'` queries the v1 Service API schema, which does not match `google_cloud_run_v2_service` and silently returns empty — DO NOT use it.)
 
 ---
 

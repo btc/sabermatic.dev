@@ -4,7 +4,7 @@
 
 **Goal:** Emit structured analytics events from backend handlers, ship them to BigQuery via Cloud Logging Logs Router, and expose a clean queryable schema via a BQ view — so the Show HN funnel (landing → signup → activate → complete) can be reconstructed post-spike with SQL.
 
-**Architecture:** Backend code calls a fire-and-forget `events.Emitter.Emit(ctx, name, props...)` which writes one structured slog line tagged `analytics_event=true`. Cloud Run forwards stdout to Cloud Logging automatically. A Logs Router sink filters on the tag and routes matching entries to a BigQuery dataset. A BQ view flattens `jsonPayload.*` into named columns for queries. Frontend events (landing_view, signup_started) post to `/api/beacon` which validates an allowlist and re-emits via the same path.
+**Architecture:** Backend code calls a fire-and-forget `events.Emitter.Emit(ctx, name, props...)` which writes one structured slog line tagged `analytics_event=true`. The application logger writes to stderr in Cloud Run (the configured `LOG_FILE` path is unwritable in the container, so `buildLogWriter` falls back to `os.Stderr`); Cloud Run captures both stdout and stderr and forwards them to Cloud Logging automatically. A Logs Router sink filters on the tag and routes matching entries to a BigQuery dataset. A BQ view flattens `jsonPayload.*` into named columns for queries. Frontend events (landing_view, signup_started) post to `/api/beacon` which validates an allowlist and re-emits via the same path.
 
 **Tech Stack:** Go 1.x, slog, pgx/v5, ConnectRPC, React + TypeScript, Terraform, Google Cloud Logging, BigQuery.
 
@@ -75,15 +75,22 @@ package events
 import "context"
 
 // ContextValues bundles the per-request analytics context populated by
-// AnalyticsContextMiddleware (visitor_id, referer, UTM) and by the auth
-// middlewares (user_id).
+// AnalyticsContextMiddleware (visitor_id, referer, UTM, path, user_agent),
+// the auth middlewares (user_id), and backend handlers (session_id).
+//
+// IMPORTANT: every field here becomes a top-level column in the BQ view via
+// jsonPayload.<field>. Event-specific properties go into the `properties`
+// slog.Group instead and become a nested RECORD column.
 type ContextValues struct {
 	VisitorID   string
 	UserID      string
+	SessionID   string
 	Referer     string
 	UTMSource   string
 	UTMMedium   string
 	UTMCampaign string
+	Path        string
+	UserAgent   string
 }
 
 type ctxKey struct{}
@@ -113,6 +120,30 @@ func WithVisitorID(ctx context.Context, id string) context.Context {
 func WithUserID(ctx context.Context, id string) context.Context {
 	cv := ContextValuesFromContext(ctx)
 	cv.UserID = id
+	return WithContextValues(ctx, cv)
+}
+
+// WithSessionID returns a new ctx with SessionID set; preserves other fields.
+// Backend handlers operating on a known session call this before Emit so that
+// session_id lands at jsonPayload.session_id (top-level) rather than buried
+// inside the per-event properties record.
+func WithSessionID(ctx context.Context, id string) context.Context {
+	cv := ContextValuesFromContext(ctx)
+	cv.SessionID = id
+	return WithContextValues(ctx, cv)
+}
+
+// WithRequestPath returns a new ctx with Path set; preserves other fields.
+func WithRequestPath(ctx context.Context, path string) context.Context {
+	cv := ContextValuesFromContext(ctx)
+	cv.Path = path
+	return WithContextValues(ctx, cv)
+}
+
+// WithUserAgent returns a new ctx with UserAgent set; preserves other fields.
+func WithUserAgent(ctx context.Context, ua string) context.Context {
+	cv := ContextValuesFromContext(ctx)
+	cv.UserAgent = ua
 	return WithContextValues(ctx, cv)
 }
 
@@ -193,10 +224,13 @@ func (e *Emitter) Emit(ctx context.Context, name string, props ...slog.Attr) {
 		slog.String("event_name", name),
 		slog.String("visitor_id", cv.VisitorID),
 		slog.String("user_id", cv.UserID),
+		slog.String("session_id", cv.SessionID),
 		slog.String("referer", cv.Referer),
 		slog.String("utm_source", cv.UTMSource),
 		slog.String("utm_medium", cv.UTMMedium),
 		slog.String("utm_campaign", cv.UTMCampaign),
+		slog.String("path", cv.Path),
+		slog.String("user_agent", cv.UserAgent),
 	}
 	if len(props) > 0 {
 		// Convert []slog.Attr to []any for slog.Group construction.
@@ -371,9 +405,13 @@ func (b *Backend) Events() *events.Emitter {
 grep -rn "backend.New(\|backend\.New(" --include='*.go' . 2>/dev/null | grep -v -E '_test\.go|\.worktrees|\.claude'
 ```
 
-For each caller, add the `*events.Emitter` argument. The main caller is `cmd/drill/main.go`; tests use `backendtest.New` or `backendtest.SeedUser`-adjacent helpers.
+Expected callers:
+- `cmd/drill/main.go` (production entry point)
+- `internal/testutil/backend.go:17` (`NewBackend(t, cfg)` test helper — calls `backend.New(cfg)`)
 
-In `cmd/drill/main.go`, before constructing `Backend`, instantiate the emitter from the existing `slog.Default()` (or whatever logger main wires):
+(Note: `internal/backendtest/backendtest.go` only contains `SeedUser`, which takes an existing `*backend.Backend`; no constructor change needed there.)
+
+In `cmd/drill/main.go`, instantiate the emitter from the application logger and pass it:
 
 ```go
 em := events.NewEmitter(slog.Default())
@@ -383,15 +421,27 @@ if err != nil {
 }
 ```
 
-(Adjust the surrounding code to pass `em` through.)
+- [ ] **Step 6: Update `internal/testutil/backend.go`**
 
-- [ ] **Step 6: Update `internal/backendtest`**
-
-Read `internal/backendtest/`. Find the constructor helper(s). Pass a no-op or a discard-logger emitter:
+Modify the `NewBackend` helper at line 15 to construct a discard-logger emitter and pass it through:
 
 ```go
-em := events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+import (
+    "io"
+    "log/slog"
+    "github.com/btc/drill/internal/events"
+    // ... existing imports
+)
+
+func NewBackend(t *testing.T, cfg *config.Config) *backend.Backend {
+    t.Helper()
+    em := events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+    b, err := backend.New(cfg, em)
+    // ... rest unchanged
+}
 ```
+
+(`PG.NewBackend(t)` at line 26 already delegates to this helper, so no additional change is needed there.)
 
 - [ ] **Step 7: Verify build + tests**
 
@@ -405,7 +455,7 @@ Expected: build passes; tests pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add internal/backend/backend.go internal/backendtest/ cmd/drill/main.go
+git add internal/backend/backend.go internal/testutil/backend.go cmd/drill/main.go
 git commit -m "backend: inject events.Emitter into Backend constructor"
 ```
 
@@ -441,10 +491,16 @@ Change the first parameter from `_ context.Context` to `ctx context.Context`. (D
 
 - [ ] **Step 3: Update `Register`**
 
-In `internal/rpc/register.go`, find where `sample.NewServer(...)` is called. Update the call site to pass `b.Events()`:
+In `internal/rpc/register.go`, the existing call site at line 41 is:
 
 ```go
-sampleSrv := sample.NewServer(sampleService, b.Events())
+mux.Handle(drillv1connect.NewSampleServiceHandler(samplerpc.NewServer(b.SampleService), publicOpts))
+```
+
+Note: the package alias is `samplerpc` (line 20), not `sample`. Update to pass the emitter:
+
+```go
+mux.Handle(drillv1connect.NewSampleServiceHandler(samplerpc.NewServer(b.SampleService, b.Events()), publicOpts))
 ```
 
 - [ ] **Step 4: Verify build + tests**
@@ -529,6 +585,8 @@ func AnalyticsContextMiddleware(secureCookies bool) func(http.Handler) http.Hand
 			ctx = events.WithVisitorID(ctx, visitorID)
 			ctx = events.WithReferer(ctx, referer)
 			ctx = events.WithUTM(ctx, utmSource, utmMedium, utmCampaign)
+			ctx = events.WithRequestPath(ctx, r.URL.Path)
+			ctx = events.WithUserAgent(ctx, r.Header.Get("User-Agent"))
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -810,6 +868,7 @@ func BeaconHandler(em *events.Emitter) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		defer r.Body.Close()
 		var req beaconRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -1028,14 +1087,14 @@ Locate `func (b *Backend) OAuthLogin(...)` (around line 36). The function uses i
 
 ```go
 b.events.Emit(ctx, "oauth_completed",
-    slog.String("auth_method", string(p.Provider)), // "google" or "github"
-    slog.String("new_user_id", result.UserID.String()),
+    slog.String("auth_method", p.Provider), // "google" or "github" (already a string)
+    slog.String("new_user_id", user.ID.String()),
     slog.Bool("is_new_user", path == pathNewUser),
     slog.Bool("is_reactivated", path == pathReactivated),
 )
 ```
 
-(Adjust field accessors based on the actual struct names — `result.UserID`, `p.Provider`. Read the surrounding code first to confirm.)
+The local variable in scope is `user` (`db.User`), accessible throughout `OAuthLogin`. There is no `result` variable until the very end of the function where `*OAuthLoginResult` is constructed; emit BEFORE that point so `user` and `path` are both in scope. Verify by reading the surrounding code.
 
 - [ ] **Step 2: Verify**
 
@@ -1054,11 +1113,15 @@ go test ./internal/backend/... -run OAuth -v
 Locate `func (b *Backend) CreateSession(...)` (around line 36). At the success path, after the session row is inserted and committed, before `return session, nil`:
 
 ```go
+ctx = events.WithSessionID(ctx, session.ID.String())
 b.events.Emit(ctx, "session_created",
-    slog.String("session_id", session.ID.String()),
     slog.String("question_id", session.QuestionID.String()),
 )
 ```
+
+(The `events.WithSessionID` call attaches `session_id` to the analytics context as a top-level field, so it lands at `jsonPayload.session_id` in the BQ raw table — matching the view DDL. Putting it in the `props` slice instead would bury it under `properties.session_id` and break the view.)
+
+Add the import `"github.com/btc/drill/internal/events"` if not already present.
 
 - [ ] **Step 2: Verify**
 
@@ -1100,34 +1163,34 @@ go build ./...
 
 - [ ] **Step 1: Add the guarded emission**
 
-Locate `func (b *Backend) ExecuteTurn(...)` (around line 63). The function reads existing messages at line ~102 (`messages, err := q.GetMessagesBySession(ctx, sessionID)`). Use that to detect first user message:
+Locate `func (b *Backend) ExecuteTurn(...)` (around line 63). Read the function carefully: at line 131, `isOpeningQuestion := len(messages) == 0 && isTextInput(p) && getTextContent(p) == ""` and `isCrashRecovery := len(messages) > 0 && messages[len(messages)-1].Role == "candidate"`. When either is true, the function returns early via `streamInterviewerResponse` (around line 138) — so the candidate-message-persist code (around lines 243–256) only runs when `!isOpeningQuestion && !isCrashRecovery`. The `!isOpeningQuestion` guard in any post-persist emit is redundant (always true at that point).
 
-After the messages are fetched and validated (existing code), before processing the turn, add:
+Just before reading the messages (or just after — anywhere prior to the persist block), compute:
 
 ```go
-// Detect "first user message" — count candidate-role messages already in the
-// session. If zero (and this turn is real user content, not the opening trigger),
-// this is the first.
+// Count candidate messages already in the session. Zero means the user has
+// not yet sent any real content; if we reach the persist block at all, this
+// is their first message.
 candidateCount := 0
 for _, m := range messages {
     if m.Role == "candidate" {
         candidateCount++
     }
 }
-isFirstUserMessage := candidateCount == 0 && !isOpeningQuestion
 ```
 
-Then at the success path (after the candidate message is inserted), emit:
+Then in the persist block, AFTER `messages = append(messages, candidateMsg)` (around line 257) and BEFORE the return that calls `streamInterviewerResponse` (around line 265), emit:
 
 ```go
-if isFirstUserMessage {
-    b.events.Emit(ctx, "first_message_sent",
-        slog.String("session_id", sessionID.String()),
-    )
+if candidateCount == 0 {
+    ctx = events.WithSessionID(ctx, sessionID.String())
+    b.events.Emit(ctx, "first_message_sent")
 }
 ```
 
-(Use the existing `isOpeningQuestion` variable already computed at line 131.)
+(`session_id` flows via the analytics context, not as a property — same reason as `Backend.CreateSession`.)
+
+Add `"github.com/btc/drill/internal/events"` import if missing.
 
 - [ ] **Step 2: Verify build + run turn tests**
 
@@ -1215,11 +1278,11 @@ Expected: FAILS — `cleanup.go` is using the old return type. That's expected; 
 
 - [ ] **Step 1: Emit in `Backend.CompleteSession`**
 
-Locate `func (b *Backend) CompleteSession(...)` (line ~286). At the success path, before `return nil`:
+Locate `func (b *Backend) CompleteSession(...)` (line ~286). At the success path, AFTER the transaction commits, before `return nil`:
 
 ```go
+ctx = events.WithSessionID(ctx, sessionID.String())
 b.events.Emit(ctx, "session_ended",
-    slog.String("session_id", sessionID.String()),
     slog.String("reason", "completed"),
     slog.Int("turn_count", turnCount),
 )
@@ -1227,57 +1290,99 @@ b.events.Emit(ctx, "session_ended",
 
 - [ ] **Step 2: Emit in `Backend.CancelSession`**
 
-Locate `func (b *Backend) CancelSession(...)` (line ~334). At the success path:
+Locate `func (b *Backend) CancelSession(...)` (line ~334). Same pattern, AFTER commit:
 
 ```go
+ctx = events.WithSessionID(ctx, sessionID.String())
 b.events.Emit(ctx, "session_ended",
-    slog.String("session_id", sessionID.String()),
     slog.String("reason", "cancelled"),
     slog.Int("turn_count", turnCount),
 )
 ```
 
-- [ ] **Step 3: Update `internal/jobs/cleanup.go`**
+(Both place the emit AFTER commit so a commit failure does not produce a "session ended" event for a session that didn't actually end — same publish-after-commit pattern as in the cleanup job below.)
 
-The cleanup worker has a `Backend` reference (or pass one in via the worker struct — verify by reading the file). Update both call sites.
+- [ ] **Step 3: Add `Events *events.Emitter` to the cleanup worker (avoid circular import)**
 
-For `CompleteAbandonedActiveSessions` (line ~57):
+`internal/jobs/cleanup.go` defines `CleanupAbandonedSessionsWorker` with `Pool *pgxpool.Pool` and (post-wired) `Jobs *river.Client[pgx.Tx]`. **Do NOT add a `Backend` reference** — `backend` already imports `jobs`, so `jobs` importing `backend` would create a cycle.
+
+Instead, add a third field for the emitter:
 
 ```go
+type CleanupAbandonedSessionsWorker struct {
+    river.WorkerDefaults[CleanupAbandonedSessionsArgs]
+    Pool   *pgxpool.Pool
+    Jobs   *river.Client[pgx.Tx]
+    Events *events.Emitter // NEW
+}
+```
+
+Add `"github.com/btc/drill/internal/events"` to the imports.
+
+- [ ] **Step 4: Wire the emitter in `RegisterWorkers`**
+
+`internal/jobs/workers.go` has `RegisterWorkers(cfg, sender, pool, llm, gemini, store)`. Add `em *events.Emitter` as a new parameter at the end:
+
+```go
+func RegisterWorkers(
+    cfg *config.Config,
+    sender email.Sender,
+    pool *pgxpool.Pool,
+    llm *ai.Client,
+    gemini *ai.GeminiClient,
+    store storage.Store,
+    em *events.Emitter,
+) (*river.Workers, WorkerRefs) {
+    // ... existing code, change cleanup construction:
+    cleanup := &CleanupAbandonedSessionsWorker{Pool: pool, Events: em}
+    // ... rest unchanged
+}
+```
+
+Update the caller in `internal/backend/backend.go` (the line `workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store)`) to pass `b.events`. Since this happens inside `New` AFTER `b.events = em` has been assigned, that field is in scope.
+
+Update `internal/jobs/cleanup_test.go` to construct the worker with `Events: events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil)))` (or a recording emitter if the test asserts on emitted events).
+
+- [ ] **Step 5: Update `cleanup.go` work logic — collect IDs during tx, emit AFTER commit**
+
+The current cleanup job runs both terminal SQL queries and commits. The plan must place emits AFTER the commit, otherwise a commit-fail produces phantom "ended" events. Refactor (pseudo-diff):
+
+```go
+// Inside Work(), inside the existing tx:
 completedRows, err := q.CompleteAbandonedActiveSessions(ctx)
 if err != nil {
     return fmt.Errorf("complete abandoned active sessions: %w", err)
 }
-for _, row := range completedRows {
-    em := w.Backend.Events()
-    em.Emit(events.WithUserID(ctx, row.UserID.String()), "session_ended",
-        slog.String("session_id", row.ID.String()),
-        slog.String("reason", "abandoned"),
-    )
-}
-```
-
-For `CancelAbandonedEmptySessions` (line ~40):
-
-```go
 cancelledRows, err := q.CancelAbandonedEmptySessions(ctx)
 if err != nil {
     return fmt.Errorf("cancel abandoned empty sessions: %w", err)
 }
+if err := tx.Commit(ctx); err != nil {
+    return fmt.Errorf("commit cleanup: %w", err)
+}
+
+// Emit AFTER commit. If the worker crashes here, a few session_ended events
+// are missed — acceptable and recoverable from Cloud Logging _Default backfill.
+for _, row := range completedRows {
+    emitCtx := events.WithUserID(ctx, row.UserID.String())
+    emitCtx  = events.WithSessionID(emitCtx, row.ID.String())
+    w.Events.Emit(emitCtx, "session_ended",
+        slog.String("reason", "abandoned"),
+    )
+}
 for _, row := range cancelledRows {
-    em := w.Backend.Events()
-    em.Emit(events.WithUserID(ctx, row.UserID.String()), "session_ended",
-        slog.String("session_id", row.ID.String()),
+    emitCtx := events.WithUserID(ctx, row.UserID.String())
+    emitCtx  = events.WithSessionID(emitCtx, row.ID.String())
+    w.Events.Emit(emitCtx, "session_ended",
         slog.String("reason", "abandoned_empty"),
     )
 }
+return nil
 ```
 
-(The exact field accessor — `row.ID` vs `row.id` etc. — depends on sqlc's generated row type. Check `grep -A5 CompleteAbandonedActiveSessions internal/db/sessions.sql.go` to confirm.)
+(Field access `row.ID` and `row.UserID` matches sqlc's PascalCase from `RETURNING id, user_id`. Confirm against the regenerated `internal/db/sessions.sql.go` after Task 19's sqlc regen.)
 
 Add imports `"log/slog"` and `"github.com/btc/drill/internal/events"` if missing.
-
-If the cleanup worker doesn't currently have a `Backend` reference, add one in its constructor. Read `internal/jobs/cleanup.go` first to determine the appropriate path.
 
 - [ ] **Step 4: Verify build + run job tests**
 
@@ -1530,10 +1635,14 @@ resource "google_logging_project_sink" "analytics" {
   description = "Routes slog analytics events from Cloud Run to BigQuery."
   destination = "bigquery.googleapis.com/projects/${var.project_id}/datasets/${google_bigquery_dataset.analytics.dataset_id}"
 
+  # Note: jsonPayload.analytics_event is a JSON boolean (slog writes booleans
+  # as native JSON booleans, not strings). Cloud Logging filter syntax
+  # supports unquoted boolean literals; do NOT quote the value or the filter
+  # will silently match zero entries.
   filter = <<-EOT
     resource.type = "cloud_run_revision"
     AND resource.labels.service_name = "sabermatic"
-    AND jsonPayload.analytics_event = "true"
+    AND jsonPayload.analytics_event = true
   EOT
 
   unique_writer_identity = true
