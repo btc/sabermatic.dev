@@ -11,37 +11,94 @@ describe("track", () => {
       configurable: true,
       value: sendBeaconMock,
     });
+    Object.defineProperty(document, "referrer", {
+      configurable: true,
+      value: "https://news.ycombinator.com/",
+    });
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { search: "?utm_source=hn&utm_medium=social&utm_campaign=show-hn" },
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("sends a beacon with the serialized event payload", () => {
+  function capturedBody(): unknown {
+    const [, blob] = sendBeaconMock.mock.calls[0] as [string, Blob];
+    // Read the Blob's contents synchronously via the captured constructor parts.
+    // Vitest/jsdom Blob doesn't support sync .text(); we instead reconstruct
+    // from the mock by serializing the parts when the Blob was built.
+    // Simpler: the test mocks sendBeacon to capture both args, and the second
+    // arg is always a Blob whose first underlying part is the JSON string.
+    const parts = (blob as unknown as { _parts?: BlobPart[] })._parts;
+    if (parts) {
+      return JSON.parse(parts.join(""));
+    }
+    // jsdom fallback: convert Blob.text() result via a sync trick is unreliable
+    // — instead, register a Blob spy in beforeEach (see below).
+    throw new Error("Blob parts not captured");
+  }
+
+  it("posts a landing_view event with referrer and UTM extracted from page state", async () => {
+    // Capture the JSON body via Blob constructor spy.
+    const captured: BlobPart[] = [];
+    const OrigBlob = globalThis.Blob;
+    vi.spyOn(globalThis, "Blob").mockImplementation((parts, opts) => {
+      if (parts) captured.push(...parts);
+      return new OrigBlob(parts, opts);
+    });
+
     track({ event: "landing_view" });
 
     expect(sendBeaconMock).toHaveBeenCalledTimes(1);
-    const [url, blob] = sendBeaconMock.mock.calls[0] as [string, Blob];
+    const url = sendBeaconMock.mock.calls[0]?.[0] as string;
     expect(url).toBe("/api/beacon");
-    expect(blob).toBeInstanceOf(Blob);
-    expect(blob.type).toBe("application/json");
+    const body = JSON.parse(captured.join("")) as Record<string, unknown>;
+    expect(body.event_name).toBe("landing_view");
+    expect(body.referrer).toBe("https://news.ycombinator.com/");
+    expect(body.utm_source).toBe("hn");
+    expect(body.utm_medium).toBe("social");
+    expect(body.utm_campaign).toBe("show-hn");
+    expect(body.properties).toBeUndefined();
   });
 
-  it("includes auth_method in the payload for signup_started", () => {
-    // Intercept the JSON body string via the Blob constructor.
-    const capturedParts: BlobPart[] = [];
+  it("posts a signup_started event with auth_method nested under properties", () => {
+    const captured: BlobPart[] = [];
     const OrigBlob = globalThis.Blob;
     vi.spyOn(globalThis, "Blob").mockImplementation((parts, opts) => {
-      if (parts) capturedParts.push(...parts);
+      if (parts) captured.push(...parts);
       return new OrigBlob(parts, opts);
     });
 
     track({ event: "signup_started", props: { auth_method: "google" } });
 
     expect(sendBeaconMock).toHaveBeenCalledTimes(1);
-    const body = capturedParts.join("");
-    const parsed = JSON.parse(body) as { event: string; props: { auth_method: string } };
-    expect(parsed.event).toBe("signup_started");
-    expect(parsed.props.auth_method).toBe("google");
+    const body = JSON.parse(captured.join("")) as {
+      event_name: string;
+      properties?: { auth_method?: string };
+    };
+    expect(body.event_name).toBe("signup_started");
+    expect(body.properties?.auth_method).toBe("google");
   });
+
+  it("falls back to fetch when sendBeacon refuses (returns false)", () => {
+    sendBeaconMock.mockReturnValue(false);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: fetchMock });
+
+    track({ event: "landing_view" });
+
+    expect(sendBeaconMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/beacon");
+    expect(opts.method).toBe("POST");
+    expect(opts.keepalive).toBe(true);
+  });
+
+  // Silence the unused capturedBody helper without breaking tree-shaking;
+  // the helper is documentation for an alternate sync-read approach.
+  void capturedBody;
 });

@@ -418,7 +418,14 @@ func (b *Backend) FailSession(ctx context.Context, sessionID uuid.UUID) (err err
 		slog.Warn("fail-session refund failed", "session_id", sessionID, "error", err)
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit fail-session: %w", err)
+	}
+	ctx = events.WithSessionID(ctx, sessionID.String())
+	b.events.Emit(ctx, "session_ended",
+		slog.String("reason", "failed"),
+	)
+	return nil
 }
 
 // Transcribe delegates to the STT provider.
