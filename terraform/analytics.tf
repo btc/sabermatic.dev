@@ -10,6 +10,15 @@ resource "google_bigquery_dataset" "analytics" {
   friendly_name = "Sabermatic analytics events"
   location      = var.region
   description   = "Funnel-reconstruction events emitted from Cloud Run via Cloud Logging Logs Router."
+
+  # Refuse a Terraform-side `terraform destroy` of this dataset — the sink
+  # populates analytics_events_raw asynchronously and a destroy would lose
+  # historical funnel data with no easy recovery path. Mirrors the
+  # deletion_protection pattern on google_sql_database_instance.sabermatic.
+  delete_contents_on_destroy = false
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_logging_project_sink" "analytics" {
@@ -45,7 +54,7 @@ resource "google_bigquery_dataset_iam_member" "sink_writer" {
 # the slog payload fields into named columns. BQ permits view creation
 # against a non-existent table; queries will return errors until the first
 # write — that's expected.
-resource "google_bigquery_table" "analytics_events_view" {
+resource "google_bigquery_table" "analytics_events" {
   dataset_id = google_bigquery_dataset.analytics.dataset_id
   table_id   = "analytics_events"
 
