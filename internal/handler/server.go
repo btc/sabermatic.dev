@@ -65,6 +65,7 @@ func registerRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	}
 
 	mux.HandleFunc("GET /api/health", Health(b))
+	mux.HandleFunc("POST /api/beacon", BeaconHandler(b.Events()))
 
 	// Admin — requires both auth and admin role.
 	requireAuth := RequireAuth(b)
