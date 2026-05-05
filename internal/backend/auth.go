@@ -22,6 +22,7 @@ import (
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
 	intemail "github.com/btc/drill/internal/email"
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -186,6 +187,13 @@ func (b *Backend) Signup(ctx context.Context, p SignupParams) (_ *SignupResult, 
 		return nil, fmt.Errorf("commit signup: %w", err)
 	}
 
+	b.events.Emit(
+		events.WithUserID(ctx, user.ID.String()),
+		"signup_completed",
+		slog.String("auth_method", "password"),
+		slog.String("new_user_id", user.ID.String()),
+	)
+
 	return &SignupResult{
 		UserID: user.ID,
 		Email:  user.Email,
@@ -285,6 +293,12 @@ func (b *Backend) VerifyEmail(ctx context.Context, token string) (err error) {
 	if err := queries.VerifyUserEmail(ctx, userID); err != nil {
 		return fmt.Errorf("verify email: %w", err)
 	}
+
+	b.events.Emit(
+		events.WithUserID(ctx, userID.String()),
+		"email_verified",
+	)
+
 	return nil
 }
 

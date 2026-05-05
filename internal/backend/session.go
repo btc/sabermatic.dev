@@ -16,6 +16,7 @@ import (
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/jobs"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 )
@@ -104,6 +105,12 @@ func (b *Backend) CreateSession(ctx context.Context, p CreateSessionParams) (_ d
 	if err := tx.Commit(ctx); err != nil {
 		return db.InterviewSession{}, fmt.Errorf("commit create-session tx: %w", err)
 	}
+
+	b.events.Emit(
+		events.WithSessionID(ctx, session.ID.String()),
+		"session_created",
+		slog.String("question_id", p.QuestionID.String()),
+	)
 
 	return session, nil
 }
@@ -325,6 +332,13 @@ func (b *Backend) CompleteSession(ctx context.Context, sessionID uuid.UUID, turn
 		return fmt.Errorf("commit end-session: %w", err)
 	}
 
+	b.events.Emit(
+		events.WithSessionID(ctx, sessionID.String()),
+		"session_ended",
+		slog.String("reason", "completed"),
+		slog.Int("turn_count", turnCount),
+	)
+
 	return nil
 }
 
@@ -354,7 +368,18 @@ func (b *Backend) CancelSession(ctx context.Context, sessionID uuid.UUID, turnCo
 		slog.Warn("cancel session refund failed", "session_id", sessionID, "error", err)
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit cancel-session: %w", err)
+	}
+
+	b.events.Emit(
+		events.WithSessionID(ctx, sessionID.String()),
+		"session_ended",
+		slog.String("reason", "cancelled"),
+		slog.Int("turn_count", turnCount),
+	)
+
+	return nil
 }
 
 // FailSession transitions a session to "failed" and refunds all reserved minutes.

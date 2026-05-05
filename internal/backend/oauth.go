@@ -11,6 +11,7 @@ import (
 
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
+	"github.com/btc/drill/internal/events"
 )
 
 // OAuthLoginParams holds the parameters for OAuthLogin.
@@ -195,6 +196,15 @@ func (b *Backend) OAuthLogin(ctx context.Context, p OAuthLoginParams) (_ *OAuthL
 	}
 
 	slog.Info("oauth login", "provider", p.Provider, "email", user.Email, "path", path, "user_id", user.ID)
+
+	b.events.Emit(
+		events.WithUserID(ctx, user.ID.String()),
+		"oauth_completed",
+		slog.String("auth_method", p.Provider),
+		slog.String("new_user_id", user.ID.String()),
+		slog.Bool("is_new_user", path == pathNewUser),
+		slog.Bool("is_reactivated", path == pathReactivated),
+	)
 
 	return &OAuthLoginResult{
 		UserID:       user.ID,
