@@ -3,6 +3,7 @@ package handler_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -188,5 +189,5 @@ func TestBeacon_NonPostSetsAllowHeader(t *testing.T) {
 }
 
 func fmtKey(i int) string {
-	return "k" + string(rune('a'+i))
+	return fmt.Sprintf("k%d", i)
 }

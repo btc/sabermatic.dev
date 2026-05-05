@@ -13,6 +13,18 @@ import (
 // activity to a single visitor across requests.
 const VisitorCookieName = "sabermatic_visitor"
 
+// analyticsFieldMaxLen caps each analytics-context string field captured
+// from request headers/URL. Bounded by http.Server.MaxHeaderBytes upstream;
+// this is row-size hygiene for BQ.
+const analyticsFieldMaxLen = 256
+
+func capField(s string) string {
+	if len(s) > analyticsFieldMaxLen {
+		return s[:analyticsFieldMaxLen]
+	}
+	return s
+}
+
 // AnalyticsContextMiddleware reads or sets the visitor cookie, captures the
 // Referer header and UTM query params, and stashes them in the request
 // context for downstream events.Emit calls. Runs on every request so that
@@ -40,19 +52,19 @@ func AnalyticsContextMiddleware(secureCookies bool) func(http.Handler) http.Hand
 				})
 			}
 
-			// Capture referer and UTM params.
-			referer := r.Header.Get("Referer")
+			// Capture referer and UTM params. Truncate the same way beacon
+			// does to avoid hostile/long header values bloating BQ row sizes.
 			q := r.URL.Query()
-			utmSource := q.Get("utm_source")
-			utmMedium := q.Get("utm_medium")
-			utmCampaign := q.Get("utm_campaign")
-
 			ctx := r.Context()
 			ctx = events.WithVisitorID(ctx, visitorID)
-			ctx = events.WithReferer(ctx, referer)
-			ctx = events.WithUTM(ctx, utmSource, utmMedium, utmCampaign)
-			ctx = events.WithRequestPath(ctx, r.URL.Path)
-			ctx = events.WithUserAgent(ctx, r.Header.Get("User-Agent"))
+			ctx = events.WithReferer(ctx, capField(r.Header.Get("Referer")))
+			ctx = events.WithUTM(ctx,
+				capField(q.Get("utm_source")),
+				capField(q.Get("utm_medium")),
+				capField(q.Get("utm_campaign")),
+			)
+			ctx = events.WithRequestPath(ctx, capField(r.URL.Path))
+			ctx = events.WithUserAgent(ctx, capField(r.Header.Get("User-Agent")))
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

@@ -61,6 +61,9 @@ resource "google_bigquery_table" "analytics_events" {
   # Match the dataset's prevent_destroy stance — the view is cheap to recreate
   # but `terraform destroy -target=google_bigquery_table.analytics_events`
   # would briefly drop query access while the BQ raw table is still flowing in.
+  # If you need to schema-iterate the view (e.g., add a column), update the
+  # `query` field in place — Terraform applies in-place updates without
+  # destroy/create. Use `terraform apply -replace=...` only as a last resort.
   lifecycle {
     prevent_destroy = true
   }
