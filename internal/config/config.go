@@ -46,10 +46,14 @@ type Server struct {
 
 type Database struct {
 	URL string `env:"DATABASE_URL,required"`
-	// 80 leaves ~20 connections for superuser, psql, migrations under the
-	// Postgres default of 100 max_connections. Each active session holds a
-	// dedicated connection for its advisory lock, so this caps concurrent sessions.
-	MaxPoolConns int32 `env:"DATABASE_MAX_POOL_SIZE,default=80"`
+	// Cloud SQL db-g1-small applies a per-tier max_connections of 50 (Cloud SQL
+	// overrides the Postgres default of 100; see cloud.google.com/sql/docs/postgres/flags).
+	// 16 conns/instance × max 3 instances = 48, leaves 2 conns reserve under the cap.
+	// Sized to accommodate up to 10 concurrent AI workers (each holds a tx across
+	// the full LLM call duration in evaluate.go/coach.go/educator.go) plus a small
+	// HTTP burst margin. Reducing further requires refactoring AI workers to release
+	// the tx before the LLM call (tracked as a separate post-Show-HN spec).
+	MaxPoolConns int32 `env:"DATABASE_MAX_POOL_SIZE,default=16"`
 }
 
 type LLM struct {
