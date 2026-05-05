@@ -119,7 +119,7 @@ git grep -E "Co-[Aa]uthored-[Bb]y:.*[Cc]laude|🤖 Generated with" \
 `docs/superpowers/plans/` currently contains 59 files spanning 6 weeks. Triage by criterion: **"would I show this to a competitor?"** Keep architecture/design plans; drop business/strategy plans.
 
 **Definitely drop:**
-- `2026-04-13-saas-starter-extraction-design.md` — documents the plan to extract a sellable SaaS starter from this codebase. Discloses what's considered generic vs. domain-specific, plus rename strategy. Useful to competitors.
+- `2026-04-13-saas-starter-extraction.md` — documents the plan to extract a sellable SaaS starter from this codebase. Discloses what's considered generic vs. domain-specific, plus rename strategy. Useful to competitors.
 
 **Eyeball pass at execution time** for these categories (drop if they discuss go-to-market, pricing, growth tactics, or competitive positioning; keep if they're system-design/refactor/architecture plans):
 - Landing-redesign and growth-related plans (e.g., `2026-04-21-landing-redesign-design.md`).
@@ -218,17 +218,13 @@ git log --all --pretty=format:"%B" | grep -c "🤖 Generated with"
 
 A passing rewrite returns `0` from the three counted checks and shows no `anthropic.com` identity in the author list.
 
-### 5.3 GitHub-side cleanup
+### 5.3 Publishing path
 
-Force-push to the existing remote does NOT clean GitHub-side artifacts:
+`btc/drill` is currently a **private** repo with no public PRs, Actions logs, or API consumers. The "GitHub artifacts persist after force-push" concern that motivates fresh-repo recommendations applies to already-public repos; here it does not. A private→public flip after force-push is functionally equivalent to a fresh repo from the public-artifact-visibility perspective.
 
-- Open and closed PRs reference old SHAs; PR review threads remain accessible at `https://github.com/<owner>/<repo>/commit/<old-sha>` for ~30-90 days.
-- GitHub Actions workflow run logs reference old SHAs and may surface old commit titles in their pages.
-- GitHub's REST/GraphQL API caches branch state.
+**Path:** force-push the rewritten history to `btc/drill`, then flip visibility to public via GitHub UI (Settings → Change visibility → Public).
 
-**Recommended path:** publish to a **fresh public repo** (e.g., create new `Spanda-LLC/sabermatic` or `btc/sabermatic`), push the rewritten history there. Leave the existing `btc/drill` private. This sidesteps every GitHub-side persistence concern and gives a clean repo URL to share on HN.
-
-If you instead force-push to the existing remote: close all open PRs first, delete old workflow runs (manually or via API), and accept that some pre-rewrite SHAs may be retrievable for several weeks.
+Optional rename to `btc/sabermatic` via GitHub UI is available — GitHub auto-redirects old URLs. Decide at publish time; no impact on this spec.
 
 ### 5.4 Post-rewrite cleanup
 
@@ -324,7 +320,7 @@ The history rewrite must come **after** all file-level cleanup, so the rewrite o
 7. Verification per Section 5.2 — all four checks must pass.
 8. Re-run gitleaks + trufflehog on rewritten history (Section 6.4).
 9. `git reflog expire --expire=now --all && git gc --prune=now --aggressive` again (drop dangling original commits).
-10. **Push to public location** — recommended: fresh public repo (Section 5.3); fallback: force-push existing remote with GitHub-side cleanup.
+10. **Force-push to `btc/drill`**, then flip visibility to public via GitHub UI (Section 5.3).
 11. Apply GitHub repo configuration (Section 7.1).
 
 **Note on commits made during step 1:** if any cleanup commits get authored via Claude Code with trailers (per the user's global CLAUDE.md, this should already be suppressed), the step 6 rewrite strips them as well. No special handling needed.
