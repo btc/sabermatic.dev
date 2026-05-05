@@ -2,7 +2,7 @@
 
 > System-design interview practice with an AI coach. Voice-driven, real-time, structured feedback.
 
-[![CI](https://github.com/btc/drill/actions/workflows/ci.yml/badge.svg)](https://github.com/btc/drill/actions/workflows/ci.yml)
+[![CI](https://github.com/btc/sabermatic.dev/actions/workflows/ci.yml/badge.svg)](https://github.com/btc/sabermatic.dev/actions/workflows/ci.yml)
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg)](LICENSE.md)
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8.svg)](go.mod)
 
@@ -63,7 +63,7 @@ flowchart LR
 ### Quickstart
 
 ```bash
-git clone https://github.com/btc/drill.git
+git clone https://github.com/btc/sabermatic.dev.git
 cd drill
 cp .env.example .env
 # Populate .env per the comments inside it
