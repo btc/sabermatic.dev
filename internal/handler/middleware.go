@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/events"
 )
 
 // SecurityHeaders returns a middleware that sets standard security hardening
@@ -51,7 +52,9 @@ func RequireAuth(sa auth.SessionAuthenticator) func(http.Handler) http.Handler {
 			span := trace.SpanFromContext(r.Context())
 			span.SetAttributes(attribute.String("user_id", user.ID.String()))
 
-			next.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), user)))
+			ctx := auth.WithUser(r.Context(), user)
+			ctx = events.WithUserID(ctx, user.ID.String())
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

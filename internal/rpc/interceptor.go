@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/events"
 )
 
 // AuthInterceptor returns a Connect interceptor that validates the session
@@ -66,5 +67,7 @@ func (a *authInterceptor) authenticate(ctx context.Context, headers http.Header)
 	span := trace.SpanFromContext(ctx)
 	span.SetAttributes(attribute.String("user_id", user.ID.String()))
 
-	return auth.WithUser(ctx, user), nil
+	ctx = auth.WithUser(ctx, user)
+	ctx = events.WithUserID(ctx, user.ID.String())
+	return ctx, nil
 }
