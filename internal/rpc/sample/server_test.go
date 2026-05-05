@@ -2,8 +2,6 @@ package sample_test
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,7 +9,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/require"
 
-	"github.com/btc/drill/internal/events"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	samplesvc "github.com/btc/drill/internal/rpc/sample"
@@ -22,10 +19,8 @@ func setup(t *testing.T) drillv1connect.SampleServiceClient {
 	ss, err := samplesvc.NewSampleService()
 	require.NoError(t, err)
 
-	em := events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil)))
-
 	mux := http.NewServeMux()
-	mux.Handle(drillv1connect.NewSampleServiceHandler(samplesvc.NewServer(ss, em)))
+	mux.Handle(drillv1connect.NewSampleServiceHandler(samplesvc.NewServer(ss)))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 

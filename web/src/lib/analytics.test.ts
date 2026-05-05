@@ -48,6 +48,22 @@ describe("track", () => {
     expect(body.properties).toBeUndefined();
   });
 
+  it("posts a sample_view event with no properties", () => {
+    const captured: BlobPart[] = [];
+    const OrigBlob = globalThis.Blob;
+    vi.spyOn(globalThis, "Blob").mockImplementation((parts, opts) => {
+      if (parts) captured.push(...parts);
+      return new OrigBlob(parts, opts);
+    });
+
+    track({ event: "sample_view" });
+
+    expect(sendBeaconMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(captured.join("")) as Record<string, unknown>;
+    expect(body.event_name).toBe("sample_view");
+    expect(body.properties).toBeUndefined();
+  });
+
   it("posts a signup_started event with auth_method nested under properties", () => {
     const captured: BlobPart[] = [];
     const OrigBlob = globalThis.Blob;

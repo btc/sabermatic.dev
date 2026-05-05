@@ -13,6 +13,7 @@ import (
 // via Backend / RPC handlers, not through the beacon.
 var allowedBeaconEvents = map[string]struct{}{
 	"landing_view":   {},
+	"sample_view":    {},
 	"signup_started": {},
 }
 

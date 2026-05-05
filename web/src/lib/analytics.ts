@@ -15,10 +15,11 @@ const BEACON_URL = "/api/beacon";
 
 // Discriminated union enforces per-event required properties at type-check time.
 // Only events in the backend allowlist (`internal/handler/beacon.go`) belong
-// here — backend-emitted events (sample_view, signup_completed, etc.) flow
-// through their own server-side handlers, not the beacon.
+// here — backend-emitted events (signup_completed, etc.) flow through their
+// own server-side handlers, not the beacon.
 export type TrackArgs =
   | { event: "landing_view" }
+  | { event: "sample_view" }
   | { event: "signup_started"; props: { auth_method: "password" | "google" | "github" } };
 
 interface BeaconPayload {

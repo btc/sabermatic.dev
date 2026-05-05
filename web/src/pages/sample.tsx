@@ -1,11 +1,26 @@
+import { useEffect, useRef } from "react";
 import { Link, Outlet } from "react-router-dom";
 
 import { PublicFooter } from "@/components/public-footer";
 import { PublicHeader } from "@/components/public-header";
+import { track } from "@/lib/analytics";
 import { TabLink } from "@/pages/session/layout";
 import { SessionDetailCtx } from "@/pages/session/session-detail-ctx";
 
+// Module-scoped guard so sample_view fires at most once per page load —
+// not on auth-state-flip remounts, not on browser-back to /sample, not on
+// StrictMode dev double-invoke. Mirrors landing/index.tsx.
+let sampleViewFired = false;
+
 export default function SampleSession() {
+  const fired = useRef(sampleViewFired);
+  useEffect(() => {
+    if (fired.current) return;
+    fired.current = true;
+    sampleViewFired = true;
+    track({ event: "sample_view" });
+  }, []);
+
   return (
     <SessionDetailCtx.Provider value={{ dataSource: "sample", sessionId: "sample" }}>
       <div className="min-h-screen bg-background text-foreground flex flex-col">

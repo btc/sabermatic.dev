@@ -39,6 +39,24 @@ func TestBeacon_AcceptsAllowedEvent(t *testing.T) {
 	require.Equal(t, "https://news.ycombinator.com/", rec1["referer"])
 }
 
+func TestBeacon_AcceptsSampleView(t *testing.T) {
+	em, buf := newRecorder(t)
+	body := strings.NewReader(`{"event_name":"sample_view","referrer":""}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/beacon", body)
+	rec := httptest.NewRecorder()
+
+	handler.BeaconHandler(em).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	var rec1 map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &rec1))
+	require.Equal(t, "sample_view", rec1["event_name"])
+	// sample_view fires from /sample, not the landing page — referrer attribution
+	// joins back to the visitor's earlier landing_view row, so the beacon's own
+	// referrer is expected to be empty here.
+	require.Equal(t, "", rec1["referer"])
+}
+
 func TestBeacon_RejectsDisallowedEvent(t *testing.T) {
 	em, _ := newRecorder(t)
 	body := strings.NewReader(`{"event_name":"signup_completed"}`)

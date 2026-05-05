@@ -184,7 +184,7 @@ Single events table. One row per event. Funnel queries: `WHERE event_name IN (..
 | Event | Emitted from | Identifies |
 |---|---|---|
 | `landing_view` | Frontend beacon (`POST /api/beacon`) on landing mount | visitor |
-| `sample_view` | `(*sample.Server).GetSampleSession` success | visitor |
+| `sample_view` | Frontend beacon (`POST /api/beacon`) on `/sample` mount | visitor |
 | `signup_started` | Frontend beacon when user clicks "Sign up" / "Continue with Google" | visitor |
 | `signup_completed` | `Backend.Signup` success | visitor + new user_id |
 | `oauth_completed` | `Backend.OAuthLogin` success | visitor + user_id |
@@ -368,13 +368,14 @@ Call sites:
 
 #### Modified: backend handlers and RPC servers
 
-Inject `*events.Emitter` into both `Backend` (for backend method emissions) and `internal/rpc/sample/Server` (for sample handler emissions). Constructor signature changes in both. Emit events at success boundaries (line numbers omitted — function names are stable, line numbers shift):
+Inject `*events.Emitter` into `Backend` (for backend method emissions). Constructor signature changes there. Emit events at success boundaries (line numbers omitted — function names are stable, line numbers shift):
 
-Note: `(*sample.Server).GetSampleSession` currently has signature `(_ context.Context, _ *connect.Request[...])` — it ignores ctx. Implementation must change the signature to use ctx for visitor_id lookup. (Also: emit at the *inner* methods for sessions — `CompleteSession` and `CancelSession` — not the `Wait*` wrappers, so the event emits regardless of which entry path the caller used.)
+Note: emit at the *inner* methods for sessions — `CompleteSession` and `CancelSession` — not the `Wait*` wrappers, so the event emits regardless of which entry path the caller used.
+
+(`sample_view` was originally specified to emit from `(*sample.Server).GetSampleSession` success, but that emission was moved to a frontend beacon on `/sample` mount — see `2026-05-05-sample-view-event-scope-design.md` for analysis. The taxonomy table above reflects the current emission point.)
 
 | Handler | Event | Properties |
 |---|---|---|
-| `(*sample.Server).GetSampleSession` (`internal/rpc/sample/server.go`) | `sample_view` | — |
 | `Backend.Signup` (`internal/backend/auth.go`) | `signup_completed` | `auth_method=password`, `new_user_id` |
 | `Backend.OAuthLogin` (`internal/backend/oauth.go`) — emit before returning success | `oauth_completed` | `auth_method=google`/`github`, `new_user_id`, `is_new_user` (true when internal `path == pathNewUser`), `is_reactivated` (true when `path == pathReactivated`) |
 | `Backend.VerifyEmail` (`internal/backend/auth.go`) | `email_verified` | — |
@@ -419,7 +420,7 @@ All queries reference the `analytics_events` view (not the raw table). Schema co
 3. **Funnel conversion** — single SELECT with COUNTIF per `event_name`
 4. **Time-to-first-session** — APPROX_QUANTILES on TIMESTAMP_DIFF between `landing_view.event_time` and `first_message_sent.event_time` per `visitor_id`
 5. **Auth method preference & activation** — `properties.auth_method` (direct RECORD field access; `JSON_VALUE(properties, '$.auth_method')` as fallback only if BQ types `properties` as JSON instead of RECORD)
-6. **Sample-page impact** — visitors who saw `sample_view` vs. those who didn't, signup conversion
+6. **Sample-page impact** — visitors who saw `sample_view` vs. those who didn't, signup conversion. **Cutoff:** the original implementation emitted `sample_view` from `(*sample.Server).GetSampleSession` success, which the landing-page transcript/scoring previews also call — see `2026-05-05-sample-view-event-scope-design.md` for the analysis. Pre-fix `sample_view` rows mean "GetSampleSession RPC fired" (effectively duplicates `landing_view` for most visitors); post-fix rows mean "/sample page mounted." This query is meaningful only for `sample_view` rows after the fix's deploy timestamp.
 7. **Power users** — `COUNT(DISTINCT session_id)` grouped by `user_id`, filtered to `event_name='session_ended' AND properties.reason='completed'`
 
 ### Testing
