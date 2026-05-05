@@ -16,8 +16,11 @@ type Emitter struct {
 }
 
 // NewEmitter returns an Emitter that writes to the given slog.Logger. Pass
-// the application's main slog logger (which writes to stdout in production,
-// which Cloud Run forwards to Cloud Logging).
+// the application's main slog logger. In Cloud Run the logger writes to
+// stderr (cmd/drill/main.go's buildLogWriter falls back to os.Stderr when
+// the configured LOG_FILE path isn't writable); Cloud Run forwards both
+// stdout and stderr to Cloud Logging, where the sink filter routes
+// analytics_event=true entries on to BigQuery.
 func NewEmitter(logger *slog.Logger) *Emitter {
 	return &Emitter{logger: logger}
 }
