@@ -3,8 +3,13 @@ import { Link } from "react-router-dom";
 
 import { BrandName } from "@/components/brand-name";
 import { PublicFooter } from "@/components/public-footer";
+import { useNoindex } from "@/hooks/use-noindex";
 
 export function AuthLayout({ children }: { children: ReactNode }) {
+  // Every auth-flow page is hidden from search engines. Hoisting here keeps
+  // login/signup/forgot-password/reset-password/verify-email in lockstep with
+  // robots.txt without per-page hook calls drifting out of sync.
+  useNoindex();
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <div className="flex flex-1 items-center justify-center px-4">

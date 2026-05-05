@@ -9,13 +9,11 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useNoindex } from "@/hooks/use-noindex";
 
 import { AuthLayout } from "./auth-layout";
 import { OAuthError } from "./oauth-error";
 
 export default function Login() {
-  useNoindex();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

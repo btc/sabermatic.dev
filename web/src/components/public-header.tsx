@@ -7,7 +7,7 @@ const LANDING_NAV = [
   { href: "#pipeline", label: "How it works" },
 ];
 
-const LANDING_PATHS = new Set(["/", "/about"]);
+const LANDING_PATHS = new Set(["/"]);
 
 export function PublicHeader() {
   const location = useLocation();

@@ -12,7 +12,7 @@ export function useNoindex() {
     meta.content = "noindex";
     document.head.appendChild(meta);
     return () => {
-      document.head.removeChild(meta);
+      meta.remove();
     };
   }, []);
 }

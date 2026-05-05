@@ -8,7 +8,7 @@ import { Link } from "react-router-dom";
 export function PublicFooter() {
   return (
     <footer className="border-t border-border mt-16">
-      <div className="mx-auto max-w-5xl px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
+      <div className="mx-auto max-w-[1120px] px-5 sm:px-6 lg:px-10 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
         <div>© Spanda, LLC</div>
         <nav aria-label="Footer">
           <ul className="flex flex-wrap items-center gap-4">
