@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { PublicFooter } from "@/components/public-footer";
 import { PublicHeader } from "@/components/public-header";
 import { useOptionalAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/layouts/app-layout";
@@ -23,6 +24,9 @@ const DeepDive = lazy(() => import("@/pages/session/deep-dive"));
 const History = lazy(() => import("@/pages/history"));
 const Settings = lazy(() => import("@/pages/settings"));
 const NotFound = lazy(() => import("@/pages/not-found"));
+const About = lazy(() => import("@/pages/about"));
+const Terms = lazy(() => import("@/pages/terms"));
+const Privacy = lazy(() => import("@/pages/privacy"));
 
 function Loading() {
   return <div className="flex h-screen items-center justify-center text-muted-foreground">Loading...</div>;
@@ -48,7 +52,15 @@ function ConditionalHome() {
     console.error("ConditionalHome: unexpected error", error);
   }
 
-  return <><PublicHeader /><Landing /></>;
+  return (
+    <div className="min-h-screen flex flex-col">
+      <PublicHeader />
+      <div className="flex-1">
+        <Landing />
+      </div>
+      <PublicFooter />
+    </div>
+  );
 }
 
 export function App() {
@@ -61,7 +73,9 @@ export function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
-        <Route path="/about" element={<><PublicHeader /><Landing /></>} />
+        <Route path="/about" element={<About />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="/sample" element={<SampleSession />}>
           <Route index element={<Overview />} />
           <Route path="transcript" element={<TranscriptPage />} />

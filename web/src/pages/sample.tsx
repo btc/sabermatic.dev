@@ -1,5 +1,6 @@
 import { Link, Outlet } from "react-router-dom";
 
+import { PublicFooter } from "@/components/public-footer";
 import { PublicHeader } from "@/components/public-header";
 import { TabLink } from "@/pages/session/layout";
 import { SessionDetailCtx } from "@/pages/session/session-detail-ctx";
@@ -7,10 +8,10 @@ import { SessionDetailCtx } from "@/pages/session/session-detail-ctx";
 export default function SampleSession() {
   return (
     <SessionDetailCtx.Provider value={{ dataSource: "sample", sessionId: "sample" }}>
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-background text-foreground flex flex-col">
         <PublicHeader />
 
-        <main className="mx-auto max-w-5xl px-4 py-6">
+        <main className="flex-1 mx-auto max-w-5xl w-full px-4 py-6">
           <div className="border-b border-border -mx-4 px-4">
             <nav aria-label="Session tabs" className="flex items-end max-w-5xl mx-auto -mb-px">
               <TabLink to="/sample">Overview</TabLink>
@@ -33,6 +34,7 @@ export default function SampleSession() {
             </Link>
           </div>
         </main>
+        <PublicFooter />
       </div>
     </SessionDetailCtx.Provider>
   );
