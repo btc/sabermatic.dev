@@ -436,36 +436,32 @@ git rm docs/superpowers/plans/2026-04-13-saas-starter-extraction.md
 
 (Filename has no `-design` suffix — verify with `ls` first if uncertain.)
 
-- [ ] **Step 2: Generate candidate-drop list**
+- [ ] **Step 2: Generate candidate list and apply triage criterion**
 
 ```bash
 ls docs/superpowers/plans/ | grep -iE "landing|marketing|growth|show-hn|pricing"
 ```
 
-For each match, read the file and write a one-sentence rationale (keep / drop) using the criterion: **"would I show this to a competitor?"** Drop if it discusses go-to-market, competitive positioning, pricing strategy, or growth tactics. Keep if it's a system-design or refactor plan that happens to name a landing page.
+For each match, read the file and decide using this criterion: **"would I show this to a competitor?"** Drop if it discusses go-to-market, competitive positioning, pricing strategy, or growth tactics. Keep if it's a system-design or refactor plan that happens to name a landing page.
 
-Save the candidate list to `/tmp/triage-candidates.md` for the human checkpoint.
+Apply your judgment — owner has delegated this decision. No human checkpoint needed.
 
-- [ ] **Step 3: Human checkpoint (STOP)**
+- [ ] **Step 3: Delete files identified in Step 2**
 
-Print the contents of `/tmp/triage-candidates.md` and STOP execution. Wait for the owner to respond with explicit per-file decisions in the form `delete: <file1>, <file2>; keep: <file3>, ...`. Do not proceed to Step 4 until that response is received. Do NOT delete on your own judgment.
-
-- [ ] **Step 4: Delete confirmed files**
-
-For each owner-confirmed deletion:
+For each file you decided to drop:
 
 ```bash
 git rm docs/superpowers/plans/<filename>
 ```
 
-- [ ] **Step 5: Verify**
+- [ ] **Step 4: Verify**
 
 ```bash
 git status --short | grep -c "^D"
 ls docs/superpowers/plans/ | wc -l
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 Replace `N` below with the actual count of additionally-deleted files (write `0` if only `saas-starter-extraction.md` was dropped):
 
