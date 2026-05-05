@@ -89,6 +89,7 @@ func (s *Server) GetSampleSession(
 	ctx context.Context,
 	_ *connect.Request[drillv1.GetSampleSessionRequest],
 ) (*connect.Response[drillv1.GetSampleSessionResponse], error) {
+	s.em.Emit(ctx, "sample_view")
 	return connect.NewResponse(s.ss.session), nil
 }
 

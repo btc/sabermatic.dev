@@ -20,6 +20,7 @@ import (
 	"github.com/btc/drill/internal/ai"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/interview/observer"
 	"github.com/btc/drill/internal/interview/prompt"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
@@ -240,6 +241,14 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 	}
 
 	// Step 7: Persist candidate message.
+	// Count existing candidate messages before appending to detect first message.
+	candidateCount := 0
+	for _, m := range messages {
+		if m.Role == "candidate" {
+			candidateCount++
+		}
+	}
+
 	sequence++
 	persistCtx := context.WithoutCancel(ctx)
 	candidateMsg, err := b.PersistMessage(persistCtx, PersistMessageParams{
@@ -255,6 +264,13 @@ func (b *Backend) ExecuteTurn(ctx context.Context, p *drillv1.SubmitTurnRequest,
 		return nil
 	}
 	messages = append(messages, candidateMsg)
+
+	if candidateCount == 0 {
+		b.events.Emit(
+			events.WithSessionID(ctx, sessionID.String()),
+			"first_message_sent",
+		)
+	}
 
 	// Step 8: Stream interviewer response.
 	// Use an uncancellable context so the pipeline survives client disconnects.
