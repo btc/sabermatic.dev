@@ -1,12 +1,15 @@
 package testutil
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
+	"github.com/btc/drill/internal/events"
 )
 
 // NewBackend creates a *backend.Backend from a caller-provided config and
@@ -14,7 +17,8 @@ import (
 // creating the backend (e.g. setting Auth.BaseURL for OAuth tests).
 func NewBackend(t *testing.T, cfg *config.Config) *backend.Backend {
 	t.Helper()
-	b, err := backend.New(cfg)
+	em := events.NewEmitter(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	b, err := backend.New(cfg, em)
 	require.NoError(t, err)
 	t.Cleanup(func() { b.Close() })
 	return b

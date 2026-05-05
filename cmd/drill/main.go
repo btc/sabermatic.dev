@@ -18,6 +18,7 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/migrate"
 )
@@ -71,7 +72,8 @@ func runWithContext(ctx context.Context) error {
 		}
 	}()
 
-	b, err := backend.New(cfg)
+	em := events.NewEmitter(logger)
+	b, err := backend.New(cfg, em)
 	if err != nil {
 		return fmt.Errorf("create backend: %w", err)
 	}

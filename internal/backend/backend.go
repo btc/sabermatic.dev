@@ -22,6 +22,7 @@ import (
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
+	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/jobs"
 	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/storage"
@@ -44,13 +45,14 @@ type Backend struct {
 	stt          ai.Transcriber
 	tts          ai.Synthesizer
 	store        storage.Store
+	events       *events.Emitter
 
 	SampleService *samplesvc.SampleService
 }
 
 // New creates a pool, runs River migrations, and starts the River client.
 // App migrations must be run before calling this (schema must exist).
-func New(cfg *config.Config) (*Backend, error) {
+func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 	// SampleService (no pool dependency -- initialize first).
 	ss, err := samplesvc.NewSampleService()
 	if err != nil {
@@ -209,8 +211,15 @@ func New(cfg *config.Config) (*Backend, error) {
 		stt:           stt,
 		tts:           tts,
 		store:         store,
+		events:        em,
 		SampleService: ss,
 	}, nil
+}
+
+// Events returns the Backend's analytics emitter. Used by background jobs
+// that hold a Backend reference and need to emit events.
+func (b *Backend) Events() *events.Emitter {
+	return b.events
 }
 
 // SetConfig sets the configuration on a Backend. Useful in tests where
