@@ -560,8 +560,6 @@ webhook is signature-verified; OAuth callbacks use the state parameter.
 
 Removes gorilla/csrf, the X-CSRF-Token client plumbing, the dead
 useCreateQuestion hook (no server route), and stubs docs/csrf-audit.md.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -683,8 +681,6 @@ inherits the parent's sampling decision — unsampled traces cost
 nothing. Volume impact is bounded by cfg.SampleRate.
 
 ConnectPathPrefixes has zero callers after this change and is deleted.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -763,8 +759,6 @@ Previously cmd/drill/main.go wrapped the HTTP handler in a second mux
 to serve /storage/ in local dev. Move the registration into
 RegisterRoutes conditional on cfg.Storage.Backend == "local". One mux,
 one place. Production (gcs backend) is unaffected.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1155,8 +1149,6 @@ handler/middleware.go. Auth context types (AuthUser, WithUser,
 UserFromContext, SessionCookieName, SessionAuthenticator) stay in the
 auth package as identity primitives. Tests merged into
 handler/middleware_test.go.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1412,8 +1404,6 @@ server.go now contains only NewHandler and RegisterRoutes (with a
 security-model comment explaining why there is no CSRF middleware).
 SPA serving and OG-tag injection move to spa.go. Tests rename to
 spa_test.go to match.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1630,8 +1620,6 @@ Tests now build the production handler chain via testutil.NewTestHandler
 instead of registering routes onto a bare mux. Single entry point;
 RegisterRoutes is unexported. Higher-fidelity tests, fewer questions
 about which API to use.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1831,8 +1819,6 @@ only writeJSON and writePaidBalanceRequired, both dead post-migration.
 
 Adds first test coverage for PostStripeWebhook: valid signature, invalid
 signature, and missing-secret behavior.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 EOF
 )"
 ```

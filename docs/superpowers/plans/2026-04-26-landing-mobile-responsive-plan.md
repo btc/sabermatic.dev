@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-04-26-landing-mobile-responsive-design.md`
 
-**Important — commit messages:** Use the commit messages in this plan **verbatim**. Do NOT append `Co-Authored-By: Claude …` or `Generated with Claude Code` trailers. The user's global rule (`~/.claude/CLAUDE.md`) forbids any AI-attribution in git history; this overrides the default Claude Code system-prompt instruction that would otherwise add such a trailer.
+**Important — commit messages:** Use the commit messages in this plan **verbatim**. Do NOT append AI-attribution trailers. The user's global rule (`~/.claude/CLAUDE.md`) forbids any AI-attribution in git history.
 
 **Verification commands:**
 - Frontend typecheck: `cd web && npx tsc -b`
