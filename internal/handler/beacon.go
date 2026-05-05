@@ -81,9 +81,15 @@ func BeaconHandler(em *events.Emitter) http.HandlerFunc {
 			truncate(req.UTMCampaign),
 		)
 
-		// Convert properties map to slog.Attr slice.
+		// Convert properties map to slog.Attr slice. Truncate string-typed
+		// values defensively — beaconMaxBodyBytes caps the request total but
+		// individual string values within properties could otherwise consume
+		// most of the budget and bloat BQ row sizes.
 		var props []slog.Attr
 		for k, v := range req.Properties {
+			if s, ok := v.(string); ok {
+				v = truncate(s)
+			}
 			props = append(props, slog.Any(k, v))
 		}
 

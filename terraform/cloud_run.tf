@@ -6,6 +6,13 @@ resource "google_cloud_run_v2_service" "sabermatic" {
   template {
     service_account = google_service_account.sabermatic_app.email
 
+    # IMPORTANT: changes to this scaling block are NOT applied by `terraform
+    # apply` — see `lifecycle.ignore_changes` below. Provider drift on
+    # manual_instance_count made the whole `scaling` block opaque to Terraform.
+    # To change max_instance_count in production, run:
+    #   gcloud run services update sabermatic --region=$REGION --max-instances=N
+    # The value here is the documented intent; the live value is whatever
+    # gcloud last set.
     scaling {
       max_instance_count = 3
     }

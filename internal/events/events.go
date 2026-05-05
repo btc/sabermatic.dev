@@ -21,8 +21,16 @@ type Emitter struct {
 // the configured LOG_FILE path isn't writable); Cloud Run forwards both
 // stdout and stderr to Cloud Logging, where the sink filter routes
 // analytics_event=true entries on to BigQuery.
+//
+// The provided handler is wrapped with alwaysEnabledHandler so analytics
+// events bypass any LOG_LEVEL filtering on the application logger. Without
+// this wrapper, raising LOG_LEVEL=warn (a reasonable cost-control move) would
+// silently kill every analytics event without any error or warning.
 func NewEmitter(logger *slog.Logger) *Emitter {
-	return &Emitter{logger: logger}
+	if logger == nil {
+		return &Emitter{}
+	}
+	return &Emitter{logger: slog.New(&alwaysEnabledHandler{inner: logger.Handler()})}
 }
 
 // Emit writes a single analytics event. Never blocks the caller, never
@@ -62,4 +70,29 @@ func (e *Emitter) Emit(ctx context.Context, name string, props ...slog.Attr) {
 	}
 
 	e.logger.LogAttrs(ctx, slog.LevelInfo, "analytics", attrs...)
+}
+
+// alwaysEnabledHandler wraps a slog.Handler and reports Enabled=true for
+// every level, while delegating Handle/WithAttrs/WithGroup to the inner
+// handler. Used by Emitter so analytics events can't be filtered out by
+// LOG_LEVEL config — the BQ sink filter (jsonPayload.analytics_event=true)
+// is the only routing mechanism we want to gate on.
+type alwaysEnabledHandler struct {
+	inner slog.Handler
+}
+
+func (h *alwaysEnabledHandler) Enabled(_ context.Context, _ slog.Level) bool {
+	return true
+}
+
+func (h *alwaysEnabledHandler) Handle(ctx context.Context, r slog.Record) error {
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *alwaysEnabledHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &alwaysEnabledHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h *alwaysEnabledHandler) WithGroup(name string) slog.Handler {
+	return &alwaysEnabledHandler{inner: h.inner.WithGroup(name)}
 }

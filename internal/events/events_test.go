@@ -60,6 +60,28 @@ func TestEmit_NilEmitter_NoPanic(t *testing.T) {
 	em.Emit(context.Background(), "anything") // must not panic
 }
 
+// Analytics events must reach the sink even when the application logger is
+// configured at WARN/ERROR (a reasonable cost-control move). The Emitter
+// wraps the handler with alwaysEnabledHandler to bypass level filtering.
+// Without this guard, raising LOG_LEVEL would silently kill the BQ pipeline.
+func TestEmit_BypassesLevelFiltering(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	em := events.NewEmitter(logger)
+
+	em.Emit(context.Background(), "landing_view")
+
+	require.NotEmpty(t, buf.Bytes(), "analytics emit must write even when application logger is at LevelError")
+	var record map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &record))
+	require.Equal(t, "landing_view", record["event_name"])
+}
+
+func TestNewEmitter_NilLogger(t *testing.T) {
+	em := events.NewEmitter(nil)
+	em.Emit(context.Background(), "anything") // must not panic
+}
+
 func TestContextValues_PreserveAcrossWithCalls(t *testing.T) {
 	ctx := context.Background()
 	ctx = events.WithVisitorID(ctx, "v1")

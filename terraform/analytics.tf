@@ -58,6 +58,13 @@ resource "google_bigquery_table" "analytics_events" {
   dataset_id = google_bigquery_dataset.analytics.dataset_id
   table_id   = "analytics_events"
 
+  # Match the dataset's prevent_destroy stance — the view is cheap to recreate
+  # but `terraform destroy -target=google_bigquery_table.analytics_events`
+  # would briefly drop query access while the BQ raw table is still flowing in.
+  lifecycle {
+    prevent_destroy = true
+  }
+
   view {
     use_legacy_sql = false
     query          = <<-EOT
