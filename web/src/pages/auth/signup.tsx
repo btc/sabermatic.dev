@@ -9,6 +9,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { track } from "@/lib/analytics";
 
 import { AuthLayout } from "./auth-layout";
 import { OAuthError } from "./oauth-error";
@@ -31,6 +32,7 @@ export default function Signup() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    track({ event: "signup_started", props: { auth_method: "password" } });
     setError(null);
     signup.mutate(
       { displayName, email, password },
@@ -58,6 +60,7 @@ export default function Signup() {
             <a
               href={`/api/auth/oauth/google${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
+              onClick={() => track({ event: "signup_started", props: { auth_method: "google" } })}
             >
               <GoogleIcon className="mr-2 h-4 w-4" />
               Sign up with Google
@@ -65,6 +68,7 @@ export default function Signup() {
             <a
               href={`/api/auth/oauth/github${redirectQuery}`}
               className={buttonVariants({ variant: "outline", className: "w-full" })}
+              onClick={() => track({ event: "signup_started", props: { auth_method: "github" } })}
             >
               <GitHubIcon className="mr-2 h-4 w-4" />
               Sign up with GitHub
