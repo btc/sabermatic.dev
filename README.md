@@ -25,7 +25,7 @@ Sabermatic was built end-to-end with [Claude Code](https://docs.claude.com/claud
 ```mermaid
 flowchart LR
   Browser[Browser - React/Vite] -->|ConnectRPC| API[Go API - Cloud Run]
-  Browser -.->|audio (server-stream)| API
+  Browser -.->|audio via server-stream| API
   API --> DB[(Postgres - Cloud SQL)]
   API --> SM[GCP Secret Manager]
   API --> LLM[Anthropic / OpenAI]
