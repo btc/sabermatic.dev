@@ -23,7 +23,7 @@ Two acceptance gates require live credentials and are deferred to the user:
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] Replace `CLAUDE.md:31` per the verbatim before/after text in the spec ("API & Proto" / Proto section).
+- [ ] Find and replace the exact sentence in `CLAUDE.md` matching `"REST handlers in \`internal/handler/\` are limited to health checks, OAuth flows, and Stripe webhooks — endpoints that are inherently HTTP-level."` per the verbatim before/after text in the spec's Proto section. (Use `grep -n` first to confirm the line still matches before editing — the line number may have shifted since spec authoring.)
 - [ ] Commit standalone: `docs(claude): broaden internal/handler/ carve-out to all third-party webhooks`.
 
 ---
@@ -166,26 +166,32 @@ SELECT $1::uuid,
  WHERE EXISTS (SELECT 1 FROM interview_sessions WHERE id = $1 AND status = 'active');
 
 -- name: MarkSessionCompletedFromActive :one
--- CTE pattern: always returns exactly one row with (updated, candidate_count)
--- so sqlc's :one annotation never produces ErrNoRows.
+-- CTE that always returns exactly one row with (updated, candidate_count).
+-- The `counts` CTE always emits one row; the SELECT joins from it so
+-- sqlc's :one annotation never produces ErrNoRows even when the UPDATE
+-- matches zero rows.
 WITH upd AS (
   UPDATE interview_sessions
      SET status = 'completed', ended_at = NOW(), updated_at = NOW()
    WHERE id = $1 AND status = 'active'
-  RETURNING id
+  RETURNING 1 AS marker
+),
+counts AS (
+  SELECT COUNT(*)::int AS cc FROM messages WHERE session_id = $1 AND role = 'candidate'
 )
 SELECT
-  EXISTS(SELECT 1 FROM upd)::bool AS updated,
-  (SELECT COUNT(*)::int FROM messages WHERE session_id = $1 AND role = 'candidate') AS candidate_count;
+  ((SELECT COUNT(*) FROM upd) > 0)::bool AS updated,
+  counts.cc                              AS candidate_count
+FROM counts;
 
 -- name: MarkSessionCancelledFromActive :one
 WITH upd AS (
   UPDATE interview_sessions
      SET status = 'cancelled', ended_at = NOW(), updated_at = NOW()
    WHERE id = $1 AND status = 'active'
-  RETURNING id
+  RETURNING 1 AS marker
 )
-SELECT EXISTS(SELECT 1 FROM upd)::bool AS updated;
+SELECT ((SELECT COUNT(*) FROM upd) > 0)::bool AS updated;
 
 -- name: UpdateSessionToActiveWithTavus :execrows
 -- (Moved from C3 to C2 because C2's tests require a Tavus session in
@@ -202,19 +208,22 @@ UPDATE interview_sessions
 
 The advisory lock is **not** an sqlc query (plan-review M5 resolution). It's invoked via `tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, $2::int)", classid, objid)` directly because it's a control-plane op outside the data layer. This is documented in `CONVENTIONS.md`.
 
-- [ ] **Step 2:** `sqlc generate`. Confirm the generated `MarkSessionCompletedFromActive` returns a row struct with `Updated bool` and `CandidateCount int32`.
-- [ ] **Step 3: `internal/backend/tavus.go::Backend.HandleTavusEvent`** dispatch logic. Helper for advisory-lock acquisition:
+- [ ] **Step 2:** `sqlc generate`. Confirm the generated `MarkSessionCompletedFromActive` returns a row struct with `Updated bool` and `CandidateCount int32`. **If sqlc fails to generate the row struct correctly** (data-modifying CTEs are historically uneven across sqlc versions): fall back to running the `UPDATE ... RETURNING id` and the `SELECT COUNT(*)` as two consecutive statements inside the same Go-managed tx, with the first returning `pgx.ErrNoRows` mapped to `Updated=false`. Decision deferred to implementation; both produce the same dispatcher behavior.
+- [ ] **Step 3: `internal/backend/tavus.go::Backend.HandleTavusEvent`** dispatch logic. Helper for advisory-lock acquisition (round-2 plan-review H2 + H4 resolution — both classid and objid are hashed by Postgres, never by Go, so the values are reproducible from any future SQL-side caller):
 
 ```go
 func acquireTavusSessionLock(ctx context.Context, tx pgx.Tx, sessionID uuid.UUID) error {
-  // Two-arg form namespaces the lock by feature classid; see CONVENTIONS.md.
-  classid := hashtext("tavus_session")
-  objid := hashtext(sessionID.String())
-  _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::int, $2::int)", classid, objid)
+  // Two-arg form namespaces the lock by feature classid. Postgres computes
+  // both hashes so future SQL-side callers can reproduce the values; see
+  // docs/superpowers/CONVENTIONS.md for the registry.
+  _, err := tx.Exec(ctx,
+    "SELECT pg_advisory_xact_lock(hashtext($1)::int, hashtext($2)::int)",
+    "tavus_session", sessionID.String())
   return err
 }
-// hashtext mirrors Postgres's hashtext() to compute classid in Go for stability.
 ```
+
+No Go-side hash function is introduced. The `hashtext` SQL function is version-stable since PG11 (Sabermatic runs PG16).
 
 Per-event behavior:
 - `RecordingReadyEvent`: call `q.UpdateSessionRecordingURL`. No lock; single-statement; recording is an artifact (spec line ~232).
@@ -255,7 +264,10 @@ Per-event behavior:
   ## `messages.input_method` value registry
 
   Stored as nullable `TEXT` (no DB CHECK constraint by design — values
-  evolve with input modalities). Known values:
+  evolve with input modalities). Known values: **verify each entry
+  with `grep -rn "InputMethod" internal/` before committing this
+  registry** (round-2 plan-review M7); update the table to match the
+  exact string literals the code emits today. Today's expected entries:
 
   | Value          | Producer                                     |
   |----------------|----------------------------------------------|
@@ -280,7 +292,14 @@ Per-event behavior:
   }
   ```
 
-  Concretely for C2 (before C3 lands): the helper uses `q.CreateSession` directly with `mode='tavus', status='provisioning'` then `q.UpdateSessionToActiveWithTavus` to transition. Mirrors what C3's CreateSession Tavus branch will do.
+  **State-fidelity rule** (round-2 plan-review M1): the helper must reserve minutes via the real billing path so test assertions on grants/ledger match production. Concretely:
+
+  1. `b.Signup(...)` to create a real user + free grant (mirrors `backendtest.SeedUser`).
+  2. `b.CreateSession(ctx, userID, questionID, durationMinutes, mode=SESSION_MODE_STANDARD)` — uses the production session+billing path. Reserves minutes; creates ledger entry. Lands the row in `'active'`.
+  3. `q.UpdateSessionStatusOnly(id, 'provisioning')` to move it back into the C2 starting state.
+  4. `q.UpdateSessionToActiveWithTavus(...)` to transition to the active Tavus state (sets `tavus_conversation_id`, `tavus_conversation_url`, flips back to `'active'`).
+
+  This pattern uses production code paths for user/grant/billing state and only synthesizes the Tavus-specific transitions via direct queries. C3 lands `Backend.CreateSession` with `mode='tavus'`; the helper does **not** change in C3, because the goal is test-state stability across commits. C3's own tests use `Backend.CreateSession` directly (the production path) rather than the helper.
 
 - [ ] **Step 8: Tests.** Enumerated explicitly (plan-review L1):
   - `internal/handler/tavus_test.go`:
@@ -316,6 +335,7 @@ Per-event behavior:
   - `mode='standard'`: existing logic, single tx.
   - `mode='tavus'`: validate `cfg.Tavus.Enabled` (else error); call `q.HasActivePaidBalance` (else `ErrNoPaidBalance`); Tx#1 reserve minutes + INSERT with `status='provisioning'`; commit. Call `tavus.Client.CreateConversation` outside tx with body composed via `BuildConversationalContext`. On success: Tx#2 calls `q.UpdateSessionToActiveWithTavus`; if RowsAffected != 1 (someone else mutated the row, e.g. cleanup raced) call `Backend.FailSession`. On Tavus failure: `Backend.FailSession`; emit `tavus_provider_call_failed{operation:"create", http_status, error_class}`; return error.
   - Existing CreateSession callers in `lifecycle_test.go` and `session_archive_test.go` updated to pass the default `SESSION_MODE_STANDARD`.
+- [ ] **Step 2a (round-2 plan-review H1):** Extend `Backend.FailSession` to accept `'provisioning'` in addition to `'active'`. The current guard at `internal/backend/session.go:401` reads `if session.Status != "active" { return ErrSessionNotActive }` — change to `if session.Status != "active" && session.Status != "provisioning" { return ErrSessionNotActive }`. Add a focused `TestFailSession_FromProvisioning` to confirm the row transitions to `'failed'` and minutes are refunded. Without this fix, both the C3 Tavus-creation-error path AND the C5 reconciler Pass A would silently no-op on stranded `'provisioning'` rows.
 - [ ] **Step 3:** `internal/rpc/session/server.go::CreateSession` — coerce `SESSION_MODE_UNSPECIFIED → SESSION_MODE_STANDARD`, map any error from `Backend.CreateSession` to ConnectRPC codes per spec (`FailedPrecondition` for Enabled=false, `PermissionDenied` for no paid balance, `Unavailable` for Tavus 5xx). Both backend methods emit `session_created` with `slog.String("mode", mode)` attr.
 - [ ] **Step 4:** Test cases:
   - `mode=tavus, Enabled=false` → `FailedPrecondition`
@@ -384,11 +404,11 @@ UPDATE interview_sessions
 
 - [ ] **Step 2:** `sqlc generate`.
 - [ ] **Step 3:** `ReconcileTavusSessionsWorker.Work(ctx, job)`:
-  - **Pass A:** open tx; `SelectStrandedTavusProvisioning(LIMIT 25)`; for each, call `Backend.FailSession` (refunds via existing path) outside the SELECT tx (or call within if FailSession is tx-aware; pick based on FailSession's signature). Commit.
-  - **Pass B:** open tx; `SelectOverdueTavusActive(LIMIT 25)`; release the SELECT lock by committing immediately, then process the rows with `semaphore.NewWeighted(5)` bounding concurrent `tavus.Client.GetConversation` calls. For each:
-    - On `ErrRateLimited`: `IncrementTavusReconcileAttempts`, return early (skip remaining rows this tick).
-    - On `ErrUnavailable`: `IncrementTavusReconcileAttempts`, continue.
-    - On non-`'active'` Tavus status: synthesize a `ShutdownEvent` and dispatch via `Backend.HandleTavusEvent` (which takes the same advisory lock and runs the conditional UPDATE).
+  - **Pass A:** open tx; `SelectStrandedTavusProvisioning(LIMIT 25)`; commit the tx **before** calling `Backend.FailSession` per row (FailSession opens its own tx). Note that releasing the row lock here is fine because Pass A's only side effect is FailSession, and FailSession is itself a conditional `UPDATE ... WHERE status IN ('active','provisioning')` — duplicate concurrent calls return `ErrSessionNotActive` on the second attempt without harm. Each row gets one FailSession call best-effort; logged failures don't abort the pass.
+  - **Pass B (round-2 plan-review M3 resolution):** open tx; `SelectOverdueTavusActive(LIMIT 25)`; **keep this tx open** for the duration of the pass — that is, hold the row locks via `FOR UPDATE SKIP LOCKED` across the per-row `tavus.Client.GetConversation` calls. Two concurrent worker invocations cannot pick up the same row even at the boundary between ticks, because the tx is open until all rows in this tick are processed. Worst case: 25 rows × 5-concurrency × ~5s per Tavus call = 25s tx duration; acceptable. Use `semaphore.NewWeighted(5)` to bound in-flight Tavus HTTP. For each row:
+    - On `ErrRateLimited`: `IncrementTavusReconcileAttempts` (within the open tx); break out of the loop (skip remaining rows this tick); commit the tx.
+    - On `ErrUnavailable`: `IncrementTavusReconcileAttempts` (within tx); continue to next row.
+    - On non-`'active'` Tavus status: synthesize a `ShutdownEvent` and dispatch via `Backend.HandleTavusEvent`. Note that `HandleTavusEvent` opens its OWN tx and acquires the advisory lock; this nested-tx-via-second-connection pattern is fine because `Backend.HandleTavusEvent` doesn't share a transaction with the reconciler. We commit the reconciler's tx after dispatch returns. The conditional UPDATE inside `HandleTavusEvent` is idempotent so re-dispatching a row that's already been finalized is safe.
   - Log per-tick metrics: `{provisioning_failed, rows_examined, rows_finalized, rate_limited}`.
 - [ ] **Step 4:** Register the worker in `internal/jobs/workers.go::WorkerRefs` and create it alongside the others; in `internal/backend/backend.go` wire `Reconcile.Jobs = jobs` after `river.NewClient` returns (plan-review M7); add the periodic job entry to the `PeriodicJobs: []*river.PeriodicJob{...}` slice with a 60s interval.
 - [ ] **Step 5:** Extend `CleanupAbandonedSessionsWorker`: capture `tavus_conversation_id` from each cancelled/completed row inside the tx; after `tx.Commit`, iterate the slice and call `tavus.Client.EndConversation` per row with a 5s timeout. Best-effort (logged failure does not abort cleanup).
@@ -436,9 +456,10 @@ UPDATE interview_sessions
   // alongside SESSION_STATUS_GENERATING (reuse the existing "preparing" UI).
   ```
 - [ ] **Step 7:** Extend `internal/handler/middleware.go::SecurityHeaders` signature to `SecurityHeaders(secureCookies, tavusEnabled bool, next http.Handler) http.Handler`. When `tavusEnabled`:
-  - Append ` https://*.daily.co` to the existing CSP `frame-src` (currently absent — add it). Default ships with the wildcard-subdomain branch per spec round-3 M4 default; comment notes the C1 origin probe will potentially tighten this.
-  - Do **not** set a document-level `Permissions-Policy` header (wildcards aren't supported there); the iframe `allow=` attribute on the element provides per-iframe delegation.
-  Update the call site in `internal/handler/server.go:56` to pass `cfg.Tavus.Enabled`.
+  - Append ` frame-src 'self' https://*.daily.co;` to the CSP string (currently has no `frame-src` directive). Default ships the wildcard-subdomain branch per spec round-3 M4 default.
+  - Do **not** set a document-level `Permissions-Policy` header for the wildcard branch (wildcards aren't supported there); the iframe `allow=` attribute on the element provides per-iframe delegation.
+  - Add a TODO comment in the function (round-2 plan-review M4): "if the C1 origin probe finds a single fixed Tavus iframe origin, tighten frame-src to that exact origin AND add a Permissions-Policy header `camera=(self https://that-origin), microphone=(self https://that-origin), display-capture=(self https://that-origin)`. The function is structured so this is a one-place edit."
+  - Update the only existing call site in `internal/handler/server.go:56` to pass `cfg.Tavus.Enabled`. Update `internal/handler/middleware_test.go:30,51` callers.
 - [ ] **Step 8:** Frontend tests:
   - `interview-view.test.tsx`: iframe `src` matches session URL; iframe `allow` has all four tokens; End button calls EndSession mutation. **Assert** unmount does NOT fire any EndConversation mutation (regression guard against re-introducing the broken cleanup).
   - `interview.test.tsx`: lazy branch renders `TavusInterview` when `session.mode === TAVUS`. Use `vi.mock('@/tavus/interview-view', () => ({ default: () => <div data-testid="tavus-interview"/> }))` hoisted at file top; `await waitFor(() => screen.getByTestId('tavus-interview'))`. Standard mode renders existing UI.
@@ -460,19 +481,22 @@ UPDATE interview_sessions
 - Modify: `terraform/cloud_run.tf` (env entries + Secret Manager refs)
 - Create: `docs/tavus-bootstrap.md`
 
-- [ ] **Step 1: Persona extraction (plan-review H5).**
-  - Read the current persona block from `internal/interview/prompt/prompt.go::WithSystemInstructions`. The block starts at `b.system.WriteString(\`You are a senior staff engineer...\`)`.
-  - Extract the literal string into a new `internal/interview/prompt/persona.go`:
-    ```go
-    package prompt
+- [ ] **Step 1: Persona extraction (plan-review H5 + round-2 M5 resolution).**
 
-    // TavusPersonaSystemPrompt is the system prompt used by the Tavus CVI
-    // persona. Equivalent to the body written by Builder.WithSystemInstructions
-    // in prompt.go; both are derived from this constant.
-    const TavusPersonaSystemPrompt = `You are a senior staff engineer ...`
-    ```
-  - Refactor `WithSystemInstructions` to write `TavusPersonaSystemPrompt` (plus any post-prompt additions that exist today — keep the byte-for-byte output).
-  - Add a snapshot test in `prompt_test.go` that asserts `Builder.NewInterviewerPrompt().WithSystemInstructions(...).String()` is unchanged from the pre-extraction value (red-green proof of zero behavioral change).
+  The Tavus persona system prompt is **not** byte-equal to `Builder.WithSystemInstructions()` output. The existing builder text contains lines like *"Time context will be provided below"* that reference the per-session content (`WithTimeContext`/`WithCoachBriefing`) the LLM-call builder appends. The Tavus persona has no such "below" because per-session content arrives via `conversational_context` instead.
+
+  Therefore we maintain **two related strings**, not one shared const:
+
+  - The existing builder behavior in `prompt.go::WithSystemInstructions` is unchanged (writes the original literal). Existing LLM-call tests stay green.
+  - A new exported `const TavusPersonaSystemPrompt` in `internal/interview/prompt/persona.go` is the *Tavus-adapted* version — same behavioral rules, but copy adjusted where it references "below"/"context provided here" to instead reference "your conversational_context."
+  - A new test `TestTavusPersonaPromptDivergence` enumerates the substrings that intentionally differ between the two (lines like `"Time context will be provided below"` vs `"Time context is in your conversational_context"`). The test fails loudly if a refactor accidentally re-merges them.
+
+  This avoids the round-2 M5 trap (snapshot test that only catches the first WriteString and misses subsequent additions) and makes the divergence explicit.
+
+  - Add `internal/interview/prompt/persona.go` with the const.
+  - Add the divergence test to `prompt_test.go`.
+  - **Do not** refactor `prompt.go::WithSystemInstructions` to consume the new const — they're intentionally separate.
+  - The drift detector at app boot fetches `GET /v2/personas/{id}` and compares the returned `system_prompt` to `prompt.TavusPersonaSystemPrompt` exactly.
 - [ ] **Step 2: `cmd/drillctl/tavus.go`** — three subcommands (`tavus-bootstrap`, `tavus-persona-sync`, `tavus-orphan-scan`).
   - `tavus-bootstrap`: POST `/v2/personas` with body `{"system_prompt": prompt.TavusPersonaSystemPrompt, "default_replica_id": cfg.Tavus.ReplicaID, "persona_name": "Sabermatic Interviewer"}`. Print returned `persona_id` for operator to paste into Secret Manager. Idempotent? No — if you call twice you get two personas. Add a guard: check env `TAVUS_PERSONA_ID`; if set, refuse with a hint to use `tavus-persona-sync` instead.
   - `tavus-persona-sync`: PATCH `/v2/personas/{TAVUS_PERSONA_ID}` with `{"system_prompt": prompt.TavusPersonaSystemPrompt}`. Idempotent.
