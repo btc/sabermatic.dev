@@ -1,6 +1,6 @@
 # Tavus CVI voice conversation integration — design spec
 
-**Status:** spec, round 3 (incorporating round-1 + round-2 Opus review)
+**Status:** spec, round 4 — final (incorporating round-1, round-2, round-3 Opus review). Implementation begins after this round per the CLAUDE.md "up to 3 rounds" cap.
 **Date:** 2026-05-06
 **Goal:** Let an opted-in user run a Sabermatic interview against a Tavus replica avatar (live WebRTC video + audio) instead of the current push-to-talk OpenAI STT → Anthropic LLM → OpenAI TTS pipeline. Ship behind a feature flag; existing pipeline remains the default.
 
@@ -46,13 +46,11 @@ Drift prevention between the committed Go source and the Tavus-stored persona:
 
 ### Conversational context size
 
-`conversational_context` is bounded server-side to **8000 chars** (resolves round-2 M14). Composition order, applied at compose time in `SessionService.CreateSession`:
+`conversational_context` is bounded server-side to **8000 chars** (resolves round-2 M14). v1 composition (round-3 M3 resolution — there is no rubric or few-shot data anywhere in the codebase today; `questions` rows have only `title`, `prompt`, `difficulty`, `hints`):
 
-1. Question prompt (mandatory).
-2. Rubric/scoring criteria (truncated first if total > 8000).
-3. Few-shot examples (dropped first if still over).
+`conversational_context = question.prompt`
 
-Validation lives in `internal/backend/tavus.go::BuildConversationalContext(question)` with a unit test. Any future question whose prompt alone exceeds 8000 chars fails session creation with a `connect.CodeFailedPrecondition` referencing the question_id; an alert event `tavus_context_too_large` is emitted for ops.
+That is the entire composition for v1. The 8000-char cap is a forward-compat guardrail for when we add rubric/few-shot data; today no question prompt approaches 8000 chars. Validation lives in `internal/backend/tavus.go::BuildConversationalContext(question)`. Any prompt exceeding 8000 chars fails session creation with `connect.CodeFailedPrecondition` referencing the question_id, and an alert event `tavus_context_too_large` is emitted for ops. Multi-layer composition (rubric, few-shots) is explicitly deferred — when we add it, the size policy will need to grow into a real truncation order; we'll revise this section then.
 
 Out of scope for v1: rotating personas per question category, custom replicas, persona A/B testing, backfilling missed utterances from `GET /v2/conversations/{id}.events[]`.
 
@@ -131,6 +129,11 @@ Migration `015_tavus_session_fields.up.sql` (and matching `.down.sql`):
 | `tavus_recording_url` | `text` | Set by `recording_ready` webhook |
 | `tavus_reconcile_attempts` | `int NOT NULL DEFAULT 0` | Round-2 M8/M9: per-row backoff counter |
 
+The migration also extends the `interview_sessions.status` CHECK to add `'provisioning'` (round-3 H1 resolution; see immediately below) and adds two indexes:
+
+- `CREATE INDEX idx_sessions_tavus_conversation_id ON interview_sessions(tavus_conversation_id) WHERE tavus_conversation_id IS NOT NULL;` — webhook lookup.
+- `CREATE INDEX idx_sessions_tavus_reconcile ON interview_sessions(started_at) WHERE mode='tavus' AND status='active' AND tavus_reconcile_attempts < 10;` — reconciler hot path (round-3 M1 resolution).
+
 Plus index: `CREATE INDEX idx_sessions_tavus_conversation_id ON interview_sessions(tavus_conversation_id) WHERE tavus_conversation_id IS NOT NULL;`.
 
 Down migration: drop the index, then the five columns.
@@ -139,7 +142,15 @@ Down migration: drop the index, then the five columns.
 
 `messages.role` is CHECK-constrained to `('interviewer','candidate')`. We deliberately map Tavus `replica`→`interviewer` and Tavus `user`→`candidate` so existing constraint, evaluation prompt, and transcript page all keep working unchanged. Do **not** extend the constraint to add `'replica'`/`'user'`.
 
-We reuse the existing `SESSION_STATUS_GENERATING` (migration 009) for the brief Tx#1↔Tx#2 window. The frontend already renders a "preparing your interview" UI for this status; Tavus mode reuses it (round-2 H4 resolution).
+We **introduce a new status `'provisioning'`** for the brief Tx#1↔Tx#2 window (round-3 H1 resolution). Round-2 v3 had proposed reusing `SESSION_STATUS_GENERATING`, but `'generating'` is actively managed by `internal/jobs/cleanup_generating.go:CleanupStaleGeneratingWorker` and `internal/backend/session.go:586:waitForGeneration`, both of which inline-recover stale `'generating'` rows back to `'active'`. A Tavus row stuck in `'generating'` would be silently flipped to `'active'` with `tavus_conversation_id=NULL`, then Tx#2's `WHERE status='generating'` no-ops, and the row leaks (the reconciler can't recover it because `tavus_conversation_id` is NULL forever).
+
+The new `'provisioning'` status:
+
+- Added to the `interview_sessions.status` CHECK constraint in migration 015.
+- Added to the `SessionStatus` proto enum as `SESSION_STATUS_PROVISIONING = 9`.
+- Frontend treats it as equivalent to `SESSION_STATUS_GENERATING` for UI purposes (renders "preparing your interview"); the existing generating-state component is reused via `if (status === GENERATING || status === PROVISIONING)`.
+- Excluded from `CleanupStaleGenerating` (it has its own cleanup path via the reconciler — see below).
+- The reconciler picks up rows stuck in `'provisioning'` for >5 min (round-3 H2 resolution): for each, calls `Backend.FailSession` (refunds via existing path). We do **not** attempt to look up potentially-orphaned Tavus conversations by name — Tavus's `participant_absent_timeout=60s` means orphaned Tavus-side rooms self-terminate within 60s of creation if no participant joins, so the leak surface is bounded to one minute of Tavus billing per crash.
 
 ### Backend
 
@@ -207,9 +218,9 @@ Source-of-truth choice: paid *balance > 0*, not "ever had a paid grant." This me
 1. Validate request. If `mode=SESSION_MODE_TAVUS && !cfg.Tavus.Enabled`: `connect.CodeFailedPrecondition`.
 2. Coerce `SESSION_MODE_UNSPECIFIED → SESSION_MODE_STANDARD` on input.
 3. If `mode=tavus`: call `HasActivePaidBalance`; on false return `connect.CodePermissionDenied`.
-4. **Tx#1:** reserve minutes + INSERT session row with `mode='tavus', status='generating', tavus_conversation_id=NULL`. Commit. (`generating` is an existing status with existing frontend handling — round-2 H4.)
+4. **Tx#1:** reserve minutes + INSERT session row with `mode='tavus', status='provisioning', tavus_conversation_id=NULL`. Commit. (`'provisioning'` is the new status added by migration 015; see Data model.)
 5. (No tx open) call `tavus.Client.CreateConversation(ctx, ...)` with body composed via `BuildConversationalContext`.
-6. **Tx#2 on success:** `UPDATE interview_sessions SET status='active', tavus_conversation_id=$1, tavus_conversation_url=$2 WHERE id=$3 AND status='generating'`. Commit. Emit `session_created` (existing) with `slog.String("mode","tavus")` attr. Return `Session`.
+6. **Tx#2 on success:** `UPDATE interview_sessions SET status='active', tavus_conversation_id=$1, tavus_conversation_url=$2 WHERE id=$3 AND status='provisioning'`. Commit. Emit `session_created` (existing) with `slog.String("mode","tavus")` attr. Return `Session`.
 7. **On Tavus failure:** call `Backend.FailSession(ctx, sessionID)` (refunds via existing path). Emit `tavus_provider_call_failed` `{operation:"create", http_status, error_class}`. Return `connect.CodeUnavailable`.
 
 `GetSession` returns the `Session` proto including `mode` and `tavus_conversation_url`. Server always returns `SESSION_MODE_STANDARD` (not UNSPECIFIED) for legacy rows.
@@ -237,36 +248,55 @@ Source-of-truth choice: paid *balance > 0*, not "ever had a paid grant." This me
 - `application.recording_ready`: `UPDATE interview_sessions SET tavus_recording_url=$1 WHERE tavus_conversation_id=$2`. **No status guard**: recordings can legitimately arrive after eval; the URL is a stored artifact, not a live signal. Documented in code comment.
 - `conversation.utterance` (both `replica` and `user` roles):
   1. Look up session by `tavus_conversation_id`.
-  2. Acquire transaction-scoped advisory lock with two-arg form (round-2 M6 resolution): `SELECT pg_advisory_xact_lock(hashtext('tavus_utterance')::int, hashtext(session_id::text)::int)`. The classid `hashtext('tavus_utterance')` namespaces this lock so future advisory-lock callers in other features don't collide. **Lock convention:** any new advisory-lock call must claim a unique classid; we will document this in `docs/superpowers/CONVENTIONS.md` (a new file) when this lands.
-  3. Check session status: `SELECT status FROM interview_sessions WHERE id=$1`. If `status != 'active'`: rollback + 200 (utterance arrived after session terminated; drop). Round-2 H5 resolution.
-  4. Compute `seq = COALESCE(MAX(seq),0)+1` from `messages WHERE session_id=$1`.
-  5. INSERT message: role mapped (replica→interviewer, user→candidate), `input_method='tavus_voice'`.
-  6. Commit.
+  2. Open tx; acquire transaction-scoped advisory lock with two-arg form (round-2 M6 resolution): `SELECT pg_advisory_xact_lock(hashtext('tavus_session')::int, hashtext(session_id::text)::int)`. The classid `hashtext('tavus_session')` namespaces this lock so future advisory-lock callers in other features don't collide. **Both utterance and shutdown handlers take this lock** (round-3 H3 resolution); the lock serializes the entire utterance↔shutdown race, not just utterance↔utterance.
+  3. **Lock convention:** any new advisory-lock call must claim a unique classid; we document this in `docs/superpowers/CONVENTIONS.md` (a new file).
+  4. INSERT message with status guard folded in (round-3 H3 belt-and-braces — even with the lock, the conditional INSERT prevents accidental insert if a future caller forgets the lock):
+     ```sql
+     INSERT INTO messages (session_id, seq, role, content, input_method)
+     SELECT $1, COALESCE((SELECT MAX(seq) FROM messages WHERE session_id=$1), 0)+1, $2, $3, 'tavus_voice'
+     WHERE EXISTS (SELECT 1 FROM interview_sessions WHERE id=$1 AND status='active');
+     ```
+     If RowsAffected == 0: utterance arrived after session terminated; drop silently. Role mapped (replica→interviewer, user→candidate).
+  5. Commit.
 - `system.shutdown`:
-  1. Tx: conditional `UPDATE interview_sessions SET status=$new_status, ended_at=NOW() WHERE id=$id AND status='active'` (round-2 M15: only `'active'`, not "NOT IN terminal"). Use a CTE to also fetch `candidate_count = (SELECT COUNT(*) FROM messages WHERE session_id=$id AND role='candidate')`.
-  2. RowsAffected == 0: tx rollback; user or prior webhook already finalized this session. No double-eval.
-  3. RowsAffected == 1 + candidate_count == 0: status set to `cancelled`, call `FullRefundSessionMinutes` in same tx. No eval.
-  4. RowsAffected == 1 + candidate_count > 0: status set to `completed`, `b.jobs.InsertTx` enqueue eval.
-  5. Commit. Emit `session_ended` with `{provider:"tavus", reason:"tavus_shutdown"}`.
+  1. Open tx; acquire the **same** per-session advisory lock as the utterance handler (round-3 H3): `SELECT pg_advisory_xact_lock(hashtext('tavus_session')::int, hashtext(session_id::text)::int)`. This serializes shutdown against in-flight utterance INSERTs.
+  2. Conditional `UPDATE interview_sessions SET status=$new_status, ended_at=NOW() WHERE id=$id AND status='active'` (round-2 M15: only `'active'`, not "NOT IN terminal"). Use a CTE to also fetch `candidate_count = (SELECT COUNT(*) FROM messages WHERE session_id=$id AND role='candidate')`.
+  3. RowsAffected == 0: tx rollback; user or prior webhook already finalized this session. No double-eval.
+  4. RowsAffected == 1 + candidate_count == 0: status set to `cancelled`, call `FullRefundSessionMinutes` in same tx. No eval.
+  5. RowsAffected == 1 + candidate_count > 0: status set to `completed`, `b.jobs.InsertTx` enqueue eval.
+  6. Commit. Emit `session_ended` with `{provider:"tavus", reason:"tavus_shutdown"}`.
 - Unknown `event_type`: log info, return nil.
 
 **Reconciliation worker** (`internal/jobs/reconcile_tavus.go`) — registered into the existing `PeriodicJobs` slice in `internal/backend/backend.go:140` (round-2 L17 wording fix):
 
-`ReconcileTavusSessionsArgs` runs every 60s. Per tick:
+`ReconcileTavusSessionsArgs` runs every 60s. Two passes per tick:
 
-1. Open tx.
-2. `SELECT id, tavus_conversation_id FROM interview_sessions WHERE mode='tavus' AND status='active' AND tavus_conversation_id IS NOT NULL AND started_at < NOW() - (config_duration_minutes * interval '1 minute' + interval '5 minutes') AND tavus_reconcile_attempts < 10 ORDER BY started_at ASC LIMIT 25 FOR UPDATE SKIP LOCKED`. The `SKIP LOCKED` clause prevents two concurrent worker invocations from double-finalizing (round-2 M9 resolution); the attempts counter prevents permanently-broken rows from being checked forever (round-2 M8 resolution).
-3. Use `started_at`, not `created_at`, because Tavus rooms only burn time once a participant joins; sessions that never started are caught by the existing `CleanupAbandonedSessionsWorker` instead.
-4. Bounded concurrency (`semaphore.NewWeighted(5)`) for the Tavus `GetConversation` calls within the batch. Round-2 M8.
-5. For each row: call `tavus.Client.GetConversation`. If `ErrRateLimited`, increment `tavus_reconcile_attempts`, commit, exit early (try next tick — exponential backoff via attempts counter is a v2 nicety; v1 just stops the batch on first 429). If `ErrUnavailable`, increment attempts, continue to next row.
-6. If `Status` is non-`'active'`: synthesize a `system.shutdown` event and dispatch through `Backend.HandleTavusEvent` so the same conditional-UPDATE path runs.
-7. Commit. Log per-tick metrics: `{rows_examined, rows_finalized, rate_limited}`.
+**Pass A — stranded provisioning rows** (round-3 H2 resolution): rows where `mode='tavus' AND status='provisioning' AND created_at < NOW() - interval '5 minutes' ORDER BY created_at ASC LIMIT 25 FOR UPDATE SKIP LOCKED`. For each, call `Backend.FailSession` (refunds via existing path). We do **not** try to discover potentially-orphaned Tavus conversations by name — `participant_absent_timeout=60s` bounds the orphan-side leak. Logged warning includes a hint pointing at `drillctl tavus-orphan-scan` (an ops-only subcommand documented in `docs/tavus-bootstrap.md` for manual cleanup if leak rates ever justify it).
+
+**Pass B — overdue active rows:**
+
+1. `SELECT id, tavus_conversation_id FROM interview_sessions WHERE mode='tavus' AND status='active' AND tavus_conversation_id IS NOT NULL AND started_at < NOW() - (config_duration_minutes * interval '1 minute' + interval '5 minutes') AND tavus_reconcile_attempts < 10 ORDER BY started_at ASC LIMIT 25 FOR UPDATE SKIP LOCKED`. The `SKIP LOCKED` clause prevents two concurrent worker invocations from double-finalizing (round-2 M9); the attempts counter prevents permanently-broken rows from being checked forever (round-2 M8). The selection is index-backed by the new `idx_sessions_tavus_reconcile` partial index (round-3 M1).
+2. Use `started_at`, not `created_at`, because Tavus rooms only burn time once a participant joins; sessions that never started have already been handled by Pass A or by the existing `CleanupAbandonedSessionsWorker`.
+3. Bounded concurrency (`semaphore.NewWeighted(5)`) for the Tavus `GetConversation` calls within the batch (round-2 M8).
+4. For each row: call `tavus.Client.GetConversation`. If `ErrRateLimited`, increment `tavus_reconcile_attempts`, commit, exit early (try next tick). If `ErrUnavailable`, increment attempts, continue to next row.
+5. If `Status` is non-`'active'`: synthesize a `system.shutdown` event and dispatch through `Backend.HandleTavusEvent` so the same lock + conditional-UPDATE path runs.
+6. Commit. Log per-tick metrics: `{provisioning_failed, rows_examined, rows_finalized, rate_limited}`.
 
 Also extend `internal/jobs/cleanup.go:CleanupAbandonedSessionsWorker`: for each row it cancels or completes that has a non-NULL `tavus_conversation_id`, call `tavus.Client.EndConversation` after the tx commits. Best-effort (logged failure does not abort cleanup).
 
 ### Proto
 
-**Move CLAUDE.md edit out of C0** into its own micro-commit C-1 (round-2 M13): `docs(claude): broaden internal/handler/ carve-out to all third-party webhooks`. Lands first.
+**Move CLAUDE.md edit out of C0** into its own micro-commit C-1 (round-2 M13 + round-3 M6 — verbatim text spelled out below). Lands first as a stable contract.
+
+CLAUDE.md line 31 currently reads:
+
+> `ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are limited to health checks, OAuth flows, and Stripe webhooks — endpoints that are inherently HTTP-level. All resource RPCs use ConnectRPC.`
+
+C-1 replaces it with:
+
+> `ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are limited to health checks, OAuth flows, and third-party webhooks (e.g. Stripe, Tavus) — endpoints that are inherently HTTP-level (raw body required, status-code-as-protocol, signed by the provider). All resource RPCs use ConnectRPC.`
+
+The change rephrases a closed enumeration as an open category and documents the three properties that justify the carve-out. Future webhook handlers (Mailgun events, GitHub webhooks, etc.) can land without further CLAUDE.md edits.
 
 Then in C0, edit `pb/drill/v1/session.proto`:
 
@@ -298,7 +328,7 @@ message SessionSummary {
 
 Field numbers verified next-free against current proto (round-2 N23).
 
-**New `pb/drill/v1/system.proto`** — AIP-131 `Get` shape on a `System` resource (round-2 H3 resolution):
+**New `pb/drill/v1/system.proto`** — AIP-131 `Get` shape on a `System` resource (round-2 H3 + round-3 M5 resolution):
 
 ```proto
 service SystemService {
@@ -306,7 +336,11 @@ service SystemService {
   rpc GetSystem(GetSystemRequest) returns (System);
 }
 
-message GetSystemRequest {}
+message GetSystemRequest {
+  // AIP-131 singleton convention: must be the literal string "system".
+  // Validated server-side; non-"system" values return InvalidArgument.
+  string name = 1;
+}
 
 message System {
   // Globally-enabled capabilities. Per-user gating happens at request time
@@ -333,16 +367,34 @@ After editing protos: `buf generate` and commit `internal/pb/`, `web/src/pb/`. P
   />
   ```
   Plus an "End interview" button that calls `EndSession` and navigates to the transcript.
-  **`useEffect` cleanup:** on unmount (in-app navigation, route change), the component fires a `EndConversation` mutation best-effort against the backend (the backend in turn calls Tavus `/end`). This addresses round-2 L16 — without it, in-app nav burns minutes until `participant_absent_timeout` fires. Together with the 60s `participant_absent_timeout`, the worst-case cost leak is bounded to 60s.
+  **`useEffect` cleanup with StrictMode guard** (round-3 M2 resolution): React 19 + StrictMode (active per `web/src/main.tsx:5,35`) double-invokes effects in dev — without a guard, the spurious unmount would fire `EndConversation` immediately after mount and terminate the freshly-created Tavus room. Pattern (mirrors `web/src/pages/auth/verify-email.tsx:17`):
+  ```tsx
+  const didMountRef = useRef(false);
+  useEffect(() => {
+    didMountRef.current = true;
+    return () => {
+      // StrictMode: skip the synthetic dev unmount; only run on real unmount.
+      if (!didMountRef.current) return;
+      didMountRef.current = false;
+      endConversationMutation.mutate({ session_id });
+    };
+  }, []);
+  ```
+  Together with `participant_absent_timeout=60s`, worst-case cost leak from a force-quit tab is bounded to 60s.
   Lazy-loaded at the call site via `React.lazy(() => import('@/tavus/interview-view'))`.
-- `__tests__/interview-view.test.tsx`: renders, asserts iframe src + `allow` attrs, asserts End button calls the mutation, asserts unmount fires the EndConversation mutation.
+- `__tests__/interview-view.test.tsx`: renders, asserts iframe src + `allow` attrs, asserts End button calls the mutation, asserts unmount fires the EndConversation mutation, asserts StrictMode double-mount does **not** fire it (test wraps render in `<StrictMode>`).
 
-**iframe permissions and CSP** (round-2 M10 resolution):
+**iframe permissions and CSP** (round-2 M10 + round-3 M4 resolution):
 
-- The Tavus-hosted iframe origin is `https://tavus.daily.co` (per Tavus docs cited above; verified during C6).
-- Backend serves `Permissions-Policy: camera=(self "https://tavus.daily.co"), microphone=(self "https://tavus.daily.co"), display-capture=(self "https://tavus.daily.co")` on the SPA index response (`internal/handler/spa.go`). The current `spa.go` does not set Permissions-Policy at all; we add the header gated on `cfg.Tavus.Enabled` so non-Tavus deploys are unaffected.
-- CSP `frame-src` is currently unset (no CSP middleware in `internal/handler/`). C6 adds a minimal CSP including `frame-src 'self' https://*.daily.co`. Wider CSP rollout is out of scope.
-- No `sandbox` attribute on the iframe — Daily.co requires same-origin tokens and fails inside a sandboxed iframe in our testing pattern.
+The Tavus iframe origin is potentially a per-tenant or per-conversation Daily.co subdomain; **C1 will probe the actual returned `conversation_url` host alongside the webhook signature probe**. Three branches based on what we find:
+
+- **If single fixed origin** (e.g., `tavus.daily.co`): backend serves `Permissions-Policy: camera=(self https://tavus.daily.co), microphone=(self https://tavus.daily.co), display-capture=(self https://tavus.daily.co)` (round-3 M4 — origin tokens are bare URLs, not double-quoted). CSP `frame-src 'self' https://tavus.daily.co`.
+- **If wildcard subdomains under `*.daily.co`**: drop the document-level `Permissions-Policy` header (the spec does not support host wildcards in origin allowlists). Rely solely on the iframe's `allow="camera; microphone; autoplay; display-capture"` attribute, which delegates by attribute rather than by origin. CSP `frame-src 'self' https://*.daily.co` (CSP *does* support host wildcards).
+- **If something else entirely**: escalate to user before merging C6.
+
+The header logic and CSP additions live in `internal/handler/spa.go`, gated on `cfg.Tavus.Enabled` so non-Tavus deploys are unaffected.
+
+No `sandbox` attribute on the iframe — Daily.co requires same-origin tokens and fails inside a sandboxed iframe in our testing pattern.
 
 **Capability flag**:
 
@@ -386,11 +438,12 @@ Reuse existing event names (round-1 review M18 resolved):
 - `internal/handler/tavus_test.go`: mirrors `stripe_test.go` — 200 (missing secret config), 400 (bad HMAC), 400 (bad body), 200 (each event), 500 (dispatch error). DB side-effects asserted.
 - `internal/backend/tavus_test.go`:
   - **Concurrent utterance test** (round-2 L20): two distinct sessions, 50 parallel inserts each, assert no `UNIQUE` violations and `seq` is dense per session.
-  - **Negative test** (red-green per CLAUDE.md): same scenario *without* the advisory lock — assert it fails. This proves the lock is doing real work.
+  - **Negative test** (red-green per CLAUDE.md): same scenario *without* the advisory lock — assert it fails. Proves the lock does real work.
+  - **Utterance↔shutdown race test** (round-3 H3): N parallel goroutines, half firing `conversation.utterance` and half firing `system.shutdown` for the same session, assert: (a) no inserts land after the shutdown's terminal status flip, (b) no UNIQUE violations on `messages.seq`, (c) at most one evaluation enqueued. Run with the lock removed to confirm the test fails — the test must be sensitive to the H3 race, not just to the H5 race.
   - `system.shutdown` for already-completed session is a no-op.
   - `system.shutdown` with zero candidate utterances → `cancelled` + refund.
-  - Late `conversation.utterance` after shutdown is dropped (status guard test).
-- `internal/jobs/reconcile_tavus_test.go`: bounded concurrency assertion; 429 short-circuit; `SKIP LOCKED` parallel-worker safety.
+  - Late `conversation.utterance` after shutdown is dropped (status guard test, exercises the `WHERE EXISTS (... AND status='active')` clause).
+- `internal/jobs/reconcile_tavus_test.go`: bounded concurrency assertion; 429 short-circuit; `SKIP LOCKED` parallel-worker safety; **Pass A** stranded `'provisioning'` row (older than 5 min) is `FailSession`'d and minutes refunded.
 - `internal/jobs/cleanup_test.go`: extend to assert Tavus `/end` is called for Tavus-mode rows.
 - `internal/rpc/interview/server_test.go`: `TestEndSession_TavusMode_Idempotent` (second EndSession is a no-op), `TestEndSession_TavusMode_TavusUnavailable` (local completion succeeds even when Tavus 5xxs).
 - Frontend:
@@ -415,7 +468,7 @@ Reuse existing event names (round-1 review M18 resolved):
 Nine commits, each independently mergeable and reviewable:
 
 - **C-1 — CLAUDE.md edit** (round-2 M13): broaden `internal/handler/` carve-out wording. Lands first as a stable contract.
-- **C0 — Schema + config + proto.** Migration 015 (up + down), `Tavus` config struct + Validate, `SessionMode` enum + `mode`/`tavus_conversation_url` on `Session`/`SessionSummary`, new `SystemService` proto + handler stub returning `tavus_available`, codegen.
+- **C0 — Schema + config + proto.** Migration 015 (up + down): adds `mode`, `tavus_conversation_id`, `tavus_conversation_url`, `tavus_recording_url`, `tavus_reconcile_attempts` columns; extends `interview_sessions.status` CHECK to add `'provisioning'`; adds `idx_sessions_tavus_conversation_id` and `idx_sessions_tavus_reconcile` indexes. `Tavus` config struct + Validate. `SessionMode` enum + `mode`/`tavus_conversation_url` on `Session`/`SessionSummary`. `SessionStatus` enum extended with `SESSION_STATUS_PROVISIONING = 9`. New `SystemService` proto + handler stub returning `tavus_available` (mounted under authed `opts`). Codegen.
 - **C1 — Tavus client package.** `internal/tavus/{client,webhook,types}.go` + tests + `tavustest/`. Includes the request-bin probe (Open Q 1). Pure library.
 - **C2 — Webhook handler + dispatcher + conventions doc.** `internal/handler/tavus.go`, route mounted, `internal/backend/tavus.go` dispatcher with advisory-lock + status-guarded utterance INSERT + conditional shutdown UPDATE. `docs/superpowers/CONVENTIONS.md` documents the advisory-lock classid registry (round-2 M6). C2 has runtime dep on C0's schema (called out in the PR description).
 - **C3 — `SessionService.CreateSession` Tavus branch.** Split-commit logic, `HasActivePaidBalance` query, `BuildConversationalContext` with size policy.
