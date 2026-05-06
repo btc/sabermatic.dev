@@ -25,7 +25,7 @@ Tavus does not publish (in any docs URL retrievable on this date) an enumeration
   - `conversation_name` (`sabermatic-{session_id}`)
   - `conversational_context` (per-session: question prompt + rubric, **bounded to 8000 chars**; see Open Q 5 / size policy)
   - `custom_greeting` (per-session: opener tied to the question)
-  - `callback_url` — `cfg.Auth.BaseURL + "/webhooks/tavus"` (no secret in path; see Webhook section)
+  - `callback_url` — `cfg.Auth.BaseURL + "/api/webhooks/tavus"` (no secret in path; see Webhook section)
   - `properties.max_call_duration` = `config_duration_minutes * 60`
   - `properties.participant_absent_timeout` = `60` (seconds; tight to limit the cost-leak from in-app navigation; see L16/L18 resolution below)
   - `properties.enable_recording` = `true`
@@ -91,7 +91,7 @@ SessionService.CreateSession                │
                                │
                                │ webhook events (HMAC-verified)
                                ▼
-                  POST /webhooks/tavus
+                  POST /api/webhooks/tavus
                                │
                                ▼
                   HandleTavusEvent (per-session advisory lock):
@@ -134,9 +134,9 @@ The migration also extends the `interview_sessions.status` CHECK to add `'provis
 - `CREATE INDEX idx_sessions_tavus_conversation_id ON interview_sessions(tavus_conversation_id) WHERE tavus_conversation_id IS NOT NULL;` — webhook lookup.
 - `CREATE INDEX idx_sessions_tavus_reconcile ON interview_sessions(started_at) WHERE mode='tavus' AND status='active' AND tavus_reconcile_attempts < 10;` — reconciler hot path (round-3 M1 resolution).
 
-Plus index: `CREATE INDEX idx_sessions_tavus_conversation_id ON interview_sessions(tavus_conversation_id) WHERE tavus_conversation_id IS NOT NULL;`.
+Plus a third partial index (for Pass A of the reconciler — plan-review L4): `CREATE INDEX idx_sessions_tavus_provisioning ON interview_sessions(created_at) WHERE mode='tavus' AND status='provisioning';`.
 
-Down migration: drop the index, then the five columns.
+Down migration drops all three indexes (`idx_sessions_tavus_conversation_id`, `idx_sessions_tavus_reconcile`, `idx_sessions_tavus_provisioning`), drops the new status CHECK constraint and re-adds the original (without `'provisioning'`), then drops the five columns. The migration must explicitly reference the constraint name `interview_sessions_status_check` (created in `001_initial.up.sql`).
 
 `messages.input_method` is unconstrained text; we add `'tavus_voice'` as a value with no schema change.
 
@@ -168,7 +168,7 @@ The new `'provisioning'` status:
 **Webhook signature verification.** Tavus's signature mechanism is not retrievable from public docs on this date. We commit to:
 
 1. **Implementation prerequisite for C2:** before merging, send one test webhook to a request-bin and inspect the headers. If a header named anything like `X-Tavus-Signature` is present, implement HMAC-SHA256 verification using `cfg.Tavus.WebhookSecret`. If absent, **escalate to user** for decision before merging — do not ship URL-path-secret as a silent fallback.
-2. **Mounted route:** `POST /webhooks/tavus` (no path secret; round-1 H1).
+2. **Mounted route:** `POST /api/webhooks/tavus` (no path secret; round-1 H1).
 3. **Status codes (matches `internal/handler/stripe.go` pattern; round-2 M7):**
   - `200` on success.
   - `200` on missing `WebhookSecret` config (avoid retry storms; matches Stripe).
@@ -235,7 +235,7 @@ Source-of-truth choice: paid *balance > 0*, not "ever had a paid grant." This me
 
 **`CancelSession`** Tavus path: same pattern but `status='cancelled'`, refund minutes, no eval enqueue, then Tavus `/end` best-effort.
 
-**Webhook handler** (`internal/handler/tavus.go`, `POST /webhooks/tavus`):
+**Webhook handler** (`internal/handler/tavus.go`, `POST /api/webhooks/tavus`):
 
 1. Read body (limit 64KB).
 2. If `cfg.Tavus.WebhookSecret == ""`: log + `200`.
@@ -367,22 +367,16 @@ After editing protos: `buf generate` and commit `internal/pb/`, `web/src/pb/`. P
   />
   ```
   Plus an "End interview" button that calls `EndSession` and navigates to the transcript.
-  **`useEffect` cleanup with StrictMode guard** (round-3 M2 resolution): React 19 + StrictMode (active per `web/src/main.tsx:5,35`) double-invokes effects in dev — without a guard, the spurious unmount would fire `EndConversation` immediately after mount and terminate the freshly-created Tavus room. Pattern (mirrors `web/src/pages/auth/verify-email.tsx:17`):
-  ```tsx
-  const didMountRef = useRef(false);
-  useEffect(() => {
-    didMountRef.current = true;
-    return () => {
-      // StrictMode: skip the synthetic dev unmount; only run on real unmount.
-      if (!didMountRef.current) return;
-      didMountRef.current = false;
-      endConversationMutation.mutate({ session_id });
-    };
-  }, []);
-  ```
-  Together with `participant_absent_timeout=60s`, worst-case cost leak from a force-quit tab is bounded to 60s.
+  **No `useEffect` cleanup that fires `EndConversation`** (resolves round-3 M2 + plan-review M2). The earlier `didMountRef` pattern was logically broken: a useRef-based guard cannot reliably distinguish StrictMode's synthetic unmount from a real unmount, since the cleanup runs in both cases with the ref re-set on the second mount. Workable alternatives (`pagehide` listener, route-change blocker) all add complexity and edge cases.
+
+  Instead we **rely solely on Tavus's `participant_absent_timeout=60s`** for navigation-away cleanup. The user's exit paths reduce to:
+
+  - **Click "End interview"**: explicit `EndSession` RPC → backend calls Tavus `/end`. Cleanest path; user is on the transcript page within seconds.
+  - **Anything else** (close tab, in-app navigation, force quit, network blackhole): the iframe disconnects from the Daily room; Tavus shuts the room down 60s after the last participant leaves; the `system.shutdown` webhook reaches us; reconciler is the backstop.
+
+  Cost-leak ceiling is 60s of Tavus minutes per non-explicit exit. That's acceptable for v1 and removes a fragile React pattern.
   Lazy-loaded at the call site via `React.lazy(() => import('@/tavus/interview-view'))`.
-- `__tests__/interview-view.test.tsx`: renders, asserts iframe src + `allow` attrs, asserts End button calls the mutation, asserts unmount fires the EndConversation mutation, asserts StrictMode double-mount does **not** fire it (test wraps render in `<StrictMode>`).
+- `__tests__/interview-view.test.tsx`: renders, asserts iframe src + `allow` attrs, asserts End button calls the `EndSession` mutation. Asserts unmount does **not** fire any `EndConversation` mutation (regression guard against re-introducing the broken cleanup pattern).
 
 **iframe permissions and CSP** (round-2 M10 + round-3 M4 resolution):
 
@@ -426,7 +420,7 @@ Reuse existing event names (round-1 review M18 resolved):
 - `.env.example`: append `TAVUS_ENABLED`, `TAVUS_API_KEY`, `TAVUS_PERSONA_ID`, `TAVUS_REPLICA_ID`, `TAVUS_WEBHOOK_SECRET`, `TAVUS_BASE_URL` with comments.
 - `scripts/cloud_bootstrap.py`: prompt for the four secrets; run `drillctl tavus-bootstrap`.
 - `terraform/`: Cloud Run env entries for `TAVUS_ENABLED` + `TAVUS_BASE_URL`; Secret Manager refs for the four secrets.
-- `docs/tavus-bootstrap.md` (new): account creation; `drillctl tavus-bootstrap`; webhook secret configuration; `drillctl tavus-persona-sync` after prompt changes; local-dev tunnel via cloudflared/ngrok; webhook URL = `${BASE_URL}/webhooks/tavus`.
+- `docs/tavus-bootstrap.md` (new): account creation; `drillctl tavus-bootstrap`; webhook secret configuration; `drillctl tavus-persona-sync` after prompt changes; local-dev tunnel via cloudflared/ngrok; webhook URL = `${BASE_URL}/api/webhooks/tavus`.
 - `docs/superpowers/CONVENTIONS.md` (new): documents the advisory-lock classid registry. Lands in C2 alongside the first user.
 
 ### Tests
@@ -447,7 +441,7 @@ Reuse existing event names (round-1 review M18 resolved):
 - `internal/jobs/cleanup_test.go`: extend to assert Tavus `/end` is called for Tavus-mode rows.
 - `internal/rpc/interview/server_test.go`: `TestEndSession_TavusMode_Idempotent` (second EndSession is a no-op), `TestEndSession_TavusMode_TavusUnavailable` (local completion succeeds even when Tavus 5xxs).
 - Frontend:
-  - `web/src/tavus/__tests__/interview-view.test.tsx` covers iframe attrs + End button + unmount cleanup.
+  - `web/src/tavus/__tests__/interview-view.test.tsx` covers iframe attrs + End button + asserts unmount does NOT fire EndConversation.
   - `web/src/pages/__tests__/interview.test.tsx` covers the lazy-loaded branch using `vi.mock` per test pattern above.
   - `web/src/pages/__tests__/session-config.test.tsx` covers toggle + sessionStorage + paid-balance gate.
 
@@ -504,7 +498,7 @@ C0 and C1 can run in parallel; C5 and C6 can run in parallel after C4.
 - [ ] Reconciliation worker picks up an artificially-stranded Tavus session and finalizes it (manual: insert a row with `started_at = NOW() - 2h`, run worker, observe).
 - [ ] Webhook handler returns 200 for unknown event types, 400 for tampered HMAC, 200 for missing-secret config.
 - [ ] Concurrent utterance webhook deliveries for the same session never produce a `UNIQUE` violation; the negative test (no lock) demonstrates the lock is required.
-- [ ] In-app navigation away from the interview page fires `EndConversation` (verified by network tab in browser smoke).
+- [ ] In-app navigation away from the interview page eventually triggers a Tavus `system.shutdown` webhook within ~60s of `participant_absent_timeout` (verified by webhook log + Tavus dashboard).
 - [ ] CLAUDE.md updated with third-party-webhooks carve-out.
 - [ ] `docs/tavus-bootstrap.md` is complete enough that a fresh dev can run the bootstrap end-to-end.
 - [ ] `docs/superpowers/CONVENTIONS.md` documents the advisory-lock classid registry.
