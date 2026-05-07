@@ -28,7 +28,7 @@ ConnectRPC services follow Google AIPs where practical. Standard methods use AIP
 
 Update methods use field masks for partial updates (AIP-134).
 
-ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are limited to health checks, OAuth flows, and Stripe webhooks — endpoints that are inherently HTTP-level. All resource RPCs use ConnectRPC.
+ConnectRPC handlers live in `internal/rpc/{service}/`. REST handlers in `internal/handler/` are limited to health checks, OAuth flows, and third-party webhooks (e.g. Stripe, Tavus) — endpoints that are inherently HTTP-level (raw body required, status-code-as-protocol, signed by the provider). All resource RPCs use ConnectRPC.
 
 Verify library API signatures against installed versions before writing plan code blocks.
 
