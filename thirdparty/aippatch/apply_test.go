@@ -3,6 +3,7 @@ package aippatch
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -236,4 +237,41 @@ func TestApply_WhereBoundColumnAccepted(t *testing.T) {
 		Where:   map[string]any{"enabled": false},
 	})
 	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
+
+func TestApply_AutoSetBumpsUpdatedAt(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	id := uuid.New()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx,
+		"INSERT INTO widgets (id, name) VALUES ($1, $2)", id, "old")
+	require.NoError(t, err)
+
+	var before time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT updated_at FROM widgets WHERE id=$1", id).Scan(&before))
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+		// clock_timestamp advances within a transaction; NOW() does not.
+		AutoSet: []AutoSetClause{{Column: "updated_at", SQLLiteral: "clock_timestamp()"}},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	_, err = Apply(ctx, pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "new"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: id,
+	})
+	require.NoError(t, err)
+
+	var after time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		"SELECT updated_at FROM widgets WHERE id=$1", id).Scan(&after))
+	require.True(t, after.After(before),
+		"updated_at must advance: before=%v after=%v", before, after)
 }
