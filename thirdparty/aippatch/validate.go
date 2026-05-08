@@ -2,6 +2,7 @@ package aippatch
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -56,8 +57,32 @@ func (m *Mapping[T]) Validate(codecs map[string]EnumCodec) error {
 		}
 	}
 
-	// Codec selection deferred to Task 9 — for now leave m.codecs empty.
+	// Codec selection: copy only the codecs reachable from m.Bindings into
+	// m.codecs, build each FromText from ToText. Reject bindings that
+	// reference a codec not present in the input map.
 	m.codecs = make(map[string]EnumCodec)
+	for _, b := range m.Bindings {
+		if !strings.HasPrefix(b.Codec, "enum:") {
+			continue
+		}
+		name := strings.TrimPrefix(b.Codec, "enum:")
+		c, ok := codecs[name]
+		if !ok {
+			return fmt.Errorf("aippatch: %s: binding %q references unknown codec %q",
+				m.Table, b.Proto, name)
+		}
+		// Build FromText from ToText.
+		fromText := make(map[string]int32, len(c.ToText))
+		for k, v := range c.ToText {
+			if _, dup := fromText[v]; dup {
+				return fmt.Errorf("aippatch: codec %q: duplicate ToText value %q",
+					name, v)
+			}
+			fromText[v] = k
+		}
+		c.FromText = fromText
+		m.codecs[name] = c
+	}
 
 	m.validated.Store(true)
 	return nil
