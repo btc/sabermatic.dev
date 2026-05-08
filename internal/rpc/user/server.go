@@ -3,12 +3,11 @@ package user
 import (
 	"context"
 	"errors"
-	"fmt"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/btc/drill/internal/auth"
@@ -16,6 +15,8 @@ import (
 	"github.com/btc/drill/internal/db"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
+	"github.com/btc/drill/internal/patches"
+	"github.com/btc/drill/thirdparty/aippatch"
 )
 
 // auth.UserFromContext returns *auth.AuthUser, which includes CreatedAt
@@ -89,55 +90,36 @@ func usageSummaryToProto(s *backend.UsageSummary) *drillv1.GetUsageResponse {
 	}
 }
 
-// implementedUserFields is the allow-list of User proto fields that UpdateProfile
-// supports. Fields not in this map are valid proto fields but not yet updatable.
-var implementedUserFields = map[string]bool{
-	"display_name": true,
-}
-
 // UpdateProfile updates the authenticated user's profile fields.
 // AIP-134: PATCH semantics via update_mask. Only fields in the mask are modified.
 func (s *Server) UpdateProfile(
 	ctx context.Context,
 	req *connect.Request[drillv1.UpdateProfileRequest],
 ) (*connect.Response[drillv1.UpdateProfileResponse], error) {
-	user := auth.UserFromContext(ctx)
-	if user == nil {
+	u := auth.UserFromContext(ctx)
+	if u == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
 
-	mask := req.Msg.GetUpdateMask()
-	if mask == nil || len(mask.Paths) == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("update_mask must not be empty"))
-	}
-
-	// Validate each path against the proto descriptor and the allow-list.
-	userDesc := (*drillv1.User)(nil).ProtoReflect().Descriptor()
-	for _, path := range mask.Paths {
-		fd := userDesc.Fields().ByName(protoreflect.Name(path))
-		if fd == nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("unknown field in update_mask: %q", path))
+	// Per-field validation lives in the handler in v0. v2 makes it declarative.
+	// (slices.Contains is in stdlib since Go 1.21; drill is on Go 1.25.)
+	if slices.Contains(req.Msg.GetUpdateMask().GetPaths(), "display_name") {
+		trimmed := strings.TrimSpace(req.Msg.GetUser().GetDisplayName())
+		if trimmed == "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("display_name must not be empty"))
 		}
-		if !implementedUserFields[path] {
-			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("field not supported for update: %q", path))
-		}
+		req.Msg.GetUser().DisplayName = trimmed
 	}
 
-	displayName := strings.TrimSpace(req.Msg.GetUser().GetDisplayName())
-	if displayName == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("display_name must not be empty"))
-	}
-
-	updated, err := s.b.UpdateDisplayName(ctx, user.ID, displayName)
+	updated, err := aippatch.Apply(ctx, s.b.Pool(), patches.UserPatch, aippatch.Op[*drillv1.User]{
+		Message: req.Msg.GetUser(),
+		Mask:    req.Msg.GetUpdateMask(),
+		PKValue: u.ID,
+	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("update profile failed"))
+		return nil, err
 	}
-
-	return connect.NewResponse(&drillv1.UpdateProfileResponse{
-		User: dbUserToProto(&updated),
-	}), nil
+	return connect.NewResponse(&drillv1.UpdateProfileResponse{User: updated}), nil
 }
 
 // ExportData triggers an export of the authenticated user's data.
@@ -150,20 +132,6 @@ func (s *Server) ExportData(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ExportData not yet implemented"))
-}
-
-// dbUserToProto converts a db.User (sqlc model) to its proto representation.
-// Used by UpdateProfile which returns the updated record from the database.
-func dbUserToProto(u *db.User) *drillv1.User {
-	return &drillv1.User{
-		Id:            u.ID.String(),
-		Email:         u.Email,
-		DisplayName:   u.DisplayName,
-		Role:          roleToProto(u.Role),
-		Plan:          planToProto(u.Plan),
-		EmailVerified: u.EmailVerified,
-		CreateTime:    timestamppb.New(u.CreatedAt),
-	}
 }
 
 func userToProto(u *auth.AuthUser) *drillv1.User {
