@@ -239,6 +239,56 @@ func TestApply_WhereBoundColumnAccepted(t *testing.T) {
 	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
 }
 
+func TestApply_RoundTripAllTypes(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	ctx := context.Background()
+	id := uuid.New()
+	_, err := pool.Exec(ctx, "INSERT INTO widgets (id) VALUES ($1)", id)
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "big_count", Column: "big_count", SQLType: "bigint", Writable: true},
+			{Proto: "color", Column: "color", SQLType: "text", Writable: true, Codec: "enum:enum_color"},
+			{Proto: "count", Column: "count", SQLType: "integer", Writable: true},
+			{Proto: "create_time", Column: "created_at", SQLType: "timestamptz", Writable: false, Codec: "timestamp"},
+			{Proto: "enabled", Column: "enabled", SQLType: "boolean", Writable: true},
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+			{Proto: "small_count", Column: "small_count", SQLType: "smallint", Writable: true},
+		},
+	}
+	codecs := map[string]EnumCodec{
+		"enum_color": {ToText: map[int32]string{int32(fixturepb.Color_COLOR_RED): "red", int32(fixturepb.Color_COLOR_BLUE): "blue"}},
+	}
+	require.NoError(t, m.Validate(codecs))
+
+	updated, err := Apply(ctx, pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{
+			Name:       "abc",
+			Enabled:    true,
+			Count:      42,
+			SmallCount: 7,
+			BigCount:   1 << 35,
+			Color:      fixturepb.Color_COLOR_BLUE,
+		},
+		Mask: &fieldmaskpb.FieldMask{Paths: []string{
+			"name", "enabled", "count", "small_count", "big_count", "color",
+		}},
+		PKValue: id,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "abc", updated.GetName())
+	require.True(t, updated.GetEnabled())
+	require.Equal(t, int32(42), updated.GetCount())
+	require.Equal(t, int32(7), updated.GetSmallCount())
+	require.Equal(t, int64(1<<35), updated.GetBigCount())
+	require.Equal(t, fixturepb.Color_COLOR_BLUE, updated.GetColor())
+	require.NotZero(t, updated.GetCreateTime().AsTime())
+	require.Equal(t, id.String(), updated.GetId())
+}
+
 func TestApply_AutoSetBumpsUpdatedAt(t *testing.T) {
 	pool := aippatchtest.NewPool(t)
 	id := uuid.New()
