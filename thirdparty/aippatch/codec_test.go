@@ -2,9 +2,11 @@ package aippatch
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	fixturepb "github.com/btc/drill/thirdparty/aippatch/internal/fixturepb"
 )
@@ -37,4 +39,13 @@ func TestEncode_Scalars(t *testing.T) {
 			require.Equal(t, tc.expected, v)
 		})
 	}
+}
+
+func TestEncode_Timestamp(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	w := &fixturepb.Widget{CreateTime: timestamppb.New(now)}
+	fd := w.ProtoReflect().Descriptor().Fields().ByName("create_time")
+	v, err := encode(w, fd, "timestamp", nil)
+	require.NoError(t, err)
+	require.WithinDuration(t, now, v.(time.Time), time.Microsecond)
 }
