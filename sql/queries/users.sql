@@ -79,3 +79,68 @@ INSERT INTO users (email, email_verified, display_name)
 VALUES (@email, TRUE, @display_name)
 ON CONFLICT (email) DO NOTHING
 RETURNING *;
+
+-- name: SetUserAutoCancelState :exec
+-- Called by idleunsub.HandleInvoiceUpcoming when our trigger fires.
+-- Sets BOTH cache flags so the auto-reverse middleware gate fires for this user.
+UPDATE users
+SET sub_cancel_at_period_end = TRUE,
+    sub_cancel_is_auto       = TRUE,
+    sub_current_period_start = $2
+WHERE id = $1;
+
+-- name: ClearUserAutoCancelState :exec
+-- Called by KeepSubscription / AutoReverse on reversal. Sets banner flag.
+UPDATE users
+SET sub_cancel_at_period_end = FALSE,
+    sub_cancel_is_auto       = FALSE,
+    pending_kept_banner      = TRUE,
+    sub_current_period_start = $2
+WHERE id = $1;
+
+-- name: SyncSubStateFromWebhook :exec
+-- Called by handleSubscriptionUpdated. Does NOT touch sub_cancel_is_auto:
+-- only our handler sets that flag; webhook sync must not overwrite it.
+UPDATE users
+SET stripe_subscription_id   = $2,
+    sub_cancel_at_period_end = $3,
+    sub_current_period_start = $4
+WHERE id = $1;
+
+-- name: ClearSubStateOnDeletion :exec
+-- Called by handleSubscriptionDeleted. Clears all sub state and downgrades plan.
+UPDATE users
+SET stripe_subscription_id   = NULL,
+    sub_cancel_at_period_end = FALSE,
+    sub_cancel_is_auto       = FALSE,
+    sub_current_period_start = NULL,
+    plan                     = 'free'
+WHERE id = $1;
+
+-- name: ClearKeptBanner :exec
+UPDATE users SET pending_kept_banner = FALSE WHERE id = $1;
+
+-- name: ClearStaleKeptBanners :exec
+-- Periodic hygiene: clear banners that are older than 14 days.
+-- (Run from a tiny daily cron; the spec calls this out as low-priority cleanup.)
+UPDATE users
+SET pending_kept_banner = FALSE
+WHERE pending_kept_banner = TRUE
+  AND id IN (
+    SELECT user_id FROM user_events
+    WHERE event_type = 'subscription_kept'
+      AND created_at < NOW() - INTERVAL '14 days'
+  );
+
+-- name: GetUserAutoCancelGates :one
+-- Used by AutoReverse to defensively re-read both gates.
+SELECT sub_cancel_at_period_end, sub_cancel_is_auto,
+       stripe_subscription_id,   sub_current_period_start
+FROM users
+WHERE id = $1;
+
+-- name: LockUserForSubDecision :one
+-- Per-user mutex for the cancel transaction. Acquires a row-level lock that
+-- serializes concurrent invoice.upcoming evaluations for the same user.
+-- Must be inside a transaction; releases on COMMIT or ROLLBACK.
+SELECT id FROM users WHERE id = $1 FOR UPDATE;

@@ -177,6 +177,12 @@ type User struct {
 	UpdatedAt             time.Time          `json:"updated_at"`
 	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
 	FreeFullEducatorsUsed int32              `json:"free_full_educators_used"`
+	StripeSubscriptionID  pgtype.Text        `json:"stripe_subscription_id"`
+	SubCancelAtPeriodEnd  bool               `json:"sub_cancel_at_period_end"`
+	SubCancelIsAuto       bool               `json:"sub_cancel_is_auto"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+	PendingKeptBanner     bool               `json:"pending_kept_banner"`
+	IdleEligibleAfter     time.Time          `json:"idle_eligible_after"`
 }
 
 type UserEvent struct {

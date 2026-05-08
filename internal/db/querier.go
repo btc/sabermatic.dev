@@ -22,6 +22,14 @@ type Querier interface {
 	CancelSession(ctx context.Context, arg CancelSessionParams) error
 	// Reset sessions stuck in 'generating' for too long (crash recovery).
 	CleanupStaleGenerating(ctx context.Context) error
+	ClearKeptBanner(ctx context.Context, id uuid.UUID) error
+	// Periodic hygiene: clear banners that are older than 14 days.
+	// (Run from a tiny daily cron; the spec calls this out as low-priority cleanup.)
+	ClearStaleKeptBanners(ctx context.Context) error
+	// Called by handleSubscriptionDeleted. Clears all sub state and downgrades plan.
+	ClearSubStateOnDeletion(ctx context.Context, id uuid.UUID) error
+	// Called by KeepSubscription / AutoReverse on reversal. Sets banner flag.
+	ClearUserAutoCancelState(ctx context.Context, arg ClearUserAutoCancelStateParams) error
 	// Batch-completes abandoned sessions that have at least one candidate message.
 	// These are real interviews that the user forgot to end.
 	CompleteAbandonedActiveSessions(ctx context.Context) ([]CompleteAbandonedActiveSessionsRow, error)
@@ -88,15 +96,23 @@ type Querier interface {
 	GetSessionForTurn(ctx context.Context, id uuid.UUID) (GetSessionForTurnRow, error)
 	// Lightweight status check for EndSession/CancelSession polling.
 	GetSessionStatus(ctx context.Context, id uuid.UUID) (GetSessionStatusRow, error)
+	// Used by AutoReverse to defensively re-read both gates.
+	GetUserAutoCancelGates(ctx context.Context, id uuid.UUID) (GetUserAutoCancelGatesRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailForUpdate(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
-	// Reads across all history (including revoked sessions) — this is a
-	// "when did the user last act, ever?" query, not a session-validity check.
-	// Returns NULL when the user has no auth_sessions rows. The LEFT JOIN
-	// from a single-row subquery forces sqlc to infer a nullable result type.
+	// Reads across all history (including revoked sessions). Returns NULL
+	// when the user has no auth_sessions rows.
+	//
+	// The LEFT-JOIN-from-placeholder shape (rather than the simpler MAX()) is
+	// a workaround: in sqlc 1.25 with pgx/v5, MAX(timestamptz_not_null) is
+	// generated as a non-nullable time.Time even though the SQL semantics are
+	// "NULL when zero rows match." LEFT JOIN forces sqlc's nullability
+	// inference correctly. If a future sqlc version makes MAX() nullable for
+	// this case, simplify back to:
+	//   SELECT MAX(last_active)::timestamptz FROM auth_sessions WHERE user_id = $1;
 	GetUserLastActive(ctx context.Context, userID uuid.UUID) (pgtype.Timestamptz, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
@@ -118,6 +134,10 @@ type Querier interface {
 	ListQuestionsWithoutImages(ctx context.Context) ([]uuid.UUID, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
+	// Per-user mutex for the cancel transaction. Acquires a row-level lock that
+	// serializes concurrent invoice.upcoming evaluations for the same user.
+	// Must be inside a transaction; releases on COMMIT or ROLLBACK.
+	LockUserForSubDecision(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	// Refunds unused minutes for a completed session based on wall-clock duration.
@@ -136,7 +156,13 @@ type Querier interface {
 	RevokeUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	SetAudioURL(ctx context.Context, arg SetAudioURLParams) error
 	SetQuestionImageURL(ctx context.Context, arg SetQuestionImageURLParams) error
+	// Called by idleunsub.HandleInvoiceUpcoming when our trigger fires.
+	// Sets BOTH cache flags so the auto-reverse middleware gate fires for this user.
+	SetUserAutoCancelState(ctx context.Context, arg SetUserAutoCancelStateParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
+	// Called by handleSubscriptionUpdated. Does NOT touch sub_cancel_is_auto:
+	// only our handler sets that flag; webhook sync must not overwrite it.
+	SyncSubStateFromWebhook(ctx context.Context, arg SyncSubStateFromWebhookParams) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
 	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
