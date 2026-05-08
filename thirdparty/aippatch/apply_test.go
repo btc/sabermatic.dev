@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/btc/drill/thirdparty/aippatch/internal/aippatchtest"
 	fixturepb "github.com/btc/drill/thirdparty/aippatch/internal/fixturepb"
 )
 
@@ -109,4 +111,30 @@ func mustValidatedFixtureMapping(t *testing.T) *Mapping[*fixturepb.Widget] {
 	}
 	require.NoError(t, m.Validate(nil))
 	return m
+}
+
+func TestApply_HappyPath_NameOnly(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	id := uuid.New()
+	_, err := pool.Exec(context.Background(),
+		"INSERT INTO widgets (id, name) VALUES ($1, $2)", id, "old")
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	updated, err := Apply(context.Background(), pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "new"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: id,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "new", updated.GetName())
+	require.Equal(t, id.String(), updated.GetId())
 }

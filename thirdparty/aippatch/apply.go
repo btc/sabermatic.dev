@@ -2,15 +2,17 @@ package aippatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/huandu/go-sqlbuilder"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// Apply executes the PATCH described by op against m and returns the
-// updated proto message populated from the RETURNING row.
 func Apply[T proto.Message](
 	ctx context.Context, db DBTX,
 	m *Mapping[T], op Op[T],
@@ -27,18 +29,17 @@ func Apply[T proto.Message](
 		return zero, connectInvalidArg("op.Message must not be nil")
 	}
 
-	// 1. Mask validation. GetPaths is nil-safe.
+	// 1. Mask.
 	paths := op.Mask.GetPaths()
 	if len(paths) == 0 {
 		if m.EmptyMask == ErrorOnEmpty {
 			return zero, connectInvalidArg("update_mask must not be empty")
 		}
-		// UpdateAllWritable: not implemented in v0. CodeUnimplemented
-		// signals "feature not yet built" rather than a server bug.
 		return zero, connect.NewError(connect.CodeUnimplemented,
-			fmt.Errorf("UpdateAllWritable is unimplemented in v0"))
+			errors.New("UpdateAllWritable is unimplemented in v0"))
 	}
-	// 2. Resolve paths to bindings; reject nested / unknown / non-writable.
+
+	// 2. Validate paths.
 	maskSet := make(map[string]struct{}, len(paths))
 	for _, p := range paths {
 		if strings.Contains(p, ".") {
@@ -54,9 +55,94 @@ func Apply[T proto.Message](
 		maskSet[p] = struct{}{}
 	}
 
-	_ = ctx
-	_ = db
-	_ = src
-	_ = maskSet
-	return zero, connectInternal("Apply: SQL build not yet implemented")
+	// 3. Build SET clause: iterate Bindings (alphabetical) filtered by maskSet
+	// for deterministic SQL. AutoSet appended at the end.
+	desc := src.Descriptor()
+	ub := sqlbuilder.PostgreSQL.NewUpdateBuilder()
+	ub.Update(m.Table)
+	sets := make([]string, 0, len(maskSet)+len(m.AutoSet))
+	for i := range m.Bindings {
+		b := &m.Bindings[i]
+		if _, ok := maskSet[b.Proto]; !ok {
+			continue
+		}
+		fd := desc.Fields().ByName(protoreflect.Name(b.Proto))
+		if fd == nil {
+			return zero, connectInternal("binding/proto desync: %q", b.Proto)
+		}
+		v, err := encode(op.Message, fd, b.Codec, m.codecs)
+		if err != nil {
+			return zero, connectInvalidArg("encode %s: %s", b.Proto, err.Error())
+		}
+		sets = append(sets, ub.Assign(b.Column, v))
+	}
+	for _, a := range m.AutoSet {
+		sets = append(sets, fmt.Sprintf("%s = %s", a.Column, a.SQLLiteral))
+	}
+	ub.Set(sets...)
+
+	// 4. WHERE.
+	ub.Where(ub.Equal(m.PK, op.PKValue))
+	if m.SoftDelete != "" {
+		ub.Where(ub.IsNull(m.SoftDelete))
+	}
+	if len(op.Where) > 0 {
+		keys := make([]string, 0, len(op.Where))
+		for k := range op.Where {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, col := range keys {
+			if _, ok := m.bindingsByColumn[col]; !ok {
+				return zero, connectInvalidArg("unknown column in op.Where: %q", col)
+			}
+			ub.Where(ub.Equal(col, op.Where[col]))
+		}
+	}
+
+	// 5. Returning bound columns.
+	boundCols := make([]string, len(m.Bindings))
+	for i, b := range m.Bindings {
+		boundCols[i] = b.Column
+	}
+	ub.Returning(boundCols...)
+
+	sqlStr, args := ub.Build()
+
+	// 6. Execute.
+	rows, err := db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return zero, connectInternal("query: %s", err.Error())
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return zero, connectInternal("query: %s", err.Error())
+		}
+		return zero, connectNotFound("resource not found, soft-deleted, or filtered out")
+	}
+	cols := rows.FieldDescriptions()
+	vals, err := rows.Values()
+	if err != nil {
+		return zero, connectInternal("scan: %s", err.Error())
+	}
+
+	// 7. Build result via CloneOf.
+	result := proto.CloneOf(op.Message)
+	msg := result.ProtoReflect()
+	for i, c := range cols {
+		b, ok := m.bindingsByColumn[string(c.Name)]
+		if !ok {
+			continue
+		}
+		fd := msg.Descriptor().Fields().ByName(protoreflect.Name(b.Proto))
+		if fd == nil {
+			return zero, connectInternal("binding/proto desync on read: %q", b.Proto)
+		}
+		if err := decode(msg, fd, vals[i], b.Codec, m.codecs); err != nil {
+			return zero, connectInternal("decode %s: %s", b.Proto, err.Error())
+		}
+	}
+	return result, nil
 }
