@@ -1,9 +1,9 @@
 syntax = "proto3";
 package aippatch.fixture.v1;
 
-option go_package = "github.com/btc/drill/thirdparty/aippatch/internal/fixturepb;fixturepb";
-
 import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/btc/drill/thirdparty/aippatch/internal/fixturepb;fixturepb";
 
 enum Color {
   COLOR_UNSPECIFIED = 0;
