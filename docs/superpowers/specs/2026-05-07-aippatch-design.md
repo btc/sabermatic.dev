@@ -18,16 +18,18 @@ lifted into a standalone Go module and re-used across Spanda LLC products.
 
 - **Common case is one yaml entry.** Adding a new writable field on a resource
   is: declare it in `aippatch.yaml`, regenerate, ship.
-- **Hard case is possible.** Name divergences, enum codecs, and opt-outs are
-  expressible as overrides without escape hatches into custom Go.
+- **Hard case is possible.** Name divergences, enum codecs, always-set columns
+  (e.g. `updated_at`), and opt-outs are expressible as overrides without
+  escape hatches into custom Go.
 - **No type casting in user code.** The public API is generic over the proto
   message type; callers never see `proto.Message` erasure.
 - **Schema drift is a build-time error.** When proto fields rename, columns
   rename, or types diverge, the codegen tool fails CI before runtime can.
 - **Replicable across projects.** Three artifacts (runtime library, codegen
   binary, yaml file) port to any Go service speaking ConnectRPC + pgx.
-- **AIP-134 compliant on the wire.** PATCH responses carry the updated
-  resource. `FieldMask` semantics are honored.
+- **AIP-134-aligned with documented divergences.** Wire shape (resource +
+  FieldMask in, full updated resource out) follows AIP-134. Empty-mask
+  semantics deviate intentionally; see *Wire conformance note* below.
 
 ## Non-goals (v0)
 
@@ -42,12 +44,40 @@ lifted into a standalone Go module and re-used across Spanda LLC products.
 - JSONB, repeated, oneof, message-as-jsonb, proto3 explicit-optional / NULL
   semantics. v0 codecs cover scalars, timestamps, and enums only; everything
   else fails at codegen with a diagnostic.
+- **Nullable bound columns.** v0 bindings must reference `NOT NULL` columns.
+  Nullable columns require `pgtype.*` decode handling and are deferred to v1.
+- **`bytes`, `float`, `double` proto kinds.** Common but unused in drill v0
+  resources; deferred to v1.
+- **Nested mask paths.** v0 supports top-level proto fields only. Mask paths
+  with dots (`address.street`) are rejected by codegen with a diagnostic.
+- **Audit logging hooks.** v0 has no pre/post hook for emitting audit events.
+  Callers wrap `Apply` themselves until v1 adds returned-diff or hooks.
 - Replacing sqlc for SELECTs and non-PATCH UPDATEs. aippatch only owns dynamic
   PATCH UPDATEs.
 
+## Wire conformance note
+
+aippatch follows AIP-134 wire shape (resource + `FieldMask` in, full updated
+resource out) with two intentional divergences:
+
+1. **Empty `FieldMask`** is rejected with `InvalidArgument` (default
+   `ErrorOnEmpty` policy). AIP-134 §Update specifies that an omitted mask
+   "MUST" be treated as an implied mask covering all populated fields. drill
+   prefers explicit intent over implicit broad updates; clients that need
+   full-field updates must enumerate paths. The `EmptyMaskPolicy` is
+   wire-affecting and considered permanent for any deployed service —
+   document the chosen policy in the resource's API documentation.
+2. **Nested mask paths** (`address.street`) are not supported in v0 because
+   the codec set excludes nested message types. Codegen rejects yaml entries
+   whose proto fields would require nested support. Roadmap: v1+.
+
+All other AIP-134 requirements (return the updated resource, honor mask paths
+that are valid, reject unknown paths) are upheld.
+
 ## First-principles mechanics
 
-To turn a PATCH RPC into `UPDATE … WHERE … RETURNING *` you need nine things:
+To turn a PATCH RPC into `UPDATE … WHERE … RETURNING <cols>` you need nine
+things:
 
 1. **Presence detection** — which fields to apply.
 2. **Proto-field → SQL-column mapping.**
@@ -59,9 +89,14 @@ To turn a PATCH RPC into `UPDATE … WHERE … RETURNING *` you need nine things
 8. **Returned representation** — the post-update resource on the wire.
 9. **Optimistic concurrency.**
 
-`aippatch` v0 owns 1, 2, 3, 4, 5, and 8. Items 6 and 7 stay in the handler;
-item 9 is deferred. Read-back (item 8) requires bidirectional coercion, so the
-v0 codec set covers every type the v0 target resources use.
+`aippatch` v0 owns 1, 2, 3, 4, 5, and 8. Items **6** (authorization) and **7**
+(validation) stay in the handler in v0; v2 promotes them to declarative.
+Item **9** (concurrency) is deferred to v3. Read-back (item 8) requires
+bidirectional coercion, so the v0 codec set covers every type the v0 target
+resources use.
+
+A tenth concern — **audit logging** — is intentionally out of v0; callers wrap
+`Apply` for now. v1 considers a returned-diff or hooks API.
 
 ## Architecture
 
@@ -70,37 +105,40 @@ v0 codec set covers every type the v0 target resources use.
 │  pb/drill/v1/*.proto    │         │  sql/migrations/*.up.sql │
 │  (proto contracts)      │         │  (logical schema)        │
 └──────────┬──────────────┘         └────────────┬─────────────┘
-           │ buf build → buf.binpb               │ pg_query_go
+           │ buf build -o buf.binpb              │ pg_query_go
            │  (FileDescriptorSet)                │
            ▼                                     ▼
-       ┌─────────────────────────────────────────────────┐
-       │  cmd/aippatchgen  (standalone Go binary)        │
-       │  reads: descriptors + SQL schema + aippatch.yaml│
-       │  writes: typed Mapping[T] literals (Go)         │
-       └─────────────────┬───────────────────────────────┘
+       ┌──────────────────────────────────────────────────────┐
+       │  thirdparty/aippatch/cmd/aippatchgen/                │
+       │  (standalone Go binary; CGO required for pg_query_go)│
+       │  reads: descriptors + SQL schema + aippatch.yaml     │
+       │  writes: typed Mapping[T] literals + InitPatches()   │
+       └─────────────────┬────────────────────────────────────┘
                          │           ▲
                          │           │ aippatch.yaml
-                         ▼           │  (codecs, overrides, writable)
-       ┌─────────────────────────────────────────────────┐
-       │  internal/patches/*.gen.go   (committed)        │
-       │  e.g. var UserPatch = aippatch.Mapping[*User]{} │
-       └─────────────────┬───────────────────────────────┘
+                         ▼           │  (codecs, overrides, writable, auto_set)
+       ┌──────────────────────────────────────────────────────┐
+       │  internal/patches/*.gen.go   (committed)             │
+       │  e.g. var UserPatch = aippatch.Mapping[*User]{ … }   │
+       │  func InitPatches() error { Validate all mappings }  │
+       └─────────────────┬────────────────────────────────────┘
                          │ imported by
                          ▼
-       ┌─────────────────────────────────────────────────┐
-       │  internal/rpc/<svc>/server.go   (handler)       │
-       │  aippatch.Apply(ctx, pool,                      │
-       │      patches.UserPatch, Op[*User]{...})         │
-       └─────────────────┬───────────────────────────────┘
+       ┌──────────────────────────────────────────────────────┐
+       │  internal/rpc/<svc>/server.go   (handler)            │
+       │  aippatch.Apply(ctx, pool,                           │
+       │      patches.UserPatch, Op[*User]{...})              │
+       └─────────────────┬────────────────────────────────────┘
                          │ uses
                          ▼
-       ┌─────────────────────────────────────────────────┐
-       │  thirdparty/aippatch/  (runtime library)        │
-       │  • Mapping[T], Binding, Op[T], EmptyMaskPolicy  │
-       │  • Apply[T] — validate → build → exec → scan    │
-       │  • Codec dispatch: scalar / timestamp / enum    │
-       │  • Self-contained: no drill imports             │
-       └─────────────────────────────────────────────────┘
+       ┌──────────────────────────────────────────────────────┐
+       │  thirdparty/aippatch/  (runtime library)             │
+       │  • Mapping[T], Binding, AutoSetClause, Op[T],        │
+       │    EmptyMaskPolicy                                   │
+       │  • Apply[T] — validate → build → exec → scan         │
+       │  • Codec dispatch: scalar / timestamp / enum         │
+       │  • Self-contained: no drill imports                  │
+       └──────────────────────────────────────────────────────┘
 ```
 
 Five components, three new:
@@ -108,17 +146,21 @@ Five components, three new:
 1. **`thirdparty/aippatch/`** — runtime library. Self-contained, no drill
    imports, ready to lift into a standalone Go module. Imports:
    `google.golang.org/protobuf`, `github.com/jackc/pgx/v5`,
-   `github.com/huandu/go-sqlbuilder`. Reads back via `pgx.Rows.Values()` and
-   populates the proto via reflection — no third-party row scanner is needed.
+   `github.com/huandu/go-sqlbuilder`, `github.com/google/uuid` (for
+   `[16]byte`→canonical uuid string formatting on the read side). Reads back
+   via `pgx.Rows.Values()` and populates the proto via reflection — no
+   third-party row scanner is needed.
 2. **`thirdparty/aippatch/cmd/aippatchgen/`** — codegen binary. Imports:
    `google.golang.org/protobuf` + `github.com/pganalyze/pg_query_go/v5`.
+   Requires CGO (libpg_query); see *Risks* §1.
 3. **`aippatch.yaml`** — at the repo root. Source of truth for codecs,
-   resource bindings, name overrides, and writable allow-list.
+   resource bindings, name overrides, writable allow-list, and always-set
+   columns.
 
 Pre-existing components shrink:
 
 4. **`internal/patches/*.gen.go`** — committed generated code, one file per
-   resource.
+   resource, plus a single `init.gen.go` that emits `InitPatches() error`.
 5. **`internal/rpc/<svc>/server.go`** — handlers shrink to ~12 lines.
 
 ### Boundary properties
@@ -130,6 +172,9 @@ Pre-existing components shrink:
   generated `patches` package.
 - sqlc still owns SELECT, INSERT, and any non-PATCH UPDATE. aippatch only
   writes the dynamic PATCH UPDATE.
+- The runtime's `DBTX` interface is satisfied by `*pgxpool.Pool`, `*pgx.Conn`,
+  and `pgx.Tx` — `Apply` participates in a caller's transaction transparently
+  when a `pgx.Tx` is passed.
 
 ## Public API (runtime)
 
@@ -143,31 +188,46 @@ type Mapping[T proto.Message] struct {
     PK         string                  // column name (PK value comes from Op)
     SoftDelete string                  // "" if none; framework adds "AND col IS NULL"
     EmptyMask  EmptyMaskPolicy         // ErrorOnEmpty (v0 default)
-    Bindings   []Binding               // ordered, alphabetical by Proto
+    Bindings   []Binding               // ordered alphabetically by Proto for stable diff
+    AutoSet    []AutoSetClause         // always-set columns regardless of mask
 
     // Populated by Validate(); unexported.
     bindingsByProto  map[string]*Binding
     bindingsByColumn map[string]*Binding
+    validated        bool              // guard against use before InitPatches()
 }
 
 // Binding pairs one proto field with one SQL column.
 type Binding struct {
     Proto    string  // proto field name, e.g. "display_name"
     Column   string  // SQL column, e.g. "display_name" (or "created_at")
-    SQLType  string  // diagnostic: "text", "timestamptz", "uuid", "boolean", "integer", …
+    SQLType  string  // diagnostic: "text", "timestamptz", "uuid", "boolean", "integer", "smallint", "bigint"
     Writable bool    // PATCH may set this column; default false (deny-by-default)
-    Codec    string  // "" (scalar pass-through) | "timestamp" | "enum:<name>"
+    Codec    string  // "" (scalar pass-through) | "timestamp" | "enum:<yaml-name>"
+}
+
+// AutoSetClause defines a SQL expression always written into the SET clause.
+// Typical use: { Column: "updated_at", SQLLiteral: "NOW()" }. The literal is
+// emitted as raw SQL — never sourced from user input. Codegen verifies the
+// column exists in the table and is NOT NULL.
+type AutoSetClause struct {
+    Column     string
+    SQLLiteral string
 }
 
 // Op carries a single PATCH invocation's runtime data.
 type Op[T proto.Message] struct {
-    Message T                          // input proto carrying the new values
+    Message T                          // input proto carrying the new values; must be non-nil
     Mask    *fieldmaskpb.FieldMask     // which fields to apply
     PKValue any                        // value for the PK column (e.g. uuid.UUID)
     Where   map[string]any             // optional extra equality predicates
 }
 
-// DBTX is the minimal pgx interface aippatch needs (matches sqlc's DBTX).
+// DBTX is the minimal pgx interface aippatch needs. It is a strict subset of
+// pgx's query surface and is satisfied by *pgxpool.Pool, *pgx.Conn, and pgx.Tx
+// — Apply participates in a caller's transaction when a pgx.Tx is passed.
+// (Note: this is *not* the same DBTX that sqlc generates; aippatch's is
+// smaller and read-only on the connection from a control-flow perspective.)
 type DBTX interface {
     Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
@@ -175,45 +235,68 @@ type DBTX interface {
 // EmptyMaskPolicy controls behavior when Op.Mask has zero paths.
 type EmptyMaskPolicy int
 const (
-    ErrorOnEmpty       EmptyMaskPolicy = iota // v0 default
+    ErrorOnEmpty       EmptyMaskPolicy = iota // v0 default; rejects with InvalidArgument
     UpdateAllWritable                          // future opt-in (not implemented in v0)
 )
 
 // Apply executes the PATCH described by op against m, and returns the
-// updated proto message populated from the RETURNING * row.
+// updated proto message populated from the RETURNING row. op.Message must
+// be non-nil; the returned T is a clone (via proto.CloneOf) of op.Message
+// with mapped columns overwritten from RETURNING.
 func Apply[T proto.Message](
     ctx context.Context, db DBTX,
     m *Mapping[T], op Op[T],
 ) (T, error)
 
-// Validate is called by generated package init; checks every binding's
-// proto path against the descriptor of T and indexes binding maps.
-// Returns error rather than panicking, per drill's no-panic-at-init rule.
+// Validate is called by generated InitPatches(); checks every binding's
+// proto path against the descriptor of T, verifies AutoSet columns exist,
+// and indexes binding maps. Returns error rather than panicking, per drill's
+// no-panic-at-init rule. Sets m.validated = true on success.
 func (m *Mapping[T]) Validate() error
 ```
 
 The codec registry inside the runtime is keyed by the `Codec` string on each
-Binding. v0 ships three:
+Binding (the yaml codec name, prefixed with `"enum:"` for enum codecs):
 
 - `""` — scalar pass-through (`StringKind`, `BoolKind`, `Int32Kind`,
   `Sint32Kind`, `Int64Kind`, `Sint64Kind`)
 - `"timestamp"` — `google.protobuf.Timestamp` ↔ `time.Time` via `.AsTime()` /
   `timestamppb.New(...)`
-- `"enum:<name>"` — proto enum number ↔ SQL text via a declared map; both
-  directions look up the map keyed by the enum's protoreflect name. Out-of-map
-  values on the read side return `Internal` (data invariant violation); on the
-  write side return `InvalidArgument`.
+- `"enum:<yaml-name>"` — proto enum number ↔ SQL text via a declared map; both
+  directions look up the codec by yaml name. Out-of-map values on the read
+  side return `Internal` (data invariant violation); on the write side return
+  `InvalidArgument`. Codecs are global to the yaml file and reusable across
+  resources.
 
 ### Errors
 
 All errors returned by `Apply` are `*connect.Error` with appropriate codes:
 
 - `CodeInvalidArgument` — empty mask (when policy is `ErrorOnEmpty`), unknown
-  mask path, non-writable mask path, enum write value not in declared map.
+  mask path, non-writable mask path, nested mask path, enum write value not
+  in declared map, nil `op.Message`.
 - `CodeNotFound` — `UPDATE` matched zero rows (PK wrong or scope filter
   excluded the row).
-- `CodeInternal` — pgx error, codec read-side data invariant violation, or
-  binding/proto desync that escaped boot-time `Validate`.
+- `CodeInternal` — pgx error, codec read-side data invariant violation,
+  binding/proto desync that escaped boot-time `Validate`, or `Apply` called
+  on an unvalidated `Mapping` (`InitPatches()` not invoked).
+
+### Transactions
+
+`Apply` does not start its own transaction. `DBTX` accepts both pools and
+`pgx.Tx`; passing a tx makes `Apply` participate. On error, the caller's
+transaction state is the caller's responsibility — pgx aborts an open tx on
+any non-nil error per its standard contract. For multi-statement atomic
+operations (e.g. PATCH + audit-event insert), wrap in `pgx.BeginFunc`:
+
+```go
+err := pgx.BeginFunc(ctx, s.b.Pool(), func(tx pgx.Tx) error {
+    _, err := aippatch.Apply(ctx, tx, patches.UserPatch, op)
+    if err != nil { return err }
+    _, err = tx.Exec(ctx, "INSERT INTO audit_events ...")
+    return err
+})
+```
 
 ## Codegen tool: `aippatchgen`
 
@@ -226,28 +309,55 @@ aippatchgen [--check] [--config aippatch.yaml] [--out internal/patches]
 
 Defaults: reads `./aippatch.yaml`, writes to `./internal/patches/`, reads
 `./buf.binpb` and `./sql/migrations/`. `--check` exits non-zero if any
-generated file would change. Wired into `Makefile`:
+generated file would change.
+
+**CGO requirement.** `aippatchgen` links `libpg_query` via
+`github.com/pganalyze/pg_query_go/v6`, which requires `CGO_ENABLED=1`. This
+is the default in Go's `go build`, but some shops set `CGO_ENABLED=0`
+globally; document at the top of `cmd/aippatchgen/main.go` and in
+`thirdparty/aippatch/README.md`. The runtime library has no CGO requirement.
+
+Wired into `Makefile`:
 
 ```
-codegen: ; buf generate && sqlc generate && go run ./thirdparty/aippatch/cmd/aippatchgen
-test: ; … && go run ./thirdparty/aippatch/cmd/aippatchgen --check && …
+codegen:
+	buf generate
+	buf build -o buf.binpb
+	sqlc generate
+	go run ./thirdparty/aippatch/cmd/aippatchgen
+
+test:
+	... && go run ./thirdparty/aippatch/cmd/aippatchgen --check && ...
 ```
+
+`buf.binpb` is committed to the repo (small, deterministic; CI can regenerate
+and verify if desired).
 
 ### Inputs
 
-1. **`buf.binpb`** — emitted by `buf build -o buf.binpb` as part of
-   `buf generate`. Unmarshaled into `*descriptorpb.FileDescriptorSet`; walked
-   via `protoreflect.FileDescriptor`.
+1. **`buf.binpb`** — emitted by `buf build -o buf.binpb` (added as a new step
+   in `make codegen`; the existing `buf generate` does not emit a descriptor
+   set). Unmarshaled into `*descriptorpb.FileDescriptorSet`; walked via
+   `protoreflect.FileDescriptor`.
 2. **`sql/migrations/*.up.sql`** — read in lexical order. Each statement
    parsed by `pg_query_go`. The tool accumulates a logical schema:
-   - `CREATE TABLE` → register table with columns `(name, type, nullable)`
-   - `ALTER TABLE … ADD COLUMN` → add column
-   - `ALTER TABLE … DROP COLUMN` → remove column
-   - `ALTER TABLE … ALTER COLUMN … TYPE` → change type
-   - `ALTER TABLE … RENAME COLUMN` → rename
-   - `DROP TABLE` → remove table
-   - Other statements (indexes, constraints, FK refs) are ignored.
-3. **`aippatch.yaml`** — codecs + resource declarations (schema below).
+   - `CREATE TABLE` → register table with columns `(name, type, not_null,
+     default_present)`.
+   - `ALTER TABLE … ADD COLUMN` → add column.
+   - `ALTER TABLE … DROP COLUMN` → remove column.
+   - `ALTER TABLE … ALTER COLUMN … TYPE` → change type.
+   - `ALTER TABLE … ALTER COLUMN … SET / DROP NOT NULL` → flip nullability.
+   - `ALTER TABLE … RENAME COLUMN` → rename.
+   - `DROP TABLE` → remove table.
+   - Other statements (indexes, foreign-key constraints, CHECK constraints)
+     are ignored in v0. CHECK constraint extraction (to validate enum codec
+     maps) is a v1 feature.
+
+   **Nullability** is interpreted from `NOT NULL`, `PRIMARY KEY` (implies
+   NOT NULL), and `SET / DROP NOT NULL` migrations. The codegen's
+   compatibility check enforces v0's "bound columns must be NOT NULL" rule.
+3. **`aippatch.yaml`** — codecs + resource declarations + auto_set blocks
+   (schema below).
 
 ### Algorithm
 
@@ -256,40 +366,60 @@ test: ; … && go run ./thirdparty/aippatch/cmd/aippatchgen --check && …
 3. For each `resources[i]` in `aippatch.yaml`:
    1. Look up the proto message descriptor by full name.
    2. Look up the SQL table from the schema; resolve the PK column.
-   3. For each proto field in the message, in field-number order:
+   3. For each proto field in the message, in field-number order (so error
+      messages are stable):
       - If `overrides[field].skip` is true → drop.
       - If `overrides[field].column` set → use that column.
       - Else → snake-case name match with the SQL column list.
-      - If no match → record diagnostic: "field X has no matching column;
-        list candidates and suggest yaml fix."
+      - If no match → diagnostic: "field X has no matching column; suggest
+        `{ skip: true }` or `{ column: <name> }`."
       - Compatibility check between proto kind and column type (table below).
-        If incompatible → diagnostic.
+        On v0 also enforce: column is NOT NULL. On incompatibility →
+        diagnostic.
       - Determine codec:
-        - `MessageKind` with full name `google.protobuf.Timestamp` → `"timestamp"`.
-        - Enum kind → `"enum:" + name` from `overrides[field].codec`. If missing
-          → diagnostic: "enum field requires explicit codec in overrides."
+        - `MessageKind` with full name `google.protobuf.Timestamp` →
+          `"timestamp"`.
+        - Enum kind → require `overrides[field].codec` to name a declared
+          codec; emit `"enum:<yaml-name>"`. If missing → diagnostic.
         - Scalar kind → `""`.
         - Anything else → diagnostic: "unsupported in v0; mark `skip: true`."
       - `Writable` = field name is in `resources[i].writable`.
-   4. Sort bindings alphabetically by `Proto` for stable output.
-4. Emit one Go file per resource.
+      - Reject paths with dots (nested) — diagnostic.
+   4. After processing, every proto field must either have a binding or
+      `skip: true`. Any unmatched field is a diagnostic (this prevents the
+      `proto.CloneOf`-base case from silently passing through unmapped
+      fields with input-message values).
+   5. For each `auto_set[col]` entry: verify the column exists in the table
+      and is NOT NULL. The literal expression is emitted verbatim as raw SQL
+      — never user input. Reject if column is a writable binding (would
+      conflict).
+   6. Sort bindings alphabetically by `Proto` for stable output.
+4. Emit one Go file per resource, plus one `init.gen.go` that emits
+   `InitPatches() error` calling `Validate()` on each mapping.
 5. If `--check`: byte-compare to existing files; exit 1 on any diff.
 
 ### Type compatibility (v0)
 
-| Proto kind | SQL types accepted | Codec |
-|---|---|---|
-| `StringKind` | `text`, `varchar`, `citext`, `uuid` | `""` |
-| `BoolKind` | `boolean` | `""` |
-| `Int32Kind`, `Sint32Kind` | `integer`, `smallint` | `""` |
-| `Int64Kind`, `Sint64Kind` | `bigint` | `""` |
-| `MessageKind`: `google.protobuf.Timestamp` | `timestamptz`, `timestamp` | `"timestamp"` |
-| `EnumKind` | `text`, `varchar` | `"enum:<name>"` (declared) |
-| anything else | — | codegen error |
+| Proto kind | SQL types accepted | Codec | Notes |
+|---|---|---|---|
+| `StringKind` | `text`, `varchar`, `citext`, `uuid` | `""` | `uuid` columns: pgx returns `[16]byte`; runtime formats canonical string. |
+| `BoolKind` | `boolean` | `""` | |
+| `Int32Kind`, `Sint32Kind` | `integer` | `""` | pgx returns `int32`. |
+| `Int32Kind`, `Sint32Kind` | `smallint` | `""` | pgx returns `int16`; runtime widens to `int32` before `protoreflect.Set`. |
+| `Int64Kind`, `Sint64Kind` | `bigint` | `""` | pgx returns `int64`. |
+| `MessageKind`: `google.protobuf.Timestamp` | `timestamptz`, `timestamp` | `"timestamp"` | |
+| `EnumKind` | `text`, `varchar` | `"enum:<yaml-name>"` | yaml-declared map keyed by enum value name. |
+| **Deferred (v1)** | | | |
+| `BytesKind` | `bytea` | (TBD) | Codegen rejects in v0. |
+| `FloatKind`, `DoubleKind` | `real`, `double precision` | (TBD) | Codegen rejects in v0. |
+| Any kind ↔ nullable column | | | Codegen rejects in v0; v1 adds `pgtype.*` decode. |
+| `MessageKind` (non-Timestamp) | `jsonb` | `"jsonb"` | v1. |
+| anything else | — | — | codegen error |
 
 `uuid`-as-string is special-cased: a proto `string` field maps to a `uuid`
-column when the column type is `uuid`, with `[16]byte`↔string conversion in
-the runtime.
+column when the column type is `uuid`, with `[16]byte`↔canonical-string
+conversion in the runtime. The runtime imports `github.com/google/uuid` for
+the canonical formatter.
 
 ### Diagnostics
 
@@ -313,11 +443,20 @@ aippatchgen: drill.v1.User: field "role" has unsupported type without codec
         overrides: { role: { codec: enum_role } }
 
 aippatchgen: drill.v1.User: writable field "display_name" not present in proto descriptor
+
+aippatchgen: drill.v1.User.password_hash → users.password_hash: nullable column not supported in v0
+  hint: mark { skip: true } or wait for v1 nullable support.
+
+aippatchgen: drill.v1.User.address.street: nested mask paths not supported in v0
+
+aippatchgen: drill.v1.User: auto_set column "updated_at" not found in table users
+  hint: ensure migrations have run and column exists.
 ```
 
 ## Configuration: `aippatch.yaml`
 
 ```yaml
+# Codecs are global and reusable across resources.
 codecs:
   enum_role:
     proto_enum: drill.v1.UserRole
@@ -335,16 +474,25 @@ resources:
     table: users
     pk: id
     soft_delete: deleted_at
-    empty_mask: error                # error (default) | update_writable
+    empty_mask: error                # error → ErrorOnEmpty (default) | update_writable → UpdateAllWritable
     writable: [display_name]         # AIP-203 deny-by-default
+    auto_set:
+      updated_at: NOW()              # raw SQL, applied to every PATCH
     overrides:
       create_time: { column: created_at }
       role:        { codec: enum_role }
       plan:        { codec: enum_plan }
+      # password_hash, stripe_customer_id are nullable in users; not in proto;
+      # not in writable; codegen drops them with "no matching proto field" — no
+      # action needed.
+      free_full_educators_used: { skip: true }   # column exists; no proto field; explicitly skipped
 ```
 
 One file per repo. `~10–20` lines per resource. Reviewers see policy and
 mapping deltas in a single diff. Adding a writable field is one line.
+
+The yaml-string `error` maps to the Go enum `ErrorOnEmpty`;
+`update_writable` maps to `UpdateAllWritable` (v0 unsupported).
 
 ## Generated file shape
 
@@ -360,7 +508,8 @@ import (
 )
 
 // UserPatch is the PATCH mapping for drill.v1.User → users.
-var UserPatch = mustValidate(&aippatch.Mapping[*drillv1.User]{
+// Validate() is called from InitPatches() at startup, never at package init.
+var UserPatch = &aippatch.Mapping[*drillv1.User]{
     Table:      "users",
     PK:         "id",
     SoftDelete: "deleted_at",
@@ -374,26 +523,42 @@ var UserPatch = mustValidate(&aippatch.Mapping[*drillv1.User]{
         {Proto: "plan",           Column: "plan",           SQLType: "text",        Writable: false, Codec: "enum:enum_plan"},
         {Proto: "role",           Column: "role",           SQLType: "text",        Writable: false, Codec: "enum:enum_role"},
     },
-})
-
-func mustValidate[T proto.Message](m *aippatch.Mapping[T]) *aippatch.Mapping[T] {
-    if err := m.Validate(); err != nil {
-        // Per drill's no-panic-at-init rule, the generated package exposes
-        // an Init() that returns the error; main wires it up. The
-        // mustValidate helper is only used in tests; production wiring uses
-        // an explicit constructor that returns (mappings, error).
-        panic(err)
-    }
-    return m
+    AutoSet: []aippatch.AutoSetClause{
+        {Column: "updated_at", SQLLiteral: "NOW()"},
+    },
 }
 ```
 
-**Init wiring:** to comply with drill's no-panic-at-init rule, the production
-build does *not* use the `mustValidate` helper. Instead `aippatchgen` emits an
-`InitPatches() error` function that calls `Validate()` on every generated
-mapping and returns the first error. `cmd/server/main.go` calls it during
-startup and propagates the error normally. The `mustValidate` helper exists
-only for test-side use where panicking is acceptable.
+`internal/patches/init.gen.go`:
+
+```go
+// Code generated by aippatchgen. DO NOT EDIT.
+package patches
+
+// InitPatches validates every generated mapping. Call once at server startup.
+// Returns the first validation error encountered; never panics.
+func InitPatches() error {
+    for _, fn := range []func() error{
+        UserPatch.Validate,
+        // …one entry per resource…
+    } {
+        if err := fn(); err != nil {
+            return err
+        }
+    }
+    return nil
+}
+```
+
+**Init wiring.** `cmd/server/main.go` calls `patches.InitPatches()` during
+startup, propagating the error normally per drill's no-panic-at-init rule. No
+package-level `mustValidate` helper is generated — `Validate()` is invoked
+explicitly. This eliminates init-time panics and makes the validation point
+greppable.
+
+`Apply` checks `m.validated` on every call; calling `Apply` before
+`InitPatches()` returns `Internal` ("Mapping not initialized; call
+InitPatches()") rather than a misleading "unknown field" error.
 
 ## Runtime: `Apply` walkthrough
 
@@ -404,7 +569,15 @@ func Apply[T proto.Message](
 ) (T, error) {
     var zero T
 
-    // 1. Mask validation
+    // 0. Sanity guards.
+    if m == nil || !m.validated {
+        return zero, connectInternal("aippatch.Mapping not initialized; call patches.InitPatches() during startup")
+    }
+    if any(op.Message) == nil {
+        return zero, connectInvalidArg("op.Message must not be nil")
+    }
+
+    // 1. Mask validation.
     paths := op.Mask.GetPaths()
     if len(paths) == 0 {
         if m.EmptyMask == ErrorOnEmpty {
@@ -413,13 +586,16 @@ func Apply[T proto.Message](
         // Future: collect all writable bindings as paths.
     }
 
-    // 2. Resolve paths to bindings; reject unknown / non-writable.
-    sets := make([]string, 0, len(paths))   // go-sqlbuilder Assign exprs
+    // 2. Resolve paths to bindings; reject unknown / non-writable / nested.
     desc := op.Message.ProtoReflect().Descriptor()
     ub   := sqlbuilder.PostgreSQL.NewUpdateBuilder()
     ub.Update(m.Table)
 
+    sets := make([]string, 0, len(paths)+len(m.AutoSet))
     for _, p := range paths {
+        if strings.Contains(p, ".") {
+            return zero, connectInvalidArg("nested mask path not supported in v0: %q", p)
+        }
         b, ok := m.bindingsByProto[p]
         if !ok {
             return zero, connectInvalidArg("unknown field in update_mask: %q", p)
@@ -431,13 +607,18 @@ func Apply[T proto.Message](
         if fd == nil {
             return zero, connectInternal("binding/proto desync: %q", p)
         }
-        v, err := encode(op.Message, fd, b.Codec, m.codecs) // proto value → SQL parameter
+        v, err := encode(op.Message, fd, b.Codec, m.codecs)
         if err != nil { return zero, err }
         sets = append(sets, ub.Assign(b.Column, v))
     }
+
+    // 3. AutoSet columns: append raw SQL fragments unconditionally.
+    for _, a := range m.AutoSet {
+        sets = append(sets, fmt.Sprintf("%s = %s", a.Column, a.SQLLiteral))
+    }
     ub.Set(sets...)
 
-    // 3. WHERE clauses.
+    // 4. WHERE clauses.
     ub.Where(ub.Equal(m.PK, op.PKValue))
     if m.SoftDelete != "" {
         ub.Where(m.SoftDelete + " IS NULL")
@@ -445,11 +626,15 @@ func Apply[T proto.Message](
     for col, v := range op.Where {
         ub.Where(ub.Equal(col, v))
     }
-    ub.SQL("RETURNING *")
+
+    // 5. Returning explicit bound columns (not RETURNING *).
+    boundCols := make([]string, len(m.Bindings))
+    for i, b := range m.Bindings { boundCols[i] = b.Column }
+    ub.Returning(boundCols...)
 
     sqlStr, args := ub.Build()
 
-    // 4. Execute and read back via RETURNING *.
+    // 6. Execute and read back.
     rows, err := db.Query(ctx, sqlStr, args...)
     if err != nil { return zero, connectInternal("query: %w", err) }
     defer rows.Close()
@@ -464,12 +649,12 @@ func Apply[T proto.Message](
     vals, err := rows.Values()
     if err != nil { return zero, connectInternal("scan: %w", err) }
 
-    // 5. Build result proto from input message + RETURNING values.
-    result := proto.Clone(op.Message).(T)
+    // 7. Build result proto from input message clone + RETURNING values.
+    result := proto.CloneOf(op.Message)
     msg    := result.ProtoReflect()
     for i, c := range cols {
         b, ok := m.bindingsByColumn[string(c.Name)]
-        if !ok { continue } // unmapped column → ignore
+        if !ok { continue }
         fd := msg.Descriptor().Fields().ByName(protoreflect.Name(b.Proto))
         if err := decode(msg, fd, vals[i], b.Codec, m.codecs); err != nil {
             return zero, connectInternal("decode %s: %w", b.Proto, err)
@@ -479,8 +664,23 @@ func Apply[T proto.Message](
 }
 ```
 
+Notable details:
+
+- **`proto.CloneOf`** (added in protobuf-go v1.36.6; project uses v1.36.11)
+  is type-safe: returns `T` directly, no `.(T)` assertion.
+- **`Returning(boundCols...)`** sends only mapped columns over the wire from
+  Postgres to Go. Unmapped columns (`password_hash`, `stripe_customer_id`,
+  `free_full_educators_used`) are not transmitted at all — both a privacy
+  benefit and a guard against future schema additions appearing silently.
+- **`ub.Set(sets...)`** is variadic over assignment strings. `ub.Assign(col,
+  val)` returns `"col = $N"` with parameterized placeholder; raw expressions
+  for `AutoSet` are formatted directly (`"updated_at = NOW()"`), with codegen
+  guaranteeing the column and literal are safe.
+- **`ub.Returning(...)`** is the library's first-class API; we do not use the
+  marker-position-dependent `ub.SQL(...)` for this.
+
 `encode` and `decode` are bounded switches over field kind × codec. The total
-runtime is approximately 300 LoC including codec dispatch, error
+runtime is approximately 350 LoC including codec dispatch, error
 constructors, and `Validate`.
 
 ### pgx native types on the read side
@@ -490,18 +690,22 @@ constructors, and `Validate`.
 | `text`, `varchar`, `citext` | `string` | `StringKind` | direct |
 | `uuid` | `[16]byte` | `StringKind` | `uuid.UUID(v).String()` |
 | `boolean` | `bool` | `BoolKind` | direct |
-| `integer`, `smallint` | `int32` | `Int32Kind`, `Sint32Kind` | direct |
+| `integer` | `int32` | `Int32Kind`, `Sint32Kind` | direct |
+| `smallint` | `int16` | `Int32Kind`, `Sint32Kind` | widen: `int32(v)` |
 | `bigint` | `int64` | `Int64Kind`, `Sint64Kind` | direct |
 | `timestamptz`, `timestamp` | `time.Time` | `MessageKind: Timestamp` | `timestamppb.New(v)` |
 | `text` (with enum codec) | `string` | `EnumKind` | reverse-map declared codec |
 
-Any other pgx-native type encountered at runtime is an `Internal` error
-(should have been caught by codegen's compatibility check).
+**Nullable columns return `pgtype.Text`/`pgtype.Timestamptz`/etc. from
+`rows.Values()` rather than the underlying scalar.** v0 codegen rejects
+nullable bound columns; v1 adds explicit `pgtype.*` decode. Any unexpected
+pgx-native type at runtime is `Internal` (should be impossible if codegen
+accepted the binding).
 
 ## Handler call site
 
 drill's existing `UpdateProfile` (currently `internal/rpc/user/server.go:100-141`)
-shrinks from ~45 lines to ~12:
+shrinks from ~45 lines to ~14:
 
 ```go
 func (s *Server) UpdateProfile(
@@ -522,7 +726,7 @@ func (s *Server) UpdateProfile(
         req.Msg.GetUser().DisplayName = trimmed
     }
 
-    updated, err := aippatch.Apply(ctx, s.b.Pool, patches.UserPatch, aippatch.Op[*drillv1.User]{
+    updated, err := aippatch.Apply(ctx, s.b.Pool(), patches.UserPatch, aippatch.Op[*drillv1.User]{
         Message: req.Msg.GetUser(),
         Mask:    req.Msg.GetUpdateMask(),
         PKValue: u.ID,
@@ -532,6 +736,8 @@ func (s *Server) UpdateProfile(
     return connect.NewResponse(&drillv1.UpdateProfileResponse{User: updated}), nil
 }
 ```
+
+(`s.b.Pool()` is a method on `*backend.Backend` returning `*pgxpool.Pool`.)
 
 The hand-rolled `implementedUserFields` allow-list and per-path validation
 loop disappear. Authorization (the unauthenticated check) and per-field value
@@ -549,16 +755,21 @@ same approach with a small fixture schema independent of drill's migrations.
 
 Cases:
 - empty mask → `InvalidArgument`
+- nil `op.Message` → `InvalidArgument`
+- unvalidated mapping (`InitPatches` not called) → `Internal`
 - unknown mask path → `InvalidArgument`
 - non-writable mask path → `InvalidArgument`
-- writable scalar (string, bool, int32, int64) write + read-back
+- nested mask path → `InvalidArgument`
+- writable scalar (string, bool, int32 from `integer`, int32 from `smallint`,
+  int64) write + read-back
 - writable timestamp write + read-back
 - writable enum write (valid & invalid) + read-back
+- AutoSet column is bumped on every PATCH (e.g. `updated_at` advances)
 - soft-delete WHERE filters out deleted rows → `NotFound`
 - PK mismatch → `NotFound`
 - extra `Op.Where` predicate excludes row → `NotFound`
-- `RETURNING *` populates fields not touched by mask
-- `proto.Clone` preserves input-message fields that have no binding
+- `Returning(boundCols)` does not include unmapped columns
+- `proto.CloneOf` preserves input-message fields that have no binding
 
 ### Codegen golden tests (`thirdparty/aippatch/cmd/aippatchgen/aippatchgen_test.go`)
 
@@ -566,36 +777,61 @@ Fixtures under `testdata/`:
 - `simple/` — proto + 2 migrations + yaml → expected `*.gen.go`
 - `name_divergence/` — `create_time` ↔ `created_at`
 - `enum_codec/` — proto enum + declared codec
-- `unsupported_kind/` — proto with bytes field (not in v0); expects diagnostic
+- `auto_set/` — `updated_at: NOW()` and verified output
+- `unsupported_kind/` — proto with bytes field; expects diagnostic
+- `nullable_bound/` — writable on a nullable column; expects diagnostic
+- `nested_path/` — proto with submessage, attempted writable; expects diagnostic
 - `missing_column/` — proto field with no candidate; expects diagnostic
+- `unmatched_proto_field/` — proto field neither matched nor `skip: true`;
+  expects diagnostic
 - `--check_drift/` — fixture with stale `*.gen.go`; expects exit 1
 
 ### Handler integration test (`internal/rpc/user/server_test.go`)
 
-Uses drill's existing `backendtest.SeedUser` to create a real user, then
-exercises `UpdateProfile` end-to-end through the connect handler:
-- valid PATCH on `display_name` → response carries updated User; DB row
-  updated.
+Uses drill's existing `backendtest.SeedUser` to create a real user (matching
+drill's "Test production parity" rule), then exercises `UpdateProfile`
+end-to-end through the connect handler:
+- valid PATCH on `display_name` → response carries updated User; DB row's
+  `display_name` and `updated_at` both change.
 - empty mask → `InvalidArgument`.
 - mask with `email` (non-writable) → `InvalidArgument`.
 - unauthenticated → `Unauthenticated`.
 
-These tests already exist for the current implementation; they should pass
-unchanged after the migration.
+**Audit step in rollout (see below):** existing tests assert on error
+strings such as `"field not supported for update: \"email\""`. The new
+handler produces `"field not writable: \"email\""`. Existing tests must be
+updated where they assert on error message text; those that assert on error
+codes only need no change.
 
 ## Drill rollout plan
 
-1. Add `thirdparty/aippatch/` runtime package and `cmd/aippatchgen/` binary.
-2. Add `aippatch.yaml` at repo root with the `User` resource and enum codecs.
-3. Add `internal/patches/` directory; wire `aippatchgen` into `make codegen`.
-4. Add `aippatchgen --check` to `make test`.
-5. Generate `internal/patches/user.gen.go`. Review the diff manually.
-6. Wire `patches.InitPatches()` into `cmd/server/main.go` startup; surface
-   any error from `Validate()`.
-7. Replace `UpdateProfile` handler body with the shrunk version.
-8. Delete the `UpdateUserDisplayName` query from `sql/queries/users.sql` and
-   regenerate sqlc.
-9. Run `make test`; existing handler tests should pass unchanged.
+1. **Dependency adds.** `go get github.com/huandu/go-sqlbuilder
+   github.com/pganalyze/pg_query_go/v5` and commit `go.mod`/`go.sum`.
+   (`github.com/google/uuid` is already in `go.mod`.)
+2. **Add framework.** Land `thirdparty/aippatch/` runtime + `cmd/aippatchgen/`
+   binary.
+3. **Wire codegen.** Add `buf build -o buf.binpb` and the `aippatchgen` step
+   to `make codegen`. Add `aippatchgen --check` to `make test`.
+4. **Add config.** `aippatch.yaml` at repo root with the `User` resource,
+   enum codecs, and `auto_set: { updated_at: NOW() }`.
+5. **Generate.** Create `internal/patches/`; run `make codegen`. Review the
+   diff manually first time, including `internal/patches/user.gen.go` and
+   `internal/patches/init.gen.go`.
+6. **Wire init.** Call `patches.InitPatches()` in `cmd/server/main.go`
+   startup; surface any error from `Validate()` per drill's no-panic rule.
+7. **Switch handler.** Replace `UpdateProfile` handler body with the shrunk
+   version. Verify the proto wire contract is unchanged with golden response
+   bytes if needed.
+8. **Audit existing tests.** Grep `internal/rpc/user/server_test.go` (and
+   anywhere else) for assertions on error strings such as `"field not
+   supported for update"`; update to the new wording (`"field not
+   writable"`) or relax to error-code only.
+9. **Audit consumers of `b.UpdateDisplayName`.** Grep the codebase for
+   callers; confirm only `UpdateProfile` calls it before deletion.
+10. **Delete stale sqlc.** Remove `UpdateUserDisplayName` from
+    `sql/queries/users.sql` and `b.UpdateDisplayName`; regenerate sqlc.
+11. **Verify.** `make test` (full CI: buf lint, codegen check, frontend
+    typecheck+lint+tests, backend tests with race).
 
 Rollback: single-commit revert. The proto wire contract is unchanged.
 
@@ -604,19 +840,27 @@ Rollback: single-commit revert. The proto wire contract is unchanged.
 Each Spanda repo gets three artifacts:
 
 1. The `thirdparty/aippatch/` directory (initially copied from drill; once
-   stable, extracted to its own module and imported).
-2. The `aippatchgen` binary — `go install ./thirdparty/aippatch/cmd/aippatchgen`.
-3. A `aippatch.yaml` skeleton.
+   stable, extracted to its own module — see *Roadmap v0.5*).
+2. The `aippatchgen` binary — `go install
+   ./thirdparty/aippatch/cmd/aippatchgen`.
+3. An `aippatch.yaml` skeleton.
 
 Each project's `Makefile` wires `aippatchgen` into its `codegen` and `test`
-targets. No drill-specific code is required.
+targets. The runtime library and codegen binary contain no drill-specific
+code; the yaml file, generated `*.gen.go`, and `Makefile` wiring are
+project-specific by design.
 
 ## Roadmap
 
 | Tier | Feature | Notes |
 |---|---|---|
-| v1 | JSONB codec | Marshals proto sub-messages or `[]byte` to `jsonb` columns. Likely first non-v0 demand. |
-| v1 | Proto3 explicit-optional + NULL semantics | AIP-134 clearing rule (`mask path + zero value → NULL`); only meaningful for `optional` fields. |
+| v0.5 | Extract `thirdparty/aippatch/` to its own Go module | Trigger: a second Spanda project consumes aippatch in production. New module path `github.com/<org>/aippatch`; drill's `go.mod` switches from local replace to versioned import; thirdparty/ directory removed. |
+| v1 | Nullable bound columns (`pgtype.*` decode) | First wave of demand; many natural settings columns are nullable. |
+| v1 | JSONB codec | Marshals proto sub-messages or `[]byte` to `jsonb` columns. |
+| v1 | `bytes`, `float`, `double` proto kinds | Bytea / real / double precision support. |
+| v1 | Pre/post hooks (or returned diff) for audit logging | `Apply` returns `(updated T, diff Diff, err error)` where Diff carries before/after for mask paths; handler emits audit events. |
+| v1 | Proto3 explicit-optional + NULL semantics | AIP-134 clearing rule (`mask path + zero value → NULL`); meaningful for `optional` fields. |
+| v1 | CHECK constraint extraction | Validate enum codec maps against `CHECK (col IN (…))` at codegen. |
 | v2 | Declarative validators | `NonEmptyTrimmed`, `LenBetween`, `URL`, `OneOf`. Per-resource yaml + handler-side composition. |
 | v2 | AIP-193 error mapping | pgx error inspection: `unique_violation` → `AlreadyExists`, `fk_violation` → `FailedPrecondition`, `not_null_violation` / `check_violation` → `InvalidArgument`. Per-resource override map. |
 | v3 | Per-field declarative authz | `admin_only_fields:` in yaml; layered with handler narrowing. |
@@ -632,31 +876,43 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
 1. **`pg_query_go` is a CGO dependency.** It wraps `libpg_query`. drill's
    production binary builds may run with `CGO_ENABLED=0` in some paths.
    Mitigation: `aippatchgen` is a developer/CI tool, not part of the
-   production binary; CGO is only required where `aippatchgen` runs. Document
-   this in the package README.
+   production binary; CGO is only required where `aippatchgen` runs.
+   Document at the top of `cmd/aippatchgen/main.go`:
+   `// Requires CGO (libpg_query).` Add a `README.md` next to it stating
+   the same. CI runners must have a C toolchain — drill's CI already does
+   for testcontainers.
 
 2. **pgx-native ↔ proto type drift.** New SQL types added to drill in the
    future may not be in the runtime's `decode` switch. Mitigation:
-   `aippatchgen` rejects unknown SQL types at codegen with a clear diagnostic;
-   the runtime never sees a type the codegen accepted.
+   `aippatchgen` rejects unknown SQL types at codegen with a clear
+   diagnostic; the runtime never sees a type the codegen accepted.
+   `Returning(boundCols...)` (not `RETURNING *`) further reduces blast
+   radius — unmapped columns are not transmitted from Postgres at all.
 
-3. **`EmptyMaskPolicy` is wire-affecting.** Switching from `ErrorOnEmpty` to
-   `UpdateAllWritable` changes behavior visible to clients. Mitigation:
-   document as a per-resource permanent decision; `error` is the v0 default
-   and recommended.
+3. **`EmptyMaskPolicy` is wire-affecting and AIP-134-divergent.**
+   `ErrorOnEmpty` deviates from AIP-134 §Update's "MUST treat omitted mask as
+   all populated fields" — this is documented in *Wire conformance note*.
+   Switching policies post-deploy is a breaking change visible to clients;
+   document choice per resource in API docs.
 
 4. **Validation duplication in v0.** Per-field validation lives in handlers
    until v2. New PATCH RPCs added before v2 must hand-roll trimming /
-   non-empty / length checks. Mitigation: ship v2 quickly if the duplication
+   non-empty / length checks. Mitigation: ship v2 quickly if duplication
    becomes painful; document the v0 expectation in the README.
 
-5. **`proto.Clone` for the result base.** `Apply` clones `op.Message` as the
-   starting point for the returned proto. Fields not in the RETURNING row
-   keep their input-message values. For PATCH this is fine (all DB-backed
-   fields are populated by RETURNING). For non-DB fields (rare; would only
-   exist if the proto carries computed-only fields), the input message's
-   values pass through. Mitigation: document; reject in codegen any proto
-   field that has no `skip: true` and no binding match.
+5. **Audit logging is the caller's responsibility in v0.** Wrapping `Apply`
+   in a transaction is the documented pattern for atomically logging audit
+   events. v1 adds returned-diff support to remove the wrap. Mitigation: if
+   audit comes due before v1 ships, the wrap-in-tx pattern is sufficient.
+
+6. **Test wording change is observable.** Existing tests asserting on error
+   message strings (`"field not supported for update"`) will break. The
+   rollout plan includes an explicit audit step.
+
+7. **`buf.binpb` drift.** If `buf.binpb` is committed and a developer regens
+   `pb/*.pb.go` without re-running `buf build -o buf.binpb`, the codegen
+   will be stale. Mitigation: `make codegen` runs both in order;
+   `aippatchgen --check` in CI catches drift.
 
 ## Decisions (locked, with rationale)
 
@@ -665,26 +921,30 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
 | 1 | Runtime library + standalone codegen binary; not a buf plugin | Cleaner separation from buf's plugin machinery; reusable in non-buf contexts. |
 | 2 | Working name `aippatch`; lives at `drill/thirdparty/aippatch/` | Signals AIP-134 lineage; thirdparty/ prepares clean extraction. |
 | 3 | Generic `Mapping[T proto.Message]` (single type parameter) | No row-type coupling; framework is sqlc-independent. No type casts in user code. |
-| 4 | Codegen consumes proto FileDescriptorSet + SQL migrations + yaml | Both schemas already on disk; yaml carries policy + overrides only. |
+| 4 | Codegen consumes proto FileDescriptorSet + SQL migrations + yaml | Both schemas already on disk; yaml carries policy + overrides + auto_set only. |
 | 5 | Generated `*.gen.go` files committed to repo | Mapping is reviewable in PRs; CI checks for drift via `--check`. |
-| 6 | SQL builder: `huandu/go-sqlbuilder` (private to package) | Mature; `PostgreSQL.NewUpdateBuilder()` emits `$1` placeholders cleanly. |
-| 7 | Row scan: direct `pgx.Rows.Values()` + proto reflection (no third-party scanner) | A scanner like `scany/v2` would target a Go row struct; we populate a proto via reflection instead. Avoids an unnecessary dependency and a proto-aware shim. |
-| 8 | Empty FieldMask rejected with `InvalidArgument` (default) | Strict; matches drill's existing behavior; relax later if a use case warrants. |
+| 6 | SQL builder: `huandu/go-sqlbuilder` (private to package) | Mature; `PostgreSQL.NewUpdateBuilder()` emits `$1` placeholders cleanly; `Returning(...)` is a first-class method. |
+| 7 | Row scan: direct `pgx.Rows.Values()` + proto reflection (no third-party scanner) | We populate a proto via reflection rather than a Go row struct; avoids an unnecessary dependency and a proto-aware shim. |
+| 8 | Empty FieldMask rejected with `InvalidArgument` (default) | drill prefers explicit intent; documented divergence from AIP-134; relax later if a use case warrants. |
 | 9 | Deny-by-default writable; opt in via `writable:` list | AIP-203; security posture. |
 | 10 | Codegen errors on unsupported field types | Bad fields stop at codegen; runtime never sees a type it cannot handle. |
-| 11 | Framework reads back via `RETURNING *` and returns the populated proto | One round-trip; AIP-134 compliant on the wire; pulls codec set up to cover every type in target protos. |
-| 12 | v0 codec set: scalars + timestamps + enum | Smallest set that covers drill's `User` and most Spanda CRUD shapes. JSONB and others in v1+. |
+| 11 | Framework reads back via `RETURNING <bound-columns>` (not `*`) and returns the populated proto | One round-trip; AIP-134 compliant; explicit column list excludes sensitive unmapped columns from the wire. |
+| 12 | v0 codec set: scalars + timestamps + enum, NOT-NULL columns only | Smallest set that covers drill's `User` and most Spanda CRUD shapes. JSONB / nullable / bytes / float in v1. |
 | 13 | v0 first user: drill's `UpdateProfile` | Validates the framework against an existing target; replaces the most boilerplate-heavy code path today. |
-| 14 | Boot validation via `Mapping.Validate() error` propagated to `main` | drill's no-panic-at-init rule. |
+| 14 | Boot validation via `Mapping.Validate() error` propagated to `main` through generated `InitPatches() error` | drill's no-panic-at-init rule. No `mustValidate` panic helper in generated code. |
+| 15 | `AutoSet` clauses (e.g. `updated_at: NOW()`) declared per-resource in yaml | Replaces sqlc's hand-rolled `updated_at = NOW()` in every UPDATE; codegen-checked column existence and NOT-NULL. |
+| 16 | Always commit `buf.binpb` and regenerate via `buf build -o buf.binpb` | Eliminates need for a live buf-build dependency at codegen time; CI's `aippatchgen --check` catches drift. |
 
 ## Open questions (deferred)
 
-- **JSONB shape** — for v1: do we marshal proto sub-messages as JSON via
-  `protojson`, or accept opaque `[]byte` from the handler? Trade-offs around
-  schema evolution.
-- **AIP-154 ETag column type** — `bigint` counter, `uuid` token, or
-  per-resource choice? Defer to v3 when the use case is concrete.
-- **Buf plugin migration** — when (and if) v4 ships, the yaml format remains
-  the source of truth for policy; only mappings move to proto annotations.
-  Migration path TBD.
-
+- **JSONB shape (v1)** — for proto sub-messages, marshal via `protojson` or
+  accept opaque `[]byte` from the handler? Trade-offs around schema
+  evolution.
+- **AIP-154 ETag column type (v3)** — `bigint` counter, `uuid` token, or
+  per-resource choice? Defer until use case is concrete.
+- **Buf plugin migration path (v4)** — when (and if) v4 ships, the yaml
+  format remains the source of truth for policy; only mappings move to proto
+  annotations. Migration mechanics TBD.
+- **Diff API shape (v1)** — for audit logging, is the returned `Diff` a
+  `map[string]struct{Before, After any}`, or a typed proto-aware structure?
+  Decide when v1 work begins.
