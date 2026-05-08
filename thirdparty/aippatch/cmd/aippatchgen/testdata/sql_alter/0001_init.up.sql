@@ -1,0 +1,1 @@
+CREATE TABLE widgets (id UUID PRIMARY KEY);
