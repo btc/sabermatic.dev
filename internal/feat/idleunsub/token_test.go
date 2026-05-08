@@ -42,6 +42,44 @@ func TestSignVerify_RoundTrip(t *testing.T) {
 	require.Equal(t, claims.Action, got.Action)
 	require.True(t, claims.CurrentPeriodEnd.Equal(got.CurrentPeriodEnd))
 	require.Equal(t, claims.ExpiresAt, got.ExpiresAt)
+	require.Equal(t, claims.IssuedAt, got.IssuedAt)
+}
+
+func TestVerify_RejectsMalformed(t *testing.T) {
+	t.Parallel()
+	s := newSigner(t)
+	cases := []struct {
+		name string
+		tok  string
+	}{
+		{"empty", ""},
+		{"no_dot", "nodot"},
+		{"only_dot", "."},
+		{"both_halves_invalid_base64", "!!.@@"},
+		{"sig_invalid_base64", "AAAA.!!"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := s.Verify(tc.tok)
+			require.ErrorIs(t, err, idleunsub.ErrTokenInvalid)
+		})
+	}
+}
+
+func TestVerify_RejectsWrongKey(t *testing.T) {
+	t.Parallel()
+	signerA := newSigner(t)
+	signerB := newSigner(t) // different random key
+	end := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+
+	tok := signerA.Sign(idleunsub.KeepTokenClaims{
+		UserID: uuid.New(), SubscriptionID: "sub_x", Action: "keep_subscription",
+		CurrentPeriodEnd: end, IssuedAt: time.Now().Unix(), ExpiresAt: end.Unix(),
+	})
+	_, err := signerB.Verify(tok)
+	require.ErrorIs(t, err, idleunsub.ErrTokenInvalid)
 }
 
 func TestVerify_RejectsTampered(t *testing.T) {
