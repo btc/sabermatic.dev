@@ -55,8 +55,10 @@ func Apply[T proto.Message](
 		maskSet[p] = struct{}{}
 	}
 
-	// 3. Build SET clause: iterate Bindings (alphabetical) filtered by maskSet
-	// for deterministic SQL. AutoSet appended at the end.
+	// 3. Build SET clause: iterate Bindings in declaration order (codegen
+	// emits alphabetical for stable diff) filtered by maskSet, so SQL is
+	// deterministic regardless of client-supplied path order. AutoSet
+	// appended at the end.
 	desc := src.Descriptor()
 	ub := sqlbuilder.PostgreSQL.NewUpdateBuilder()
 	ub.Update(m.Table)
@@ -72,7 +74,11 @@ func Apply[T proto.Message](
 		}
 		v, err := encode(op.Message, fd, b.Codec, m.codecs)
 		if err != nil {
-			return zero, connectInvalidArg("encode %s: %s", b.Proto, err.Error())
+			// encode errors are predominantly server-side configuration
+			// issues that escaped Validate (unsupported kind, codec not in
+			// registry, missing ToText entry). Surface as Internal so the
+			// caller doesn't mistake them for client mistakes.
+			return zero, connectInternal("encode %s: %s", b.Proto, err.Error())
 		}
 		sets = append(sets, ub.Assign(b.Column, v))
 	}
