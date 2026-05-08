@@ -99,6 +99,12 @@ type InterviewSession struct {
 	GeneratingSince       pgtype.Timestamptz `json:"generating_since"`
 }
 
+type KeepLinkTokenUse struct {
+	TokenHash []byte    `json:"token_hash"`
+	UserID    uuid.UUID `json:"user_id"`
+	UsedAt    time.Time `json:"used_at"`
+}
+
 type LedgerEntry struct {
 	ID        uuid.UUID   `json:"id"`
 	UserID    uuid.UUID   `json:"user_id"`

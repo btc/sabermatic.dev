@@ -83,6 +83,10 @@ type Querier interface {
 	GetMessagesBySessionAfterSeq(ctx context.Context, arg GetMessagesBySessionAfterSeqParams) ([]Message, error)
 	// Return messages after the given offset (for known_message_count cursor).
 	GetMessagesBySessionOffset(ctx context.Context, arg GetMessagesBySessionOffsetParams) ([]Message, error)
+	// For multi-firing dedup: did a 'subscription_kept' event arrive after the
+	// most recent 'subscription_auto_canceled' for this period? If yes, the user
+	// already kept their sub for this period; don't re-cancel.
+	GetMostRecentKeptOrCanceledForPeriod(ctx context.Context, arg GetMostRecentKeptOrCanceledForPeriodParams) (string, error)
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
@@ -115,6 +119,10 @@ type Querier interface {
 	//   SELECT MAX(last_active)::timestamptz FROM auth_sessions WHERE user_id = $1;
 	GetUserLastActive(ctx context.Context, userID uuid.UUID) (pgtype.Timestamptz, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
+	// Returns true if a subscription_auto_canceled event already exists for
+	// this (user, subscription, period). Backs the multi-firing dedup in §4.1.
+	// metadata->>'current_period_start' is RFC3339 text written by cancelMetadata.
+	HasAutoCanceledThisPeriod(ctx context.Context, arg HasAutoCanceledThisPeriodParams) (bool, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
 	// Inline crash recovery for EndSession/CancelSession.
 	// Conditional WHERE makes this idempotent and race-free.
@@ -127,6 +135,9 @@ type Querier interface {
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
+	// Composed insert for the cancel decision. metadata is already-marshaled JSON.
+	InsertSubscriptionAutoCanceledEvent(ctx context.Context, arg InsertSubscriptionAutoCanceledEventParams) error
+	InsertSubscriptionKeptEvent(ctx context.Context, arg InsertSubscriptionKeptEventParams) error
 	LinkOAuthAccount(ctx context.Context, arg LinkOAuthAccountParams) (OauthAccount, error)
 	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
 	ListFeaturedQuestions(ctx context.Context) ([]ListFeaturedQuestionsRow, error)
@@ -164,6 +175,8 @@ type Querier interface {
 	// only our handler sets that flag; webhook sync must not overwrite it.
 	SyncSubStateFromWebhook(ctx context.Context, arg SyncSubStateFromWebhookParams) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
+	// Single-use enforcement. Returns the hash on first claim, no row otherwise.
+	TryClaimKeepToken(ctx context.Context, arg TryClaimKeepTokenParams) ([]byte, error)
 	// Returns the event_id on first claim; returns no row on subsequent claims.
 	// Use the no-row return as the signal "this event was already handled".
 	TryClaimWebhookEvent(ctx context.Context, arg TryClaimWebhookEventParams) (string, error)
