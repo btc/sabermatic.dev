@@ -243,10 +243,14 @@ type Op[T proto.Message] struct {
     Message T                          // input proto carrying the new values; must be non-nil
     Mask    *fieldmaskpb.FieldMask     // which fields to apply
     PKValue any                        // value for the PK column (e.g. uuid.UUID)
-    Where   map[string]any             // optional extra equality predicates
+    Where   map[string]any             // optional extra equality predicates.
                                        // KEYS MUST BE BOUND COLUMNS — runtime validates
                                        // against m.bindingsByColumn before composing SQL.
-                                       // Values are pgx-parameterized; keys are NOT escaped.
+                                       // Keys are NOT escaped; values ARE pgx-parameterized.
+                                       // Values must be scalar / pgx-bindable; v0 framework
+                                       // supports equality only. List comparators (IN, !=,
+                                       // <, etc.) are deferred — passing a slice value
+                                       // produces SQL like `col = ARRAY[…]`, not `col IN (…)`.
 }
 
 // DBTX is the minimal pgx interface aippatch needs. It is a strict subset of
@@ -283,6 +287,13 @@ func Apply[T proto.Message](
 // no-panic-at-init rule. Idempotent up to the validated flag — repeated
 // calls return nil after the first success. On error, validated is left
 // false and the caller may retry after fixing the cause.
+//
+// Concurrency: callers should invoke Validate before serving any RPCs (the
+// generated InitPatches() runs synchronously at startup). Two concurrent
+// Validate calls on the same Mapping that both observe validated == false
+// would each rebuild the indexes (harmless but redundant). v0 does not use
+// sync.Once because real callers serialize startup; if strict-once
+// semantics are needed, wrap InitPatches() in a sync.Once at the call site.
 func (m *Mapping[T]) Validate(codecs map[string]EnumCodec) error
 ```
 
@@ -314,6 +325,10 @@ All errors returned by `Apply` are `*connect.Error` with appropriate codes:
   in declared map, nil `op.Message`, `op.Where` key not in `bindingsByColumn`.
 - `CodeNotFound` — `UPDATE` matched zero rows (PK wrong, scope filter
   excluded the row, or row is soft-deleted).
+- `CodeUnimplemented` — `EmptyMaskPolicy` is `UpdateAllWritable`. Codegen is
+  the primary defense (rejects `update_writable` in yaml in v0); this is a
+  defense-in-depth runtime check that fires only if a Mapping is constructed
+  by hand or by a future codegen version.
 - `CodeInternal` — pgx error, codec read-side data invariant violation,
   binding/proto desync that escaped boot-time `Validate`, or `Apply` called
   on an unvalidated `Mapping` (`InitPatches()` not invoked).
@@ -408,7 +423,9 @@ and verify if desired).
    2. Look up the SQL table from the schema; resolve the PK column.
    3. For each proto field in the message, in **field-number order** (so
       diagnostic messages line up with the proto file's declaration order):
-      - If `overrides[field].skip` is true → drop.
+      - If `overrides[field].skip` is true → emit no binding; the field is
+        registered as intentionally skipped and is not flagged by step 4
+        below.
       - If `overrides[field].column` set → use that column.
       - Else → snake-case name match with the SQL column list.
       - If no match → diagnostic: "field X has no matching column; suggest
@@ -445,6 +462,16 @@ and verify if desired).
    8. Sort `Bindings` alphabetically by `Proto` and `AutoSet` alphabetically
       by `Column` for **stable diff output** (different from step 3's
       processing order).
+   9. Reject `empty_mask: update_writable` with a diagnostic — v0 does not
+      implement this policy. The runtime carries a defense-in-depth check
+      that returns `CodeUnimplemented`, but the yaml is the primary
+      enforcement point.
+   10. Verify column uniqueness across emitted bindings: if two proto fields
+       (after applying overrides) bind to the same SQL column, emit a
+       diagnostic identifying both fields and the shared column. Without
+       this check, a misconfigured yaml could produce a duplicate
+       `RETURNING` list and a `SET` clause that Postgres rejects with
+       "multiple assignments to column".
 4. Emit one Go file per resource, plus one `init.gen.go` that emits a
    shared `var Codecs = map[string]aippatch.EnumCodec{...}` registry and
    `InitPatches() error` calling `Validate(Codecs)` on each mapping.
@@ -529,9 +556,15 @@ resources:
     table: users
     pk: id
     soft_delete: deleted_at
-    empty_mask: error                # error → ErrorOnEmpty (default) | update_writable → UpdateAllWritable
+    empty_mask: error                # error → ErrorOnEmpty (default; v0 only valid value)
     writable: [display_name]         # deny-by-default
     auto_set:
+      # NOTE: NOW() is constant within a transaction. If a test runs
+      # SELECT-before, Apply, SELECT-after inside a single BeginFunc, the
+      # before/after timestamps will be equal. Test patterns that need to
+      # observe the bump must use clock_timestamp() instead, run the SELECTs
+      # outside the surrounding transaction, or compare against a captured
+      # NOW() bound (post >= captured). See *Testing strategy*.
       updated_at: NOW()              # raw SQL, applied to every PATCH; pg_query_go-validated as expression
     overrides:
       create_time: { column: created_at }
@@ -548,9 +581,11 @@ or binding. No yaml entry is needed for them.
 One file per repo. `~10–20` lines per resource. Reviewers see policy and
 mapping deltas in a single diff. Adding a writable field is one line.
 
-The yaml-string `error` maps to the Go enum `ErrorOnEmpty`;
-`update_writable` maps to `UpdateAllWritable` (v0 unsupported — codegen
-emits a diagnostic until v1 lands).
+The yaml-string `error` maps to the Go enum `ErrorOnEmpty`. The yaml-string
+`update_writable` would map to `UpdateAllWritable`, but v0 codegen rejects
+this value with a diagnostic (the runtime path is defense-in-depth only —
+see *Errors* and Algorithm step 9). v1 will implement the policy and remove
+the codegen rejection.
 
 ## Generated file shape
 
@@ -590,7 +625,11 @@ var UserPatch = &aippatch.Mapping[*drillv1.User]{
 The `id` column appears as a non-writable binding because the proto field
 `id` should round-trip in the response. The framework does not deduplicate
 PK from Bindings — PK identifies the row to update via `WHERE`, while
-Bindings carries the read-back representation.
+Bindings carries the read-back representation. If a future resource has a
+PK column without a corresponding proto field (e.g. a synthetic table key
+that's not exposed via the API), that column simply doesn't appear in
+Bindings; `Returning(boundCols...)` won't include it; the WHERE clause still
+uses `m.PK` for row identity.
 
 `internal/patches/init.gen.go`:
 
@@ -662,7 +701,7 @@ func Apply[T proto.Message](
 
     // 0. Sanity guards.
     if m == nil || !m.validated.Load() {
-        return zero, connectInternal("aippatch.Mapping not initialized; call patches.InitPatches() during startup")
+        return zero, connectInternal("aippatch.Mapping not initialized; call your generated InitPatches() (or Mapping.Validate) during startup")
     }
     // ProtoReflect().IsValid() returns false for typed-nil pointers and
     // un-initialized messages, sidestepping the typed-nil interface trap
@@ -780,6 +819,9 @@ func Apply[T proto.Message](
         b, ok := m.bindingsByColumn[string(c.Name)]
         if !ok { continue }
         fd := msg.Descriptor().Fields().ByName(protoreflect.Name(b.Proto))
+        if fd == nil {
+            return zero, connectInternal("binding/proto desync on read: %q", b.Proto)
+        }
         if err := decode(msg, fd, vals[i], b.Codec, m.codecs); err != nil {
             return zero, connectInternal("decode %s: %w", b.Proto, err)
         }
@@ -1014,7 +1056,7 @@ publishing the module.)
 | v1 | Pre/post hooks (or returned diff) for audit logging | `Apply` returns `(updated T, diff Diff, err error)` where Diff carries before/after for mask paths; handler emits audit events. |
 | v1 | Proto3 explicit-optional + NULL semantics | AIP-134 clearing rule (`mask path + zero value → NULL`); meaningful for `optional` fields. |
 | v1 | CHECK constraint extraction | Validate enum codec maps against `CHECK (col IN (…))` at codegen. |
-| v1 | `UpdateAllWritable` empty-mask policy | Implement the "all populated/writable fields" path; until then v0 returns `Internal` if the policy is set. |
+| v1 | `UpdateAllWritable` empty-mask policy | Implement the "all populated/writable fields" path. v0 codegen rejects `update_writable` in yaml; the runtime defense-in-depth check returns `CodeUnimplemented` if a Mapping is somehow constructed with this policy. |
 | v2 | Declarative validators | `NonEmptyTrimmed`, `LenBetween`, `URL`, `OneOf`. Per-resource yaml + handler-side composition. |
 | v2 | AIP-193 error mapping | pgx error inspection: `unique_violation` → `AlreadyExists`, `fk_violation` → `FailedPrecondition`, `not_null_violation` / `check_violation` → `InvalidArgument`. Per-resource override map. |
 | v3 | Per-field declarative authz | `admin_only_fields:` in yaml; layered with handler narrowing. |
@@ -1036,8 +1078,9 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
    the same. CI runners must have a C toolchain — drill's CI already does
    for testcontainers. **First-build cost:** `pg_query_go/v6` compiles part
    of the PostgreSQL parser from C source on first use; on a cold build
-   cache this can take ~3 minutes. CI runners should preserve `GOCACHE`
-   and `GOMODCACHE` across runs (drill's CI already does).
+   cache this can take several minutes (varies by runner). CI runners
+   should preserve `GOCACHE` and `GOMODCACHE` across runs (drill's CI
+   already does).
 
 2. **pgx-native ↔ proto type drift.** New SQL types added to drill in the
    future may not be in the runtime's `decode` switch. Mitigation:
@@ -1090,7 +1133,7 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
 | 5 | Generated `*.gen.go` files committed to repo | Mapping is reviewable in PRs; CI checks for drift via `--check`. |
 | 6 | SQL builder: `huandu/go-sqlbuilder` (private to package) | Mature; `PostgreSQL.NewUpdateBuilder()` emits `$1` placeholders cleanly; `Returning(...)` is a first-class method. |
 | 7 | Row scan: direct `pgx.Rows.Values()` + proto reflection (no third-party scanner) | We populate a proto via reflection rather than a Go row struct; avoids an unnecessary dependency and a proto-aware shim. |
-| 8 | Empty FieldMask rejected with `InvalidArgument` (default) | drill prefers explicit intent; documented divergence from AIP-134; relax later if a use case warrants. |
+| 8 | Empty FieldMask rejected with `InvalidArgument` (default) | drill prefers explicit intent; documented divergence from AIP-134; permanent per resource once deployed (see *Wire conformance note*). |
 | 9 | Deny-by-default writable; opt in via `writable:` list | Security posture; consistent with AIP-134 §Update_Mask "must not allow output-only fields." |
 | 10 | Codegen errors on unsupported field types | Bad fields stop at codegen; runtime never sees a type it cannot handle. |
 | 11 | Framework reads back via `RETURNING <bound-columns>` (not `*`) and returns the populated proto | One round-trip; AIP-134 compliant; explicit column list excludes unmapped columns from the wire. (Bound non-writable columns are still returned — that is the AIP contract.) |
