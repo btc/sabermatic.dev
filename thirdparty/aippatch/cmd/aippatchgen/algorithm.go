@@ -286,9 +286,6 @@ func processResource(r yamlResource, codecsYaml map[string]yamlCodec, files *pro
 	sort.Slice(autoSet, func(i, j int) bool { return autoSet[i].Column < autoSet[j].Column })
 
 	emptyMask := "ErrorOnEmpty"
-	if r.EmptyMask == "" {
-		emptyMask = "ErrorOnEmpty"
-	}
 
 	// Derive the Go package alias from the proto file's go_package option,
 	// not from the proto package name. The two are not the same: drill's
@@ -326,7 +323,47 @@ func processResource(r yamlResource, codecsYaml map[string]yamlCodec, files *pro
 // string ("", "timestamp", "enum:<name>") and a normalized SQL type string,
 // or returns ok=false on incompatibility.
 func compatibility(fd protoreflect.FieldDescriptor, col *Column, ov yamlOverride, codecsYaml map[string]yamlCodec) (codec, sqlType string, ok bool) {
-	// Implemented in Task 32.
+	switch fd.Kind() {
+	case protoreflect.StringKind:
+		switch col.Type {
+		case "text", "varchar", "citext":
+			return "", col.Type, true
+		case "uuid":
+			return "", "uuid", true
+		}
+	case protoreflect.BoolKind:
+		if col.Type == "boolean" || col.Type == "bool" {
+			return "", "boolean", true
+		}
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind:
+		switch col.Type {
+		case "integer", "int4", "int":
+			return "", "integer", true
+		case "smallint", "int2":
+			return "", "smallint", true
+		}
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind:
+		if col.Type == "bigint" || col.Type == "int8" {
+			return "", "bigint", true
+		}
+	case protoreflect.MessageKind:
+		if fd.Message().FullName() == "google.protobuf.Timestamp" {
+			if col.Type == "timestamptz" || col.Type == "timestamp" {
+				return "timestamp", col.Type, true
+			}
+		}
+	case protoreflect.EnumKind:
+		if ov.Codec == "" {
+			return "", "", false
+		}
+		if _, exists := codecsYaml[ov.Codec]; !exists {
+			return "", "", false
+		}
+		if col.Type != "text" && col.Type != "varchar" {
+			return "", "", false
+		}
+		return "enum:" + ov.Codec, col.Type, true
+	}
 	return "", "", false
 }
 
