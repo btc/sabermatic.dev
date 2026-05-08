@@ -388,6 +388,38 @@ func (q *Queries) GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID)
 	return i, err
 }
 
+const getUserByStripeCustomer = `-- name: GetUserByStripeCustomer :one
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
+WHERE stripe_customer_id = $1 AND deleted_at IS NULL
+`
+
+// Used by idleunsub.HandleInvoiceUpcoming to map a Stripe customer to our user.
+func (q *Queries) GetUserByStripeCustomer(ctx context.Context, stripeCustomerID pgtype.Text) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByStripeCustomer, stripeCustomerID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
+	)
+	return i, err
+}
+
 const incrementFreeEducatorUsed = `-- name: IncrementFreeEducatorUsed :one
 UPDATE users
 SET free_full_educators_used = free_full_educators_used + 1

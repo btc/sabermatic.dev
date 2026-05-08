@@ -11,6 +11,11 @@ WHERE email = $1 AND deleted_at IS NULL;
 SELECT * FROM users
 WHERE id = $1 AND deleted_at IS NULL;
 
+-- name: GetUserByStripeCustomer :one
+-- Used by idleunsub.HandleInvoiceUpcoming to map a Stripe customer to our user.
+SELECT * FROM users
+WHERE stripe_customer_id = $1 AND deleted_at IS NULL;
+
 -- name: VerifyUserEmail :exec
 UPDATE users SET email_verified = TRUE, updated_at = NOW()
 WHERE id = $1;

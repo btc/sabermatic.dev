@@ -107,6 +107,8 @@ type Querier interface {
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
+	// Used by idleunsub.HandleInvoiceUpcoming to map a Stripe customer to our user.
+	GetUserByStripeCustomer(ctx context.Context, stripeCustomerID pgtype.Text) (User, error)
 	// Reads across all history (including revoked sessions). Returns NULL
 	// when the user has no auth_sessions rows.
 	//
