@@ -2,7 +2,9 @@ package aippatch
 
 import (
 	"context"
+	"fmt"
 
+	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -24,8 +26,19 @@ func Apply[T proto.Message](
 		return zero, connectInvalidArg("op.Message must not be nil")
 	}
 
+	// 1. Mask validation. GetPaths is nil-safe.
+	paths := op.Mask.GetPaths()
+	if len(paths) == 0 {
+		if m.EmptyMask == ErrorOnEmpty {
+			return zero, connectInvalidArg("update_mask must not be empty")
+		}
+		// UpdateAllWritable: not implemented in v0. CodeUnimplemented
+		// signals "feature not yet built" rather than a server bug.
+		return zero, connect.NewError(connect.CodeUnimplemented,
+			fmt.Errorf("UpdateAllWritable is unimplemented in v0"))
+	}
 	_ = ctx
 	_ = db
 	_ = src
-	return zero, connectInternal("Apply: not yet implemented")
+	return zero, connectInternal("Apply: SET clause not yet implemented")
 }

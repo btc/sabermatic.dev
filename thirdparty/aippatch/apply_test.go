@@ -37,3 +37,49 @@ func TestApply_NilMessageReturnsInvalidArg(t *testing.T) {
 	})
 	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
 }
+
+func TestApply_EmptyMaskReturnsInvalidArg(t *testing.T) {
+	m := mustValidatedFixtureMapping(t)
+	_, err := Apply(context.Background(), nil, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{},
+		Mask:    &fieldmaskpb.FieldMask{},
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestApply_NilMaskReturnsInvalidArg(t *testing.T) {
+	m := mustValidatedFixtureMapping(t)
+	_, err := Apply(context.Background(), nil, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{},
+		Mask:    nil,
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestApply_UpdateAllWritableReturnsUnimplemented(t *testing.T) {
+	t.Parallel() // mapping is unshared (mustValidatedFixtureMapping returns a fresh value), so post-Validate mutation of EmptyMask is race-safe.
+	m := mustValidatedFixtureMapping(t)
+	m.EmptyMask = UpdateAllWritable
+	// Apply reads m.EmptyMask directly; no re-Validate needed because
+	// validate() does not gate on EmptyMask. If a future Validate() change
+	// adds such a gate, re-validate here.
+	_, err := Apply(context.Background(), nil, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{},
+		Mask:    &fieldmaskpb.FieldMask{},
+	})
+	require.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
+}
+
+// mustValidatedFixtureMapping returns a Mapping with a single writable "name" binding.
+func mustValidatedFixtureMapping(t *testing.T) *Mapping[*fixturepb.Widget] {
+	t.Helper()
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+	return m
+}
