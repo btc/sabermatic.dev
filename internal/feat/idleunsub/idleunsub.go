@@ -293,6 +293,11 @@ func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) 
 		// Don't touch Stripe; render confirmation page idempotently.
 		return nil
 	}
+	// Empty idempotency key is intentional: KeepSubscription is gated upstream by
+	// keep_link_token_uses single-use enforcement; AutoReverse converges via the
+	// gate read on the next call. Unlike HandleInvoiceUpcoming (which uses event.ID
+	// because Stripe retries webhooks with the same ID), reversal is request-driven
+	// and idempotent at the gate-check layer.
 	updated, err := s.stripe.UpdateSubscriptionCancel(ctx, claims.SubscriptionID, false, "")
 	if err != nil {
 		return fmt.Errorf("stripe reverse: %w", err)
@@ -302,7 +307,14 @@ func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) 
 	}
 	periodStart := time.Unix(updated.Items.Data[0].CurrentPeriodStart, 0).UTC()
 
-	if err := q.ClearUserAutoCancelState(ctx, db.ClearUserAutoCancelStateParams{
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+	qtx := db.New(tx)
+
+	if err := qtx.ClearUserAutoCancelState(ctx, db.ClearUserAutoCancelStateParams{
 		ID: claims.UserID, SubCurrentPeriodStart: pgxTime(periodStart),
 	}); err != nil {
 		return fmt.Errorf("clear gates: %w", err)
@@ -312,10 +324,14 @@ func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) 
 	if err != nil {
 		return fmt.Errorf("marshal kept metadata: %w", err)
 	}
-	if err := q.InsertSubscriptionKeptEvent(ctx, db.InsertSubscriptionKeptEventParams{
+	if err := qtx.InsertSubscriptionKeptEvent(ctx, db.InsertSubscriptionKeptEventParams{
 		UserID: claims.UserID, Metadata: mdJSON,
 	}); err != nil {
 		return fmt.Errorf("insert kept event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 
 	mReverseLink(ctx, claims.SubscriptionID)
@@ -343,6 +359,11 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("read gates: %w", err)
 	}
+	// If StripeSubscriptionID is NULL, AutoReverse cannot self-heal here — only
+	// the link path (which carries the sub ID in the signed token) or a fresh
+	// customer.subscription.updated webhook (via SyncSubStateFromWebhook) can
+	// recover this state. This is consistent with the spec's "single sole
+	// population path" invariant for stripe_subscription_id.
 	if !gates.SubCancelAtPeriodEnd || !gates.SubCancelIsAuto || !gates.StripeSubscriptionID.Valid {
 		return nil // cache says off, or no sub — nothing to do
 	}
@@ -372,6 +393,11 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 	}
 
 	// Real reversal.
+	// Empty idempotency key is intentional: KeepSubscription is gated upstream by
+	// keep_link_token_uses single-use enforcement; AutoReverse converges via the
+	// gate read on the next call. Unlike HandleInvoiceUpcoming (which uses event.ID
+	// because Stripe retries webhooks with the same ID), reversal is request-driven
+	// and idempotent at the gate-check layer.
 	updated, err := s.stripe.UpdateSubscriptionCancel(ctx, subID, false, "")
 	if err != nil {
 		return fmt.Errorf("stripe reverse: %w", err)
@@ -382,7 +408,14 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 	periodStart := time.Unix(updated.Items.Data[0].CurrentPeriodStart, 0).UTC()
 	periodEnd := time.Unix(updated.Items.Data[0].CurrentPeriodEnd, 0).UTC()
 
-	if err := q.ClearUserAutoCancelState(ctx, db.ClearUserAutoCancelStateParams{
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+	qtx := db.New(tx)
+
+	if err := qtx.ClearUserAutoCancelState(ctx, db.ClearUserAutoCancelStateParams{
 		ID: userID, SubCurrentPeriodStart: pgxTime(periodStart),
 	}); err != nil {
 		return fmt.Errorf("clear gates: %w", err)
@@ -392,10 +425,14 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("marshal kept metadata: %w", err)
 	}
-	if err := q.InsertSubscriptionKeptEvent(ctx, db.InsertSubscriptionKeptEventParams{
+	if err := qtx.InsertSubscriptionKeptEvent(ctx, db.InsertSubscriptionKeptEventParams{
 		UserID: userID, Metadata: mdJSON,
 	}); err != nil {
 		return fmt.Errorf("insert kept event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 
 	mReverseActivity(ctx, subID)

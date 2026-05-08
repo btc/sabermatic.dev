@@ -2,6 +2,7 @@ package idleunsub_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -509,6 +510,10 @@ func TestKeepSubscription_Idempotent(t *testing.T) {
 	// Exactly one Stripe call, exactly one event row.
 	require.Len(t, fx.Fake.updateCalls, 1, "second call must not re-hit Stripe")
 	require.Equal(t, 1, countKeptEvents(t, fx), "second call must not re-insert event")
+
+	// TODO(Task 9): assert mEmailEnqueue counter == 1 once the real mailer wires up.
+	// The plan promises "exactly one email enqueued"; with the current stub this
+	// can't be verified without inspecting the OTEL counter directly.
 }
 
 // ---------------------------------------------------------------------------
@@ -604,5 +609,26 @@ func TestAutoReverse_RefusesManualCancel(t *testing.T) {
 	require.True(t, cancelAtEnd)
 	require.False(t, isAuto)
 	require.False(t, banner)
+	require.Equal(t, 0, countKeptEvents(t, fx))
+}
+
+func TestAutoReverse_StripeUpdateFails(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	// Configure fakeStripe to fail on the next Update call.
+	fx.Fake.updateErr = errors.New("stripe down")
+
+	err := fx.Svc.AutoReverse(fx.Ctx, fx.UserID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stripe down")
+
+	// Gates must remain ON — the next call retries (self-healing).
+	cancelAtEnd, isAuto, banner := readUserCache(t, fx)
+	require.True(t, cancelAtEnd, "gates must remain ON after Stripe failure for self-heal")
+	require.True(t, isAuto)
+	require.False(t, banner, "banner must NOT be set on failure")
+
+	// No subscription_kept rows because we returned before DB writes.
 	require.Equal(t, 0, countKeptEvents(t, fx))
 }

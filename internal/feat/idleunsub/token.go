@@ -37,7 +37,7 @@ type TokenSigner struct {
 
 // NewTokenSigner constructs a signer with the given HMAC key.
 func NewTokenSigner(key []byte) *TokenSigner {
-	return &TokenSigner{key: key, now: func() time.Time { return time.Now() }}
+	return &TokenSigner{key: key, now: time.Now}
 }
 
 // Sign serializes and HMAC-signs the claims, returning a URL-safe base64
