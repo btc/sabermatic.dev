@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,21 +32,24 @@ type StripeClient interface {
 
 // Service owns the cancel/keep/auto-reverse logic.
 type Service struct {
-	pool   *pgxpool.Pool
-	stripe StripeClient
-	mailer email.Sender
-	signer *TokenSigner
-	now    func() time.Time
-	log    *slog.Logger
+	pool    *pgxpool.Pool
+	stripe  StripeClient
+	mailer  email.Sender
+	signer  *TokenSigner
+	baseURL string
+	now     func() time.Time
+	log     *slog.Logger
 }
 
 // NewService constructs a Service. The signer may be nil for tests that
 // only exercise HandleInvoiceUpcoming (Task 7); Tasks 8/9 wire it in.
-func NewService(pool *pgxpool.Pool, sc StripeClient, m email.Sender, sn *TokenSigner, log *slog.Logger) *Service {
+// baseURL is the public-facing base URL (e.g. "https://sabermatic.dev") used
+// to build keep-links; pass "http://localhost:3000" in tests.
+func NewService(pool *pgxpool.Pool, sc StripeClient, m email.Sender, sn *TokenSigner, baseURL string, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{pool: pool, stripe: sc, mailer: m, signer: sn, now: time.Now, log: log}
+	return &Service{pool: pool, stripe: sc, mailer: m, signer: sn, baseURL: baseURL, now: time.Now, log: log}
 }
 
 // HandleInvoiceUpcoming evaluates the trigger rule. Idempotent: safe to call
@@ -263,19 +267,34 @@ func marshalCancelMetadata(subID, eventID string, start, end time.Time) ([]byte,
 	})
 }
 
-// enqueueCancelEmail composes and enqueues the cancel email.
-// Implementation lands in Task 9 alongside the templates; for now this is a
-// stub so the cancel path compiles. Task 9 replaces it with the real impl.
-//
-// TODO: Task 9 implements; the error path here is currently unreachable
-// (stub always returns nil). Task 9's test must inject an erroring sender
-// and assert mEmailEnqueue("cancel", "error") fires + cancel still succeeds.
+// enqueueCancelEmail composes the cancel email and sends it via the mailer.
+// Called from HandleInvoiceUpcoming after the cancel decision is committed.
 func (s *Service) enqueueCancelEmail(ctx context.Context, user db.User, subID string, periodEnd time.Time) error {
-	_ = ctx
-	_ = user
-	_ = subID
-	_ = periodEnd
-	return nil // placeholder; replaced in Task 9
+	keepURL, err := s.buildKeepURL(user.ID, subID, periodEnd)
+	if err != nil {
+		return fmt.Errorf("build keep url: %w", err)
+	}
+	msg, err := composeCancelEmail(user.Email, user.DisplayName, keepURL, periodEnd)
+	if err != nil {
+		return fmt.Errorf("compose cancel: %w", err)
+	}
+	return s.mailer.Send(ctx, msg)
+}
+
+func (s *Service) buildKeepURL(userID uuid.UUID, subID string, periodEnd time.Time) (string, error) {
+	if s.signer == nil {
+		return "", fmt.Errorf("token signer not configured")
+	}
+	periodEnd = periodEnd.UTC().Truncate(time.Second)
+	tok := s.signer.Sign(KeepTokenClaims{
+		UserID:           userID,
+		SubscriptionID:   subID,
+		Action:           "keep_subscription",
+		CurrentPeriodEnd: periodEnd,
+		IssuedAt:         s.now().Unix(),
+		ExpiresAt:        periodEnd.Unix(),
+	})
+	return fmt.Sprintf("%s/sub/keep?t=%s", strings.TrimRight(s.baseURL, "/"), tok), nil
 }
 
 // KeepSubscription reverses cancel_at_period_end after a verified, single-use
@@ -454,15 +473,20 @@ func marshalKeptMetadata(subID, via string, periodStart time.Time) ([]byte, erro
 	})
 }
 
-// enqueueKeptEmail composes and enqueues the kept email. Implementation lands
-// in Task 9 alongside the templates; for now this is a stub so the keep paths
-// compile. Task 9 replaces it with the real impl.
+// enqueueKeptEmail composes the kept-confirmation email and sends it.
+// Called from KeepSubscription and AutoReverse after a successful reversal.
 func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, subID string, periodEnd time.Time) error {
-	_ = ctx
-	_ = userID
 	_ = subID
-	_ = periodEnd
-	return nil // placeholder; replaced in Task 9
+	q := db.New(s.pool)
+	user, err := q.GetUserByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+	msg, err := composeKeptEmail(user.Email, user.DisplayName, periodEnd)
+	if err != nil {
+		return fmt.Errorf("compose kept: %w", err)
+	}
+	return s.mailer.Send(ctx, msg)
 }
 
 // pgxText / pgxTime are local pgtype constructors. Inlined here because the

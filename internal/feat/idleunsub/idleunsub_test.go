@@ -96,7 +96,7 @@ func setupHappyPath(t *testing.T) *fixture {
 	}
 	fake := &fakeStripe{subs: map[string]*stripe.Subscription{subID: sub}}
 
-	svc := idleunsub.NewService(b.Pool(), fake, nullMailer{}, nil, silentLogger())
+	svc := idleunsub.NewService(b.Pool(), fake, nullMailer{}, nil, "http://localhost:3000", silentLogger())
 
 	event := stripe.Event{
 		ID:   "evt_" + uuid.NewString()[:8],
