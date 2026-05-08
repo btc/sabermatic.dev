@@ -63,3 +63,41 @@ func TestValidate_DanglingCodecRefRejected(t *testing.T) {
 	err := m.Validate(map[string]EnumCodec{})
 	require.ErrorContains(t, err, "nope")
 }
+
+func TestValidate_BindingProtoFieldMissing(t *testing.T) {
+	m := &Mapping[*fixturepb.Widget]{
+		Table:    "widgets",
+		PK:       "id",
+		Bindings: []Binding{{Proto: "no_such_field", Column: "x", SQLType: "text"}},
+	}
+	err := m.Validate(nil)
+	require.ErrorContains(t, err, "no_such_field")
+	require.False(t, m.validated.Load(), "validated should remain false on error")
+}
+
+func TestValidate_DuplicateBindingProtoField(t *testing.T) {
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "name", Column: "name", SQLType: "text"},
+			{Proto: "name", Column: "alias", SQLType: "text"},
+		},
+	}
+	require.ErrorContains(t, m.Validate(nil), "duplicate")
+}
+
+func TestValidate_DuplicateBindingColumn(t *testing.T) {
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "name", Column: "name", SQLType: "text"},
+			{Proto: "enabled", Column: "name", SQLType: "boolean"},
+		},
+	}
+	require.ErrorContains(t, m.Validate(nil), "duplicate")
+}
+
+func TestValidate_MissingTableOrPK(t *testing.T) {
+	require.ErrorContains(t, (&Mapping[*fixturepb.Widget]{}).Validate(nil), "Table")
+	require.ErrorContains(t, (&Mapping[*fixturepb.Widget]{Table: "x"}).Validate(nil), "PK")
+}
