@@ -113,6 +113,49 @@ func mustValidatedFixtureMapping(t *testing.T) *Mapping[*fixturepb.Widget] {
 	return m
 }
 
+func TestApply_SoftDeletedRowReturnsNotFound(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	id := uuid.New()
+	_, err := pool.Exec(context.Background(),
+		"INSERT INTO widgets (id, name, deleted_at) VALUES ($1, $2, NOW())", id, "old")
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id", SoftDelete: "deleted_at",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	_, err = Apply(context.Background(), pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "new"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: id,
+	})
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
+
+func TestApply_PKMismatchReturnsNotFound(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	_, err := Apply(context.Background(), pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "new"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: uuid.New(), // no row with this id
+	})
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
+
 func TestApply_HappyPath_NameOnly(t *testing.T) {
 	pool := aippatchtest.NewPool(t)
 	id := uuid.New()
