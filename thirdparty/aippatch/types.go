@@ -38,7 +38,7 @@ type Binding struct {
 // AutoSetClause defines a SQL expression always written into the SET clause.
 // The SQLLiteral is emitted as raw SQL — codegen guarantees Column matches
 // [A-Za-z_][A-Za-z0-9_]* and SQLLiteral is a single Postgres expression
-// (validated via pg_query_go).
+// (validated at codegen time, not at runtime).
 type AutoSetClause struct {
 	Column     string
 	SQLLiteral string
