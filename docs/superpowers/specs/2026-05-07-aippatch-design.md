@@ -249,8 +249,17 @@ type Op[T proto.Message] struct {
                                        // Keys are NOT escaped; values ARE pgx-parameterized.
                                        // Values must be scalar / pgx-bindable; v0 framework
                                        // supports equality only. List comparators (IN, !=,
-                                       // <, etc.) are deferred — passing a slice value
-                                       // produces SQL like `col = ARRAY[…]`, not `col IN (…)`.
+                                       // <, etc.) are deferred — a slice value parameterizes
+                                       // as a Postgres array (compared with `=`), not
+                                       // expanded into `IN (…)`.
+                                       //
+                                       // Keys must reference a BOUND column (one with a
+                                       // proto-field binding). SQL-only columns without a
+                                       // proto field — e.g. soft-delete timestamps, audit
+                                       // columns, tenant filters that aren't in the proto —
+                                       // cannot be referenced via Where; the framework's
+                                       // built-in SoftDelete handling covers the most
+                                       // common case. v1+ may add typed scope predicates.
 }
 
 // DBTX is the minimal pgx interface aippatch needs. It is a strict subset of
@@ -288,12 +297,14 @@ func Apply[T proto.Message](
 // calls return nil after the first success. On error, validated is left
 // false and the caller may retry after fixing the cause.
 //
-// Concurrency: callers should invoke Validate before serving any RPCs (the
-// generated InitPatches() runs synchronously at startup). Two concurrent
-// Validate calls on the same Mapping that both observe validated == false
-// would each rebuild the indexes (harmless but redundant). v0 does not use
-// sync.Once because real callers serialize startup; if strict-once
-// semantics are needed, wrap InitPatches() in a sync.Once at the call site.
+// Concurrency: Validate is NOT safe for concurrent invocation on the same
+// Mapping — it writes to the Mapping's internal index maps, and concurrent
+// Go map writes are a data race even when the writes would produce
+// semantically identical contents. Callers must serialize Validate calls
+// per Mapping. The generated InitPatches() does this naturally (a single
+// goroutine iterates each Mapping in turn at startup, before any RPC
+// handler is registered). If a use case requires concurrent first-use
+// guarantees, wrap InitPatches() in a sync.Once at the call site.
 func (m *Mapping[T]) Validate(codecs map[string]EnumCodec) error
 ```
 
@@ -325,10 +336,10 @@ All errors returned by `Apply` are `*connect.Error` with appropriate codes:
   in declared map, nil `op.Message`, `op.Where` key not in `bindingsByColumn`.
 - `CodeNotFound` — `UPDATE` matched zero rows (PK wrong, scope filter
   excluded the row, or row is soft-deleted).
-- `CodeUnimplemented` — `EmptyMaskPolicy` is `UpdateAllWritable`. Codegen is
-  the primary defense (rejects `update_writable` in yaml in v0); this is a
-  defense-in-depth runtime check that fires only if a Mapping is constructed
-  by hand or by a future codegen version.
+- `CodeUnimplemented` — `EmptyMaskPolicy` is `UpdateAllWritable`
+  (defense-in-depth only; codegen rejects `update_writable` in yaml as the
+  primary enforcement point and this runtime check should never fire in
+  practice unless a Mapping is hand-edited or built by a future codegen).
 - `CodeInternal` — pgx error, codec read-side data invariant violation,
   binding/proto desync that escaped boot-time `Validate`, or `Apply` called
   on an unvalidated `Mapping` (`InitPatches()` not invoked).
@@ -447,11 +458,14 @@ and verify if desired).
       fields with input-message values).
    5. For each `auto_set[col]` entry: verify the column exists in the table
       and is NOT NULL. **Reject if the column is *any* binding** (writable
-      or non-writable) — auto-set must own the column entirely. The literal
-      expression is emitted verbatim as raw SQL; codegen further validates
-      the literal by parsing it with `pg_query_go` and rejecting
-      multi-statement input or non-expression payloads. (v0 effectively
-      restricts callers to a few well-known forms: `NOW()`,
+      or non-writable) — auto-set must own the column entirely. **Reject if
+      the column name does not match `[A-Za-z_][A-Za-z0-9_]*`** — runtime
+      emits the column unquoted, so reserved words and special characters
+      are rejected at codegen rather than handled with `pq.QuoteIdentifier`.
+      The literal expression is emitted verbatim as raw SQL; codegen
+      further validates the literal by parsing it with `pg_query_go` and
+      rejecting multi-statement input or non-expression payloads. (v0
+      effectively restricts callers to a few well-known forms: `NOW()`,
       `CURRENT_TIMESTAMP`, integer constants, etc.)
    6. Validate enum-codec yaml entries: every codec's `map` values must be
       unique (no two enum values map to the same SQL text), to prevent the
@@ -533,6 +547,13 @@ aippatchgen: drill.v1.User: auto_set column "updated_at" not found in table user
 
 aippatchgen: drill.v1.User: auto_set column "display_name" conflicts with binding
   hint: auto_set columns must not also be bindings; remove the proto field's binding or pick a different column.
+
+aippatchgen: drill.v1.User: auto_set column "user-id" is not a plain SQL identifier
+  hint: auto_set column names must match [A-Za-z_][A-Za-z0-9_]*; reserved words and special characters are rejected.
+
+aippatchgen: drill.v1.User: column "display_name" bound by multiple proto fields
+  conflicting fields: display_name, name
+  hint: pick one binding or add `{ skip: true }` to the other override.
 ```
 
 ## Configuration: `aippatch.yaml`
@@ -743,10 +764,11 @@ func Apply[T proto.Message](
         if strings.Contains(p, ".") {
             return zero, connectInvalidArg("nested mask path not supported in v0: %q", p)
         }
-        if _, ok := m.bindingsByProto[p]; !ok {
+        b, ok := m.bindingsByProto[p]
+        if !ok {
             return zero, connectInvalidArg("unknown field in update_mask: %q", p)
         }
-        if !m.bindingsByProto[p].Writable {
+        if !b.Writable {
             return zero, connectInvalidArg("field not writable: %q", p)
         }
         maskSet[p] = struct{}{}
@@ -765,6 +787,10 @@ func Apply[T proto.Message](
     }
 
     // 3. AutoSet columns: append raw SQL fragments unconditionally.
+    // Column names are emitted as bare identifiers — codegen restricts
+    // a.Column to plain ASCII identifiers (matching `[A-Za-z_][A-Za-z0-9_]*`)
+    // so no quoting is needed. Reserved-word column names would require
+    // pq.QuoteIdentifier; v0 rejects them at codegen.
     for _, a := range m.AutoSet {
         sets = append(sets, fmt.Sprintf("%s = %s", a.Column, a.SQLLiteral))
     }
@@ -841,6 +867,17 @@ Notable details:
   per AIP-134's "return the updated resource" requirement. The benefit of
   `Returning(boundCols)` over `RETURNING *` is excluding *unmapped*
   columns, not all non-writable ones.
+- **Partial-clone discard on error.** Step 7 may fail mid-loop after some
+  columns have been decoded into `result`. On any decode error the function
+  returns `(zero, err)` — the partially-populated clone is discarded. Every
+  error path in `Apply` returns `zero T`; an implementer must not return
+  `result` on the error path.
+- **Defense-in-depth field-descriptor lookups.** `Validate()` already
+  proves every binding's proto path exists on T, so the `fd == nil` checks
+  in encode (step 2) and decode (step 7) are belt-and-suspenders only —
+  they fire only on a binding/proto desync that escaped boot validation
+  (e.g. a hand-edited generated file). They return `Internal` so the bug
+  is loud rather than a nil-deref panic.
 - **`ub.Set(sets...)`** is variadic over assignment strings. `ub.Assign(col,
   val)` returns `"col = $N"` with parameterized placeholder; raw expressions
   for `AutoSet` are formatted directly (`"updated_at = NOW()"`), with codegen
@@ -1020,7 +1057,9 @@ One new case added by the rollout:
 8. **Audit consumers of `b.UpdateDisplayName`.** Grep the codebase for
    callers; confirm only `UpdateProfile` calls it before deletion.
 9. **Remove superseded sqlc.** Delete `UpdateUserDisplayName` from
-   `sql/queries/users.sql` and `b.UpdateDisplayName`; regenerate sqlc.
+   `sql/queries/users.sql` and `b.UpdateDisplayName`; run `make generate`
+   (which runs `sqlc generate` plus `aippatchgen --check`) to regenerate
+   the sqlc layer and verify aippatch is in sync.
 10. **Verify.** `make test` (full CI: buf lint, codegen check, frontend
     typecheck+lint+tests, backend tests with race).
 
@@ -1131,7 +1170,7 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
 | 3 | Generic `Mapping[T proto.Message]` (single type parameter) | No row-type coupling; framework is sqlc-independent. No type casts in user code. |
 | 4 | Codegen consumes proto FileDescriptorSet + SQL migrations + yaml | Both schemas already on disk; yaml carries policy + overrides + auto_set only. |
 | 5 | Generated `*.gen.go` files committed to repo | Mapping is reviewable in PRs; CI checks for drift via `--check`. |
-| 6 | SQL builder: `huandu/go-sqlbuilder` (private to package) | Mature; `PostgreSQL.NewUpdateBuilder()` emits `$1` placeholders cleanly; `Returning(...)` is a first-class method. |
+| 6 | SQL builder: `huandu/go-sqlbuilder` v1.36.0+ (private to package) | Mature; `PostgreSQL.NewUpdateBuilder()` emits `$1` placeholders cleanly; `Returning(...)` is a first-class method (added in v1.36.0 — see rollout step 1). |
 | 7 | Row scan: direct `pgx.Rows.Values()` + proto reflection (no third-party scanner) | We populate a proto via reflection rather than a Go row struct; avoids an unnecessary dependency and a proto-aware shim. |
 | 8 | Empty FieldMask rejected with `InvalidArgument` (default) | drill prefers explicit intent; documented divergence from AIP-134; permanent per resource once deployed (see *Wire conformance note*). |
 | 9 | Deny-by-default writable; opt in via `writable:` list | Security posture; consistent with AIP-134 §Update_Mask "must not allow output-only fields." |
