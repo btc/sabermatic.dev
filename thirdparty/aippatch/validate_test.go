@@ -13,7 +13,7 @@ func TestValidate_HappyPath(t *testing.T) {
 		Table: "widgets",
 		PK:    "id",
 		Bindings: []Binding{
-			{Proto: "id",   Column: "id",   SQLType: "uuid", Writable: false},
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
 			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
 		},
 	}
