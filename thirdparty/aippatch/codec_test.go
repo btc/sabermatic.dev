@@ -106,3 +106,12 @@ func TestDecode_UUIDFromBytes(t *testing.T) {
 	require.NoError(t, decode(msg, fd, raw, "", nil))
 	require.Equal(t, "12345678-9abc-def0-fedc-ba9876543210", w.GetId())
 }
+
+func TestDecode_Timestamp(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	w := &fixturepb.Widget{}
+	msg := w.ProtoReflect()
+	fd := msg.Descriptor().Fields().ByName("create_time")
+	require.NoError(t, decode(msg, fd, now, "timestamp", nil))
+	require.WithinDuration(t, now, w.GetCreateTime().AsTime(), time.Microsecond)
+}

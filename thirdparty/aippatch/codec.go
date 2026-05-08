@@ -3,6 +3,7 @@ package aippatch
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
@@ -53,8 +54,12 @@ func decode(m protoreflect.Message, fd protoreflect.FieldDescriptor, raw any, co
 		}
 		return nil
 	case "timestamp":
-		// Implemented in Task 16.
-		return fmt.Errorf("aippatch: decode: codec %q not implemented", codec)
+		t, ok := raw.(time.Time)
+		if !ok {
+			return fmt.Errorf("aippatch: decode %q: expected time.Time, got %T", fd.Name(), raw)
+		}
+		m.Set(fd, protoreflect.ValueOfMessage(timestamppb.New(t).ProtoReflect()))
+		return nil
 	default:
 		// enum: implemented in Task 17.
 		return fmt.Errorf("aippatch: decode: codec %q not implemented", codec)
