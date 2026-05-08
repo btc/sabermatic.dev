@@ -124,6 +124,9 @@ deps:
 # Regenerate protobuf code from .proto sources.
 generate:
 	buf generate
+	buf build -o buf.binpb
+	sqlc generate
+	# aippatchgen step is added in Task 38 once the binary exists.
 
 # Run golangci-lint (same config as CI).
 lint:
