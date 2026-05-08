@@ -2,6 +2,7 @@ package aippatch
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -32,7 +33,19 @@ func encode(m proto.Message, fd protoreflect.FieldDescriptor, codec string, code
 	case "timestamp":
 		return v.Message().Interface().(*timestamppb.Timestamp).AsTime(), nil
 	default:
-		// enum: handled in next task.
-		return nil, fmt.Errorf("aippatch: encode: codec %q not implemented", codec)
+		if !strings.HasPrefix(codec, "enum:") {
+			return nil, fmt.Errorf("aippatch: encode: unknown codec %q", codec)
+		}
+		name := strings.TrimPrefix(codec, "enum:")
+		c, ok := codecs[name]
+		if !ok {
+			return nil, fmt.Errorf("aippatch: encode: codec %q not in registry", name)
+		}
+		num := int32(v.Enum())
+		text, ok := c.ToText[num]
+		if !ok {
+			return nil, fmt.Errorf("aippatch: encode: enum value %d not in codec %q ToText", num, name)
+		}
+		return text, nil
 	}
 }

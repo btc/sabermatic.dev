@@ -49,3 +49,29 @@ func TestEncode_Timestamp(t *testing.T) {
 	require.NoError(t, err)
 	require.WithinDuration(t, now, v.(time.Time), time.Microsecond)
 }
+
+func TestEncode_Enum(t *testing.T) {
+	w := &fixturepb.Widget{Color: fixturepb.Color_COLOR_BLUE}
+	fd := w.ProtoReflect().Descriptor().Fields().ByName("color")
+	codecs := map[string]EnumCodec{
+		"enum_color": {
+			ToText:   map[int32]string{int32(fixturepb.Color_COLOR_RED): "red", int32(fixturepb.Color_COLOR_BLUE): "blue"},
+			FromText: map[string]int32{"red": int32(fixturepb.Color_COLOR_RED), "blue": int32(fixturepb.Color_COLOR_BLUE)},
+		},
+	}
+	v, err := encode(w, fd, "enum:enum_color", codecs)
+	require.NoError(t, err)
+	require.Equal(t, "blue", v)
+}
+
+func TestEncode_EnumOutOfMap(t *testing.T) {
+	w := &fixturepb.Widget{Color: fixturepb.Color_COLOR_UNSPECIFIED} // unmapped value
+	fd := w.ProtoReflect().Descriptor().Fields().ByName("color")
+	codecs := map[string]EnumCodec{
+		"enum_color": {
+			ToText: map[int32]string{int32(fixturepb.Color_COLOR_RED): "red"},
+		},
+	}
+	_, err := encode(w, fd, "enum:enum_color", codecs)
+	require.Error(t, err, "unmapped enum value must error")
+}
