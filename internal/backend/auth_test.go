@@ -498,15 +498,6 @@ func TestAuthenticateSession_ProjectsSubState(t *testing.T) {
 
 	signupRes := signupUser(t, b, "substate@example.com", "testpassword123", "SubState")
 
-	// Force the cache columns to known values.
-	_, err := b.Pool().Exec(ctx, `
-		UPDATE users
-		SET sub_cancel_at_period_end = TRUE,
-		    sub_cancel_is_auto       = TRUE,
-		    pending_kept_banner      = TRUE
-		WHERE id = $1`, signupRes.UserID)
-	require.NoError(t, err)
-
 	loginRes, err := b.Login(ctx, backend.LoginParams{
 		Email:    "substate@example.com",
 		Password: "testpassword123",
@@ -515,11 +506,30 @@ func TestAuthenticateSession_ProjectsSubState(t *testing.T) {
 
 	tokenHash := auth.HashSessionToken(loginRes.Token)
 
+	// Assert schema defaults: all three booleans must be FALSE before mutation.
 	user, err := b.AuthenticateSession(ctx, tokenHash)
+	require.NoError(t, err)
+	require.False(t, user.SubCancelAtPeriodEnd)
+	require.False(t, user.SubCancelIsAuto)
+	require.False(t, user.PendingKeptBanner)
+
+	// Raw SQL: SetUserAutoCancelState doesn't touch pending_kept_banner,
+	// and we want to assert all three projections at once.
+	_, err = b.Pool().Exec(ctx, `
+		UPDATE users
+		SET sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = TRUE,
+		    pending_kept_banner      = TRUE
+		WHERE id = $1`, signupRes.UserID)
+	require.NoError(t, err)
+
+	// AuthenticateSession re-reads the user row on every call — same token is valid.
+	user, err = b.AuthenticateSession(ctx, tokenHash)
 	require.NoError(t, err)
 	require.True(t, user.SubCancelAtPeriodEnd)
 	require.True(t, user.SubCancelIsAuto)
 	require.True(t, user.PendingKeptBanner)
+	require.Equal(t, "substate@example.com", user.Email)
 }
 
 func TestResetPassword_InvalidToken(t *testing.T) {

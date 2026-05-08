@@ -23,7 +23,7 @@ type AuthUser struct {
 	EmailVerified bool
 	CreatedAt     time.Time
 
-	// Auto-cancel state (migration 016).
+	// Auto-cancel state cache.
 	SubCancelAtPeriodEnd bool
 	SubCancelIsAuto      bool
 	PendingKeptBanner    bool
