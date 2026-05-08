@@ -3,6 +3,7 @@ package aippatch
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -37,8 +38,25 @@ func Apply[T proto.Message](
 		return zero, connect.NewError(connect.CodeUnimplemented,
 			fmt.Errorf("UpdateAllWritable is unimplemented in v0"))
 	}
+	// 2. Resolve paths to bindings; reject nested / unknown / non-writable.
+	maskSet := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		if strings.Contains(p, ".") {
+			return zero, connectInvalidArg("nested mask path not supported in v0: %q", p)
+		}
+		b, ok := m.bindingsByProto[p]
+		if !ok {
+			return zero, connectInvalidArg("unknown field in update_mask: %q", p)
+		}
+		if !b.Writable {
+			return zero, connectInvalidArg("field not writable: %q", p)
+		}
+		maskSet[p] = struct{}{}
+	}
+
 	_ = ctx
 	_ = db
 	_ = src
-	return zero, connectInternal("Apply: SET clause not yet implemented")
+	_ = maskSet
+	return zero, connectInternal("Apply: SQL build not yet implemented")
 }

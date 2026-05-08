@@ -70,6 +70,33 @@ func TestApply_UpdateAllWritableReturnsUnimplemented(t *testing.T) {
 	require.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
 }
 
+func TestApply_NestedMaskPath(t *testing.T) {
+	m := mustValidatedFixtureMapping(t)
+	_, err := Apply(context.Background(), nil, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name.sub"}},
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestApply_UnknownMaskPath(t *testing.T) {
+	m := mustValidatedFixtureMapping(t)
+	_, err := Apply(context.Background(), nil, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"made_up"}},
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestApply_NonWritableMaskPath(t *testing.T) {
+	m := mustValidatedFixtureMapping(t)
+	_, err := Apply(context.Background(), nil, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Id: "x"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"id"}}, // id is non-writable in fixture mapping
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
 // mustValidatedFixtureMapping returns a Mapping with a single writable "name" binding.
 func mustValidatedFixtureMapping(t *testing.T) *Mapping[*fixturepb.Widget] {
 	t.Helper()
