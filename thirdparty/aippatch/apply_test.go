@@ -181,3 +181,59 @@ func TestApply_HappyPath_NameOnly(t *testing.T) {
 	require.Equal(t, "new", updated.GetName())
 	require.Equal(t, id.String(), updated.GetId())
 }
+
+func TestApply_WhereUnknownColumnReturnsInvalidArg(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	_, err := Apply(context.Background(), pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "x"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: uuid.New(),
+		Where:   map[string]any{"deleted_at": nil}, // not bound
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
+func TestApply_WhereBoundColumnAccepted(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	id := uuid.New()
+	_, err := pool.Exec(context.Background(),
+		"INSERT INTO widgets (id, name, enabled) VALUES ($1, $2, TRUE)", id, "old")
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+			{Proto: "enabled", Column: "enabled", SQLType: "boolean", Writable: false},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	// Where enabled=TRUE matches; PATCH succeeds.
+	_, err = Apply(context.Background(), pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "new"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: id,
+		Where:   map[string]any{"enabled": true},
+	})
+	require.NoError(t, err)
+
+	// Where enabled=FALSE excludes; NotFound.
+	_, err = Apply(context.Background(), pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Name: "newer"},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: id,
+		Where:   map[string]any{"enabled": false},
+	})
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+}
