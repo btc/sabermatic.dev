@@ -164,6 +164,12 @@ type Question struct {
 	FeaturedOrder  pgtype.Int4 `json:"featured_order"`
 }
 
+type StripeWebhookDedup struct {
+	EventID     string    `json:"event_id"`
+	EventType   string    `json:"event_type"`
+	ProcessedAt time.Time `json:"processed_at"`
+}
+
 type User struct {
 	ID                    uuid.UUID          `json:"id"`
 	Email                 string             `json:"email"`

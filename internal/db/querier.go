@@ -164,6 +164,9 @@ type Querier interface {
 	// only our handler sets that flag; webhook sync must not overwrite it.
 	SyncSubStateFromWebhook(ctx context.Context, arg SyncSubStateFromWebhookParams) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
+	// Returns the event_id on first claim; returns no row on subsequent claims.
+	// Use the no-row return as the signal "this event was already handled".
+	TryClaimWebhookEvent(ctx context.Context, arg TryClaimWebhookEventParams) (string, error)
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
 	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
 	UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlanByStripeCustomerParams) (int64, error)
