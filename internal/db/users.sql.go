@@ -115,8 +115,10 @@ WITH soft_delete AS (
 DELETE FROM auth_sessions WHERE user_id = $1
 `
 
-// Soft-deletes the user and wipes all auth sessions in one round-trip.
-// Idempotent: re-calling on a deleted user is a no-op on the user row.
+// Soft-deletes the user and hard-deletes all auth sessions in one round-trip
+// (data minimization / GDPR). Logout uses RevokeAuthSession / RevokeUserAuthSessions
+// in auth_sessions.sql instead. Idempotent: re-calling on a deleted user is a
+// no-op on the user row.
 func (q *Queries) DeleteAccount(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAccount, id)
 	return err

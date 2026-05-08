@@ -22,14 +22,15 @@ type Annotation struct {
 }
 
 type AuthSession struct {
-	ID         uuid.UUID   `json:"id"`
-	UserID     uuid.UUID   `json:"user_id"`
-	TokenHash  string      `json:"token_hash"`
-	ExpiresAt  time.Time   `json:"expires_at"`
-	LastActive time.Time   `json:"last_active"`
-	IpAddress  *netip.Addr `json:"ip_address"`
-	UserAgent  pgtype.Text `json:"user_agent"`
-	CreatedAt  time.Time   `json:"created_at"`
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	LastActive time.Time          `json:"last_active"`
+	IpAddress  *netip.Addr        `json:"ip_address"`
+	UserAgent  pgtype.Text        `json:"user_agent"`
+	CreatedAt  time.Time          `json:"created_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type CoachAnalysis struct {

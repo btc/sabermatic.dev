@@ -54,8 +54,10 @@ WHERE id = $1 AND free_full_educators_used < $2
 RETURNING free_full_educators_used;
 
 -- name: DeleteAccount :exec
--- Soft-deletes the user and wipes all auth sessions in one round-trip.
--- Idempotent: re-calling on a deleted user is a no-op on the user row.
+-- Soft-deletes the user and hard-deletes all auth sessions in one round-trip
+-- (data minimization / GDPR). Logout uses RevokeAuthSession / RevokeUserAuthSessions
+-- in auth_sessions.sql instead. Idempotent: re-calling on a deleted user is a
+-- no-op on the user row.
 WITH soft_delete AS (
     UPDATE users SET deleted_at = NOW(), updated_at = NOW()
     WHERE id = @id AND deleted_at IS NULL

@@ -44,11 +44,11 @@ type Querier interface {
 	// grants_created=0 for duplicate event.
 	CreateSubscriptionGrant(ctx context.Context, arg CreateSubscriptionGrantParams) (CreateSubscriptionGrantRow, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	// Soft-deletes the user and wipes all auth sessions in one round-trip.
-	// Idempotent: re-calling on a deleted user is a no-op on the user row.
+	// Soft-deletes the user and hard-deletes all auth sessions in one round-trip
+	// (data minimization / GDPR). Logout uses RevokeAuthSession / RevokeUserAuthSessions
+	// in auth_sessions.sql instead. Idempotent: re-calling on a deleted user is a
+	// no-op on the user row.
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
-	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
-	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	// Creates the one-time free trial grant + ledger entry atomically. Called
 	// only at account creation (Signup, OAuthLogin). If the grant already exists
 	// (ON CONFLICT), both the INSERT and the ledger SELECT produce zero rows — a
@@ -60,6 +60,8 @@ type Querier interface {
 	// Idempotent: returns 0 rows if session_refund ledger entries already exist.
 	FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
+	// Filters out soft-revoked sessions; only returns valid live sessions.
+	// (Activity queries do NOT filter on revoked_at — see GetUserLastActive.)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
 	// Single query to fetch all billing state needed for entitlement checks.
 	// Fetch inside the caller's transaction to avoid TOCTOU.
@@ -91,6 +93,11 @@ type Querier interface {
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
+	// Reads across all history (including revoked sessions) — this is a
+	// "when did the user last act, ever?" query, not a session-validity check.
+	// Returns NULL when the user has no auth_sessions rows. The LEFT JOIN
+	// from a single-row subquery forces sqlc to infer a nullable result type.
+	GetUserLastActive(ctx context.Context, userID uuid.UUID) (pgtype.Timestamptz, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
 	// Inline crash recovery for EndSession/CancelSession.
@@ -123,6 +130,10 @@ type Querier interface {
 	// Returns one row per grant debited. Returns zero rows if balance is insufficient
 	// (all-or-nothing: no mutations occur when balance < requested).
 	ReserveMinutes(ctx context.Context, arg ReserveMinutesParams) ([]ReserveMinutesRow, error)
+	// Soft-delete: marks the row revoked but preserves it for the activity query.
+	RevokeAuthSession(ctx context.Context, id uuid.UUID) error
+	// Soft-delete every active session for a user (logout-everywhere).
+	RevokeUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	SetAudioURL(ctx context.Context, arg SetAudioURLParams) error
 	SetQuestionImageURL(ctx context.Context, arg SetQuestionImageURLParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error

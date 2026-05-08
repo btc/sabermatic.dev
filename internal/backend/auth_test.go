@@ -11,6 +11,7 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -274,11 +275,12 @@ func TestLogout_Success(t *testing.T) {
 	err = b.Logout(ctx, loginRes.Token)
 	require.NoError(t, err)
 
-	// Session should be deleted -- lookup by hash should fail.
+	// Session should be revoked (soft-deleted) -- lookup by token should fail
+	// because GetAuthSessionByToken filters on revoked_at IS NULL.
 	tokenHash := auth.HashSessionToken(loginRes.Token)
 	queries := db.New(b.Pool())
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
-	require.Error(t, err) // pgx.ErrNoRows
+	require.Error(t, err) // pgx.ErrNoRows — revoked session is invisible
 }
 
 func TestLogout_NonExistentToken(t *testing.T) {
@@ -289,6 +291,55 @@ func TestLogout_NonExistentToken(t *testing.T) {
 	// Logging out with a bogus token should not error.
 	err := b.Logout(ctx, "completely-bogus-token")
 	require.NoError(t, err)
+}
+
+func TestLogout_SoftDeletes_PreservesActivityHistory(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupUser(t, b, "softlogout@example.com", "strongpass1", "SoftLogout")
+	loginRes, err := b.Login(ctx, backend.LoginParams{
+		Email:    "softlogout@example.com",
+		Password: "strongpass1",
+		IP:       "127.0.0.1:1234",
+	})
+	require.NoError(t, err)
+
+	// Logout should soft-delete the session.
+	require.NoError(t, b.Logout(ctx, loginRes.Token))
+
+	// GetAuthSessionByToken should no longer find it (revoked_at IS NULL filter).
+	tokenHash := auth.HashSessionToken(loginRes.Token)
+	queries := db.New(b.Pool())
+	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
+	require.Error(t, err, "revoked session should not be returned by GetAuthSessionByToken")
+
+	// The session row should still exist with revoked_at set (soft delete).
+	var revokedAt pgtype.Timestamptz
+	err = b.Pool().QueryRow(ctx,
+		`SELECT revoked_at FROM auth_sessions WHERE user_id = $1`,
+		loginRes.UserID).Scan(&revokedAt)
+	require.NoError(t, err)
+	require.True(t, revokedAt.Valid, "revoked_at should be set after logout")
+
+	// GetUserLastActive should still return a value (reads across revoked sessions).
+	last, err := queries.GetUserLastActive(ctx, loginRes.UserID)
+	require.NoError(t, err)
+	require.True(t, last.Valid, "last_active should have a value across revoked sessions")
+}
+
+func TestGetUserLastActive_NoSessions(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	// SeedUser calls Signup only — no auth_sessions row is created, so no
+	// DELETE needed to reach the "zero sessions" precondition.
+	userID := backendtest.SeedUser(t, b)
+
+	last, err := db.New(b.Pool()).GetUserLastActive(ctx, userID)
+	require.NoError(t, err)
+	require.False(t, last.Valid, "MAX over zero rows should be NULL")
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +469,7 @@ func TestResetPassword_Success(t *testing.T) {
 	tokenHash := auth.HashSessionToken(loginRes.Token)
 	queries := db.New(b.Pool())
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
-	require.Error(t, err) // session deleted
+	require.Error(t, err) // session revoked (soft-deleted) — invisible to token lookup
 
 	// Can login with new password.
 	newLoginRes, err := b.Login(ctx, backend.LoginParams{

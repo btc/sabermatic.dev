@@ -17,7 +17,7 @@ import (
 const createAuthSession = `-- name: CreateAuthSession :one
 INSERT INTO auth_sessions (user_id, token_hash, expires_at, ip_address, user_agent)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, token_hash, expires_at, last_active, ip_address, user_agent, created_at
+RETURNING id, user_id, token_hash, expires_at, last_active, ip_address, user_agent, created_at, revoked_at
 `
 
 type CreateAuthSessionParams struct {
@@ -46,55 +46,42 @@ func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionPa
 		&i.IpAddress,
 		&i.UserAgent,
 		&i.CreatedAt,
+		&i.RevokedAt,
 	)
 	return i, err
 }
 
-const deleteAuthSession = `-- name: DeleteAuthSession :exec
-DELETE FROM auth_sessions WHERE id = $1
-`
-
-func (q *Queries) DeleteAuthSession(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAuthSession, id)
-	return err
-}
-
-const deleteUserAuthSessions = `-- name: DeleteUserAuthSessions :exec
-DELETE FROM auth_sessions WHERE user_id = $1
-`
-
-func (q *Queries) DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteUserAuthSessions, userID)
-	return err
-}
-
 const getAuthSessionByToken = `-- name: GetAuthSessionByToken :one
-SELECT s.id, s.user_id, s.token_hash, s.expires_at, s.last_active, s.ip_address, s.user_agent, s.created_at, u.email, u.display_name, u.role, u.plan, u.email_verified,
+SELECT s.id, s.user_id, s.token_hash, s.expires_at, s.last_active, s.ip_address, s.user_agent, s.created_at, s.revoked_at, u.email, u.display_name, u.role, u.plan, u.email_verified,
        u.created_at AS user_created_at
 FROM auth_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
   AND s.expires_at > NOW()
+  AND s.revoked_at IS NULL
   AND u.deleted_at IS NULL
 `
 
 type GetAuthSessionByTokenRow struct {
-	ID            uuid.UUID   `json:"id"`
-	UserID        uuid.UUID   `json:"user_id"`
-	TokenHash     string      `json:"token_hash"`
-	ExpiresAt     time.Time   `json:"expires_at"`
-	LastActive    time.Time   `json:"last_active"`
-	IpAddress     *netip.Addr `json:"ip_address"`
-	UserAgent     pgtype.Text `json:"user_agent"`
-	CreatedAt     time.Time   `json:"created_at"`
-	Email         string      `json:"email"`
-	DisplayName   string      `json:"display_name"`
-	Role          string      `json:"role"`
-	Plan          string      `json:"plan"`
-	EmailVerified bool        `json:"email_verified"`
-	UserCreatedAt time.Time   `json:"user_created_at"`
+	ID            uuid.UUID          `json:"id"`
+	UserID        uuid.UUID          `json:"user_id"`
+	TokenHash     string             `json:"token_hash"`
+	ExpiresAt     time.Time          `json:"expires_at"`
+	LastActive    time.Time          `json:"last_active"`
+	IpAddress     *netip.Addr        `json:"ip_address"`
+	UserAgent     pgtype.Text        `json:"user_agent"`
+	CreatedAt     time.Time          `json:"created_at"`
+	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
+	Email         string             `json:"email"`
+	DisplayName   string             `json:"display_name"`
+	Role          string             `json:"role"`
+	Plan          string             `json:"plan"`
+	EmailVerified bool               `json:"email_verified"`
+	UserCreatedAt time.Time          `json:"user_created_at"`
 }
 
+// Filters out soft-revoked sessions; only returns valid live sessions.
+// (Activity queries do NOT filter on revoked_at — see GetUserLastActive.)
 func (q *Queries) GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error) {
 	row := q.db.QueryRow(ctx, getAuthSessionByToken, tokenHash)
 	var i GetAuthSessionByTokenRow
@@ -107,6 +94,7 @@ func (q *Queries) GetAuthSessionByToken(ctx context.Context, tokenHash string) (
 		&i.IpAddress,
 		&i.UserAgent,
 		&i.CreatedAt,
+		&i.RevokedAt,
 		&i.Email,
 		&i.DisplayName,
 		&i.Role,
@@ -115,6 +103,54 @@ func (q *Queries) GetAuthSessionByToken(ctx context.Context, tokenHash string) (
 		&i.UserCreatedAt,
 	)
 	return i, err
+}
+
+const getUserLastActive = `-- name: GetUserLastActive :one
+SELECT a.last_active
+FROM (SELECT 1) AS _placeholder
+LEFT JOIN auth_sessions a ON a.user_id = $1
+ORDER BY a.last_active DESC
+LIMIT 1
+`
+
+// Reads across all history (including revoked sessions). Returns NULL
+// when the user has no auth_sessions rows.
+//
+// The LEFT-JOIN-from-placeholder shape (rather than the simpler MAX()) is
+// a workaround: in sqlc 1.25 with pgx/v5, MAX(timestamptz_not_null) is
+// generated as a non-nullable time.Time even though the SQL semantics are
+// "NULL when zero rows match." LEFT JOIN forces sqlc's nullability
+// inference correctly. If a future sqlc version makes MAX() nullable for
+// this case, simplify back to:
+//
+//	SELECT MAX(last_active)::timestamptz FROM auth_sessions WHERE user_id = $1;
+func (q *Queries) GetUserLastActive(ctx context.Context, userID uuid.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getUserLastActive, userID)
+	var last_active pgtype.Timestamptz
+	err := row.Scan(&last_active)
+	return last_active, err
+}
+
+const revokeAuthSession = `-- name: RevokeAuthSession :exec
+UPDATE auth_sessions SET revoked_at = NOW()
+WHERE id = $1 AND revoked_at IS NULL
+`
+
+// Soft-delete: marks the row revoked but preserves it for the activity query.
+func (q *Queries) RevokeAuthSession(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeAuthSession, id)
+	return err
+}
+
+const revokeUserAuthSessions = `-- name: RevokeUserAuthSessions :exec
+UPDATE auth_sessions SET revoked_at = NOW()
+WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+// Soft-delete every active session for a user (logout-everywhere).
+func (q *Queries) RevokeUserAuthSessions(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeUserAuthSessions, userID)
+	return err
 }
 
 const touchAuthSession = `-- name: TouchAuthSession :exec
