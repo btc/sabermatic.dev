@@ -275,11 +275,14 @@ func Apply[T proto.Message](
 ) (T, error)
 
 // Validate is called once at startup, by InitPatches(). It indexes the
-// binding maps, copies relevant codecs into m.codecs (subset reachable from
-// m.Bindings), verifies every binding's proto path exists on T, and sets
-// the validated atomic flag. Returns error rather than panicking, per
-// drill's no-panic-at-init rule. Idempotent up to the validated flag —
-// repeated calls return nil after the first success.
+// binding maps; copies relevant codecs into m.codecs (subset reachable from
+// m.Bindings); builds each EnumCodec's FromText from ToText; verifies every
+// binding's proto path exists on T; verifies every binding's "enum:<name>"
+// codec reference exists in the supplied codecs map; and sets the validated
+// atomic flag. Returns error rather than panicking, per drill's
+// no-panic-at-init rule. Idempotent up to the validated flag — repeated
+// calls return nil after the first success. On error, validated is left
+// false and the caller may retry after fixing the cause.
 func (m *Mapping[T]) Validate(codecs map[string]EnumCodec) error
 ```
 
@@ -351,10 +354,11 @@ is the default in Go's `go build`, but some shops set `CGO_ENABLED=0`
 globally; document at the top of `cmd/aippatchgen/main.go` and in
 `thirdparty/aippatch/README.md`. The runtime library has no CGO requirement.
 
-Wired into `Makefile`:
+Wired into `Makefile` (drill's existing `generate` target gains the
+`buf build -o buf.binpb` and `aippatchgen` steps):
 
 ```
-codegen:
+generate:
 	buf generate
 	buf build -o buf.binpb
 	sqlc generate
@@ -370,7 +374,7 @@ and verify if desired).
 ### Inputs
 
 1. **`buf.binpb`** — emitted by `buf build -o buf.binpb` (added as a new step
-   in `make codegen`; the existing `buf generate` does not emit a descriptor
+   in `make generate`; the existing `buf generate` does not emit a descriptor
    set). Unmarshaled into `*descriptorpb.FileDescriptorSet`; walked via
    `protoreflect.FileDescriptor`.
 2. **`sql/migrations/*.up.sql`** — read in lexical order. Each statement
@@ -383,6 +387,8 @@ and verify if desired).
    - `ALTER TABLE … ALTER COLUMN … SET / DROP NOT NULL` → flip nullability.
    - `ALTER TABLE … RENAME COLUMN` → rename.
    - `DROP TABLE` → remove table.
+   - `ALTER TABLE … ADD/DROP CONSTRAINT`, `ADD/DROP DEFAULT`, and any other
+     `AlterTableCmd` kind not enumerated above: ignored in v0.
    - Other statements (indexes, foreign-key constraints, CHECK constraints)
      are ignored in v0. CHECK constraint extraction (to validate enum codec
      maps) is a v1 feature.
@@ -418,7 +424,6 @@ and verify if desired).
         - Scalar kind → `""`.
         - Anything else → diagnostic: "unsupported in v0; mark `skip: true`."
       - `Writable` = field name is in `resources[i].writable`.
-      - Reject paths with dots (nested) — diagnostic.
    4. After processing, every proto field must either have a binding or
       `skip: true`. Any unmatched field is a diagnostic (this prevents the
       `proto.CloneOf`-base case from silently passing through unmapped
@@ -431,8 +436,15 @@ and verify if desired).
       multi-statement input or non-expression payloads. (v0 effectively
       restricts callers to a few well-known forms: `NOW()`,
       `CURRENT_TIMESTAMP`, integer constants, etc.)
-   6. Sort bindings alphabetically by `Proto` for **stable diff output**
-      (different from step 3's processing order).
+   6. Validate enum-codec yaml entries: every codec's `map` values must be
+      unique (no two enum values map to the same SQL text), to prevent the
+      derived FromText map from being lossy. Diagnostic on duplicates.
+   7. Validate yaml-side names: reject any `writable` or `overrides` key
+      containing dots (these would imply nested-message paths, which v0
+      does not support).
+   8. Sort `Bindings` alphabetically by `Proto` and `AutoSet` alphabetically
+      by `Column` for **stable diff output** (different from step 3's
+      processing order).
 4. Emit one Go file per resource, plus one `init.gen.go` that emits a
    shared `var Codecs = map[string]aippatch.EnumCodec{...}` registry and
    `InitPatches() error` calling `Validate(Codecs)` on each mapping.
@@ -654,8 +666,10 @@ func Apply[T proto.Message](
     }
     // ProtoReflect().IsValid() returns false for typed-nil pointers and
     // un-initialized messages, sidestepping the typed-nil interface trap
-    // (`any(op.Message) == nil` is false for a nil *T).
-    if op.Message.ProtoReflect() == nil || !op.Message.ProtoReflect().IsValid() {
+    // (`any(op.Message) == nil` is false for a nil *T). ProtoReflect itself
+    // never returns a nil interface for protoc-gen-go-generated types.
+    src := op.Message.ProtoReflect()
+    if !src.IsValid() {
         return zero, connectInvalidArg("op.Message must not be nil")
     }
 
@@ -666,31 +680,45 @@ func Apply[T proto.Message](
         if m.EmptyMask == ErrorOnEmpty {
             return zero, connectInvalidArg("update_mask must not be empty")
         }
-        // UpdateAllWritable: not implemented in v0. Reject explicitly to
-        // avoid silently emitting an AutoSet-only UPDATE.
-        return zero, connectInternal("UpdateAllWritable is unimplemented in v0")
+        // UpdateAllWritable: not implemented in v0. CodeUnimplemented
+        // signals "feature not yet built" rather than a server bug.
+        return zero, connect.NewError(connect.CodeUnimplemented,
+            errors.New("UpdateAllWritable is unimplemented in v0"))
     }
 
     // 2. Resolve paths to bindings; reject unknown / non-writable / nested.
-    desc := op.Message.ProtoReflect().Descriptor()
+    // sqlbuilder.PostgreSQL.NewUpdateBuilder() is required (not the default
+    // NewUpdateBuilder) — only the PostgreSQL flavor emits $1 placeholders
+    // and a working RETURNING clause.
+    desc := src.Descriptor()
     ub   := sqlbuilder.PostgreSQL.NewUpdateBuilder()
     ub.Update(m.Table)
 
-    sets := make([]string, 0, len(paths)+len(m.AutoSet))
+    // Iterate Bindings (not client-supplied paths) in stable order so the
+    // emitted SQL is deterministic regardless of the order the client put
+    // paths in the mask. This makes pgx's prepared-statement cache hit
+    // across calls with the same mask shape, and makes golden-test SQL
+    // deterministic.
+    maskSet := make(map[string]struct{}, len(paths))
     for _, p := range paths {
         if strings.Contains(p, ".") {
             return zero, connectInvalidArg("nested mask path not supported in v0: %q", p)
         }
-        b, ok := m.bindingsByProto[p]
-        if !ok {
+        if _, ok := m.bindingsByProto[p]; !ok {
             return zero, connectInvalidArg("unknown field in update_mask: %q", p)
         }
-        if !b.Writable {
+        if !m.bindingsByProto[p].Writable {
             return zero, connectInvalidArg("field not writable: %q", p)
         }
-        fd := desc.Fields().ByName(protoreflect.Name(p))
+        maskSet[p] = struct{}{}
+    }
+    sets := make([]string, 0, len(maskSet)+len(m.AutoSet))
+    for i := range m.Bindings {
+        b := &m.Bindings[i]
+        if _, ok := maskSet[b.Proto]; !ok { continue }
+        fd := desc.Fields().ByName(protoreflect.Name(b.Proto))
         if fd == nil {
-            return zero, connectInternal("binding/proto desync: %q", p)
+            return zero, connectInternal("binding/proto desync: %q", b.Proto)
         }
         v, err := encode(op.Message, fd, b.Codec, m.codecs)
         if err != nil { return zero, err }
@@ -707,7 +735,7 @@ func Apply[T proto.Message](
     // prepared-statement cache hits across calls with the same shape).
     ub.Where(ub.Equal(m.PK, op.PKValue))
     if m.SoftDelete != "" {
-        ub.Where(m.SoftDelete + " IS NULL")
+        ub.Where(ub.IsNull(m.SoftDelete))   // first-class helper, not string concat
     }
     if len(op.Where) > 0 {
         keys := make([]string, 0, len(op.Where))
@@ -869,11 +897,17 @@ Cases:
   int64) write + read-back
 - writable timestamp write + read-back
 - writable enum write (valid & invalid) + read-back
-- AutoSet column is bumped on every PATCH. Test pattern: open a
-  `pgx.BeginFunc`, `SELECT updated_at` before, run `Apply`, `SELECT
-  updated_at` after — assert post > pre. Within a single transaction `NOW()`
-  returns the same instant; the framework executes the UPDATE in a separate
-  query so `NOW()` advances. (Alternatively use `clock_timestamp()` if needed.)
+- AutoSet column is bumped on every PATCH. **Important:** `NOW()` returns
+  the transaction-start timestamp and is constant for the duration of a
+  single transaction, so a `BeginFunc(SELECT before; Apply; SELECT after)`
+  test would see equal values. Use one of:
+  - `clock_timestamp()` in the test fixture's `auto_set` instead of `NOW()`,
+    which advances within a transaction; or
+  - run the SELECT-before, `Apply`, SELECT-after as separate top-level
+    statements (no surrounding `BeginFunc`); or
+  - SELECT `NOW()` to capture the test's own transaction-time bound
+    before `Apply`, then SELECT the row's `updated_at` after `Apply`,
+    asserting it's >= the captured time.
 - soft-delete WHERE filters out deleted rows → `NotFound`
 - PK mismatch → `NotFound`
 - extra `Op.Where` predicate (valid bound column) excludes row → `NotFound`
@@ -921,16 +955,18 @@ One new case added by the rollout:
 
 ## Drill rollout plan
 
-1. **Dependency adds.** `go get github.com/huandu/go-sqlbuilder
+1. **Dependency adds.** `go get github.com/huandu/go-sqlbuilder@v1.36.0
    github.com/pganalyze/pg_query_go/v6` and commit `go.mod`/`go.sum`.
-   (`github.com/google/uuid` is already in `go.mod`.)
+   The `@v1.36.0` floor is required — `UpdateBuilder.Returning(...)` was
+   added in that release. (`github.com/google/uuid` is already in `go.mod`.)
 2. **Add framework.** Land `thirdparty/aippatch/` runtime + `cmd/aippatchgen/`
    binary.
-3. **Wire codegen.** Add `buf build -o buf.binpb` and the `aippatchgen` step
-   to `make codegen`. Add `aippatchgen --check` to `make test`.
+3. **Wire codegen.** Extend the existing `make generate` target (line 125 of
+   `Makefile`) to add `buf build -o buf.binpb` and the `aippatchgen` step
+   after `buf generate`. Add `aippatchgen --check` to `make test`.
 4. **Add config.** `aippatch.yaml` at repo root with the `User` resource,
    enum codecs, and `auto_set: { updated_at: NOW() }`.
-5. **Generate.** Create `internal/patches/`; run `make codegen`. Review the
+5. **Generate.** Create `internal/patches/`; run `make generate`. Review the
    diff manually first time, including `internal/patches/user.gen.go` and
    `internal/patches/init.gen.go`.
 6. **Wire init.** Call `patches.InitPatches()` in `cmd/drill/main.go`
@@ -998,7 +1034,10 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
    Document at the top of `cmd/aippatchgen/main.go`:
    `// Requires CGO (libpg_query).` Add a `README.md` next to it stating
    the same. CI runners must have a C toolchain — drill's CI already does
-   for testcontainers.
+   for testcontainers. **First-build cost:** `pg_query_go/v6` compiles part
+   of the PostgreSQL parser from C source on first use; on a cold build
+   cache this can take ~3 minutes. CI runners should preserve `GOCACHE`
+   and `GOMODCACHE` across runs (drill's CI already does).
 
 2. **pgx-native ↔ proto type drift.** New SQL types added to drill in the
    future may not be in the runtime's `decode` switch. Mitigation:
@@ -1030,7 +1069,7 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
 
 7. **`buf.binpb` drift.** If `buf.binpb` is committed and a developer regens
    `pb/*.pb.go` without re-running `buf build -o buf.binpb`, the codegen
-   will be stale. Mitigation: `make codegen` runs both in order;
+   will be stale. Mitigation: `make generate` runs both in order;
    `aippatchgen --check` in CI catches drift.
 
 8. **`op.Where` raw-identifier surface.** Keys in the map are interpolated
