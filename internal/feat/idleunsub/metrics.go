@@ -19,9 +19,12 @@ var (
 	cancelFired, _   = meter.Int64Counter("idleunsub.cancel.fired")
 	cancelSkipped, _ = meter.Int64Counter("idleunsub.cancel.skipped")
 	cancelError, _   = meter.Int64Counter("idleunsub.cancel.error")
-	cacheDrift, _    = meter.Int64Counter("idleunsub.cancel.cache_drift_corrected")
-	reverseLink, _   = meter.Int64Counter("idleunsub.reverse.link")
-	reverseAct, _    = meter.Int64Counter("idleunsub.reverse.activity")
+	//nolint:unused // wired up by AutoReverse in Task 8
+	cacheDrift, _ = meter.Int64Counter("idleunsub.cancel.cache_drift_corrected")
+	//nolint:unused // wired up by KeepSubscription in Task 8
+	reverseLink, _ = meter.Int64Counter("idleunsub.reverse.link")
+	//nolint:unused // wired up by AutoReverse in Task 8
+	reverseAct, _ = meter.Int64Counter("idleunsub.reverse.activity")
 	emailEnqueue, _  = meter.Int64Counter("idleunsub.email.enqueue")
 )
 
@@ -37,14 +40,17 @@ func mCancelError(ctx context.Context, reason string) {
 	cancelError.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 }
 
+//nolint:unused // wired up in Task 8
 func mCacheDriftCorrected(ctx context.Context, subID string) {
 	cacheDrift.Add(ctx, 1, metric.WithAttributes(attribute.String("sub_id", subID)))
 }
 
+//nolint:unused // wired up in Task 8
 func mReverseLink(ctx context.Context, subID string) {
 	reverseLink.Add(ctx, 1, metric.WithAttributes(attribute.String("sub_id", subID)))
 }
 
+//nolint:unused // wired up in Task 8
 func mReverseActivity(ctx context.Context, subID string) {
 	reverseAct.Add(ctx, 1, metric.WithAttributes(attribute.String("sub_id", subID)))
 }

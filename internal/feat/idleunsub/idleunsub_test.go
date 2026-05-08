@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 	stripe "github.com/stripe/stripe-go/v82"
 
@@ -180,6 +181,16 @@ func TestHandleInvoiceUpcoming_FiresCancel_WhenIdleTwoPeriods(t *testing.T) {
 		Scan(&count)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
+
+	// SetUserAutoCancelState does NOT write stripe_subscription_id (spec §4.1
+	// designates SyncSubStateFromWebhook as the single population path).
+	// In this test the webhook hasn't fired, so the column remains NULL.
+	var subIDCol pgtype.Text
+	err = fx.B.Pool().QueryRow(fx.Ctx,
+		`SELECT stripe_subscription_id FROM users WHERE id = $1`,
+		fx.UserID).Scan(&subIDCol)
+	require.NoError(t, err)
+	require.False(t, subIDCol.Valid, "spec invariant: HandleInvoiceUpcoming does not write stripe_subscription_id")
 }
 
 // ---------------------------------------------------------------------------
@@ -222,27 +233,54 @@ func TestHandleInvoiceUpcoming_DedupesRetryStorm(t *testing.T) {
 	t.Parallel()
 	fx := setupHappyPath(t)
 
+	// Step 1: First call with evt_1 → fires cancel (1 Stripe update call).
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
-	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
-
-	// Only one update call total — the second invocation hit the webhook dedup.
 	require.Len(t, fx.Fake.updateCalls, 1)
 
-	// Exactly one auto-cancel event row.
+	// Step 2: Second call with evt_1 → blocked by webhook dedup (same event
+	// ID); still exactly 1 update call.
+	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
+	require.Len(t, fx.Fake.updateCalls, 1)
+
+	// Step 3: Third call with evt_2 (different event ID, same period) →
+	// TryClaimWebhookEvent succeeds (new event), but HasAutoCanceledThisPeriod
+	// blocks the cancel inside the TX. Still exactly 1 update call.
+	evt2 := fx.Event
+	evt2.ID = "evt_" + uuid.NewString()[:8]
+	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, evt2))
+	require.Len(t, fx.Fake.updateCalls, 1)
+
+	// Exactly one auto-cancel user_events row (only step 1 wrote it).
 	var count int
 	err := fx.B.Pool().QueryRow(fx.Ctx, `
 		SELECT COUNT(*) FROM user_events
 		WHERE user_id = $1 AND event_type = 'subscription_auto_canceled'`,
 		fx.UserID).Scan(&count)
 	require.NoError(t, err)
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, count, "only one auto-cancel event row expected")
 
-	// One webhook dedup row.
+	// evt_1 dedup row persisted (step 1 committed).
 	err = fx.B.Pool().QueryRow(fx.Ctx,
 		`SELECT COUNT(*) FROM stripe_webhook_dedup WHERE event_id = $1`, fx.Event.ID).
 		Scan(&count)
 	require.NoError(t, err)
-	require.Equal(t, 1, count)
+	require.Equal(t, 1, count, "evt_1 dedup row persisted from step 1")
+
+	// evt_2 dedup row is NOT persisted: TryClaimWebhookEvent runs inside the
+	// same TX that gets rolled back (no commit occurs) when
+	// HasAutoCanceledThisPeriod returns true. The dedup insert is in-flight
+	// only — it rolls back with the rest of the TX.
+	err = fx.B.Pool().QueryRow(fx.Ctx,
+		`SELECT COUNT(*) FROM stripe_webhook_dedup WHERE event_id = $1`, evt2.ID).
+		Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 0, count, "evt_2 dedup row rolled back with the TX")
+
+	// Total dedup rows: only evt_1.
+	err = fx.B.Pool().QueryRow(fx.Ctx,
+		`SELECT COUNT(*) FROM stripe_webhook_dedup`).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "only one dedup row persisted total")
 }
 
 func TestHandleInvoiceUpcoming_DedupesPostKeep(t *testing.T) {

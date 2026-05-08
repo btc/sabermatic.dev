@@ -86,7 +86,7 @@ func (s *Service) HandleInvoiceUpcoming(ctx context.Context, event stripe.Event)
 	}
 	periodStart := time.Unix(item.CurrentPeriodStart, 0).UTC()
 	periodEnd := time.Unix(item.CurrentPeriodEnd, 0).UTC()
-	threshold := subtractInterval(periodStart, item.Price.Recurring.Interval)
+	threshold := subtractInterval(periodStart, item.Price.Recurring.Interval, item.Price.Recurring.IntervalCount)
 
 	// 3. Look up our user by stripe customer ID.
 	if sub.Customer == nil || sub.Customer.ID == "" {
@@ -233,19 +233,23 @@ func (s *Service) HandleInvoiceUpcoming(ctx context.Context, event stripe.Event)
 	return nil
 }
 
-// subtractInterval returns t minus one Stripe billing interval.
-func subtractInterval(t time.Time, interval stripe.PriceRecurringInterval) time.Time {
+// subtractInterval returns t minus count Stripe billing intervals.
+func subtractInterval(t time.Time, interval stripe.PriceRecurringInterval, count int64) time.Time {
+	if count < 1 {
+		count = 1
+	}
+	n := int(count)
 	switch interval {
 	case stripe.PriceRecurringIntervalDay:
-		return t.AddDate(0, 0, -1)
+		return t.AddDate(0, 0, -n)
 	case stripe.PriceRecurringIntervalWeek:
-		return t.AddDate(0, 0, -7)
+		return t.AddDate(0, 0, -7*n)
 	case stripe.PriceRecurringIntervalMonth:
-		return t.AddDate(0, -1, 0)
+		return t.AddDate(0, -n, 0)
 	case stripe.PriceRecurringIntervalYear:
-		return t.AddDate(-1, 0, 0)
+		return t.AddDate(-n, 0, 0)
 	default:
-		return t.AddDate(0, -1, 0) // safe default
+		return t.AddDate(0, -n, 0) // safe default
 	}
 }
 
@@ -261,6 +265,10 @@ func marshalCancelMetadata(subID, eventID string, start, end time.Time) ([]byte,
 // enqueueCancelEmail composes and enqueues the cancel email.
 // Implementation lands in Task 9 alongside the templates; for now this is a
 // stub so the cancel path compiles. Task 9 replaces it with the real impl.
+//
+// TODO: Task 9 implements; the error path here is currently unreachable
+// (stub always returns nil). Task 9's test must inject an erroring sender
+// and assert mEmailEnqueue("cancel", "error") fires + cancel still succeeds.
 func (s *Service) enqueueCancelEmail(ctx context.Context, user db.User, subID string, periodEnd time.Time) error {
 	_ = ctx
 	_ = user
