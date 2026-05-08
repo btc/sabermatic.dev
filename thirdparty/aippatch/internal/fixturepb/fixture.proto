@@ -1,0 +1,23 @@
+syntax = "proto3";
+package aippatch.fixture.v1;
+
+option go_package = "github.com/btc/drill/thirdparty/aippatch/internal/fixturepb;fixturepb";
+
+import "google/protobuf/timestamp.proto";
+
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  COLOR_RED         = 1;
+  COLOR_BLUE        = 2;
+}
+
+message Widget {
+  string id          = 1;   // uuid
+  string name        = 2;   // text
+  bool   enabled     = 3;
+  int32  count       = 4;   // integer
+  int32  small_count = 5;   // smallint
+  int64  big_count   = 6;   // bigint
+  Color  color       = 7;   // enum
+  google.protobuf.Timestamp create_time = 8;
+}
