@@ -75,3 +75,25 @@ func TestEncode_EnumOutOfMap(t *testing.T) {
 	_, err := encode(w, fd, "enum:enum_color", codecs)
 	require.Error(t, err, "unmapped enum value must error")
 }
+
+func TestDecode_Scalars(t *testing.T) {
+	for _, tc := range []struct {
+		field string
+		raw   any
+		want  protoreflect.Value
+	}{
+		{"name", "hi", protoreflect.ValueOfString("hi")},
+		{"enabled", true, protoreflect.ValueOfBool(true)},
+		{"count", int32(42), protoreflect.ValueOfInt32(42)},
+		{"small_count", int16(3), protoreflect.ValueOfInt32(3)}, // widen int16 -> int32
+		{"big_count", int64(1 << 40), protoreflect.ValueOfInt64(1 << 40)},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			w := &fixturepb.Widget{}
+			msg := w.ProtoReflect()
+			fd := msg.Descriptor().Fields().ByName(protoreflect.Name(tc.field))
+			require.NoError(t, decode(msg, fd, tc.raw, "", nil))
+			require.Equal(t, tc.want.Interface(), msg.Get(fd).Interface())
+		})
+	}
+}
