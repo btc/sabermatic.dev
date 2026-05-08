@@ -357,3 +357,252 @@ func TestHandleInvoiceUpcoming_FirstPeriodGrace(t *testing.T) {
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 	requireNoCancel(t, fx)
 }
+
+// ---------------------------------------------------------------------------
+// KeepSubscription / AutoReverse fixtures
+// ---------------------------------------------------------------------------
+
+// setupAutoCanceledState seeds a user in the "auto-canceled" cache state. We
+// use raw SQL UPDATE per the spec's "start from real state and mutate" rule:
+// SeedUser yields a real user row; we then mutate the cache columns to the
+// post-cancel shape we'd see after HandleInvoiceUpcoming + the
+// SyncSubStateFromWebhook follow-up. This is appropriate for unit-testing
+// the reversal paths in isolation.
+//
+// Returns a fixture ready for KeepSubscription/AutoReverse calls. The fake
+// Stripe sub mirrors the cached state (CancelAtPeriodEnd=true) by default;
+// individual tests mutate fx.Sub before calling AutoReverse to simulate
+// drift.
+func setupAutoCanceledState(t *testing.T) *fixture {
+	t.Helper()
+	fx := setupHappyPath(t)
+
+	// Mutate the user's cache columns to the auto-canceled shape and write
+	// the stripe_subscription_id (in production written by
+	// SyncSubStateFromWebhook on customer.subscription.updated).
+	_, err := fx.B.Pool().Exec(fx.Ctx, `
+		UPDATE users
+		SET sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = TRUE,
+		    stripe_subscription_id   = $1,
+		    sub_current_period_start = $2,
+		    pending_kept_banner      = FALSE
+		WHERE id = $3`, fx.SubID, fx.PeriodStart, fx.UserID)
+	require.NoError(t, err)
+
+	// The fake Stripe sub should match: it's in the canceled state too.
+	fx.Sub.CancelAtPeriodEnd = true
+
+	return fx
+}
+
+// readUserCache returns the auto-cancel cache columns for a user.
+func readUserCache(t *testing.T, fx *fixture) (cancelAtEnd, isAuto, banner bool) {
+	t.Helper()
+	err := fx.B.Pool().QueryRow(fx.Ctx,
+		`SELECT sub_cancel_at_period_end, sub_cancel_is_auto, pending_kept_banner
+		 FROM users WHERE id = $1`,
+		fx.UserID).Scan(&cancelAtEnd, &isAuto, &banner)
+	require.NoError(t, err)
+	return
+}
+
+// countKeptEvents returns the number of subscription_kept rows for a user.
+func countKeptEvents(t *testing.T, fx *fixture) int {
+	t.Helper()
+	var count int
+	err := fx.B.Pool().QueryRow(fx.Ctx, `
+		SELECT COUNT(*) FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_kept'`,
+		fx.UserID).Scan(&count)
+	require.NoError(t, err)
+	return count
+}
+
+// keepClaims constructs a KeepTokenClaims for fx. The endpoint constructs
+// these from a verified token; here we synthesize directly since
+// KeepSubscription's contract is "endpoint already verified the token".
+func keepClaims(fx *fixture) idleunsub.KeepTokenClaims {
+	return idleunsub.KeepTokenClaims{
+		UserID:           fx.UserID,
+		SubscriptionID:   fx.SubID,
+		Action:           "keep_subscription",
+		CurrentPeriodEnd: fx.PeriodEnd,
+		IssuedAt:         fx.PeriodStart.Unix(),
+		ExpiresAt:        fx.PeriodEnd.Unix(),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// KeepSubscription tests
+// ---------------------------------------------------------------------------
+
+func TestKeepSubscription_HappyPath(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
+
+	// Stripe Update called once, with cancel_at_period_end=false.
+	require.Len(t, fx.Fake.updateCalls, 1)
+	require.Equal(t, fx.SubID, fx.Fake.updateCalls[0].ID)
+	require.False(t, fx.Fake.updateCalls[0].CancelAtPeriodEnd)
+	require.Empty(t, fx.Fake.updateCalls[0].IdempotencyKey,
+		"KeepSubscription passes empty idempotency key (Stripe treats as non-idempotent)")
+
+	// Cache flipped, banner set.
+	cancelAtEnd, isAuto, banner := readUserCache(t, fx)
+	require.False(t, cancelAtEnd)
+	require.False(t, isAuto)
+	require.True(t, banner, "KeepSubscription is a real reversal: banner must be set")
+
+	// One subscription_kept event row with via='link'.
+	require.Equal(t, 1, countKeptEvents(t, fx))
+	var via, gotSubID string
+	err := fx.B.Pool().QueryRow(fx.Ctx, `
+		SELECT metadata->>'via', metadata->>'subscription_id'
+		FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_kept'`,
+		fx.UserID).Scan(&via, &gotSubID)
+	require.NoError(t, err)
+	require.Equal(t, "link", via)
+	require.Equal(t, fx.SubID, gotSubID)
+}
+
+func TestKeepSubscription_RefusesManualCancel(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	// Flip sub_cancel_is_auto OFF: this is now a manual portal cancel that
+	// happens to share the cache flag layout. KeepSubscription must refuse.
+	_, err := fx.B.Pool().Exec(fx.Ctx,
+		`UPDATE users SET sub_cancel_is_auto = FALSE WHERE id = $1`, fx.UserID)
+	require.NoError(t, err)
+
+	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
+
+	// Zero Stripe calls.
+	require.Empty(t, fx.Fake.updateCalls, "must not touch Stripe on a manual cancel")
+	// Zero new event rows.
+	require.Equal(t, 0, countKeptEvents(t, fx))
+	// Cache unchanged: still cancel_at_period_end=true, is_auto=false (we set
+	// it false above), banner false.
+	var cancelAtEnd, isAuto, banner bool
+	err = fx.B.Pool().QueryRow(fx.Ctx,
+		`SELECT sub_cancel_at_period_end, sub_cancel_is_auto, pending_kept_banner
+		 FROM users WHERE id = $1`, fx.UserID).Scan(&cancelAtEnd, &isAuto, &banner)
+	require.NoError(t, err)
+	require.True(t, cancelAtEnd, "manual-cancel cache flag must be left intact")
+	require.False(t, isAuto)
+	require.False(t, banner)
+}
+
+func TestKeepSubscription_Idempotent(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	// First call: real reversal.
+	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
+	// Second call: gates already cleared after first → must be a no-op.
+	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
+
+	// Exactly one Stripe call, exactly one event row.
+	require.Len(t, fx.Fake.updateCalls, 1, "second call must not re-hit Stripe")
+	require.Equal(t, 1, countKeptEvents(t, fx), "second call must not re-insert event")
+}
+
+// ---------------------------------------------------------------------------
+// AutoReverse tests
+// ---------------------------------------------------------------------------
+
+func TestAutoReverse_GateOff(t *testing.T) {
+	t.Parallel()
+	// Plain happy-path user: sub_cancel_at_period_end=false. AutoReverse is
+	// a no-op.
+	fx := setupHappyPath(t)
+
+	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
+
+	require.Empty(t, fx.Fake.updateCalls, "gate off → no Stripe calls")
+	// Note: setupHappyPath does not call GetSubscription either; AutoReverse
+	// must early-return before any Stripe round-trip.
+	require.Equal(t, 0, countKeptEvents(t, fx))
+}
+
+func TestAutoReverse_HappyPath(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
+
+	// Exactly one Stripe Update call, with cancel_at_period_end=false.
+	require.Len(t, fx.Fake.updateCalls, 1)
+	require.Equal(t, fx.SubID, fx.Fake.updateCalls[0].ID)
+	require.False(t, fx.Fake.updateCalls[0].CancelAtPeriodEnd)
+
+	// Cache cleared with banner=true.
+	cancelAtEnd, isAuto, banner := readUserCache(t, fx)
+	require.False(t, cancelAtEnd)
+	require.False(t, isAuto)
+	require.True(t, banner, "real reversal must set banner")
+
+	// One subscription_kept row with via='auto_activity'.
+	require.Equal(t, 1, countKeptEvents(t, fx))
+	var via string
+	err := fx.B.Pool().QueryRow(fx.Ctx, `
+		SELECT metadata->>'via' FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_kept'`,
+		fx.UserID).Scan(&via)
+	require.NoError(t, err)
+	require.Equal(t, "auto_activity", via)
+}
+
+func TestAutoReverse_CacheDriftCorrected(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	// Stripe says NOT canceled (the auto-cancel webhook side never landed,
+	// or was reversed out-of-band). Cache says canceled. AutoReverse must
+	// silently reconcile without celebrating a reversal.
+	fx.Sub.CancelAtPeriodEnd = false
+
+	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
+
+	// ZERO Stripe Update calls — only the GetSubscription read.
+	require.Empty(t, fx.Fake.updateCalls, "drift correction must not hit Stripe Update")
+
+	// Cache silently cleared.
+	cancelAtEnd, isAuto, banner := readUserCache(t, fx)
+	require.False(t, cancelAtEnd)
+	require.False(t, isAuto)
+	require.False(t, banner, "drift correction must NOT set the banner")
+
+	// No subscription_kept event row (no real reversal happened).
+	require.Equal(t, 0, countKeptEvents(t, fx))
+}
+
+func TestAutoReverse_RefusesManualCancel(t *testing.T) {
+	t.Parallel()
+	fx := setupAutoCanceledState(t)
+
+	// Flip sub_cancel_is_auto OFF: this is a manual portal cancel.
+	// AutoReverse must early-return without any Stripe calls.
+	_, err := fx.B.Pool().Exec(fx.Ctx,
+		`UPDATE users SET sub_cancel_is_auto = FALSE WHERE id = $1`, fx.UserID)
+	require.NoError(t, err)
+
+	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
+
+	// Zero Stripe calls of any kind.
+	require.Empty(t, fx.Fake.updateCalls)
+	// Cache unchanged.
+	var cancelAtEnd, isAuto, banner bool
+	err = fx.B.Pool().QueryRow(fx.Ctx,
+		`SELECT sub_cancel_at_period_end, sub_cancel_is_auto, pending_kept_banner
+		 FROM users WHERE id = $1`, fx.UserID).Scan(&cancelAtEnd, &isAuto, &banner)
+	require.NoError(t, err)
+	require.True(t, cancelAtEnd)
+	require.False(t, isAuto)
+	require.False(t, banner)
+	require.Equal(t, 0, countKeptEvents(t, fx))
+}

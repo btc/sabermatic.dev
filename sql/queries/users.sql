@@ -103,6 +103,15 @@ SET sub_cancel_at_period_end = FALSE,
     sub_current_period_start = $2
 WHERE id = $1;
 
+-- name: ClearUserAutoCancelStateNoBanner :exec
+-- For cache-drift correction in AutoReverse: clear gates without setting the
+-- banner. We only flip the banner when an actual reversal happened.
+UPDATE users
+SET sub_cancel_at_period_end = FALSE,
+    sub_cancel_is_auto       = FALSE,
+    sub_current_period_start = $2
+WHERE id = $1;
+
 -- name: SyncSubStateFromWebhook :exec
 -- Called by handleSubscriptionUpdated. Does NOT touch sub_cancel_is_auto:
 -- only our handler sets that flag; webhook sync must not overwrite it.

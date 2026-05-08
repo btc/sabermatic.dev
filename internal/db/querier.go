@@ -30,6 +30,9 @@ type Querier interface {
 	ClearSubStateOnDeletion(ctx context.Context, id uuid.UUID) error
 	// Called by KeepSubscription / AutoReverse on reversal. Sets banner flag.
 	ClearUserAutoCancelState(ctx context.Context, arg ClearUserAutoCancelStateParams) error
+	// For cache-drift correction in AutoReverse: clear gates without setting the
+	// banner. We only flip the banner when an actual reversal happened.
+	ClearUserAutoCancelStateNoBanner(ctx context.Context, arg ClearUserAutoCancelStateNoBannerParams) error
 	// Batch-completes abandoned sessions that have at least one candidate message.
 	// These are real interviews that the user forgot to end.
 	CompleteAbandonedActiveSessions(ctx context.Context) ([]CompleteAbandonedActiveSessionsRow, error)

@@ -17,7 +17,6 @@ type cancelMetadata struct {
 	CurrentPeriodEnd   time.Time `json:"current_period_end"`
 }
 
-//nolint:unused // wired up by KeepSubscription/AutoReverse in Task 8
 type keptMetadata struct {
 	SubscriptionID     string    `json:"subscription_id"`
 	Via                string    `json:"via"`                  // "link" | "auto_activity"

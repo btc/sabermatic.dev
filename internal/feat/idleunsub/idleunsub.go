@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -272,6 +273,156 @@ func marshalCancelMetadata(subID, eventID string, start, end time.Time) ([]byte,
 func (s *Service) enqueueCancelEmail(ctx context.Context, user db.User, subID string, periodEnd time.Time) error {
 	_ = ctx
 	_ = user
+	_ = subID
+	_ = periodEnd
+	return nil // placeholder; replaced in Task 9
+}
+
+// KeepSubscription reverses cancel_at_period_end after a verified, single-use
+// keep-link click. The endpoint is responsible for verifying the token AND
+// claiming single-use BEFORE invoking this method. Refuses to act if the
+// stored cache says the cancel is NOT our auto-cancel (manual portal cancel).
+func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) error {
+	q := db.New(s.pool)
+	gates, err := q.GetUserAutoCancelGates(ctx, claims.UserID)
+	if err != nil {
+		return fmt.Errorf("read gates: %w", err)
+	}
+	if !gates.SubCancelAtPeriodEnd || !gates.SubCancelIsAuto {
+		// Either the cancel was already reversed, or it's a manual portal cancel.
+		// Don't touch Stripe; render confirmation page idempotently.
+		return nil
+	}
+	updated, err := s.stripe.UpdateSubscriptionCancel(ctx, claims.SubscriptionID, false, "")
+	if err != nil {
+		return fmt.Errorf("stripe reverse: %w", err)
+	}
+	if updated.Items == nil || len(updated.Items.Data) == 0 {
+		return fmt.Errorf("stripe reverse: subscription %s missing items", claims.SubscriptionID)
+	}
+	periodStart := time.Unix(updated.Items.Data[0].CurrentPeriodStart, 0).UTC()
+
+	if err := q.ClearUserAutoCancelState(ctx, db.ClearUserAutoCancelStateParams{
+		ID: claims.UserID, SubCurrentPeriodStart: pgxTime(periodStart),
+	}); err != nil {
+		return fmt.Errorf("clear gates: %w", err)
+	}
+
+	mdJSON, err := marshalKeptMetadata(claims.SubscriptionID, "link", periodStart)
+	if err != nil {
+		return fmt.Errorf("marshal kept metadata: %w", err)
+	}
+	if err := q.InsertSubscriptionKeptEvent(ctx, db.InsertSubscriptionKeptEventParams{
+		UserID: claims.UserID, Metadata: mdJSON,
+	}); err != nil {
+		return fmt.Errorf("insert kept event: %w", err)
+	}
+
+	mReverseLink(ctx, claims.SubscriptionID)
+
+	if err := s.enqueueKeptEmail(ctx, claims.UserID, claims.SubscriptionID, claims.CurrentPeriodEnd); err != nil {
+		mEmailEnqueue(ctx, "kept", "error")
+		s.log.Error("kept email enqueue failed", "user_id", claims.UserID, "err", err)
+	} else {
+		mEmailEnqueue(ctx, "kept", "ok")
+	}
+	return nil
+}
+
+// AutoReverse is invoked by the auth middleware when an authenticated request
+// arrives from a user whose cached gates are SubCancelAtPeriodEnd && SubCancelIsAuto.
+// The current request itself is the activity signal; we do NOT re-read
+// last_active (would race against TouchAuthSession).
+//
+// AutoReverse verifies Stripe state before acting. If Stripe says the sub is
+// NOT canceled (cache drift from a prior partial failure), AutoReverse silently
+// clears the cache and returns without sending email or inserting an event row.
+func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
+	q := db.New(s.pool)
+	gates, err := q.GetUserAutoCancelGates(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("read gates: %w", err)
+	}
+	if !gates.SubCancelAtPeriodEnd || !gates.SubCancelIsAuto || !gates.StripeSubscriptionID.Valid {
+		return nil // cache says off, or no sub — nothing to do
+	}
+	subID := gates.StripeSubscriptionID.String
+
+	// Verify Stripe state — handles the partial-failure window where our cache
+	// says canceled but Stripe never confirmed.
+	stripeSub, err := s.stripe.GetSubscription(ctx, subID)
+	if err != nil {
+		return fmt.Errorf("get sub: %w", err)
+	}
+	if stripeSub.Items == nil || len(stripeSub.Items.Data) == 0 {
+		return fmt.Errorf("subscription %s missing items", subID)
+	}
+	if !stripeSub.CancelAtPeriodEnd {
+		// Cache drift. Silently correct via the no-banner query and return.
+		// We don't celebrate a reversal that didn't actually happen here —
+		// the user kept their sub via some other channel.
+		mCacheDriftCorrected(ctx, subID)
+		periodStart := time.Unix(stripeSub.Items.Data[0].CurrentPeriodStart, 0).UTC()
+		if err := q.ClearUserAutoCancelStateNoBanner(ctx, db.ClearUserAutoCancelStateNoBannerParams{
+			ID: userID, SubCurrentPeriodStart: pgxTime(periodStart),
+		}); err != nil {
+			return fmt.Errorf("clear cache (drift): %w", err)
+		}
+		return nil
+	}
+
+	// Real reversal.
+	updated, err := s.stripe.UpdateSubscriptionCancel(ctx, subID, false, "")
+	if err != nil {
+		return fmt.Errorf("stripe reverse: %w", err)
+	}
+	if updated.Items == nil || len(updated.Items.Data) == 0 {
+		return fmt.Errorf("stripe reverse: subscription %s missing items", subID)
+	}
+	periodStart := time.Unix(updated.Items.Data[0].CurrentPeriodStart, 0).UTC()
+	periodEnd := time.Unix(updated.Items.Data[0].CurrentPeriodEnd, 0).UTC()
+
+	if err := q.ClearUserAutoCancelState(ctx, db.ClearUserAutoCancelStateParams{
+		ID: userID, SubCurrentPeriodStart: pgxTime(periodStart),
+	}); err != nil {
+		return fmt.Errorf("clear gates: %w", err)
+	}
+
+	mdJSON, err := marshalKeptMetadata(subID, "auto_activity", periodStart)
+	if err != nil {
+		return fmt.Errorf("marshal kept metadata: %w", err)
+	}
+	if err := q.InsertSubscriptionKeptEvent(ctx, db.InsertSubscriptionKeptEventParams{
+		UserID: userID, Metadata: mdJSON,
+	}); err != nil {
+		return fmt.Errorf("insert kept event: %w", err)
+	}
+
+	mReverseActivity(ctx, subID)
+
+	if err := s.enqueueKeptEmail(ctx, userID, subID, periodEnd); err != nil {
+		mEmailEnqueue(ctx, "kept", "error")
+		s.log.Error("kept email enqueue failed", "user_id", userID, "err", err)
+	} else {
+		mEmailEnqueue(ctx, "kept", "ok")
+	}
+	return nil
+}
+
+func marshalKeptMetadata(subID, via string, periodStart time.Time) ([]byte, error) {
+	return json.Marshal(keptMetadata{
+		SubscriptionID:     subID,
+		Via:                via,
+		CurrentPeriodStart: periodStart.UTC(),
+	})
+}
+
+// enqueueKeptEmail composes and enqueues the kept email. Implementation lands
+// in Task 9 alongside the templates; for now this is a stub so the keep paths
+// compile. Task 9 replaces it with the real impl.
+func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, subID string, periodEnd time.Time) error {
+	_ = ctx
+	_ = userID
 	_ = subID
 	_ = periodEnd
 	return nil // placeholder; replaced in Task 9
