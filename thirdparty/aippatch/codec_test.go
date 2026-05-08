@@ -97,3 +97,12 @@ func TestDecode_Scalars(t *testing.T) {
 		})
 	}
 }
+
+func TestDecode_UUIDFromBytes(t *testing.T) {
+	w := &fixturepb.Widget{}
+	msg := w.ProtoReflect()
+	fd := msg.Descriptor().Fields().ByName("id")
+	raw := [16]byte{0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10}
+	require.NoError(t, decode(msg, fd, raw, "", nil))
+	require.Equal(t, "12345678-9abc-def0-fedc-ba9876543210", w.GetId())
+}

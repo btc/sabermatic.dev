@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -61,8 +62,7 @@ func decode(m protoreflect.Message, fd protoreflect.FieldDescriptor, raw any, co
 }
 
 // formatUUID converts pgx's [16]byte uuid to canonical 8-4-4-4-12 string.
-// Implemented in Task 15.
-func formatUUID(b [16]byte) string { return "" /* placeholder; Task 15 implements */ }
+func formatUUID(b [16]byte) string { return uuid.UUID(b).String() }
 
 // encode converts a proto field value to a SQL parameter for pgx.
 // Codec values: "" (scalar), "timestamp" (proto.Timestamp -> time.Time),
