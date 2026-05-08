@@ -53,7 +53,8 @@ func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionPa
 
 const getAuthSessionByToken = `-- name: GetAuthSessionByToken :one
 SELECT s.id, s.user_id, s.token_hash, s.expires_at, s.last_active, s.ip_address, s.user_agent, s.created_at, s.revoked_at, u.email, u.display_name, u.role, u.plan, u.email_verified,
-       u.created_at AS user_created_at
+       u.created_at AS user_created_at,
+       u.sub_cancel_at_period_end, u.sub_cancel_is_auto, u.pending_kept_banner
 FROM auth_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -63,21 +64,24 @@ WHERE s.token_hash = $1
 `
 
 type GetAuthSessionByTokenRow struct {
-	ID            uuid.UUID          `json:"id"`
-	UserID        uuid.UUID          `json:"user_id"`
-	TokenHash     string             `json:"token_hash"`
-	ExpiresAt     time.Time          `json:"expires_at"`
-	LastActive    time.Time          `json:"last_active"`
-	IpAddress     *netip.Addr        `json:"ip_address"`
-	UserAgent     pgtype.Text        `json:"user_agent"`
-	CreatedAt     time.Time          `json:"created_at"`
-	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
-	Email         string             `json:"email"`
-	DisplayName   string             `json:"display_name"`
-	Role          string             `json:"role"`
-	Plan          string             `json:"plan"`
-	EmailVerified bool               `json:"email_verified"`
-	UserCreatedAt time.Time          `json:"user_created_at"`
+	ID                   uuid.UUID          `json:"id"`
+	UserID               uuid.UUID          `json:"user_id"`
+	TokenHash            string             `json:"token_hash"`
+	ExpiresAt            time.Time          `json:"expires_at"`
+	LastActive           time.Time          `json:"last_active"`
+	IpAddress            *netip.Addr        `json:"ip_address"`
+	UserAgent            pgtype.Text        `json:"user_agent"`
+	CreatedAt            time.Time          `json:"created_at"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
+	Email                string             `json:"email"`
+	DisplayName          string             `json:"display_name"`
+	Role                 string             `json:"role"`
+	Plan                 string             `json:"plan"`
+	EmailVerified        bool               `json:"email_verified"`
+	UserCreatedAt        time.Time          `json:"user_created_at"`
+	SubCancelAtPeriodEnd bool               `json:"sub_cancel_at_period_end"`
+	SubCancelIsAuto      bool               `json:"sub_cancel_is_auto"`
+	PendingKeptBanner    bool               `json:"pending_kept_banner"`
 }
 
 // Filters out soft-revoked sessions; only returns valid live sessions.
@@ -101,6 +105,9 @@ func (q *Queries) GetAuthSessionByToken(ctx context.Context, tokenHash string) (
 		&i.Plan,
 		&i.EmailVerified,
 		&i.UserCreatedAt,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.PendingKeptBanner,
 	)
 	return i, err
 }

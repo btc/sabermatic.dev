@@ -285,13 +285,16 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 	}()
 
 	return &auth.AuthUser{
-		ID:            row.UserID,
-		Email:         row.Email,
-		DisplayName:   row.DisplayName,
-		Role:          row.Role,
-		Plan:          row.Plan,
-		EmailVerified: row.EmailVerified,
-		CreatedAt:     row.UserCreatedAt,
+		ID:                   row.UserID,
+		Email:                row.Email,
+		DisplayName:          row.DisplayName,
+		Role:                 row.Role,
+		Plan:                 row.Plan,
+		EmailVerified:        row.EmailVerified,
+		CreatedAt:            row.UserCreatedAt,
+		SubCancelAtPeriodEnd: row.SubCancelAtPeriodEnd,
+		SubCancelIsAuto:      row.SubCancelIsAuto,
+		PendingKeptBanner:    row.PendingKeptBanner,
 	}, nil
 }
 

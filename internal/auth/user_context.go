@@ -22,6 +22,11 @@ type AuthUser struct {
 	Plan          string
 	EmailVerified bool
 	CreatedAt     time.Time
+
+	// Auto-cancel state (migration 016).
+	SubCancelAtPeriodEnd bool
+	SubCancelIsAuto      bool
+	PendingKeptBanner    bool
 }
 
 // SessionAuthenticator validates a hashed session token and returns the

@@ -7,7 +7,8 @@ RETURNING *;
 -- Filters out soft-revoked sessions; only returns valid live sessions.
 -- (Activity queries do NOT filter on revoked_at — see GetUserLastActive.)
 SELECT s.*, u.email, u.display_name, u.role, u.plan, u.email_verified,
-       u.created_at AS user_created_at
+       u.created_at AS user_created_at,
+       u.sub_cancel_at_period_end, u.sub_cancel_is_auto, u.pending_kept_banner
 FROM auth_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
