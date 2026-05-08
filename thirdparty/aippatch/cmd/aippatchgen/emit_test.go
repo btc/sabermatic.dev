@@ -34,3 +34,24 @@ func parseGoFile(src string) error {
 	_, err := parser.ParseFile(token.NewFileSet(), "out.go", src, 0)
 	return err
 }
+
+func TestEmitInit_Smoke(t *testing.T) {
+	codecs := map[string]CodecModel{
+		"enum_role": {
+			Name: "enum_role", ProtoEnum: "drill.v1.UserRole",
+			Values: []EnumValue{
+				{Number: 1, GoConst: "UserRole_USER_ROLE_CANDIDATE", Text: "candidate"},
+				{Number: 2, GoConst: "UserRole_USER_ROLE_ADMIN", Text: "admin"},
+			},
+		},
+	}
+	resources := []string{"UserPatch"}
+	out, err := emitInit(codecs, resources, "drillv1", "github.com/btc/drill/internal/pb/drill/v1")
+	require.NoError(t, err)
+	require.Contains(t, out, "var Codecs = map[string]aippatch.EnumCodec{")
+	require.Contains(t, out, `"enum_role":`)
+	require.Contains(t, out, `int32(drillv1.UserRole_USER_ROLE_CANDIDATE): "candidate",`)
+	require.Contains(t, out, "func InitPatches() error {")
+	require.Contains(t, out, "UserPatch.Validate,")
+	require.NoError(t, parseGoFile(out))
+}
