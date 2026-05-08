@@ -61,8 +61,25 @@ func decode(m protoreflect.Message, fd protoreflect.FieldDescriptor, raw any, co
 		m.Set(fd, protoreflect.ValueOfMessage(timestamppb.New(t).ProtoReflect()))
 		return nil
 	default:
-		// enum: implemented in Task 17.
-		return fmt.Errorf("aippatch: decode: codec %q not implemented", codec)
+		if !strings.HasPrefix(codec, "enum:") {
+			return fmt.Errorf("aippatch: decode: unknown codec %q", codec)
+		}
+		name := strings.TrimPrefix(codec, "enum:")
+		c, ok := codecs[name]
+		if !ok {
+			return fmt.Errorf("aippatch: decode: codec %q not in registry", name)
+		}
+		s, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("aippatch: decode %q: expected string for enum, got %T", fd.Name(), raw)
+		}
+		num, ok := c.FromText[s]
+		if !ok {
+			return fmt.Errorf("aippatch: decode %q: text %q not in codec %q FromText",
+				fd.Name(), s, name)
+		}
+		m.Set(fd, protoreflect.ValueOfEnum(protoreflect.EnumNumber(num)))
+		return nil
 	}
 }
 

@@ -115,3 +115,26 @@ func TestDecode_Timestamp(t *testing.T) {
 	require.NoError(t, decode(msg, fd, now, "timestamp", nil))
 	require.WithinDuration(t, now, w.GetCreateTime().AsTime(), time.Microsecond)
 }
+
+func TestDecode_Enum(t *testing.T) {
+	w := &fixturepb.Widget{}
+	msg := w.ProtoReflect()
+	fd := msg.Descriptor().Fields().ByName("color")
+	codecs := map[string]EnumCodec{
+		"enum_color": {
+			FromText: map[string]int32{"red": int32(fixturepb.Color_COLOR_RED), "blue": int32(fixturepb.Color_COLOR_BLUE)},
+		},
+	}
+	require.NoError(t, decode(msg, fd, "blue", "enum:enum_color", codecs))
+	require.Equal(t, fixturepb.Color_COLOR_BLUE, w.GetColor())
+}
+
+func TestDecode_EnumOutOfMap(t *testing.T) {
+	w := &fixturepb.Widget{}
+	msg := w.ProtoReflect()
+	fd := msg.Descriptor().Fields().ByName("color")
+	codecs := map[string]EnumCodec{
+		"enum_color": {FromText: map[string]int32{"red": 1}},
+	}
+	require.ErrorContains(t, decode(msg, fd, "purple", "enum:enum_color", codecs), "purple")
+}
