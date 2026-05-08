@@ -71,13 +71,19 @@ resource out) with two intentional divergences:
    the codec set excludes nested message types. Codegen rejects yaml entries
    whose proto fields would require nested support. Roadmap: v1+.
 
-A separate behavior change is wire-visible during the drill migration: today's
-`UpdateProfile` returns `Internal` when the user is soft-deleted (the sqlc
-`UpdateUserDisplayName` includes `AND deleted_at IS NULL`, returns
-`pgx.ErrNoRows`, the handler wraps as `Internal`). aippatch returns
-`NotFound` for the same case (zero-row update). This is the more correct AIP
-behavior. The rollout plan calls it out so clients depending on the prior
-code can adapt.
+A separate behavior change is wire-visible during the drill migration:
+today's `UpdateProfile` returns `Internal` for **every** failure from
+`b.UpdateDisplayName`, including soft-deleted user, PK mismatch, and real
+DB errors. The current call chain is `pgx.ErrNoRows` → `backend.ErrUserNotFound`
+→ handler wraps as `Internal` (`internal/rpc/user/server.go:133-136`); other
+DB errors take the same path. aippatch distinguishes zero-row outcomes
+(`NotFound`) from real DB errors (`Internal`), so the wire change applies
+to *all* zero-row cases: PK mismatch, soft-deleted row, and any future
+scope-predicate exclusion become `NotFound` instead of `Internal`. This is
+the more correct AIP behavior — but is broader than just the soft-delete
+case. Clients that treated `Internal` as "user not found" will need to
+treat `NotFound` the same way; clients that treated `Internal` as
+"transient — retry" should special-case `NotFound` (terminal).
 
 All other AIP-134 requirements (return the updated resource, honor mask paths
 that are valid, reject unknown paths) are upheld.
@@ -858,8 +864,9 @@ func Apply[T proto.Message](
 
 Notable details:
 
-- **`proto.CloneOf`** (added in protobuf-go v1.36.6; project uses v1.36.11)
-  is type-safe: returns `T` directly, no `.(T)` assertion.
+- **`proto.CloneOf`** (available in the protobuf-go versions used here;
+  project's `go.mod` is on v1.36.11) is type-safe: returns `T` directly,
+  no `.(T)` assertion.
 - **`Returning(boundCols...)`** sends only mapped columns over the wire from
   Postgres to Go. Unmapped columns (e.g. `password_hash`,
   `stripe_customer_id`) are not transmitted at all. Note: bound non-writable
@@ -887,8 +894,17 @@ Notable details:
 - **`ub.Returning(...)`** is the library's first-class API; we do not use the
   marker-position-dependent `ub.SQL(...)` for this.
 - **`op.Where` keys are validated** against `m.bindingsByColumn` — keys must
-  be bound columns. Values are pgx-parameterized; keys are not escaped, and
-  the validation step is the safety guarantee.
+  be bound columns. Writability does not matter: any bound column (writable
+  or not) is a legal scope predicate. So a handler may scope an UPDATE by
+  e.g. `email` even though `email` is non-writable. Values are
+  pgx-parameterized; keys are not escaped, and the validation step is the
+  safety guarantee.
+- **Multiple invalid mask paths.** If the client mask contains several
+  invalid paths (e.g. one nested + one unknown), `Apply` returns the first
+  error encountered iterating the client-supplied path slice. Tests should
+  assert on `connect.CodeOf(err)` rather than message text — see drill's
+  existing handler tests, which already use this pattern
+  (`internal/rpc/user/server_test.go`).
 
 `encode` and `decode` are bounded switches over field kind × codec. The total
 runtime is approximately 350 LoC including codec dispatch, error
@@ -929,6 +945,7 @@ func (s *Server) UpdateProfile(
     }
 
     // Per-field validation lives in the handler in v0. v2 makes it declarative.
+    // (slices.Contains is in stdlib since Go 1.21; drill is on Go 1.25.)
     if slices.Contains(req.Msg.GetUpdateMask().GetPaths(), "display_name") {
         trimmed := strings.TrimSpace(req.Msg.GetUser().GetDisplayName())
         if trimmed == "" {
@@ -1052,8 +1069,11 @@ One new case added by the rollout:
    startup; surface any error from `Validate(Codecs)` per drill's no-panic
    rule.
 7. **Switch handler.** Replace `UpdateProfile` handler body with the shrunk
-   version. Verify the proto wire contract is unchanged (or document the
-   one wire change: soft-deleted user now returns `NotFound`, was `Internal`).
+   version. Verify the proto wire contract is unchanged. Document the
+   broader error-code change (the actual delta is wider than soft-delete:
+   any zero-row outcome — PK mismatch, soft-delete, future scope filters —
+   now returns `NotFound` rather than `Internal`; pgx errors still return
+   `Internal`).
 8. **Audit consumers of `b.UpdateDisplayName`.** Grep the codebase for
    callers; confirm only `UpdateProfile` calls it before deletion.
 9. **Remove superseded sqlc.** Delete `UpdateUserDisplayName` from
@@ -1144,10 +1164,15 @@ tiers ship. New features are opt-in via `aippatch.yaml`.
    events. v1 adds returned-diff support to remove the wrap. Mitigation: if
    audit comes due before v1 ships, the wrap-in-tx pattern is sufficient.
 
-6. **Soft-deleted user wire change.** Today `UpdateProfile` returns
-   `Internal` when the user is soft-deleted; aippatch returns `NotFound`.
-   This is more correct AIP behavior, but is wire-visible. Mitigation:
-   document in *Wire conformance note* and the rollout plan.
+6. **Zero-row wire change is broader than just soft-delete.** Today
+   `UpdateProfile` returns `Internal` for *every* failure path of
+   `b.UpdateDisplayName` — soft-deleted user, PK mismatch, and real DB
+   errors all collapse into one code. aippatch distinguishes zero-row
+   outcomes (`NotFound`) from pgx errors (`Internal`), exposing finer
+   granularity for the first time. This affects more than just the
+   soft-delete case. Mitigation: documented in *Wire conformance note*,
+   *Drill rollout plan* (step 7), and clients should be told to treat
+   `NotFound` as terminal and `Internal` as potentially-transient.
 
 7. **`buf.binpb` drift.** If `buf.binpb` is committed and a developer regens
    `pb/*.pb.go` without re-running `buf build -o buf.binpb`, the codegen
