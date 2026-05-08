@@ -73,3 +73,75 @@ func TestProcessResource_Happy(t *testing.T) {
 	// Codec emitted into the registry.
 	require.Contains(t, codecs, "enum_color")
 }
+
+func TestProcessResource_NullableBoundField_Diagnostic(t *testing.T) {
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY, name TEXT)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		Writable: []string{"name"},
+		Overrides: map[string]yamlOverride{
+			"enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "nullable column not supported in v0")
+}
+
+func TestProcessResource_AutoSetBadIdentifier_Diagnostic(t *testing.T) {
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY, "user-id" TEXT NOT NULL)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"user-id": "NOW()"},
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.Contains(t, diags.Err().Error(), `auto_set column "user-id" is not a plain SQL identifier`)
+}
+
+func TestProcessResource_CodecDuplicateValue_Diagnostic(t *testing.T) {
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY)`))
+	yaml := yamlConfig{
+		Codecs: map[string]yamlCodec{
+			"enum_color": {ProtoEnum: "x", Map: map[string]string{"A": "x", "B": "x"}},
+		},
+	}
+	_, _, diags := processAll(yaml, files, schema)
+	require.Contains(t, diags.Err().Error(), "duplicate map value")
+}
+
+func TestProcessResource_UpdateWritableRejected_Diagnostic(t *testing.T) {
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		EmptyMask: "update_writable",
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.Contains(t, diags.Err().Error(), `update_writable" is not supported in v0`)
+}
+
+func TestProcessResource_UnmatchedProtoField_Diagnostic(t *testing.T) {
+	// Widget has 8 fields but the table only has id; the seven other proto
+	// fields have neither a column match nor an explicit skip:true. Every
+	// field must be diagnosed (not silently dropped).
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	msg := diags.Err().Error()
+	for _, fname := range []string{"name", "enabled", "count", "small_count", "big_count", "color", "create_time"} {
+		require.Contains(t, msg, fname, "expected diagnostic mentioning %q", fname)
+	}
+}
