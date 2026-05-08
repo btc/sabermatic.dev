@@ -1,0 +1,26 @@
+codecs:
+  enum_role:
+    proto_enum: drill.v1.UserRole
+    map:
+      USER_ROLE_CANDIDATE: candidate
+      USER_ROLE_ADMIN:     admin
+  enum_plan:
+    proto_enum: drill.v1.UserPlan
+    map:
+      USER_PLAN_FREE: free
+      USER_PLAN_PRO:  pro
+
+resources:
+  - message: drill.v1.User
+    table: users
+    pk: id
+    soft_delete: deleted_at
+    empty_mask: error
+    writable: [display_name]
+    go_package_path: github.com/btc/drill/internal/pb/drill/v1
+    auto_set:
+      updated_at: NOW()
+    overrides:
+      create_time: { column: created_at }
+      role:        { codec: enum_role }
+      plan:        { codec: enum_plan }
