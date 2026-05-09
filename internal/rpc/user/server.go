@@ -13,9 +13,9 @@ import (
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/patches"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
-	"github.com/btc/drill/internal/patches"
 	"github.com/btc/drill/thirdparty/aippatch"
 )
 
