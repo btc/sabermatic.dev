@@ -93,7 +93,7 @@ func setupKeepFixture(t *testing.T) *keepFixture {
 	svc := idleunsub.NewService(
 		b.Pool(),
 		fake,
-		idleunsubtest.NullMailer{},
+		&idleunsubtest.RecordingEnqueuer{},
 		signer,
 		"http://localhost:3000",
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -297,7 +297,7 @@ func TestKeep_NoSigner_RendersInvalid(t *testing.T) {
 	testSvc := idleunsub.NewService(
 		b.Pool(),
 		idleunsubtest.NewFakeStripe(),
-		idleunsubtest.NullMailer{},
+		&idleunsubtest.RecordingEnqueuer{},
 		nil, // no signer
 		"http://localhost:3000",
 		slog.Default(),

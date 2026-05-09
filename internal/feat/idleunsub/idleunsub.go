@@ -19,7 +19,7 @@ import (
 	stripe "github.com/stripe/stripe-go/v82"
 
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/email"
+	"github.com/btc/drill/internal/jobs"
 )
 
 // StripeClient is the surface idleunsub needs from Stripe. Production wires
@@ -30,26 +30,35 @@ type StripeClient interface {
 	UpdateSubscriptionCancel(ctx context.Context, id string, cancelAtPeriodEnd bool, idempotencyKey string) (*stripe.Subscription, error)
 }
 
+// EmailEnqueuer queues a SendEmailJob asynchronously. Production wraps a
+// *river.Client; tests substitute an in-memory recorder. Decoupling the
+// webhook/auth-middleware path from synchronous Mailgun delivery keeps the
+// Stripe webhook timeout (30s) and AuthenticateSession timeout (5s) safe
+// regardless of email-provider latency or outage. Spec §4.1, §4.3, §9.
+type EmailEnqueuer interface {
+	EnqueueSendEmail(ctx context.Context, args jobs.SendEmailArgs) error
+}
+
 // Service owns the cancel/keep/auto-reverse logic.
 type Service struct {
-	pool    *pgxpool.Pool
-	stripe  StripeClient
-	mailer  email.Sender
-	signer  *TokenSigner
-	baseURL string
-	now     func() time.Time
-	log     *slog.Logger
+	pool     *pgxpool.Pool
+	stripe   StripeClient
+	enqueuer EmailEnqueuer
+	signer   *TokenSigner
+	baseURL  string
+	now      func() time.Time
+	log      *slog.Logger
 }
 
 // NewService constructs a Service. The signer is required for the cancel email
 // flow (buildKeepURL); pass a real TokenSigner in all test fixtures.
 // baseURL is the public-facing base URL (e.g. "https://sabermatic.dev") used
 // to build keep-links; pass "http://localhost:3000" in tests.
-func NewService(pool *pgxpool.Pool, sc StripeClient, m email.Sender, sn *TokenSigner, baseURL string, log *slog.Logger) *Service {
+func NewService(pool *pgxpool.Pool, sc StripeClient, enqueuer EmailEnqueuer, sn *TokenSigner, baseURL string, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{pool: pool, stripe: sc, mailer: m, signer: sn, baseURL: baseURL, now: time.Now, log: log}
+	return &Service{pool: pool, stripe: sc, enqueuer: enqueuer, signer: sn, baseURL: baseURL, now: time.Now, log: log}
 }
 
 // Signer returns the configured TokenSigner. Used by Backend to verify
@@ -274,8 +283,10 @@ func marshalCancelMetadata(subID, eventID string, start, end time.Time) ([]byte,
 	})
 }
 
-// enqueueCancelEmail composes the cancel email and sends it via the mailer.
-// Called from HandleInvoiceUpcoming after the cancel decision is committed.
+// enqueueCancelEmail composes the cancel email and queues a SendEmailJob
+// via River. Called from HandleInvoiceUpcoming after the cancel decision
+// is committed. Spec §4.1 step 6: enqueue, do not send synchronously —
+// Mailgun latency must not block the Stripe webhook timeout.
 func (s *Service) enqueueCancelEmail(ctx context.Context, user db.User, subID string, periodEnd time.Time) error {
 	keepURL, err := s.buildKeepURL(user.ID, subID, periodEnd)
 	if err != nil {
@@ -285,7 +296,12 @@ func (s *Service) enqueueCancelEmail(ctx context.Context, user db.User, subID st
 	if err != nil {
 		return fmt.Errorf("compose cancel: %w", err)
 	}
-	return s.mailer.Send(ctx, msg)
+	return s.enqueuer.EnqueueSendEmail(ctx, jobs.SendEmailArgs{
+		To:      msg.To,
+		Subject: msg.Subject,
+		Text:    msg.Text,
+		HTML:    msg.HTML,
+	})
 }
 
 func (s *Service) buildKeepURL(userID uuid.UUID, subID string, periodEnd time.Time) (string, error) {
@@ -362,7 +378,7 @@ func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) 
 
 	mReverseLink(ctx, claims.SubscriptionID)
 
-	if err := s.enqueueKeptEmail(ctx, claims.UserID, claims.SubscriptionID, claims.CurrentPeriodEnd); err != nil {
+	if err := s.enqueueKeptEmail(ctx, claims.UserID, claims.CurrentPeriodEnd); err != nil {
 		mEmailEnqueue(ctx, "kept", "error")
 		s.log.Error("kept email enqueue failed", "user_id", claims.UserID, "sub_id", claims.SubscriptionID, "err", err)
 	} else {
@@ -463,7 +479,7 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 
 	mReverseActivity(ctx, subID)
 
-	if err := s.enqueueKeptEmail(ctx, userID, subID, periodEnd); err != nil {
+	if err := s.enqueueKeptEmail(ctx, userID, periodEnd); err != nil {
 		mEmailEnqueue(ctx, "kept", "error")
 		s.log.Error("kept email enqueue failed", "user_id", userID, "sub_id", subID, "err", err)
 	} else {
@@ -480,9 +496,12 @@ func marshalKeptMetadata(subID, via string, periodStart time.Time) ([]byte, erro
 	})
 }
 
-// enqueueKeptEmail composes the kept-confirmation email and sends it.
-// Called from KeepSubscription and AutoReverse after a successful reversal.
-func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, _ string, periodEnd time.Time) error {
+// enqueueKeptEmail composes the kept-confirmation email and queues a
+// SendEmailJob via River. Called from KeepSubscription and AutoReverse
+// after a successful reversal. Spec §4.3 step 6: enqueue, do not send
+// synchronously — AutoReverse runs under a 5s context from the auth
+// middleware and must not block on Mailgun latency.
+func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, periodEnd time.Time) error {
 	q := db.New(s.pool)
 	user, err := q.GetUserByID(ctx, userID)
 	if err != nil {
@@ -492,7 +511,12 @@ func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, _ stri
 	if err != nil {
 		return fmt.Errorf("compose kept: %w", err)
 	}
-	return s.mailer.Send(ctx, msg)
+	return s.enqueuer.EnqueueSendEmail(ctx, jobs.SendEmailArgs{
+		To:      msg.To,
+		Subject: msg.Subject,
+		Text:    msg.Text,
+		HTML:    msg.HTML,
+	})
 }
 
 // pgxText / pgxTime are local pgtype constructors. Inlined here because the

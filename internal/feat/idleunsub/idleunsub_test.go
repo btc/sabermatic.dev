@@ -31,6 +31,10 @@ func silentLogger() *slog.Logger {
 
 // fixture bundles the backend + Stripe stub + service for a single test.
 // Tests mutate Sub or per-user DB state before calling Svc.HandleInvoiceUpcoming.
+//
+// Emails: production enqueues SendEmailJobs via River instead of calling
+// email.Sender directly (spec §4.1, §4.3). Tests assert on Enqueuer.Snapshot()
+// to inspect queued args (To/Subject/Text/HTML).
 type fixture struct {
 	B           *backend.Backend
 	Ctx         context.Context
@@ -41,7 +45,7 @@ type fixture struct {
 	PeriodEnd   time.Time
 	Sub         *stripe.Subscription
 	Fake        *fakeStripe
-	Mailer      *recordingMailer
+	Enqueuer    *recordingEnqueuer
 	Svc         *idleunsub.Service
 	Event       stripe.Event
 }
@@ -97,14 +101,14 @@ func setupHappyPath(t *testing.T) *fixture {
 		}}},
 	}
 	fake := &fakeStripe{Subs: map[string]*stripe.Subscription{subID: sub}}
-	mailer := &recordingMailer{}
+	enqueuer := &recordingEnqueuer{}
 
 	var signerKey [32]byte
 	_, err = rand.Read(signerKey[:])
 	require.NoError(t, err)
 	signer := idleunsub.NewTokenSigner(signerKey[:])
 
-	svc := idleunsub.NewService(b.Pool(), fake, mailer, signer, "http://localhost:3000", silentLogger())
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, "http://localhost:3000", silentLogger())
 
 	event := stripe.Event{
 		ID:   "evt_" + uuid.NewString()[:8],
@@ -124,7 +128,7 @@ func setupHappyPath(t *testing.T) *fixture {
 		PeriodEnd:   periodEnd,
 		Sub:         sub,
 		Fake:        fake,
-		Mailer:      mailer,
+		Enqueuer:    enqueuer,
 		Svc:         svc,
 		Event:       event,
 	}
@@ -202,9 +206,10 @@ func TestHandleInvoiceUpcoming_FiresCancel_WhenIdleTwoPeriods(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, subIDCol.Valid, "spec invariant: HandleInvoiceUpcoming does not write stripe_subscription_id")
 
-	// Cancel email was sent: exactly one message with correct subject, To, and body.
-	require.Len(t, fx.Mailer.Msgs, 1, "expected exactly one cancel email")
-	cancelMsg := fx.Mailer.Msgs[0]
+	// Cancel email was enqueued: exactly one SendEmailJob with correct subject, To, and body.
+	enqueued := fx.Enqueuer.Snapshot()
+	require.Len(t, enqueued, 1, "expected exactly one cancel email enqueued")
+	cancelMsg := enqueued[0]
 	require.Equal(t, "We won't charge you for the next period", cancelMsg.Subject)
 	// Fetch user email from DB to assert on To field.
 	var userEmail string
@@ -226,7 +231,7 @@ func TestHandleInvoiceUpcoming_SkipsTrialing(t *testing.T) {
 
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 	requireNoCancel(t, fx)
-	require.Empty(t, fx.Mailer.Msgs, "no email when cancel is skipped")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued when cancel is skipped")
 }
 
 func TestHandleInvoiceUpcoming_SkipsAlreadyCanceled(t *testing.T) {
@@ -236,7 +241,7 @@ func TestHandleInvoiceUpcoming_SkipsAlreadyCanceled(t *testing.T) {
 
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 	requireNoCancel(t, fx)
-	require.Empty(t, fx.Mailer.Msgs, "no email when cancel is skipped")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued when cancel is skipped")
 }
 
 func TestHandleInvoiceUpcoming_SkipsGrandfathered(t *testing.T) {
@@ -492,9 +497,10 @@ func TestKeepSubscription_HappyPath(t *testing.T) {
 	require.Equal(t, "link", via)
 	require.Equal(t, fx.SubID, gotSubID)
 
-	// Kept-confirmation email was sent.
-	require.Len(t, fx.Mailer.Msgs, 1, "expected exactly one kept email")
-	require.Equal(t, "Your subscription is still active", fx.Mailer.Msgs[0].Subject)
+	// Kept-confirmation email was enqueued.
+	enqueued := fx.Enqueuer.Snapshot()
+	require.Len(t, enqueued, 1, "expected exactly one kept email enqueued")
+	require.Equal(t, "Your subscription is still active", enqueued[0].Subject)
 }
 
 func TestKeepSubscription_RefusesManualCancel(t *testing.T) {
@@ -523,7 +529,7 @@ func TestKeepSubscription_RefusesManualCancel(t *testing.T) {
 	require.True(t, cancelAtEnd, "manual-cancel cache flag must be left intact")
 	require.False(t, isAuto)
 	require.False(t, banner)
-	require.Empty(t, fx.Mailer.Msgs, "no email when reversal is a no-op")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued when reversal is a no-op")
 }
 
 func TestKeepSubscription_Idempotent(t *testing.T) {
@@ -539,9 +545,10 @@ func TestKeepSubscription_Idempotent(t *testing.T) {
 	require.Len(t, fx.Fake.UpdateCalls, 1, "second call must not re-hit Stripe")
 	require.Equal(t, 1, countKeptEvents(t, fx), "second call must not re-insert event")
 
-	// Exactly one email: first call sends it; second call is a gate-off no-op.
-	require.Len(t, fx.Mailer.Msgs, 1, "exactly one kept email across both calls")
-	require.Equal(t, "Your subscription is still active", fx.Mailer.Msgs[0].Subject)
+	// Exactly one email: first call enqueues it; second call is a gate-off no-op.
+	enqueued := fx.Enqueuer.Snapshot()
+	require.Len(t, enqueued, 1, "exactly one kept email enqueued across both calls")
+	require.Equal(t, "Your subscription is still active", enqueued[0].Subject)
 }
 
 // ---------------------------------------------------------------------------
@@ -560,7 +567,7 @@ func TestAutoReverse_GateOff(t *testing.T) {
 	// Note: setupHappyPath does not call GetSubscription either; AutoReverse
 	// must early-return before any Stripe round-trip.
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.Msgs, "no email when gate is off")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued when gate is off")
 }
 
 func TestAutoReverse_HappyPath(t *testing.T) {
@@ -590,9 +597,10 @@ func TestAutoReverse_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "auto_activity", via)
 
-	// Kept-confirmation email was sent.
-	require.Len(t, fx.Mailer.Msgs, 1, "expected exactly one kept email")
-	require.Equal(t, "Your subscription is still active", fx.Mailer.Msgs[0].Subject)
+	// Kept-confirmation email was enqueued.
+	enqueued := fx.Enqueuer.Snapshot()
+	require.Len(t, enqueued, 1, "expected exactly one kept email enqueued")
+	require.Equal(t, "Your subscription is still active", enqueued[0].Subject)
 }
 
 func TestAutoReverse_CacheDriftCorrected(t *testing.T) {
@@ -617,7 +625,7 @@ func TestAutoReverse_CacheDriftCorrected(t *testing.T) {
 
 	// No subscription_kept event row (no real reversal happened).
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.Msgs, "no email on cache drift correction")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued on cache drift correction")
 }
 
 func TestAutoReverse_RefusesManualCancel(t *testing.T) {
@@ -644,7 +652,7 @@ func TestAutoReverse_RefusesManualCancel(t *testing.T) {
 	require.False(t, isAuto)
 	require.False(t, banner)
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.Msgs, "no email when reversal is refused")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued when reversal is refused")
 }
 
 func TestAutoReverse_StripeUpdateFails(t *testing.T) {
@@ -666,5 +674,5 @@ func TestAutoReverse_StripeUpdateFails(t *testing.T) {
 
 	// No subscription_kept rows because we returned before DB writes.
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.Msgs, "no email when Stripe update fails")
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email enqueued when Stripe update fails")
 }

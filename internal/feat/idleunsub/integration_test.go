@@ -72,9 +72,9 @@ func TestE2E_CancelAndKeepViaLink(t *testing.T) {
 		}}},
 	}
 
-	mailer := &idleunsubtest.RecordingMailer{}
+	enqueuer := &idleunsubtest.RecordingEnqueuer{}
 	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
-	svc := idleunsub.NewService(b.Pool(), fake, mailer, signer, testBaseURL, slog.Default())
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, testBaseURL, slog.Default())
 	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
 
 	// httptest server hosting just the keep-link handler. Email body links
@@ -88,10 +88,10 @@ func TestE2E_CancelAndKeepViaLink(t *testing.T) {
 	upcomingEvent := makeInvoiceUpcomingEvent("evt_e2e_1", subID, custID)
 	require.NoError(t, b.HandleStripeWebhook(ctx, upcomingEvent))
 
-	// 2. Verify Stripe was told to cancel and a cancel email landed.
+	// 2. Verify Stripe was told to cancel and a cancel email was enqueued.
 	require.True(t, fake.Subs[subID].CancelAtPeriodEnd, "Stripe should be canceled at period end")
-	msgs := mailer.Snapshot()
-	require.Len(t, msgs, 1, "expected cancel email")
+	msgs := enqueuer.Snapshot()
+	require.Len(t, msgs, 1, "expected cancel email enqueued")
 	require.Contains(t, msgs[0].Subject, "next period")
 	require.Contains(t, msgs[0].Text, testBaseURL+"/sub/keep?t=")
 
@@ -106,8 +106,8 @@ func TestE2E_CancelAndKeepViaLink(t *testing.T) {
 
 	// 4. Verify reversal happened in Stripe + a kept email was enqueued.
 	require.False(t, fake.Subs[subID].CancelAtPeriodEnd, "Stripe should be reverted")
-	msgs = mailer.Snapshot()
-	require.Len(t, msgs, 2, "expected kept email after keep-link click")
+	msgs = enqueuer.Snapshot()
+	require.Len(t, msgs, 2, "expected kept email enqueued after keep-link click")
 	require.Contains(t, msgs[1].Subject, "still active")
 
 	// 5. Verify cache state in DB.
@@ -125,7 +125,7 @@ func TestE2E_CancelAndKeepViaLink(t *testing.T) {
 	require.NoError(t, err)
 	resp2.Body.Close()
 	require.Equal(t, http.StatusOK, resp2.StatusCode)
-	require.Equal(t, 2, mailer.Len(), "no additional email on replay")
+	require.Equal(t, 2, enqueuer.Len(), "no additional email enqueued on replay")
 }
 
 // TestE2E_AutoReverseOnLogin exercises the activity-driven reversal path:
@@ -173,9 +173,9 @@ func TestE2E_AutoReverseOnLogin(t *testing.T) {
 		}}},
 	}
 
-	mailer := &idleunsubtest.RecordingMailer{}
+	enqueuer := &idleunsubtest.RecordingEnqueuer{}
 	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
-	svc := idleunsub.NewService(b.Pool(), fake, mailer, signer, testBaseURL, slog.Default())
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, testBaseURL, slog.Default())
 	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
 
 	// Login through the real path to get a real session token.
@@ -190,22 +190,22 @@ func TestE2E_AutoReverseOnLogin(t *testing.T) {
 	_, err = b.AuthenticateSession(ctx, auth.HashSessionToken(loginResult.Token))
 	require.NoError(t, err)
 
-	// Wait for the background goroutine to land its writes AND send the email.
-	// AutoReverse clears the cache and commits BEFORE sending the email, so
-	// polling on the cache alone races against the mailer.Send call.
+	// Wait for the background goroutine to land its writes AND enqueue the email.
+	// AutoReverse clears the cache and commits BEFORE enqueuing the email, so
+	// polling on the cache alone races against the enqueue call.
 	require.Eventually(t, func() bool {
 		var subCancelAtPeriodEnd bool
 		err := b.Pool().QueryRow(ctx,
 			`SELECT sub_cancel_at_period_end FROM users WHERE id = $1`,
 			userID).Scan(&subCancelAtPeriodEnd)
-		return err == nil && !subCancelAtPeriodEnd && mailer.Len() >= 1
+		return err == nil && !subCancelAtPeriodEnd && enqueuer.Len() >= 1
 	}, 5*time.Second, 50*time.Millisecond, "AutoReverse goroutine did not finish")
 
 	// Stripe was reverted (asserted via DB cache, not fake.Subs — the FakeStripe
 	// map is mutated by the AutoReverse goroutine and is documented as not
 	// safe for concurrent reads).
-	msgs := mailer.Snapshot()
-	require.Len(t, msgs, 1, "expected kept email")
+	msgs := enqueuer.Snapshot()
+	require.Len(t, msgs, 1, "expected kept email enqueued")
 	require.Contains(t, msgs[0].Subject, "still active")
 
 	// pending_kept_banner is set (activity-driven real reversal).

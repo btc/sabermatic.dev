@@ -128,23 +128,17 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
 
-	// Idle auto-cancel service. Degraded mode (no keep-link emails) when the
+	// Idle auto-cancel signer. Degraded mode (no keep-link emails) when the
 	// HMAC key is not configured: cancel decisions still fire, but the email
-	// path is skipped per the spec. Never panic at init.
+	// path is skipped per the spec. Never panic at init. The Service itself
+	// is constructed after riverClient is available so we can wire the
+	// River-backed EmailEnqueuer.
 	var keepSigner *idleunsub.TokenSigner
 	if cfg.Idleunsub.KeepTokenHMACKey != "" {
 		keepSigner = idleunsub.NewTokenSigner([]byte(cfg.Idleunsub.KeepTokenHMACKey))
 	} else {
 		slog.Warn("KEEP_TOKEN_HMAC_KEY not configured; idle auto-cancel keep emails will be skipped")
 	}
-	idleunsubSvc := idleunsub.NewService(
-		pool,
-		realStripeClient{},
-		emailSender,
-		keepSigner,
-		cfg.Auth.BaseURL,
-		slog.Default(),
-	)
 
 	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store, em)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
@@ -190,6 +184,19 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 	workerRefs.Cleanup.Jobs = riverClient
 	workerRefs.Coach.Jobs = riverClient
 	workerRefs.SweepImages.Jobs = riverClient
+
+	// Idle auto-cancel service: now that riverClient is alive, wire the
+	// River-backed EmailEnqueuer so cancel/kept emails are sent out-of-band
+	// instead of blocking the webhook handler or the auth middleware.
+	idleunsubSvc := idleunsub.NewService(
+		pool,
+		realStripeClient{},
+		&idleunsubEnqueuer{jobs: riverClient, cfg: &cfg.Email},
+		keepSigner,
+		cfg.Auth.BaseURL,
+		slog.Default(),
+	)
+
 	if err := riverClient.Start(context.Background()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start river: %w", err)
