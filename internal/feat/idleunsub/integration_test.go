@@ -22,6 +22,8 @@ import (
 	"github.com/btc/drill/internal/handler"
 )
 
+const testBaseURL = "http://test.local"
+
 // TestE2E_CancelAndKeepViaLink exercises the full cancel + keep-link round
 // trip: a Stripe invoice.upcoming webhook is dispatched through the production
 // Backend.HandleStripeWebhook router, the cancel email's keep-link is parsed
@@ -35,8 +37,6 @@ func TestE2E_CancelAndKeepViaLink(t *testing.T) {
 	userID := backendtest.SeedUser(t, b)
 	subID := "sub_e2e"
 	custID := "cus_e2e"
-
-	const testBaseURL = "http://test.local"
 
 	// Set up the user as a Pro subscriber with stale activity (idle > 1 period).
 	_, err := b.Pool().Exec(ctx, `
@@ -175,7 +175,7 @@ func TestE2E_AutoReverseOnLogin(t *testing.T) {
 
 	mailer := &idleunsubtest.RecordingMailer{}
 	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
-	svc := idleunsub.NewService(b.Pool(), fake, mailer, signer, "http://test.local", slog.Default())
+	svc := idleunsub.NewService(b.Pool(), fake, mailer, signer, testBaseURL, slog.Default())
 	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
 
 	// Login through the real path to get a real session token.
