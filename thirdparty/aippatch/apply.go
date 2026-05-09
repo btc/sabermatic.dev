@@ -2,12 +2,10 @@ package aippatch
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
-	"connectrpc.com/connect"
 	"github.com/huandu/go-sqlbuilder"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -35,8 +33,7 @@ func Apply[T proto.Message](
 		if m.EmptyMask == ErrorOnEmpty {
 			return zero, connectInvalidArg("update_mask must not be empty")
 		}
-		return zero, connect.NewError(connect.CodeUnimplemented,
-			errors.New("UpdateAllWritable is unimplemented in v0"))
+		return zero, connectUnimplemented("UpdateAllWritable is unimplemented in v0")
 	}
 
 	// 2. Validate paths.

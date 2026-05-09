@@ -20,3 +20,7 @@ func connectNotFound(format string, args ...any) error {
 func connectInternal(format string, args ...any) error {
 	return connect.NewError(connect.CodeInternal, fmt.Errorf(format, args...))
 }
+
+func connectUnimplemented(format string, args ...any) error {
+	return connect.NewError(connect.CodeUnimplemented, fmt.Errorf(format, args...))
+}
