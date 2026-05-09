@@ -23,8 +23,10 @@ type Querier interface {
 	// Reset sessions stuck in 'generating' for too long (crash recovery).
 	CleanupStaleGenerating(ctx context.Context) error
 	ClearKeptBanner(ctx context.Context, id uuid.UUID) error
-	// Periodic hygiene: clear banners that are older than 14 days.
-	// (Run from a tiny daily cron; the spec calls this out as low-priority cleanup.)
+	// Periodic hygiene: clear banners that are older than 14 days, where "older"
+	// means the user's MOST RECENT subscription_kept event is >14 days old.
+	// Grouping by user_id and using MAX(created_at) prevents clearing a fresh
+	// banner when an older kept-event also exists for the same user.
 	ClearStaleKeptBanners(ctx context.Context) error
 	// Called by handleSubscriptionDeleted. Clears all sub state and downgrades plan.
 	ClearSubStateOnDeletion(ctx context.Context, id uuid.UUID) error

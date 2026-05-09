@@ -179,7 +179,7 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 				// Spec §4.5 — low-priority cleanup; once a day is plenty.
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) {
-					return jobs.ClearStaleKeptBannersArgs{}, nil
+					return jobs.ClearStaleKeptBannersArgs{}, &river.InsertOpts{Queue: jobs.QueueMaintenance}
 				},
 				nil,
 			),

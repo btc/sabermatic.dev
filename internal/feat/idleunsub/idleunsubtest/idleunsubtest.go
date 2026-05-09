@@ -81,45 +81,6 @@ type NullMailer struct{}
 // Send implements email.Sender.
 func (NullMailer) Send(_ context.Context, _ email.Message) error { return nil }
 
-// RecordingMailer is an email.Sender that captures all sent messages.
-// Safe for concurrent use: tests that fire background goroutines (e.g.,
-// AutoReverse) can call Send and read Snapshot/Len without racing.
-//
-// Note: production now enqueues emails via River (see RecordingEnqueuer).
-// RecordingMailer remains useful for direct email.Sender wiring (e.g., the
-// SendEmailWorker tests), but new idleunsub tests should assert on
-// RecordingEnqueuer.Snapshot().
-type RecordingMailer struct {
-	mu   sync.Mutex
-	Msgs []email.Message // legacy direct access; prefer Snapshot for tests
-}
-
-// Send implements email.Sender.
-func (r *RecordingMailer) Send(_ context.Context, m email.Message) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.Msgs = append(r.Msgs, m)
-	return nil
-}
-
-// Snapshot returns a copy of the captured messages, safe to inspect from any
-// goroutine. Use this instead of indexing Msgs directly when there is any
-// possibility of a concurrent Send.
-func (r *RecordingMailer) Snapshot() []email.Message {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]email.Message, len(r.Msgs))
-	copy(out, r.Msgs)
-	return out
-}
-
-// Len returns the number of captured messages, safe under concurrent Send.
-func (r *RecordingMailer) Len() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.Msgs)
-}
-
 // RecordingEnqueuer is an idleunsub.EmailEnqueuer that captures every queued
 // SendEmailJob argument. Safe for concurrent use: idleunsub tests that
 // trigger AutoReverse from a background goroutine can call EnqueueSendEmail
@@ -184,6 +145,5 @@ func NewServiceWithFake(t *testing.T, pool *pgxpool.Pool, fake *FakeStripe) *idl
 var (
 	_ idleunsub.StripeClient  = (*FakeStripe)(nil)
 	_ email.Sender            = NullMailer{}
-	_ email.Sender            = (*RecordingMailer)(nil)
 	_ idleunsub.EmailEnqueuer = (*RecordingEnqueuer)(nil)
 )

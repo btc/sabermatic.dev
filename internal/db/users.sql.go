@@ -28,12 +28,15 @@ WHERE pending_kept_banner = TRUE
   AND id IN (
     SELECT user_id FROM user_events
     WHERE event_type = 'subscription_kept'
-      AND created_at < NOW() - INTERVAL '14 days'
+    GROUP BY user_id
+    HAVING MAX(created_at) < NOW() - INTERVAL '14 days'
   )
 `
 
-// Periodic hygiene: clear banners that are older than 14 days.
-// (Run from a tiny daily cron; the spec calls this out as low-priority cleanup.)
+// Periodic hygiene: clear banners that are older than 14 days, where "older"
+// means the user's MOST RECENT subscription_kept event is >14 days old.
+// Grouping by user_id and using MAX(created_at) prevents clearing a fresh
+// banner when an older kept-event also exists for the same user.
 func (q *Queries) ClearStaleKeptBanners(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, clearStaleKeptBanners)
 	return err
