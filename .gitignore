@@ -52,6 +52,7 @@ web/dist/
 /drill
 /drillctl
 /stripescenario
+/aippatchgen
 cov.out
 coverage.out
 coverage-cross.out

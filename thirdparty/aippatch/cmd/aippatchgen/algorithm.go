@@ -19,8 +19,13 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 	models := make([]ResourceModel, 0, len(yaml.Resources))
 	codecsUsed := map[string]CodecModel{}
 
-	// Pre-validate codec maps (step 6: ToText uniqueness).
+	// Pre-validate every declared codec (step 6: ToText uniqueness, plus
+	// proto_enum descriptor existence and yaml-key↔proto-value matching).
+	// Running these once up-front means broken codec yaml is caught even
+	// when no binding currently references the codec — preventing silent
+	// drift in unused codec entries.
 	for name, c := range yaml.Codecs {
+		// ToText uniqueness.
 		seen := map[string]string{}
 		for k, v := range c.Map {
 			if prev, ok := seen[v]; ok {
@@ -29,6 +34,46 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 				})
 			}
 			seen[v] = k
+		}
+
+		// proto_enum descriptor must exist and resolve to an EnumDescriptor.
+		if c.ProtoEnum == "" {
+			diags = append(diags, Diagnostic{
+				Message: fmt.Sprintf("codec %q: proto_enum is required", name),
+			})
+			continue
+		}
+		ed, err := files.FindDescriptorByName(protoreflect.FullName(c.ProtoEnum))
+		if err != nil {
+			diags = append(diags, Diagnostic{
+				Message: fmt.Sprintf("codec %q: proto_enum %q not found: %s", name, c.ProtoEnum, err.Error()),
+			})
+			continue
+		}
+		enumDesc, ok := ed.(protoreflect.EnumDescriptor)
+		if !ok {
+			diags = append(diags, Diagnostic{
+				Message: fmt.Sprintf("codec %q: proto_enum %q is not an enum descriptor", name, c.ProtoEnum),
+			})
+			continue
+		}
+
+		// yaml map keys must each correspond to a proto enum value name.
+		validValueNames := map[string]bool{}
+		for j := 0; j < enumDesc.Values().Len(); j++ {
+			validValueNames[string(enumDesc.Values().Get(j).Name())] = true
+		}
+		for k := range c.Map {
+			if !validValueNames[k] {
+				validList := make([]string, 0, len(validValueNames))
+				for vn := range validValueNames {
+					validList = append(validList, vn)
+				}
+				diags = append(diags, Diagnostic{
+					Message: fmt.Sprintf("codec %q: yaml key %q does not match any value of %s", name, k, c.ProtoEnum),
+					Hint:    fmt.Sprintf("valid value names: %v", validList),
+				})
+			}
 		}
 	}
 

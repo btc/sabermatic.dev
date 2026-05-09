@@ -86,8 +86,8 @@ func run(cfg config) error {
 	// init.gen.go files or a richer import block.
 	importPath := resolveImportPath(&yaml.Resources[0], models[0].Message)
 	pkg := models[0].Package
-	for i := range models[1:] {
-		m := &models[1:][i]
+	for i := 1; i < len(models); i++ {
+		m := &models[i]
 		if m.Package != pkg {
 			return fmt.Errorf("aippatchgen: multi-package yaml not supported in v0: %s vs %s",
 				models[0].Message, m.Message)

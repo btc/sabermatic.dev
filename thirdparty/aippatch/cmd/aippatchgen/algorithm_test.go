@@ -251,8 +251,10 @@ func TestProcessResource_AutoSetMultiStatementLiteral_Diagnostic(t *testing.T) {
 }
 
 func TestProcessResource_AutoSetMultiTargetLiteral_Diagnostic(t *testing.T) {
-	// Payload that expands SET clause: "NOW(), other_col = 'x'" parses as
-	// one statement but has two targets in the SELECT's target list.
+	// Payload that would expand the SET clause: "NOW(), other_col = 'x'"
+	// parses as one statement with a single target whose value is a RowExpr
+	// (a parenthesized comma-separated tuple). The validator's RowExpr
+	// branch rejects it.
 	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
 	schema := newSchema()
 	require.NoError(t, schema.applySQL(
