@@ -162,7 +162,7 @@ func (s *Server) AckKeptBanner(
 	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
-	if err := db.New(s.b.Pool()).ClearKeptBanner(ctx, user.ID); err != nil {
+	if err := s.b.ClearKeptBanner(ctx, user.ID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("clear banner: %w", err))
 	}
 	return connect.NewResponse(&drillv1.AckKeptBannerResponse{}), nil

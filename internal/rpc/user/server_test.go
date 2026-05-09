@@ -15,7 +15,6 @@ import (
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
-	"github.com/btc/drill/internal/backendtest"
 	drillv1 "github.com/btc/drill/internal/pb/drill/v1"
 	"github.com/btc/drill/internal/pb/drill/v1/drillv1connect"
 	"github.com/btc/drill/internal/rpc"
@@ -232,19 +231,30 @@ func TestAckKeptBanner_ClearsFlag(t *testing.T) {
 
 	b := pg.NewBackend(t)
 	ctx := context.Background()
-	userID := backendtest.SeedUser(t, b)
+	srvURL := startUserServer(t, b)
+
+	// Signup + login to get both a userID and an authenticated client.
+	signup, err := b.Signup(ctx, backend.SignupParams{
+		Email:       "ackbanner-clearsFlag@example.com",
+		Password:    "testpassword123",
+		DisplayName: "Test User",
+	})
+	require.NoError(t, err)
+	userID := signup.UserID
+
+	login, err := b.Login(ctx, backend.LoginParams{
+		Email:    "ackbanner-clearsFlag@example.com",
+		Password: "testpassword123",
+	})
+	require.NoError(t, err)
+	client := authedClient(t, srvURL, login.Token)
 
 	// Set pending_kept_banner=TRUE directly so we can test clearing it.
-	_, err := b.Pool().Exec(ctx,
+	_, err = b.Pool().Exec(ctx,
 		`UPDATE users SET pending_kept_banner = TRUE WHERE id = $1`, userID)
 	require.NoError(t, err)
 
-	// Call handler with an authenticated context.
-	authUser := &auth.AuthUser{ID: userID}
-	authCtx := auth.WithUser(ctx, authUser)
-
-	s := user.NewServer(b)
-	_, err = s.AckKeptBanner(authCtx, connect.NewRequest(&drillv1.AckKeptBannerRequest{}))
+	_, err = client.AckKeptBanner(ctx, connect.NewRequest(&drillv1.AckKeptBannerRequest{}))
 	require.NoError(t, err)
 
 	// Verify the flag is cleared in the database.
@@ -259,13 +269,43 @@ func TestAckKeptBanner_RequiresAuth(t *testing.T) {
 	t.Parallel()
 
 	b := pg.NewBackend(t)
-	s := user.NewServer(b)
+	srvURL := startUserServer(t, b)
 
-	// Call without an auth context.
-	_, err := s.AckKeptBanner(context.Background(), connect.NewRequest(&drillv1.AckKeptBannerRequest{}))
+	// Build a client without auth.
+	unauthedClient := drillv1connect.NewUserServiceClient(http.DefaultClient, srvURL)
+
+	_, err := unauthedClient.AckKeptBanner(context.Background(),
+		connect.NewRequest(&drillv1.AckKeptBannerRequest{}))
 	require.Error(t, err)
+	require.Equal(t, connect.CodeUnauthenticated, connect.CodeOf(err))
+}
 
-	var connErr *connect.Error
-	require.ErrorAs(t, err, &connErr)
-	require.Equal(t, connect.CodeUnauthenticated, connErr.Code())
+func TestAckKeptBanner_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	srvURL := startUserServer(t, b)
+
+	// Signup + login; SeedUser leaves pending_kept_banner=false by default.
+	_, err := b.Signup(ctx, backend.SignupParams{
+		Email:       "ackbanner-idempotent@example.com",
+		Password:    "testpassword123",
+		DisplayName: "Test User",
+	})
+	require.NoError(t, err)
+
+	login, err := b.Login(ctx, backend.LoginParams{
+		Email:    "ackbanner-idempotent@example.com",
+		Password: "testpassword123",
+	})
+	require.NoError(t, err)
+	client := authedClient(t, srvURL, login.Token)
+
+	// Two consecutive calls — both must succeed.
+	_, err = client.AckKeptBanner(ctx, connect.NewRequest(&drillv1.AckKeptBannerRequest{}))
+	require.NoError(t, err)
+
+	_, err = client.AckKeptBanner(ctx, connect.NewRequest(&drillv1.AckKeptBannerRequest{}))
+	require.NoError(t, err, "AckKeptBanner must be idempotent")
 }

@@ -30,3 +30,11 @@ func (b *Backend) UpdateDisplayName(ctx context.Context, userID uuid.UUID, displ
 	}
 	return user, nil
 }
+
+// ClearKeptBanner clears the pending_kept_banner flag for the given user.
+// Idempotent: clearing an already-clear flag is a no-op.
+func (b *Backend) ClearKeptBanner(ctx context.Context, userID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.ClearKeptBanner")
+	defer func() { drilotel.End(span, err) }()
+	return db.New(b.pool).ClearKeptBanner(ctx, userID)
+}
