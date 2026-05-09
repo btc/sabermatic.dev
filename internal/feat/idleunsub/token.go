@@ -52,8 +52,11 @@ func (s *TokenSigner) Sign(c KeepTokenClaims) string {
 }
 
 // Verify parses and validates a token. Returns the claims or an error.
-//   - ErrTokenInvalid:  bad signature, malformed, or invariant violated
-//   - ErrTokenExpired:  signature valid but exp < now
+//   - ErrTokenInvalid:  bad signature, malformed, or invariant violated.
+//     The returned claims are the zero value — no field is trustworthy.
+//   - ErrTokenExpired:  signature valid but exp < now. The returned claims
+//     are the parsed payload (signature was OK), so the caller may surface
+//     CurrentPeriodEnd to the user (e.g. "your subscription ended on …").
 func (s *TokenSigner) Verify(tok string) (KeepTokenClaims, error) {
 	var zero KeepTokenClaims
 	parts := strings.SplitN(tok, ".", 2)
@@ -84,7 +87,9 @@ func (s *TokenSigner) Verify(tok string) (KeepTokenClaims, error) {
 	}
 
 	if s.now().Unix() >= c.ExpiresAt {
-		return zero, ErrTokenExpired
+		// Signature was valid; surface the parsed claims so the caller can
+		// render a "your subscription ended on …" page using trustworthy data.
+		return c, ErrTokenExpired
 	}
 	return c, nil
 }

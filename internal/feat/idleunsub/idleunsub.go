@@ -52,6 +52,13 @@ func NewService(pool *pgxpool.Pool, sc StripeClient, m email.Sender, sn *TokenSi
 	return &Service{pool: pool, stripe: sc, mailer: m, signer: sn, baseURL: baseURL, now: time.Now, log: log}
 }
 
+// Signer returns the configured TokenSigner. Used by Backend to verify
+// keep-link tokens at the handler layer without duplicating the signer
+// reference. Returns nil if KEEP_TOKEN_HMAC_KEY was unset at startup
+// (degraded mode: cancel decisions still fire, but keep-link emails are
+// skipped and the /sub/keep endpoint cannot verify tokens).
+func (s *Service) Signer() *TokenSigner { return s.signer }
+
 // HandleInvoiceUpcoming evaluates the trigger rule. Idempotent: safe to call
 // multiple times for the same Stripe event.
 func (s *Service) HandleInvoiceUpcoming(ctx context.Context, event stripe.Event) error {
