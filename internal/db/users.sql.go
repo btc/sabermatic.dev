@@ -305,37 +305,6 @@ func (q *Queries) UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlan
 	return result.RowsAffected(), nil
 }
 
-const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
-UPDATE users SET display_name = $1, updated_at = NOW()
-WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
-`
-
-type UpdateUserDisplayNameParams struct {
-	DisplayName string    `json:"display_name"`
-	ID          uuid.UUID `json:"id"`
-}
-
-func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserDisplayName, arg.DisplayName, arg.ID)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.EmailVerified,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.StripeCustomerID,
-		&i.Plan,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.FreeFullEducatorsUsed,
-	)
-	return i, err
-}
-
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users SET password_hash = $2, updated_at = NOW()
 WHERE id = $1

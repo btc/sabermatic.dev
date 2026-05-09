@@ -62,11 +62,6 @@ WITH soft_delete AS (
 )
 DELETE FROM auth_sessions WHERE user_id = @id;
 
--- name: UpdateUserDisplayName :one
-UPDATE users SET display_name = @display_name, updated_at = NOW()
-WHERE id = @id AND deleted_at IS NULL
-RETURNING *;
-
 -- name: GetUserByEmailForUpdate :one
 SELECT * FROM users
 WHERE email = @email

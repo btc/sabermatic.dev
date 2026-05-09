@@ -1,0 +1,20 @@
+codecs:
+  enum_color:
+    proto_enum: aippatch.fixture.v1.Color
+    map:
+      COLOR_RED: red
+      COLOR_BLUE: blue
+
+resources:
+  - message: aippatch.fixture.v1.Widget
+    table: widgets
+    pk: id
+    soft_delete: deleted_at
+    empty_mask: error
+    writable: [name]
+    go_package_path: github.com/btc/drill/thirdparty/aippatch/internal/fixturepb
+    auto_set:
+      updated_at: NOW()
+    overrides:
+      color: { codec: enum_color }
+      create_time: { column: created_at }

@@ -7,6 +7,7 @@ test-protos:
 	@echo "=== buf generate (verify clean) ==="
 	buf generate
 	@git diff --exit-code internal/pb/ web/src/pb/ || (echo "FAIL: buf generate produced uncommitted changes" && exit 1)
+	go run ./thirdparty/aippatch/cmd/aippatchgen --check
 
 test-frontend:
 	@echo "=== frontend deps ==="
@@ -124,6 +125,9 @@ deps:
 # Regenerate protobuf code from .proto sources.
 generate:
 	buf generate
+	buf build -o buf.binpb
+	sqlc generate
+	go run ./thirdparty/aippatch/cmd/aippatchgen
 
 # Run golangci-lint (same config as CI).
 lint:

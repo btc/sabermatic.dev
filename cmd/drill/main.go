@@ -21,6 +21,7 @@ import (
 	"github.com/btc/drill/internal/events"
 	"github.com/btc/drill/internal/handler"
 	"github.com/btc/drill/internal/migrate"
+	"github.com/btc/drill/internal/patches"
 )
 
 func main() {
@@ -78,6 +79,10 @@ func runWithContext(ctx context.Context) error {
 		return fmt.Errorf("create backend: %w", err)
 	}
 	defer b.Close()
+
+	if err := patches.InitPatches(); err != nil {
+		return fmt.Errorf("aippatch: %w", err)
+	}
 
 	oauthStateKey := auth.DeriveKey(cfg.Auth.TokenSecret, "oauth-state")
 	auth.SetupGothProviders(&cfg.OAuth, cfg.Auth.BaseURL, oauthStateKey)

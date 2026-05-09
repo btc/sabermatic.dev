@@ -135,7 +135,6 @@ type Querier interface {
 	// Used for status transitions after session completion (evaluating → reviewed,
 	// → evaluation_failed) where end time and turn count should not change.
 	UpdateSessionStatusOnly(ctx context.Context, arg UpdateSessionStatusOnlyParams) error
-	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (User, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserStripeCustomerID(ctx context.Context, arg UpdateUserStripeCustomerIDParams) error
 	VerifyUserEmail(ctx context.Context, id uuid.UUID) error
