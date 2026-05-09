@@ -145,3 +145,86 @@ func TestProcessResource_UnmatchedProtoField_Diagnostic(t *testing.T) {
 		require.Contains(t, msg, fname, "expected diagnostic mentioning %q", fname)
 	}
 }
+
+func TestProcessResource_AutoSetConflict_Diagnostic(t *testing.T) {
+	// auto_set names a column that is also bound to a proto field.
+	// The Widget.name field maps to the "name" column by default.
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(
+		`CREATE TABLE widgets (id UUID PRIMARY KEY, name TEXT NOT NULL DEFAULT '')`,
+	))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"name": "NOW()"},
+		Overrides: map[string]yamlOverride{
+			"enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "conflicts with binding")
+}
+
+func TestProcessResource_AutoSetBadLiteral_Diagnostic(t *testing.T) {
+	// auto_set literal contains multiple statements — not a valid Postgres expression.
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(
+		`CREATE TABLE widgets (id UUID PRIMARY KEY, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+	))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"updated_at": "NOW(); DROP TABLE x"},
+		Overrides: map[string]yamlOverride{
+			"name": {Skip: true}, "enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "not a valid Postgres expression")
+}
+
+func TestProcessResource_AutoSetColumnNotFound_Diagnostic(t *testing.T) {
+	// auto_set names a column that doesn't exist in the table.
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"nonexistent_col": "NOW()"},
+		Overrides: map[string]yamlOverride{
+			"name": {Skip: true}, "enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "nonexistent_col")
+}
+
+func TestProcessResource_AutoSetColumnNullable_Diagnostic(t *testing.T) {
+	// auto_set names a nullable column — must be rejected.
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(
+		`CREATE TABLE widgets (id UUID PRIMARY KEY, updated_at TIMESTAMPTZ)`,
+	))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"updated_at": "NOW()"},
+		Overrides: map[string]yamlOverride{
+			"name": {Skip: true}, "enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "must be NOT NULL")
+}
