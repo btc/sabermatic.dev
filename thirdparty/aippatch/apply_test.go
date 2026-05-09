@@ -2,11 +2,13 @@ package aippatch
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -387,4 +389,51 @@ func TestApply_AutoSetBumpsUpdatedAt(t *testing.T) {
 		"SELECT updated_at FROM widgets WHERE id=$1", id).Scan(&after))
 	require.True(t, after.After(before),
 		"updated_at must advance: before=%v after=%v", before, after)
+}
+
+func TestApply_ParticipatesInCallerTx(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	ctx := context.Background()
+	id := uuid.New()
+	_, err := pool.Exec(ctx, "INSERT INTO widgets (id, name) VALUES ($1, $2)", id, "before")
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	// Rollback case: Apply inside a tx, then return error → no row change.
+	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		_, err := Apply(ctx, tx, m, Op[*fixturepb.Widget]{
+			Message: &fixturepb.Widget{Name: "rolled-back"},
+			Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+			PKValue: id,
+		})
+		if err != nil {
+			return err
+		}
+		return errors.New("force rollback")
+	})
+	require.ErrorContains(t, err, "force rollback")
+
+	var name string
+	require.NoError(t, pool.QueryRow(ctx, "SELECT name FROM widgets WHERE id=$1", id).Scan(&name))
+	require.Equal(t, "before", name, "rollback should preserve original value")
+
+	// Commit case: Apply inside a tx that commits → row updated.
+	require.NoError(t, pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		_, err := Apply(ctx, tx, m, Op[*fixturepb.Widget]{
+			Message: &fixturepb.Widget{Name: "committed"},
+			Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+			PKValue: id,
+		})
+		return err
+	}))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT name FROM widgets WHERE id=$1", id).Scan(&name))
+	require.Equal(t, "committed", name)
 }
