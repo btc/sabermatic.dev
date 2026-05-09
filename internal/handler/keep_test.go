@@ -217,6 +217,7 @@ func TestKeep_ExpiredToken(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "subscription has ended")
 	assert.Contains(t, w.Body.String(), pastEnd.UTC().Format("January 2, 2006"))
 	assert.Empty(t, fx.Fake.UpdateCalls, "expired token must not reach Stripe")
+	require.Contains(t, w.Header().Get("Content-Type"), "text/html")
 }
 
 func TestKeep_Replay(t *testing.T) {
@@ -281,4 +282,31 @@ func TestKeep_RefusesManualCancel(t *testing.T) {
 		fx.UserID).Scan(&count)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "manual cancel must not insert a kept event")
+}
+
+// TestKeep_NoSigner_RendersInvalid verifies the degraded-mode path: when the
+// backend has no signer configured (nil TokenSigner), HandleKeepLink returns
+// KeepLinkInvalid and the handler renders a 400 "invalid" page without
+// touching Stripe or the database.
+func TestKeep_NoSigner_RendersInvalid(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+
+	// Construct a Service with nil signer to simulate a missing
+	// KEEP_TOKEN_HMAC_KEY at startup (degraded mode).
+	testSvc := idleunsub.NewService(
+		b.Pool(),
+		idleunsubtest.NewFakeStripe(),
+		idleunsubtest.NullMailer{},
+		nil, // no signer
+		"http://localhost:3000",
+		slog.Default(),
+	)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: testSvc})
+
+	w := httptest.NewRecorder()
+	handler.GetKeepLink(b)(w, newKeepRequest("anything"))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid")
 }

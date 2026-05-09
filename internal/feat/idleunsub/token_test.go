@@ -98,12 +98,23 @@ func TestVerify_RejectsExpired(t *testing.T) {
 	t.Parallel()
 	s := newSigner(t)
 	past := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
-	tok := s.Sign(idleunsub.KeepTokenClaims{
-		UserID: uuid.New(), SubscriptionID: "sub_x", Action: "keep_subscription",
-		CurrentPeriodEnd: past, IssuedAt: past.Add(-24 * time.Hour).Unix(), ExpiresAt: past.Unix(),
-	})
-	_, err := s.Verify(tok)
+	claims := idleunsub.KeepTokenClaims{
+		UserID:           uuid.New(),
+		SubscriptionID:   "sub_x",
+		Action:           "keep_subscription",
+		CurrentPeriodEnd: past,
+		IssuedAt:         past.Add(-24 * time.Hour).Unix(),
+		ExpiresAt:        past.Unix(),
+	}
+	tok := s.Sign(claims)
+	got, err := s.Verify(tok)
 	require.ErrorIs(t, err, idleunsub.ErrTokenExpired)
+	// Verify pins the contract: ErrTokenExpired returns POPULATED claims so
+	// callers can render a date-bearing "subscription ended" page.
+	require.Equal(t, claims.UserID, got.UserID)
+	require.Equal(t, claims.SubscriptionID, got.SubscriptionID)
+	require.Equal(t, claims.ExpiresAt, got.ExpiresAt)
+	require.True(t, claims.CurrentPeriodEnd.Equal(got.CurrentPeriodEnd))
 }
 
 func TestVerify_RejectsExpDriftFromPeriodEnd(t *testing.T) {
