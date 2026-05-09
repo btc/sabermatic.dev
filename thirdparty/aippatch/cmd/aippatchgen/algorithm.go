@@ -269,10 +269,38 @@ func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *pr
 			continue
 		}
 		// Validate literal as a single Postgres expression.
-		if _, err := pg_query.Parse("SELECT (" + lit + ")"); err != nil {
+		// We wrap in SELECT (...) and then inspect the parse tree:
+		//   - exactly 1 statement (rejects "1); DROP TABLE x; SELECT (1")
+		//   - that statement is a SELECT with exactly 1 target (rejects "NOW(), other_col = 'x'")
+		res, err := pg_query.Parse("SELECT (" + lit + ")")
+		if err != nil {
 			diags = append(diags, Diagnostic{
 				Resource: r.Message,
 				Message:  fmt.Sprintf("auto_set column %q literal %q is not a valid Postgres expression: %v", col, lit, err),
+			})
+			continue
+		}
+		if len(res.Stmts) != 1 {
+			diags = append(diags, Diagnostic{
+				Resource: r.Message,
+				Message:  fmt.Sprintf("auto_set column %q literal %q must be a single expression, not multiple statements", col, lit),
+			})
+			continue
+		}
+		sel := res.Stmts[0].Stmt.GetSelectStmt()
+		if sel == nil || len(sel.GetTargetList()) != 1 {
+			diags = append(diags, Diagnostic{
+				Resource: r.Message,
+				Message:  fmt.Sprintf("auto_set column %q literal %q must be a single expression target", col, lit),
+			})
+			continue
+		}
+		// A comma-separated list like "NOW(), col = 'x'" parses as a single
+		// RowExpr target rather than multiple targets. Reject it explicitly.
+		if tgt := sel.GetTargetList()[0].GetResTarget(); tgt != nil && tgt.GetVal().GetRowExpr() != nil {
+			diags = append(diags, Diagnostic{
+				Resource: r.Message,
+				Message:  fmt.Sprintf("auto_set column %q literal %q must be a single expression target", col, lit),
 			})
 			continue
 		}

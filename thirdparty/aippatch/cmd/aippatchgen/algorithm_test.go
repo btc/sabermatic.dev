@@ -228,3 +228,46 @@ func TestProcessResource_AutoSetColumnNullable_Diagnostic(t *testing.T) {
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "must be NOT NULL")
 }
+
+func TestProcessResource_AutoSetMultiStatementLiteral_Diagnostic(t *testing.T) {
+	// Injection payload that parses as 3 statements after the wrapping.
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(
+		`CREATE TABLE widgets (id UUID PRIMARY KEY, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+	))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"updated_at": "1); DROP TABLE x; SELECT (1"},
+		Overrides: map[string]yamlOverride{
+			"name": {Skip: true}, "enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(&yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "single expression")
+}
+
+func TestProcessResource_AutoSetMultiTargetLiteral_Diagnostic(t *testing.T) {
+	// Payload that expands SET clause: "NOW(), other_col = 'x'" parses as
+	// one statement but has two targets in the SELECT's target list.
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(
+		`CREATE TABLE widgets (id UUID PRIMARY KEY, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
+	))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		AutoSet: map[string]string{"updated_at": "NOW(), other_col = 'x'"},
+		Overrides: map[string]yamlOverride{
+			"name": {Skip: true}, "enabled": {Skip: true}, "count": {Skip: true},
+			"small_count": {Skip: true}, "big_count": {Skip: true},
+			"color": {Skip: true}, "create_time": {Skip: true},
+		},
+	}}}
+	_, _, diags := processAll(&yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "single expression")
+}
