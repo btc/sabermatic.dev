@@ -202,16 +202,17 @@ func (x *GetMeResponse) GetUser() *User {
 }
 
 type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	DisplayName   string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Role          UserRole               `protobuf:"varint,4,opt,name=role,proto3,enum=drill.v1.UserRole" json:"role,omitempty"`
-	Plan          UserPlan               `protobuf:"varint,5,opt,name=plan,proto3,enum=drill.v1.UserPlan" json:"plan,omitempty"`
-	EmailVerified bool                   `protobuf:"varint,6,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
-	CreateTime    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Email             string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	DisplayName       string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Role              UserRole               `protobuf:"varint,4,opt,name=role,proto3,enum=drill.v1.UserRole" json:"role,omitempty"`
+	Plan              UserPlan               `protobuf:"varint,5,opt,name=plan,proto3,enum=drill.v1.UserPlan" json:"plan,omitempty"`
+	EmailVerified     bool                   `protobuf:"varint,6,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
+	CreateTime        *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	PendingKeptBanner bool                   `protobuf:"varint,8,opt,name=pending_kept_banner,json=pendingKeptBanner,proto3" json:"pending_kept_banner,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -291,6 +292,13 @@ func (x *User) GetCreateTime() *timestamppb.Timestamp {
 		return x.CreateTime
 	}
 	return nil
+}
+
+func (x *User) GetPendingKeptBanner() bool {
+	if x != nil {
+		return x.PendingKeptBanner
+	}
+	return false
 }
 
 type GetUsageRequest struct {
@@ -726,6 +734,78 @@ func (*ExportDataResponse) Descriptor() ([]byte, []int) {
 	return file_drill_v1_user_proto_rawDescGZIP(), []int{10}
 }
 
+type AckKeptBannerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckKeptBannerRequest) Reset() {
+	*x = AckKeptBannerRequest{}
+	mi := &file_drill_v1_user_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckKeptBannerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckKeptBannerRequest) ProtoMessage() {}
+
+func (x *AckKeptBannerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_drill_v1_user_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckKeptBannerRequest.ProtoReflect.Descriptor instead.
+func (*AckKeptBannerRequest) Descriptor() ([]byte, []int) {
+	return file_drill_v1_user_proto_rawDescGZIP(), []int{11}
+}
+
+type AckKeptBannerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckKeptBannerResponse) Reset() {
+	*x = AckKeptBannerResponse{}
+	mi := &file_drill_v1_user_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckKeptBannerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckKeptBannerResponse) ProtoMessage() {}
+
+func (x *AckKeptBannerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_drill_v1_user_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckKeptBannerResponse.ProtoReflect.Descriptor instead.
+func (*AckKeptBannerResponse) Descriptor() ([]byte, []int) {
+	return file_drill_v1_user_proto_rawDescGZIP(), []int{12}
+}
+
 var File_drill_v1_user_proto protoreflect.FileDescriptor
 
 const file_drill_v1_user_proto_rawDesc = "" +
@@ -733,7 +813,7 @@ const file_drill_v1_user_proto_rawDesc = "" +
 	"\x13drill/v1/user.proto\x12\bdrill.v1\x1a google/protobuf/field_mask.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x0e\n" +
 	"\fGetMeRequest\"3\n" +
 	"\rGetMeResponse\x12\"\n" +
-	"\x04user\x18\x01 \x01(\v2\x0e.drill.v1.UserR\x04user\"\x83\x02\n" +
+	"\x04user\x18\x01 \x01(\v2\x0e.drill.v1.UserR\x04user\"\xb3\x02\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
@@ -742,7 +822,8 @@ const file_drill_v1_user_proto_rawDesc = "" +
 	"\x04plan\x18\x05 \x01(\x0e2\x12.drill.v1.UserPlanR\x04plan\x12%\n" +
 	"\x0eemail_verified\x18\x06 \x01(\bR\remailVerified\x12;\n" +
 	"\vcreate_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"createTime\"\x11\n" +
+	"createTime\x12.\n" +
+	"\x13pending_kept_banner\x18\b \x01(\bR\x11pendingKeptBanner\"\x11\n" +
 	"\x0fGetUsageRequest\"\xe6\x01\n" +
 	"\x10GetUsageResponse\x12#\n" +
 	"\rtotal_balance\x18\x01 \x01(\x05R\ftotalBalance\x12!\n" +
@@ -775,7 +856,9 @@ const file_drill_v1_user_proto_rawDesc = "" +
 	"\x15UpdateProfileResponse\x12\"\n" +
 	"\x04user\x18\x01 \x01(\v2\x0e.drill.v1.UserR\x04user\"\x13\n" +
 	"\x11ExportDataRequest\"\x14\n" +
-	"\x12ExportDataResponse*S\n" +
+	"\x12ExportDataResponse\"\x16\n" +
+	"\x14AckKeptBannerRequest\"\x17\n" +
+	"\x15AckKeptBannerResponse*S\n" +
 	"\bUserRole\x12\x19\n" +
 	"\x15USER_ROLE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13USER_ROLE_CANDIDATE\x10\x01\x12\x13\n" +
@@ -783,13 +866,14 @@ const file_drill_v1_user_proto_rawDesc = "" +
 	"\bUserPlan\x12\x19\n" +
 	"\x15USER_PLAN_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eUSER_PLAN_FREE\x10\x01\x12\x11\n" +
-	"\rUSER_PLAN_PRO\x10\x022\xa5\x02\n" +
+	"\rUSER_PLAN_PRO\x10\x022\xf7\x02\n" +
 	"\vUserService\x128\n" +
 	"\x05GetMe\x12\x16.drill.v1.GetMeRequest\x1a\x17.drill.v1.GetMeResponse\x12A\n" +
 	"\bGetUsage\x12\x19.drill.v1.GetUsageRequest\x1a\x1a.drill.v1.GetUsageResponse\x12P\n" +
 	"\rUpdateProfile\x12\x1e.drill.v1.UpdateProfileRequest\x1a\x1f.drill.v1.UpdateProfileResponse\x12G\n" +
 	"\n" +
-	"ExportData\x12\x1b.drill.v1.ExportDataRequest\x1a\x1c.drill.v1.ExportDataResponseB3Z1github.com/btc/drill/internal/pb/drill/v1;drillv1b\x06proto3"
+	"ExportData\x12\x1b.drill.v1.ExportDataRequest\x1a\x1c.drill.v1.ExportDataResponse\x12P\n" +
+	"\rAckKeptBanner\x12\x1e.drill.v1.AckKeptBannerRequest\x1a\x1f.drill.v1.AckKeptBannerResponseB3Z1github.com/btc/drill/internal/pb/drill/v1;drillv1b\x06proto3"
 
 var (
 	file_drill_v1_user_proto_rawDescOnce sync.Once
@@ -804,7 +888,7 @@ func file_drill_v1_user_proto_rawDescGZIP() []byte {
 }
 
 var file_drill_v1_user_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_drill_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_drill_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_drill_v1_user_proto_goTypes = []any{
 	(UserRole)(0),                 // 0: drill.v1.UserRole
 	(UserPlan)(0),                 // 1: drill.v1.UserPlan
@@ -819,32 +903,36 @@ var file_drill_v1_user_proto_goTypes = []any{
 	(*UpdateProfileResponse)(nil), // 10: drill.v1.UpdateProfileResponse
 	(*ExportDataRequest)(nil),     // 11: drill.v1.ExportDataRequest
 	(*ExportDataResponse)(nil),    // 12: drill.v1.ExportDataResponse
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
-	(*fieldmaskpb.FieldMask)(nil), // 14: google.protobuf.FieldMask
+	(*AckKeptBannerRequest)(nil),  // 13: drill.v1.AckKeptBannerRequest
+	(*AckKeptBannerResponse)(nil), // 14: drill.v1.AckKeptBannerResponse
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*fieldmaskpb.FieldMask)(nil), // 16: google.protobuf.FieldMask
 }
 var file_drill_v1_user_proto_depIdxs = []int32{
 	4,  // 0: drill.v1.GetMeResponse.user:type_name -> drill.v1.User
 	0,  // 1: drill.v1.User.role:type_name -> drill.v1.UserRole
 	1,  // 2: drill.v1.User.plan:type_name -> drill.v1.UserPlan
-	13, // 3: drill.v1.User.create_time:type_name -> google.protobuf.Timestamp
+	15, // 3: drill.v1.User.create_time:type_name -> google.protobuf.Timestamp
 	7,  // 4: drill.v1.GetUsageResponse.grants:type_name -> drill.v1.Grant
 	8,  // 5: drill.v1.GetUsageResponse.recent_activity:type_name -> drill.v1.LedgerEntry
-	13, // 6: drill.v1.Grant.expire_time:type_name -> google.protobuf.Timestamp
-	13, // 7: drill.v1.Grant.create_time:type_name -> google.protobuf.Timestamp
-	13, // 8: drill.v1.LedgerEntry.create_time:type_name -> google.protobuf.Timestamp
+	15, // 6: drill.v1.Grant.expire_time:type_name -> google.protobuf.Timestamp
+	15, // 7: drill.v1.Grant.create_time:type_name -> google.protobuf.Timestamp
+	15, // 8: drill.v1.LedgerEntry.create_time:type_name -> google.protobuf.Timestamp
 	4,  // 9: drill.v1.UpdateProfileRequest.user:type_name -> drill.v1.User
-	14, // 10: drill.v1.UpdateProfileRequest.update_mask:type_name -> google.protobuf.FieldMask
+	16, // 10: drill.v1.UpdateProfileRequest.update_mask:type_name -> google.protobuf.FieldMask
 	4,  // 11: drill.v1.UpdateProfileResponse.user:type_name -> drill.v1.User
 	2,  // 12: drill.v1.UserService.GetMe:input_type -> drill.v1.GetMeRequest
 	5,  // 13: drill.v1.UserService.GetUsage:input_type -> drill.v1.GetUsageRequest
 	9,  // 14: drill.v1.UserService.UpdateProfile:input_type -> drill.v1.UpdateProfileRequest
 	11, // 15: drill.v1.UserService.ExportData:input_type -> drill.v1.ExportDataRequest
-	3,  // 16: drill.v1.UserService.GetMe:output_type -> drill.v1.GetMeResponse
-	6,  // 17: drill.v1.UserService.GetUsage:output_type -> drill.v1.GetUsageResponse
-	10, // 18: drill.v1.UserService.UpdateProfile:output_type -> drill.v1.UpdateProfileResponse
-	12, // 19: drill.v1.UserService.ExportData:output_type -> drill.v1.ExportDataResponse
-	16, // [16:20] is the sub-list for method output_type
-	12, // [12:16] is the sub-list for method input_type
+	13, // 16: drill.v1.UserService.AckKeptBanner:input_type -> drill.v1.AckKeptBannerRequest
+	3,  // 17: drill.v1.UserService.GetMe:output_type -> drill.v1.GetMeResponse
+	6,  // 18: drill.v1.UserService.GetUsage:output_type -> drill.v1.GetUsageResponse
+	10, // 19: drill.v1.UserService.UpdateProfile:output_type -> drill.v1.UpdateProfileResponse
+	12, // 20: drill.v1.UserService.ExportData:output_type -> drill.v1.ExportDataResponse
+	14, // 21: drill.v1.UserService.AckKeptBanner:output_type -> drill.v1.AckKeptBannerResponse
+	17, // [17:22] is the sub-list for method output_type
+	12, // [12:17] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -863,7 +951,7 @@ func file_drill_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_drill_v1_user_proto_rawDesc), len(file_drill_v1_user_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

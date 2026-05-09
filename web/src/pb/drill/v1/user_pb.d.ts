@@ -77,6 +77,11 @@ export declare type User = Message<"drill.v1.User"> & {
    * @generated from field: google.protobuf.Timestamp create_time = 7;
    */
   createTime?: Timestamp;
+
+  /**
+   * @generated from field: bool pending_kept_banner = 8;
+   */
+  pendingKeptBanner: boolean;
 };
 
 /**
@@ -269,6 +274,30 @@ export declare type ExportDataResponse = Message<"drill.v1.ExportDataResponse"> 
 export declare const ExportDataResponseSchema: GenMessage<ExportDataResponse>;
 
 /**
+ * @generated from message drill.v1.AckKeptBannerRequest
+ */
+export declare type AckKeptBannerRequest = Message<"drill.v1.AckKeptBannerRequest"> & {
+};
+
+/**
+ * Describes the message drill.v1.AckKeptBannerRequest.
+ * Use `create(AckKeptBannerRequestSchema)` to create a new message.
+ */
+export declare const AckKeptBannerRequestSchema: GenMessage<AckKeptBannerRequest>;
+
+/**
+ * @generated from message drill.v1.AckKeptBannerResponse
+ */
+export declare type AckKeptBannerResponse = Message<"drill.v1.AckKeptBannerResponse"> & {
+};
+
+/**
+ * Describes the message drill.v1.AckKeptBannerResponse.
+ * Use `create(AckKeptBannerResponseSchema)` to create a new message.
+ */
+export declare const AckKeptBannerResponseSchema: GenMessage<AckKeptBannerResponse>;
+
+/**
  * @generated from enum drill.v1.UserRole
  */
 export enum UserRole {
@@ -355,6 +384,14 @@ export declare const UserService: GenService<{
     methodKind: "unary";
     input: typeof ExportDataRequestSchema;
     output: typeof ExportDataResponseSchema;
+  },
+  /**
+   * @generated from rpc drill.v1.UserService.AckKeptBanner
+   */
+  ackKeptBanner: {
+    methodKind: "unary";
+    input: typeof AckKeptBannerRequestSchema;
+    output: typeof AckKeptBannerResponseSchema;
   },
 }>;
 
