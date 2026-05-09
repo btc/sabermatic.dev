@@ -235,7 +235,6 @@ func processResource(r yamlResource, codecsYaml map[string]yamlCodec, files *pro
 	}
 
 	// Step 5: AutoSet.
-	autoSetCols := map[string]bool{}
 	autoSet := []AutoSetModel{}
 	for col, lit := range r.AutoSet {
 		if !identifierRe.MatchString(col) {
@@ -277,7 +276,6 @@ func processResource(r yamlResource, codecsYaml map[string]yamlCodec, files *pro
 			})
 			continue
 		}
-		autoSetCols[col] = true
 		autoSet = append(autoSet, AutoSetModel{Column: col, SQLLiteral: lit})
 	}
 
@@ -303,8 +301,6 @@ func processResource(r yamlResource, codecsYaml map[string]yamlCodec, files *pro
 		return nil, nil, diags
 	}
 	goType := "*" + pkgAlias + "." + string(desc.Name())
-
-	_ = autoSetCols // populated for validation; not stored in model
 
 	return &ResourceModel{
 		Message:    r.Message,
