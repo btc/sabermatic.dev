@@ -36,7 +36,6 @@ export function KeptBanner() {
           <Link to="/settings/billing" className="underline hover:no-underline">
             Manage subscription
           </Link>
-          .
         </span>
         <button
           type="button"
