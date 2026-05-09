@@ -23,6 +23,7 @@ import (
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/events"
+	"github.com/btc/drill/internal/feat/idleunsub"
 	"github.com/btc/drill/internal/jobs"
 	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/storage"
@@ -46,6 +47,7 @@ type Backend struct {
 	tts          ai.Synthesizer
 	store        storage.Store
 	events       *events.Emitter
+	idleunsub    *idleunsub.Service
 
 	SampleService *samplesvc.SampleService
 }
@@ -125,6 +127,25 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
+
+	// Idle auto-cancel service. Degraded mode (no keep-link emails) when the
+	// HMAC key is not configured: cancel decisions still fire, but the email
+	// path is skipped per the spec. Never panic at init.
+	var keepSigner *idleunsub.TokenSigner
+	if cfg.Idleunsub.KeepTokenHMACKey != "" {
+		keepSigner = idleunsub.NewTokenSigner([]byte(cfg.Idleunsub.KeepTokenHMACKey))
+	} else {
+		slog.Warn("KEEP_TOKEN_HMAC_KEY not configured; idle auto-cancel keep emails will be skipped")
+	}
+	idleunsubSvc := idleunsub.NewService(
+		pool,
+		realStripeClient{},
+		emailSender,
+		keepSigner,
+		cfg.Auth.BaseURL,
+		slog.Default(),
+	)
+
 	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store, em)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
@@ -212,6 +233,7 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 		tts:           tts,
 		store:         store,
 		events:        em,
+		idleunsub:     idleunsubSvc,
 		SampleService: ss,
 	}, nil
 }
@@ -226,15 +248,19 @@ func (b *Backend) Events() *events.Emitter {
 // Backend is constructed manually (without New).
 func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 
-// TestOverrides replaces AI dependencies for testing. Only call from tests.
+// TestOverrides replaces injected dependencies for testing. Only call from
+// tests. AI fields swap stub clients; Idleunsub swaps the idle-auto-cancel
+// service so tests can inject a fake-Stripe-backed Service.
 type TestOverrides struct {
-	LLM   *ai.Client
-	STT   ai.Transcriber
-	TTS   ai.Synthesizer
-	Store storage.Store
+	LLM       *ai.Client
+	STT       ai.Transcriber
+	TTS       ai.Synthesizer
+	Store     storage.Store
+	Idleunsub *idleunsub.Service
 }
 
-// ApplyTestOverrides replaces AI dependencies for testing. Only call from tests.
+// ApplyTestOverrides replaces injected dependencies for testing. Only call
+// from tests.
 func (b *Backend) ApplyTestOverrides(o TestOverrides) {
 	if o.LLM != nil {
 		b.llm = o.LLM
@@ -247,6 +273,9 @@ func (b *Backend) ApplyTestOverrides(o TestOverrides) {
 	}
 	if o.Store != nil {
 		b.store = o.Store
+	}
+	if o.Idleunsub != nil {
+		b.idleunsub = o.Idleunsub
 	}
 }
 
