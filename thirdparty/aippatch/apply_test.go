@@ -289,6 +289,40 @@ func TestApply_RoundTripAllTypes(t *testing.T) {
 	require.Equal(t, id.String(), updated.GetId())
 }
 
+func TestApply_CloneOfPreservesInputFields(t *testing.T) {
+	// A Mapping with only "name" bound should preserve unmapped fields (e.g.
+	// "enabled") from the input message via proto.CloneOf, and overwrite only
+	// the bound columns returned by the DB.
+	pool := aippatchtest.NewPool(t)
+	id := uuid.New()
+	ctx := context.Background()
+	_, err := pool.Exec(ctx,
+		"INSERT INTO widgets (id, name) VALUES ($1, $2)", id, "original")
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "name", Column: "name", SQLType: "text", Writable: true},
+		},
+	}
+	require.NoError(t, m.Validate(nil))
+
+	// Input carries name="x" and enabled=true; enabled is not a binding on m.
+	input := &fixturepb.Widget{Name: "x", Enabled: true}
+	result, err := Apply(ctx, pool, m, Op[*fixturepb.Widget]{
+		Message: input,
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"name"}},
+		PKValue: id,
+	})
+	require.NoError(t, err)
+	// Bound field updated from DB.
+	require.Equal(t, "x", result.GetName())
+	// Unmapped field preserved from CloneOf(input).
+	require.True(t, result.GetEnabled(), "enabled should be preserved from input via CloneOf")
+}
+
 func TestApply_AutoSetBumpsUpdatedAt(t *testing.T) {
 	pool := aippatchtest.NewPool(t)
 	id := uuid.New()
