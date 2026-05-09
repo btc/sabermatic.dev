@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -80,14 +81,37 @@ type NullMailer struct{}
 func (NullMailer) Send(_ context.Context, _ email.Message) error { return nil }
 
 // RecordingMailer is an email.Sender that captures all sent messages.
+// Safe for concurrent use: tests that fire background goroutines (e.g.,
+// AutoReverse) can call Send and read Snapshot/Len without racing.
 type RecordingMailer struct {
-	Msgs []email.Message
+	mu   sync.Mutex
+	Msgs []email.Message // legacy direct access; prefer Snapshot for tests
 }
 
 // Send implements email.Sender.
 func (r *RecordingMailer) Send(_ context.Context, m email.Message) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.Msgs = append(r.Msgs, m)
 	return nil
+}
+
+// Snapshot returns a copy of the captured messages, safe to inspect from any
+// goroutine. Use this instead of indexing Msgs directly when there is any
+// possibility of a concurrent Send.
+func (r *RecordingMailer) Snapshot() []email.Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]email.Message, len(r.Msgs))
+	copy(out, r.Msgs)
+	return out
+}
+
+// Len returns the number of captured messages, safe under concurrent Send.
+func (r *RecordingMailer) Len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.Msgs)
 }
 
 // NewServiceWithFake constructs an idleunsub.Service wired to the given fake
