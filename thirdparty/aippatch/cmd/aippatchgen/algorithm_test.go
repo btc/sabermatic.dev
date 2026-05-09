@@ -329,7 +329,8 @@ func TestProcessResource_ProtoEnumNotFound_Diagnostic(t *testing.T) {
 	}
 	_, _, diags := processAll(&yaml, files, schema)
 	require.NotEmpty(t, diags)
-	require.Contains(t, diags.Err().Error(), "not found in descriptor set")
+	// Pre-validation in processAll surfaces the proto-not-found error.
+	require.Contains(t, diags.Err().Error(), "not found")
 }
 
 func TestProcessResource_StaleYamlMapKeys_Diagnostic(t *testing.T) {
@@ -363,5 +364,6 @@ func TestProcessResource_StaleYamlMapKeys_Diagnostic(t *testing.T) {
 	require.NotEmpty(t, diags)
 	err2 := diags.Err().Error()
 	require.Contains(t, err2, "COLOR_PURPLE")
-	require.Contains(t, err2, "do not match any proto enum value name")
+	// Pre-validation in processAll diagnoses each unknown yaml key.
+	require.Contains(t, err2, "does not match any value")
 }

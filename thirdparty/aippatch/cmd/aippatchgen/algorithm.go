@@ -23,7 +23,10 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 	// proto_enum descriptor existence and yaml-key↔proto-value matching).
 	// Running these once up-front means broken codec yaml is caught even
 	// when no binding currently references the codec — preventing silent
-	// drift in unused codec entries.
+	// drift in unused codec entries. Codecs that fail any check are
+	// recorded in brokenCodecs so processResource can skip duplicate
+	// diagnostics on the per-binding path.
+	brokenCodecs := map[string]bool{}
 	for name, c := range yaml.Codecs {
 		// ToText uniqueness.
 		seen := map[string]string{}
@@ -32,6 +35,7 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 				diags = append(diags, Diagnostic{
 					Message: fmt.Sprintf("codec %q: duplicate map value %q (used by %q and %q)", name, v, prev, k),
 				})
+				brokenCodecs[name] = true
 			}
 			seen[v] = k
 		}
@@ -41,6 +45,7 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 			diags = append(diags, Diagnostic{
 				Message: fmt.Sprintf("codec %q: proto_enum is required", name),
 			})
+			brokenCodecs[name] = true
 			continue
 		}
 		ed, err := files.FindDescriptorByName(protoreflect.FullName(c.ProtoEnum))
@@ -48,6 +53,7 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 			diags = append(diags, Diagnostic{
 				Message: fmt.Sprintf("codec %q: proto_enum %q not found: %s", name, c.ProtoEnum, err.Error()),
 			})
+			brokenCodecs[name] = true
 			continue
 		}
 		enumDesc, ok := ed.(protoreflect.EnumDescriptor)
@@ -55,6 +61,7 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 			diags = append(diags, Diagnostic{
 				Message: fmt.Sprintf("codec %q: proto_enum %q is not an enum descriptor", name, c.ProtoEnum),
 			})
+			brokenCodecs[name] = true
 			continue
 		}
 
@@ -73,12 +80,13 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 					Message: fmt.Sprintf("codec %q: yaml key %q does not match any value of %s", name, k, c.ProtoEnum),
 					Hint:    fmt.Sprintf("valid value names: %v", validList),
 				})
+				brokenCodecs[name] = true
 			}
 		}
 	}
 
 	for i := range yaml.Resources {
-		m, used, ds := processResource(&yaml.Resources[i], yaml.Codecs, files, schema)
+		m, used, ds := processResource(&yaml.Resources[i], yaml.Codecs, files, schema, brokenCodecs)
 		diags = append(diags, ds...)
 		if m != nil {
 			models = append(models, *m)
@@ -91,7 +99,7 @@ func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([
 	return models, codecsUsed, diags
 }
 
-func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *protoregistry.Files, schema *Schema) (*ResourceModel, map[string]CodecModel, Diagnostics) {
+func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *protoregistry.Files, schema *Schema, brokenCodecs map[string]bool) (*ResourceModel, map[string]CodecModel, Diagnostics) {
 	var diags Diagnostics
 
 	// Step 9: reject update_writable in v0.
@@ -247,38 +255,25 @@ func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *pr
 			Codec:    codec,
 		})
 
-		// Track codec usage.
+		// Track codec usage. Skip CodecModel emission for codecs that
+		// failed pre-validation in processAll — those diagnostics are
+		// already in the global diags slice; emitting a partial CodecModel
+		// here would only produce a broken init.gen.go and duplicate
+		// diagnostic noise.
 		if strings.HasPrefix(codec, "enum:") {
 			cn := strings.TrimPrefix(codec, "enum:")
+			if brokenCodecs[cn] {
+				continue
+			}
 			yc := codecsYaml[cn]
 			cm := CodecModel{Name: cn, ProtoEnum: yc.ProtoEnum}
-			ed, err := files.FindDescriptorByName(protoreflect.FullName(yc.ProtoEnum))
-			if err != nil {
-				diags = append(diags, Diagnostic{
-					Resource: r.Message,
-					Message: fmt.Sprintf("codec %q: proto_enum %q not found in descriptor set: %v",
-						cn, yc.ProtoEnum, err),
-					Hint: "check the proto_enum value in aippatch.yaml matches the fully-qualified proto enum name",
-				})
-				diagnosedFields[fname] = true
-				continue
-			}
-			enumDesc, ok := ed.(protoreflect.EnumDescriptor)
-			if !ok {
-				diags = append(diags, Diagnostic{
-					Resource: r.Message,
-					Message: fmt.Sprintf("codec %q: proto_enum %q is not an enum descriptor (got %T)",
-						cn, yc.ProtoEnum, ed),
-				})
-				diagnosedFields[fname] = true
-				continue
-			}
-			// Build the set of valid proto value names to detect stale yaml keys.
-			validNames := map[string]bool{}
+			// Pre-validation guarantees the descriptor exists and is an
+			// EnumDescriptor; the lookup here is straightforward.
+			ed, _ := files.FindDescriptorByName(protoreflect.FullName(yc.ProtoEnum))
+			enumDesc := ed.(protoreflect.EnumDescriptor)
 			goEnumType := string(enumDesc.Name())
 			for j := 0; j < enumDesc.Values().Len(); j++ {
 				vd := enumDesc.Values().Get(j)
-				validNames[string(vd.Name())] = true
 				if text, ok := yc.Map[string(vd.Name())]; ok {
 					cm.Values = append(cm.Values, EnumValue{
 						Number:  int32(vd.Number()),
@@ -286,27 +281,6 @@ func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *pr
 						Text:    text,
 					})
 				}
-			}
-			// Identify yaml map keys that don't match any proto enum value name.
-			var unknown []string
-			for k := range yc.Map {
-				if !validNames[k] {
-					unknown = append(unknown, k)
-				}
-			}
-			if len(unknown) > 0 {
-				sort.Strings(unknown)
-				validList := make([]string, 0, len(validNames))
-				for n := range validNames {
-					validList = append(validList, n)
-				}
-				sort.Strings(validList)
-				diags = append(diags, Diagnostic{
-					Resource: r.Message,
-					Message: fmt.Sprintf("codec %q: yaml map keys %v do not match any proto enum value name",
-						cn, unknown),
-					Hint: fmt.Sprintf("valid value names: %s", strings.Join(validList, ", ")),
-				})
 			}
 			usedCodecs[cn] = cm
 		}
