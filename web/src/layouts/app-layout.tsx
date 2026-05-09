@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useLogout } from "@/api/queries";
 import { BrandName } from "@/components/brand-name";
+import { KeptBanner } from "@/components/kept-banner";
 import { ThemeSwitch } from "@/components/theme-switch";
 import {
   DropdownMenu,
@@ -94,6 +95,7 @@ export function AppLayout({ children }: { children?: React.ReactNode }) {
           </div>
         </div>
       </header>
+      <KeptBanner />
       <main className="mx-auto max-w-5xl px-4 py-6">
         {children ?? <Outlet />}
       </main>

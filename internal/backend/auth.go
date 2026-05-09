@@ -258,8 +258,8 @@ func (b *Backend) Logout(ctx context.Context, sessionToken string) (err error) {
 
 	session, err := queries.GetAuthSessionByToken(ctx, tokenHash)
 	if err == nil {
-		if delErr := queries.DeleteAuthSession(ctx, session.ID); delErr != nil {
-			slog.Error("delete auth session", "error", delErr)
+		if revokeErr := queries.RevokeAuthSession(ctx, session.ID); revokeErr != nil {
+			slog.Error("revoke auth session", "error", revokeErr)
 		}
 	}
 	return nil
@@ -384,9 +384,9 @@ func (b *Backend) ResetPassword(ctx context.Context, p ResetPasswordParams) (err
 		return fmt.Errorf("update password: %w", err)
 	}
 
-	// Invalidate all sessions.
-	if err := queries.DeleteUserAuthSessions(ctx, userID); err != nil {
-		return fmt.Errorf("delete user sessions: %w", err)
+	// Revoke all sessions (soft-delete so activity history is preserved).
+	if err := queries.RevokeUserAuthSessions(ctx, userID); err != nil {
+		return fmt.Errorf("revoke user sessions: %w", err)
 	}
 	return nil
 }

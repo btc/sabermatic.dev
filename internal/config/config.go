@@ -11,20 +11,21 @@ import (
 )
 
 type Config struct {
-	GCP      GCP
-	Server   Server
-	Database Database
-	Log      Log
-	LLM      LLM
-	Speech   Speech
-	Email    Email
-	River    River
-	Auth     Auth
-	OAuth    OAuth
-	Otel     Otel
-	Storage  Storage
-	Stripe   Stripe
-	Gemini   Gemini
+	GCP       GCP
+	Server    Server
+	Database  Database
+	Log       Log
+	LLM       LLM
+	Speech    Speech
+	Email     Email
+	River     River
+	Auth      Auth
+	OAuth     OAuth
+	Otel      Otel
+	Storage   Storage
+	Stripe    Stripe
+	Gemini    Gemini
+	Idleunsub Idleunsub
 }
 
 // GCP holds Google Cloud Platform settings shared across subsystems
@@ -142,6 +143,18 @@ type Stripe struct {
 type Gemini struct {
 	Model    string `env:"GEMINI_MODEL,default=gemini-3.1-flash-image-preview"`
 	Location string `env:"GEMINI_LOCATION,default=global"`
+}
+
+// Idleunsub holds settings for the idle auto-cancel subsystem.
+//
+// KeepTokenHMACKey is the secret used to sign keep-link tokens emailed to
+// users when their subscription is auto-canceled for idleness. Empty key
+// places the subsystem in degraded mode: cancel decisions still fire, but
+// keep-link emails cannot be generated and are skipped (with a logged
+// warning at startup). Production deployments must set this env var to a
+// 32-byte secret.
+type Idleunsub struct {
+	KeepTokenHMACKey string `env:"KEEP_TOKEN_HMAC_KEY"`
 }
 
 // Configured reports whether Stripe credentials are present.

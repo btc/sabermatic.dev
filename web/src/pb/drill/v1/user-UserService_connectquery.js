@@ -23,3 +23,8 @@ export const updateProfile = UserService.method.updateProfile;
  * @generated from rpc drill.v1.UserService.ExportData
  */
 export const exportData = UserService.method.exportData;
+
+/**
+ * @generated from rpc drill.v1.UserService.AckKeptBanner
+ */
+export const ackKeptBanner = UserService.method.ackKeptBanner;

@@ -23,6 +23,7 @@ import (
 	"github.com/btc/drill/internal/drilotel"
 	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/events"
+	"github.com/btc/drill/internal/feat/idleunsub"
 	"github.com/btc/drill/internal/jobs"
 	samplesvc "github.com/btc/drill/internal/rpc/sample"
 	"github.com/btc/drill/internal/storage"
@@ -46,6 +47,7 @@ type Backend struct {
 	tts          ai.Synthesizer
 	store        storage.Store
 	events       *events.Emitter
+	idleunsub    *idleunsub.Service
 
 	SampleService *samplesvc.SampleService
 }
@@ -125,6 +127,19 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
+
+	// Idle auto-cancel signer. Degraded mode (no keep-link emails) when the
+	// HMAC key is not configured: cancel decisions still fire, but the email
+	// path is skipped per the spec. Never panic at init. The Service itself
+	// is constructed after riverClient is available so we can wire the
+	// River-backed EmailEnqueuer.
+	var keepSigner *idleunsub.TokenSigner
+	if cfg.Idleunsub.KeepTokenHMACKey != "" {
+		keepSigner = idleunsub.NewTokenSigner([]byte(cfg.Idleunsub.KeepTokenHMACKey))
+	} else {
+		slog.Warn("KEEP_TOKEN_HMAC_KEY not configured; idle auto-cancel keep emails will be skipped")
+	}
+
 	workers, workerRefs := jobs.RegisterWorkers(cfg, emailSender, pool, llmClient, geminiClient, store, em)
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
@@ -159,6 +174,15 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 				},
 				nil,
 			),
+			river.NewPeriodicJob(
+				// Daily hygiene: clear pending_kept_banner rows older than 14 days.
+				// Spec §4.5 — low-priority cleanup; once a day is plenty.
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return jobs.ClearStaleKeptBannersArgs{}, &river.InsertOpts{Queue: jobs.QueueMaintenance}
+				},
+				nil,
+			),
 		},
 	})
 	if err != nil {
@@ -169,6 +193,19 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 	workerRefs.Cleanup.Jobs = riverClient
 	workerRefs.Coach.Jobs = riverClient
 	workerRefs.SweepImages.Jobs = riverClient
+
+	// Idle auto-cancel service: now that riverClient is alive, wire the
+	// River-backed EmailEnqueuer so cancel/kept emails are sent out-of-band
+	// instead of blocking the webhook handler or the auth middleware.
+	idleunsubSvc := idleunsub.NewService(
+		pool,
+		realStripeClient{},
+		&idleunsubEnqueuer{jobs: riverClient, cfg: &cfg.Email},
+		keepSigner,
+		cfg.Auth.BaseURL,
+		slog.Default(),
+	)
+
 	if err := riverClient.Start(context.Background()); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("start river: %w", err)
@@ -212,6 +249,7 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 		tts:           tts,
 		store:         store,
 		events:        em,
+		idleunsub:     idleunsubSvc,
 		SampleService: ss,
 	}, nil
 }
@@ -226,15 +264,19 @@ func (b *Backend) Events() *events.Emitter {
 // Backend is constructed manually (without New).
 func (b *Backend) SetConfig(cfg *config.Config) { b.cfg = cfg }
 
-// TestOverrides replaces AI dependencies for testing. Only call from tests.
+// TestOverrides replaces injected dependencies for testing. Only call from
+// tests. AI fields swap stub clients; Idleunsub swaps the idle-auto-cancel
+// service so tests can inject a fake-Stripe-backed Service.
 type TestOverrides struct {
-	LLM   *ai.Client
-	STT   ai.Transcriber
-	TTS   ai.Synthesizer
-	Store storage.Store
+	LLM       *ai.Client
+	STT       ai.Transcriber
+	TTS       ai.Synthesizer
+	Store     storage.Store
+	Idleunsub *idleunsub.Service
 }
 
-// ApplyTestOverrides replaces AI dependencies for testing. Only call from tests.
+// ApplyTestOverrides replaces injected dependencies for testing. Only call
+// from tests.
 func (b *Backend) ApplyTestOverrides(o TestOverrides) {
 	if o.LLM != nil {
 		b.llm = o.LLM
@@ -247,6 +289,9 @@ func (b *Backend) ApplyTestOverrides(o TestOverrides) {
 	}
 	if o.Store != nil {
 		b.store = o.Store
+	}
+	if o.Idleunsub != nil {
+		b.idleunsub = o.Idleunsub
 	}
 }
 
@@ -278,20 +323,39 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 	}
 
 	// Touch session last_active (fire-and-forget, don't block the request).
+	// Errors are logged but never bubble up — TouchAuthSession failure must
+	// not break authentication; activity tracking is best-effort.
 	go func() {
 		touchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		queries.TouchAuthSession(touchCtx, row.ID)
+		if err := queries.TouchAuthSession(touchCtx, row.ID); err != nil {
+			slog.Warn("touch auth session", "user_id", row.UserID, "err", err)
+		}
 	}()
 
+	// AutoReverse hook: when both gates are set the current request is the
+	// activity signal — reverse the auto-cancel in the background.
+	if row.SubCancelAtPeriodEnd && row.SubCancelIsAuto {
+		go func() {
+			reverseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := b.idleunsub.AutoReverse(reverseCtx, row.UserID); err != nil {
+				slog.Warn("auto-reverse failed", "user_id", row.UserID, "err", err)
+			}
+		}()
+	}
+
 	return &auth.AuthUser{
-		ID:            row.UserID,
-		Email:         row.Email,
-		DisplayName:   row.DisplayName,
-		Role:          row.Role,
-		Plan:          row.Plan,
-		EmailVerified: row.EmailVerified,
-		CreatedAt:     row.UserCreatedAt,
+		ID:                   row.UserID,
+		Email:                row.Email,
+		DisplayName:          row.DisplayName,
+		Role:                 row.Role,
+		Plan:                 row.Plan,
+		EmailVerified:        row.EmailVerified,
+		CreatedAt:            row.UserCreatedAt,
+		SubCancelAtPeriodEnd: row.SubCancelAtPeriodEnd,
+		SubCancelIsAuto:      row.SubCancelIsAuto,
+		PendingKeptBanner:    row.PendingKeptBanner,
 	}, nil
 }
 

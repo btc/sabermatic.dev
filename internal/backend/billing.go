@@ -2,11 +2,15 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	stripe "github.com/stripe/stripe-go/v82"
 	portalsession "github.com/stripe/stripe-go/v82/billingportal/session"
@@ -244,8 +248,15 @@ func (b *Backend) HandleStripeWebhook(ctx context.Context, event stripe.Event) (
 		return b.handleCheckoutCompleted(ctx, event)
 	case "invoice.paid":
 		return b.handleInvoicePaid(ctx, event)
+	case "invoice.upcoming":
+		return b.idleunsub.HandleInvoiceUpcoming(ctx, event)
 	case "customer.subscription.deleted":
 		return b.handleSubscriptionDeleted(ctx, event)
+	case "customer.subscription.created":
+		// Newly created subscriptions land here. Reuse the updated handler so
+		// the cache is seeded (stripe_subscription_id, period_start) on the
+		// first event, not waiting for a later updated event.
+		return b.handleSubscriptionUpdated(ctx, event)
 	case "customer.subscription.updated":
 		return b.handleSubscriptionUpdated(ctx, event)
 	default:
@@ -391,19 +402,21 @@ func (b *Backend) handleSubscriptionDeleted(ctx context.Context, event stripe.Ev
 		return nil
 	}
 
-	n, err := db.New(b.pool).UpdatePlanByStripeCustomer(ctx, db.UpdatePlanByStripeCustomerParams{
-		Plan:             "free",
-		StripeCustomerID: pgtype.Text{String: custID, Valid: true},
-	})
+	q := db.New(b.pool)
+	user, err := q.GetUserByStripeCustomer(ctx, pgtype.Text{String: custID, Valid: true})
 	if err != nil {
-		return fmt.Errorf("revert plan to free: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("subscription.deleted unknown customer", "event_id", event.ID, "customer_id", custID)
+			return nil
+		}
+		return fmt.Errorf("get user by customer: %w", err)
 	}
-	if n == 0 {
-		slog.Warn("subscription.deleted unknown customer", "event_id", event.ID, "customer_id", custID)
-		return nil
+	if err := q.ClearSubStateOnDeletion(ctx, user.ID); err != nil {
+		return fmt.Errorf("clear sub state: %w", err)
 	}
 
-	slog.Info("subscription deleted, plan set to free", "customer_id", custID, "event_id", event.ID)
+	slog.Info("subscription deleted, plan set to free + sub state cleared",
+		"customer_id", custID, "event_id", event.ID)
 	return nil
 }
 
@@ -423,7 +436,8 @@ func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Ev
 		planName = "free"
 	}
 
-	n, err := db.New(b.pool).UpdatePlanByStripeCustomer(ctx, db.UpdatePlanByStripeCustomerParams{
+	q := db.New(b.pool)
+	n, err := q.UpdatePlanByStripeCustomer(ctx, db.UpdatePlanByStripeCustomerParams{
 		Plan:             planName,
 		StripeCustomerID: pgtype.Text{String: custID, Valid: true},
 	})
@@ -433,6 +447,54 @@ func (b *Backend) handleSubscriptionUpdated(ctx context.Context, event stripe.Ev
 	if n == 0 {
 		slog.Warn("subscription.updated unknown customer", "event_id", event.ID, "customer_id", custID)
 		return nil
+	}
+
+	// Sync sub-state cache columns so AutoReverse / link-keep flows have an
+	// accurate stripe_subscription_id, sub_cancel_at_period_end, and
+	// sub_current_period_start. Spec §6: this is the single sole population
+	// path for stripe_subscription_id; idleunsub itself never writes it.
+	//
+	// Skip sync when the event payload omits the subscription ID (malformed
+	// event). Writing NULL to stripe_subscription_id would clobber a valid
+	// cached value from a prior event and break AutoReverse for that user.
+	if len(event.Data.Raw) == 0 {
+		slog.Info("subscription updated", "customer_id", custID, "plan", planName, "status", status, "event_id", event.ID)
+		return nil
+	}
+	sub := &stripe.Subscription{}
+	if err := json.Unmarshal(event.Data.Raw, sub); err != nil {
+		return fmt.Errorf("unmarshal subscription: %w", err)
+	}
+	if sub.ID == "" {
+		slog.Info("subscription updated", "customer_id", custID, "plan", planName, "status", status, "event_id", event.ID)
+		return nil
+	}
+	var periodStart pgtype.Timestamptz
+	if sub.Items != nil && len(sub.Items.Data) > 0 {
+		periodStart = pgtype.Timestamptz{
+			Time:  time.Unix(sub.Items.Data[0].CurrentPeriodStart, 0).UTC(),
+			Valid: true,
+		}
+	}
+	user, err := q.GetUserByStripeCustomer(ctx, pgtype.Text{String: custID, Valid: true})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// UpdatePlanByStripeCustomer matched a row above (n > 0), so this
+			// would be unexpected. Log and return nil: the plan update already
+			// landed, and the sync is best-effort cache hygiene.
+			slog.Warn("subscription.updated user lookup empty after plan update",
+				"event_id", event.ID, "customer_id", custID)
+			return nil
+		}
+		return fmt.Errorf("get user by customer: %w", err)
+	}
+	if err := q.SyncSubStateFromWebhook(ctx, db.SyncSubStateFromWebhookParams{
+		ID:                    user.ID,
+		StripeSubscriptionID:  pgtype.Text{String: sub.ID, Valid: true},
+		SubCancelAtPeriodEnd:  sub.CancelAtPeriodEnd,
+		SubCurrentPeriodStart: periodStart,
+	}); err != nil {
+		return fmt.Errorf("sync sub state: %w", err)
 	}
 
 	slog.Info("subscription updated", "customer_id", custID, "plan", planName, "status", status, "event_id", event.ID)

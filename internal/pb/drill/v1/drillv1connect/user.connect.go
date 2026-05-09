@@ -42,6 +42,9 @@ const (
 	UserServiceUpdateProfileProcedure = "/drill.v1.UserService/UpdateProfile"
 	// UserServiceExportDataProcedure is the fully-qualified name of the UserService's ExportData RPC.
 	UserServiceExportDataProcedure = "/drill.v1.UserService/ExportData"
+	// UserServiceAckKeptBannerProcedure is the fully-qualified name of the UserService's AckKeptBanner
+	// RPC.
+	UserServiceAckKeptBannerProcedure = "/drill.v1.UserService/AckKeptBanner"
 )
 
 // UserServiceClient is a client for the drill.v1.UserService service.
@@ -50,6 +53,7 @@ type UserServiceClient interface {
 	GetUsage(context.Context, *connect.Request[v1.GetUsageRequest]) (*connect.Response[v1.GetUsageResponse], error)
 	UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error)
 	ExportData(context.Context, *connect.Request[v1.ExportDataRequest]) (*connect.Response[v1.ExportDataResponse], error)
+	AckKeptBanner(context.Context, *connect.Request[v1.AckKeptBannerRequest]) (*connect.Response[v1.AckKeptBannerResponse], error)
 }
 
 // NewUserServiceClient constructs a client for the drill.v1.UserService service. By default, it
@@ -87,6 +91,12 @@ func NewUserServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(userServiceMethods.ByName("ExportData")),
 			connect.WithClientOptions(opts...),
 		),
+		ackKeptBanner: connect.NewClient[v1.AckKeptBannerRequest, v1.AckKeptBannerResponse](
+			httpClient,
+			baseURL+UserServiceAckKeptBannerProcedure,
+			connect.WithSchema(userServiceMethods.ByName("AckKeptBanner")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -96,6 +106,7 @@ type userServiceClient struct {
 	getUsage      *connect.Client[v1.GetUsageRequest, v1.GetUsageResponse]
 	updateProfile *connect.Client[v1.UpdateProfileRequest, v1.UpdateProfileResponse]
 	exportData    *connect.Client[v1.ExportDataRequest, v1.ExportDataResponse]
+	ackKeptBanner *connect.Client[v1.AckKeptBannerRequest, v1.AckKeptBannerResponse]
 }
 
 // GetMe calls drill.v1.UserService.GetMe.
@@ -118,12 +129,18 @@ func (c *userServiceClient) ExportData(ctx context.Context, req *connect.Request
 	return c.exportData.CallUnary(ctx, req)
 }
 
+// AckKeptBanner calls drill.v1.UserService.AckKeptBanner.
+func (c *userServiceClient) AckKeptBanner(ctx context.Context, req *connect.Request[v1.AckKeptBannerRequest]) (*connect.Response[v1.AckKeptBannerResponse], error) {
+	return c.ackKeptBanner.CallUnary(ctx, req)
+}
+
 // UserServiceHandler is an implementation of the drill.v1.UserService service.
 type UserServiceHandler interface {
 	GetMe(context.Context, *connect.Request[v1.GetMeRequest]) (*connect.Response[v1.GetMeResponse], error)
 	GetUsage(context.Context, *connect.Request[v1.GetUsageRequest]) (*connect.Response[v1.GetUsageResponse], error)
 	UpdateProfile(context.Context, *connect.Request[v1.UpdateProfileRequest]) (*connect.Response[v1.UpdateProfileResponse], error)
 	ExportData(context.Context, *connect.Request[v1.ExportDataRequest]) (*connect.Response[v1.ExportDataResponse], error)
+	AckKeptBanner(context.Context, *connect.Request[v1.AckKeptBannerRequest]) (*connect.Response[v1.AckKeptBannerResponse], error)
 }
 
 // NewUserServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -157,6 +174,12 @@ func NewUserServiceHandler(svc UserServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(userServiceMethods.ByName("ExportData")),
 		connect.WithHandlerOptions(opts...),
 	)
+	userServiceAckKeptBannerHandler := connect.NewUnaryHandler(
+		UserServiceAckKeptBannerProcedure,
+		svc.AckKeptBanner,
+		connect.WithSchema(userServiceMethods.ByName("AckKeptBanner")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/drill.v1.UserService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case UserServiceGetMeProcedure:
@@ -167,6 +190,8 @@ func NewUserServiceHandler(svc UserServiceHandler, opts ...connect.HandlerOption
 			userServiceUpdateProfileHandler.ServeHTTP(w, r)
 		case UserServiceExportDataProcedure:
 			userServiceExportDataHandler.ServeHTTP(w, r)
+		case UserServiceAckKeptBannerProcedure:
+			userServiceAckKeptBannerHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -190,4 +215,8 @@ func (UnimplementedUserServiceHandler) UpdateProfile(context.Context, *connect.R
 
 func (UnimplementedUserServiceHandler) ExportData(context.Context, *connect.Request[v1.ExportDataRequest]) (*connect.Response[v1.ExportDataResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.UserService.ExportData is not implemented"))
+}
+
+func (UnimplementedUserServiceHandler) AckKeptBanner(context.Context, *connect.Request[v1.AckKeptBannerRequest]) (*connect.Response[v1.AckKeptBannerResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("drill.v1.UserService.AckKeptBanner is not implemented"))
 }

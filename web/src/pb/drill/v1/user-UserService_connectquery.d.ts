@@ -20,3 +20,7 @@ export const updateProfile: typeof UserService["method"]["updateProfile"];
  * @generated from rpc drill.v1.UserService.ExportData
  */
 export const exportData: typeof UserService["method"]["exportData"];
+/**
+ * @generated from rpc drill.v1.UserService.AckKeptBanner
+ */
+export const ackKeptBanner: typeof UserService["method"]["ackKeptBanner"];

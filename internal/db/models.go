@@ -22,14 +22,15 @@ type Annotation struct {
 }
 
 type AuthSession struct {
-	ID         uuid.UUID   `json:"id"`
-	UserID     uuid.UUID   `json:"user_id"`
-	TokenHash  string      `json:"token_hash"`
-	ExpiresAt  time.Time   `json:"expires_at"`
-	LastActive time.Time   `json:"last_active"`
-	IpAddress  *netip.Addr `json:"ip_address"`
-	UserAgent  pgtype.Text `json:"user_agent"`
-	CreatedAt  time.Time   `json:"created_at"`
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	LastActive time.Time          `json:"last_active"`
+	IpAddress  *netip.Addr        `json:"ip_address"`
+	UserAgent  pgtype.Text        `json:"user_agent"`
+	CreatedAt  time.Time          `json:"created_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type CoachAnalysis struct {
@@ -98,6 +99,12 @@ type InterviewSession struct {
 	GeneratingSince       pgtype.Timestamptz `json:"generating_since"`
 }
 
+type KeepLinkTokenUse struct {
+	TokenHash []byte    `json:"token_hash"`
+	UserID    uuid.UUID `json:"user_id"`
+	UsedAt    time.Time `json:"used_at"`
+}
+
 type LedgerEntry struct {
 	ID        uuid.UUID   `json:"id"`
 	UserID    uuid.UUID   `json:"user_id"`
@@ -163,6 +170,12 @@ type Question struct {
 	FeaturedOrder  pgtype.Int4 `json:"featured_order"`
 }
 
+type StripeWebhookDedup struct {
+	EventID     string    `json:"event_id"`
+	EventType   string    `json:"event_type"`
+	ProcessedAt time.Time `json:"processed_at"`
+}
+
 type User struct {
 	ID                    uuid.UUID          `json:"id"`
 	Email                 string             `json:"email"`
@@ -176,6 +189,12 @@ type User struct {
 	UpdatedAt             time.Time          `json:"updated_at"`
 	DeletedAt             pgtype.Timestamptz `json:"deleted_at"`
 	FreeFullEducatorsUsed int32              `json:"free_full_educators_used"`
+	StripeSubscriptionID  pgtype.Text        `json:"stripe_subscription_id"`
+	SubCancelAtPeriodEnd  bool               `json:"sub_cancel_at_period_end"`
+	SubCancelIsAuto       bool               `json:"sub_cancel_is_auto"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+	PendingKeptBanner     bool               `json:"pending_kept_banner"`
+	IdleEligibleAfter     time.Time          `json:"idle_eligible_after"`
 }
 
 type UserEvent struct {

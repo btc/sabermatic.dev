@@ -12,10 +12,96 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearKeptBanner = `-- name: ClearKeptBanner :exec
+UPDATE users SET pending_kept_banner = FALSE WHERE id = $1
+`
+
+func (q *Queries) ClearKeptBanner(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearKeptBanner, id)
+	return err
+}
+
+const clearStaleKeptBanners = `-- name: ClearStaleKeptBanners :exec
+UPDATE users
+SET pending_kept_banner = FALSE
+WHERE pending_kept_banner = TRUE
+  AND id IN (
+    SELECT user_id FROM user_events
+    WHERE event_type = 'subscription_kept'
+    GROUP BY user_id
+    HAVING MAX(created_at) < NOW() - INTERVAL '14 days'
+  )
+`
+
+// Periodic hygiene: clear banners that are older than 14 days, where "older"
+// means the user's MOST RECENT subscription_kept event is >14 days old.
+// Grouping by user_id and using MAX(created_at) prevents clearing a fresh
+// banner when an older kept-event also exists for the same user.
+func (q *Queries) ClearStaleKeptBanners(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, clearStaleKeptBanners)
+	return err
+}
+
+const clearSubStateOnDeletion = `-- name: ClearSubStateOnDeletion :exec
+UPDATE users
+SET stripe_subscription_id   = NULL,
+    sub_cancel_at_period_end = FALSE,
+    sub_cancel_is_auto       = FALSE,
+    sub_current_period_start = NULL,
+    plan                     = 'free'
+WHERE id = $1
+`
+
+// Called by handleSubscriptionDeleted. Clears all sub state and downgrades plan.
+func (q *Queries) ClearSubStateOnDeletion(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearSubStateOnDeletion, id)
+	return err
+}
+
+const clearUserAutoCancelState = `-- name: ClearUserAutoCancelState :exec
+UPDATE users
+SET sub_cancel_at_period_end = FALSE,
+    sub_cancel_is_auto       = FALSE,
+    pending_kept_banner      = TRUE,
+    sub_current_period_start = $2
+WHERE id = $1
+`
+
+type ClearUserAutoCancelStateParams struct {
+	ID                    uuid.UUID          `json:"id"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+}
+
+// Called by KeepSubscription / AutoReverse on reversal. Sets banner flag.
+func (q *Queries) ClearUserAutoCancelState(ctx context.Context, arg ClearUserAutoCancelStateParams) error {
+	_, err := q.db.Exec(ctx, clearUserAutoCancelState, arg.ID, arg.SubCurrentPeriodStart)
+	return err
+}
+
+const clearUserAutoCancelStateNoBanner = `-- name: ClearUserAutoCancelStateNoBanner :exec
+UPDATE users
+SET sub_cancel_at_period_end = FALSE,
+    sub_cancel_is_auto       = FALSE,
+    sub_current_period_start = $2
+WHERE id = $1
+`
+
+type ClearUserAutoCancelStateNoBannerParams struct {
+	ID                    uuid.UUID          `json:"id"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+}
+
+// For cache-drift correction in AutoReverse: clear gates without setting the
+// banner. We only flip the banner when an actual reversal happened.
+func (q *Queries) ClearUserAutoCancelStateNoBanner(ctx context.Context, arg ClearUserAutoCancelStateNoBannerParams) error {
+	_, err := q.db.Exec(ctx, clearUserAutoCancelStateNoBanner, arg.ID, arg.SubCurrentPeriodStart)
+	return err
+}
+
 const createOAuthUser = `-- name: CreateOAuthUser :one
 INSERT INTO users (email, email_verified, display_name)
 VALUES ($1, TRUE, $2)
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after
 `
 
 type CreateOAuthUserParams struct {
@@ -39,6 +125,12 @@ func (q *Queries) CreateOAuthUser(ctx context.Context, arg CreateOAuthUserParams
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
@@ -47,7 +139,7 @@ const createOAuthUserOrNoop = `-- name: CreateOAuthUserOrNoop :one
 INSERT INTO users (email, email_verified, display_name)
 VALUES ($1, TRUE, $2)
 ON CONFLICT (email) DO NOTHING
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after
 `
 
 type CreateOAuthUserOrNoopParams struct {
@@ -71,6 +163,12 @@ func (q *Queries) CreateOAuthUserOrNoop(ctx context.Context, arg CreateOAuthUser
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
@@ -78,7 +176,7 @@ func (q *Queries) CreateOAuthUserOrNoop(ctx context.Context, arg CreateOAuthUser
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name)
 VALUES ($1, $2, $3)
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after
 `
 
 type CreateUserParams struct {
@@ -103,6 +201,12 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
@@ -115,15 +219,44 @@ WITH soft_delete AS (
 DELETE FROM auth_sessions WHERE user_id = $1
 `
 
-// Soft-deletes the user and wipes all auth sessions in one round-trip.
-// Idempotent: re-calling on a deleted user is a no-op on the user row.
+// Soft-deletes the user and hard-deletes all auth sessions in one round-trip
+// (data minimization / GDPR). Logout uses RevokeAuthSession / RevokeUserAuthSessions
+// in auth_sessions.sql instead. Idempotent: re-calling on a deleted user is a
+// no-op on the user row.
 func (q *Queries) DeleteAccount(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAccount, id)
 	return err
 }
 
+const getUserAutoCancelGates = `-- name: GetUserAutoCancelGates :one
+SELECT sub_cancel_at_period_end, sub_cancel_is_auto,
+       stripe_subscription_id,   sub_current_period_start
+FROM users
+WHERE id = $1
+`
+
+type GetUserAutoCancelGatesRow struct {
+	SubCancelAtPeriodEnd  bool               `json:"sub_cancel_at_period_end"`
+	SubCancelIsAuto       bool               `json:"sub_cancel_is_auto"`
+	StripeSubscriptionID  pgtype.Text        `json:"stripe_subscription_id"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+}
+
+// Used by AutoReverse to defensively re-read both gates.
+func (q *Queries) GetUserAutoCancelGates(ctx context.Context, id uuid.UUID) (GetUserAutoCancelGatesRow, error) {
+	row := q.db.QueryRow(ctx, getUserAutoCancelGates, id)
+	var i GetUserAutoCancelGatesRow
+	err := row.Scan(
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.StripeSubscriptionID,
+		&i.SubCurrentPeriodStart,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
 WHERE email = $1 AND deleted_at IS NULL
 `
 
@@ -143,12 +276,18 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
 
 const getUserByEmailForUpdate = `-- name: GetUserByEmailForUpdate :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
 WHERE email = $1
 FOR UPDATE
 `
@@ -169,12 +308,18 @@ func (q *Queries) GetUserByEmailForUpdate(ctx context.Context, email string) (Us
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
 
 const getUserByEmailIncludingDeleted = `-- name: GetUserByEmailIncludingDeleted :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
 WHERE email = $1
 `
 
@@ -194,12 +339,18 @@ func (q *Queries) GetUserByEmailIncludingDeleted(ctx context.Context, email stri
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -219,12 +370,18 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
 
 const getUserByIDIncludingDeleted = `-- name: GetUserByIDIncludingDeleted :one
-SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used FROM users
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
 WHERE id = $1
 `
 
@@ -244,6 +401,44 @@ func (q *Queries) GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID)
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
+	)
+	return i, err
+}
+
+const getUserByStripeCustomer = `-- name: GetUserByStripeCustomer :one
+SELECT id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after FROM users
+WHERE stripe_customer_id = $1 AND deleted_at IS NULL
+`
+
+// Used by idleunsub.HandleInvoiceUpcoming to map a Stripe customer to our user.
+func (q *Queries) GetUserByStripeCustomer(ctx context.Context, stripeCustomerID pgtype.Text) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByStripeCustomer, stripeCustomerID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.StripeCustomerID,
+		&i.Plan,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }
@@ -267,6 +462,19 @@ func (q *Queries) IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFr
 	return free_full_educators_used, err
 }
 
+const lockUserForSubDecision = `-- name: LockUserForSubDecision :one
+SELECT id FROM users WHERE id = $1 FOR UPDATE
+`
+
+// Per-user mutex for the cancel transaction. Acquires a row-level lock that
+// serializes concurrent invoice.upcoming evaluations for the same user.
+// Must be inside a transaction; releases on COMMIT or ROLLBACK.
+func (q *Queries) LockUserForSubDecision(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockUserForSubDecision, id)
+	err := row.Scan(&id)
+	return id, err
+}
+
 const reactivateUser = `-- name: ReactivateUser :exec
 UPDATE users SET deleted_at = NULL, email_verified = TRUE, updated_at = NOW()
 WHERE id = $1
@@ -277,6 +485,26 @@ func (q *Queries) ReactivateUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const setUserAutoCancelState = `-- name: SetUserAutoCancelState :exec
+UPDATE users
+SET sub_cancel_at_period_end = TRUE,
+    sub_cancel_is_auto       = TRUE,
+    sub_current_period_start = $2
+WHERE id = $1
+`
+
+type SetUserAutoCancelStateParams struct {
+	ID                    uuid.UUID          `json:"id"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+}
+
+// Called by idleunsub.HandleInvoiceUpcoming when our trigger fires.
+// Sets BOTH cache flags so the auto-reverse middleware gate fires for this user.
+func (q *Queries) SetUserAutoCancelState(ctx context.Context, arg SetUserAutoCancelStateParams) error {
+	_, err := q.db.Exec(ctx, setUserAutoCancelState, arg.ID, arg.SubCurrentPeriodStart)
+	return err
+}
+
 const softDeleteUser = `-- name: SoftDeleteUser :exec
 UPDATE users SET deleted_at = NOW(), updated_at = NOW()
 WHERE id = $1
@@ -284,6 +512,33 @@ WHERE id = $1
 
 func (q *Queries) SoftDeleteUser(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteUser, id)
+	return err
+}
+
+const syncSubStateFromWebhook = `-- name: SyncSubStateFromWebhook :exec
+UPDATE users
+SET stripe_subscription_id   = $2,
+    sub_cancel_at_period_end = $3,
+    sub_current_period_start = $4
+WHERE id = $1
+`
+
+type SyncSubStateFromWebhookParams struct {
+	ID                    uuid.UUID          `json:"id"`
+	StripeSubscriptionID  pgtype.Text        `json:"stripe_subscription_id"`
+	SubCancelAtPeriodEnd  bool               `json:"sub_cancel_at_period_end"`
+	SubCurrentPeriodStart pgtype.Timestamptz `json:"sub_current_period_start"`
+}
+
+// Called by handleSubscriptionUpdated. Does NOT touch sub_cancel_is_auto:
+// only our handler sets that flag; webhook sync must not overwrite it.
+func (q *Queries) SyncSubStateFromWebhook(ctx context.Context, arg SyncSubStateFromWebhookParams) error {
+	_, err := q.db.Exec(ctx, syncSubStateFromWebhook,
+		arg.ID,
+		arg.StripeSubscriptionID,
+		arg.SubCancelAtPeriodEnd,
+		arg.SubCurrentPeriodStart,
+	)
 	return err
 }
 
@@ -308,7 +563,7 @@ func (q *Queries) UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlan
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
 UPDATE users SET display_name = $1, updated_at = NOW()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used
+RETURNING id, email, email_verified, password_hash, display_name, role, stripe_customer_id, plan, created_at, updated_at, deleted_at, free_full_educators_used, stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto, sub_current_period_start, pending_kept_banner, idle_eligible_after
 `
 
 type UpdateUserDisplayNameParams struct {
@@ -332,6 +587,12 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.FreeFullEducatorsUsed,
+		&i.StripeSubscriptionID,
+		&i.SubCancelAtPeriodEnd,
+		&i.SubCancelIsAuto,
+		&i.SubCurrentPeriodStart,
+		&i.PendingKeptBanner,
+		&i.IdleEligibleAfter,
 	)
 	return i, err
 }

@@ -1,0 +1,373 @@
+package idleunsub_test
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	stripe "github.com/stripe/stripe-go/v82"
+
+	"github.com/btc/drill/internal/auth"
+	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/backendtest"
+	"github.com/btc/drill/internal/feat/idleunsub"
+	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
+	"github.com/btc/drill/internal/handler"
+)
+
+const testBaseURL = "http://test.local"
+
+// TestE2E_CancelAndKeepViaLink exercises the full cancel + keep-link round
+// trip: a Stripe invoice.upcoming webhook is dispatched through the production
+// Backend.HandleStripeWebhook router, the cancel email's keep-link is parsed
+// and clicked against a real httptest server mounting handler.GetKeepLink, the
+// reversal lands in fake Stripe and DB cache, and a replay of the link is
+// idempotent.
+func TestE2E_CancelAndKeepViaLink(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	userID := backendtest.SeedUser(t, b)
+	subID := "sub_e2e"
+	custID := "cus_e2e"
+
+	// Set up the user as a Pro subscriber with stale activity (idle > 1 period).
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET stripe_customer_id     = $1,
+		    stripe_subscription_id = $2,
+		    plan                   = 'pro',
+		    idle_eligible_after    = NOW() - INTERVAL '6 months'
+		WHERE id = $3`, custID, subID, userID)
+	require.NoError(t, err)
+	_, err = b.Pool().Exec(ctx, `
+		INSERT INTO auth_sessions (user_id, token_hash, expires_at, last_active)
+		VALUES ($1, 'e2e-fake-hash', NOW() + INTERVAL '24 hours', NOW() - INTERVAL '3 months')`, userID)
+	require.NoError(t, err)
+
+	// Fake Stripe with an active monthly subscription mid-cycle.
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, 0, -23)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+	fake := idleunsubtest.NewFakeStripe()
+	fake.Subs[subID] = &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: false,
+		Customer:          &stripe.Customer{ID: custID},
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+			CurrentPeriodEnd:   periodEnd.Unix(),
+			Price: &stripe.Price{Recurring: &stripe.PriceRecurring{
+				Interval:      stripe.PriceRecurringIntervalMonth,
+				IntervalCount: 1,
+			}},
+		}}},
+	}
+
+	enqueuer := &idleunsubtest.RecordingEnqueuer{}
+	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, testBaseURL, slog.Default())
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	// httptest server hosting just the keep-link handler. Email body links
+	// point at testBaseURL; we rewrite to server.URL when issuing the GET.
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /sub/keep", handler.GetKeepLink(b))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// 1. Fire invoice.upcoming via the production webhook dispatch path.
+	upcomingEvent := makeInvoiceUpcomingEvent("evt_e2e_1", subID, custID)
+	require.NoError(t, b.HandleStripeWebhook(ctx, upcomingEvent))
+
+	// 2. Verify Stripe was told to cancel and a cancel email was enqueued.
+	require.True(t, fake.Subs[subID].CancelAtPeriodEnd, "Stripe should be canceled at period end")
+	msgs := enqueuer.Snapshot()
+	require.Len(t, msgs, 1, "expected cancel email enqueued")
+	require.Contains(t, msgs[0].Subject, "next period")
+	require.Contains(t, msgs[0].Text, testBaseURL+"/sub/keep?t=")
+
+	// 3. Click the keep link against the test server.
+	keepURL := extractKeepURL(t, msgs[0].Text, testBaseURL)
+	testTargetURL := strings.Replace(keepURL, testBaseURL, server.URL, 1)
+	resp, err := http.Get(testTargetURL)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "body=%s", body)
+
+	// 4. Verify reversal happened in Stripe + a kept email was enqueued.
+	require.False(t, fake.Subs[subID].CancelAtPeriodEnd, "Stripe should be reverted")
+	msgs = enqueuer.Snapshot()
+	require.Len(t, msgs, 2, "expected kept email enqueued after keep-link click")
+	require.Contains(t, msgs[1].Subject, "still active")
+
+	// 5. Verify cache state in DB.
+	var subCancelAtPeriodEnd, subCancelIsAuto, banner bool
+	err = b.Pool().QueryRow(ctx, `
+		SELECT sub_cancel_at_period_end, sub_cancel_is_auto, pending_kept_banner
+		FROM users WHERE id = $1`, userID).Scan(&subCancelAtPeriodEnd, &subCancelIsAuto, &banner)
+	require.NoError(t, err)
+	require.False(t, subCancelAtPeriodEnd)
+	require.False(t, subCancelIsAuto)
+	require.True(t, banner, "pending_kept_banner should be true after a real reversal")
+
+	// 6. Replay the keep link — should be idempotent (same status, no new email).
+	resp2, err := http.Get(testTargetURL)
+	require.NoError(t, err)
+	resp2.Body.Close()
+	require.Equal(t, http.StatusOK, resp2.StatusCode)
+	require.Equal(t, 2, enqueuer.Len(), "no additional email enqueued on replay")
+}
+
+// TestE2E_AutoReverseOnLogin exercises the activity-driven reversal path:
+// a user is in the auto-cancel state, logs in, calls AuthenticateSession,
+// and the background goroutine reverses the cancel in Stripe + DB.
+func TestE2E_AutoReverseOnLogin(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupResult, err := b.Signup(ctx, backend.SignupParams{
+		Email:       "e2e-auto@example.com",
+		Password:    "strongpass1",
+		DisplayName: "E2E AutoReverse",
+	})
+	require.NoError(t, err)
+	userID := signupResult.UserID
+	subID := "sub_e2e_auto"
+	custID := "cus_e2e_auto"
+
+	// Place the user in the auto-canceled state (cache reflects pending cancel).
+	_, err = b.Pool().Exec(ctx, `
+		UPDATE users
+		SET stripe_customer_id       = $1,
+		    stripe_subscription_id   = $2,
+		    plan                     = 'pro',
+		    sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = TRUE,
+		    sub_current_period_start = NOW()
+		WHERE id = $3`, custID, subID, userID)
+	require.NoError(t, err)
+
+	// Fake Stripe agrees: subscription is canceled at period end.
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, 0, -10)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+	fake := idleunsubtest.NewFakeStripe()
+	fake.Subs[subID] = &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: true,
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+			CurrentPeriodEnd:   periodEnd.Unix(),
+		}}},
+	}
+
+	enqueuer := &idleunsubtest.RecordingEnqueuer{}
+	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, testBaseURL, slog.Default())
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	// Login through the real path to get a real session token.
+	loginResult, err := b.Login(ctx, backend.LoginParams{
+		Email:    "e2e-auto@example.com",
+		Password: "strongpass1",
+		IP:       "127.0.0.1:1234",
+	})
+	require.NoError(t, err)
+
+	// AuthenticateSession kicks the AutoReverse goroutine.
+	_, err = b.AuthenticateSession(ctx, auth.HashSessionToken(loginResult.Token))
+	require.NoError(t, err)
+
+	// Wait for the background goroutine to land its writes AND enqueue the email.
+	// AutoReverse clears the cache and commits BEFORE enqueuing the email, so
+	// polling on the cache alone races against the enqueue call.
+	require.Eventually(t, func() bool {
+		var subCancelAtPeriodEnd bool
+		err := b.Pool().QueryRow(ctx,
+			`SELECT sub_cancel_at_period_end FROM users WHERE id = $1`,
+			userID).Scan(&subCancelAtPeriodEnd)
+		return err == nil && !subCancelAtPeriodEnd && enqueuer.Len() >= 1
+	}, 5*time.Second, 50*time.Millisecond, "AutoReverse goroutine did not finish")
+
+	// Stripe was reverted (asserted via DB cache, not fake.Subs — the FakeStripe
+	// map is mutated by the AutoReverse goroutine and is documented as not
+	// safe for concurrent reads).
+	msgs := enqueuer.Snapshot()
+	require.Len(t, msgs, 1, "expected kept email enqueued")
+	require.Contains(t, msgs[0].Subject, "still active")
+
+	// pending_kept_banner is set (activity-driven real reversal).
+	var banner bool
+	err = b.Pool().QueryRow(ctx,
+		`SELECT pending_kept_banner FROM users WHERE id = $1`,
+		userID).Scan(&banner)
+	require.NoError(t, err)
+	require.True(t, banner)
+
+	// subscription_kept event with via=auto_activity.
+	var via string
+	err = b.Pool().QueryRow(ctx, `
+		SELECT metadata->>'via' FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_kept'`,
+		userID).Scan(&via)
+	require.NoError(t, err)
+	require.Equal(t, "auto_activity", via)
+}
+
+// TestE2E_ConcurrentInvoiceUpcomingSerializes exercises the spec §8.2
+// scenario: two simultaneous invoice.upcoming deliveries for the same user
+// (with DIFFERENT event IDs, bypassing webhook dedup) must serialize on the
+// per-user FOR UPDATE lock. Whichever goroutine wins the lock runs to
+// completion; the loser sees the prior decision via HasAutoCanceledThisPeriod
+// and rolls back its in-flight TX.
+//
+// Expected end-state:
+//   - exactly 1 Stripe Update call (the winner's)
+//   - exactly 1 subscription_auto_canceled event row
+//   - exactly 1 stripe_webhook_dedup row (the winner's; the loser's claim
+//     is rolled back with the rest of its TX since TryClaimWebhookEvent
+//     runs INSIDE the same tx)
+func TestE2E_ConcurrentInvoiceUpcomingSerializes(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	userID := backendtest.SeedUser(t, b)
+	subID := "sub_concurrent"
+	custID := "cus_concurrent"
+
+	// Same fixture as TestE2E_CancelAndKeepViaLink.
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET stripe_customer_id     = $1,
+		    stripe_subscription_id = $2,
+		    plan                   = 'pro',
+		    idle_eligible_after    = NOW() - INTERVAL '6 months'
+		WHERE id = $3`, custID, subID, userID)
+	require.NoError(t, err)
+	_, err = b.Pool().Exec(ctx, `
+		INSERT INTO auth_sessions (user_id, token_hash, expires_at, last_active)
+		VALUES ($1, 'concurrent-fake-hash', NOW() + INTERVAL '24 hours', NOW() - INTERVAL '3 months')`, userID)
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, 0, -23)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+	fake := idleunsubtest.NewFakeStripe()
+	fake.Subs[subID] = &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: false,
+		Customer:          &stripe.Customer{ID: custID},
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+			CurrentPeriodEnd:   periodEnd.Unix(),
+			Price: &stripe.Price{Recurring: &stripe.PriceRecurring{
+				Interval:      stripe.PriceRecurringIntervalMonth,
+				IntervalCount: 1,
+			}},
+		}}},
+	}
+
+	enqueuer := &idleunsubtest.RecordingEnqueuer{}
+	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, testBaseURL, slog.Default())
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	// Two distinct event IDs — webhook dedup cannot collapse them at the row
+	// level, so the per-user lock + period dedup must do the serialization.
+	evtA := makeInvoiceUpcomingEvent("evt_concurrent_a", subID, custID)
+	evtB := makeInvoiceUpcomingEvent("evt_concurrent_b", subID, custID)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errs <- b.HandleStripeWebhook(ctx, evtA)
+	}()
+	go func() {
+		defer wg.Done()
+		errs <- b.HandleStripeWebhook(ctx, evtB)
+	}()
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		require.NoError(t, e)
+	}
+
+	// Exactly one Stripe Update call (the winner's).
+	require.Len(t, fake.UpdateCalls, 1, "expected exactly one Stripe update across both events")
+	require.True(t, fake.UpdateCalls[0].CancelAtPeriodEnd)
+
+	// Exactly one subscription_auto_canceled event row.
+	var auditCount int
+	err = b.Pool().QueryRow(ctx, `
+		SELECT COUNT(*) FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_auto_canceled'`,
+		userID).Scan(&auditCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, auditCount, "expected exactly one auto-cancel audit row")
+
+	// Exactly one stripe_webhook_dedup row. The loser claimed its event_id
+	// inside its TX, but HasAutoCanceledThisPeriod returned true and the TX
+	// rolled back, taking the dedup claim with it.
+	var dedupCount int
+	err = b.Pool().QueryRow(ctx,
+		`SELECT COUNT(*) FROM stripe_webhook_dedup WHERE event_id IN ($1, $2)`,
+		evtA.ID, evtB.ID).Scan(&dedupCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, dedupCount, "exactly one dedup row persisted (loser's TX rolled back)")
+
+	// And the winner's dedup row is one of the two — but exactly which one
+	// depends on goroutine scheduling, so don't assert on the specific ID.
+
+	// Cache flags flipped to canceled.
+	var cancelAtEnd, isAuto bool
+	err = b.Pool().QueryRow(ctx,
+		`SELECT sub_cancel_at_period_end, sub_cancel_is_auto FROM users WHERE id = $1`,
+		userID).Scan(&cancelAtEnd, &isAuto)
+	require.NoError(t, err)
+	require.True(t, cancelAtEnd)
+	require.True(t, isAuto)
+
+	// Exactly one cancel email enqueued.
+	require.Equal(t, 1, enqueuer.Len(), "exactly one cancel email enqueued")
+}
+
+// makeInvoiceUpcomingEvent builds a Stripe event suitable for the production
+// webhook dispatch. event.GetObjectValue("subscription") reads from Object;
+// the production handler extracts the subID from there.
+func makeInvoiceUpcomingEvent(eventID, subID, custID string) stripe.Event {
+	return stripe.Event{
+		ID:   eventID,
+		Type: "invoice.upcoming",
+		Data: &stripe.EventData{
+			Object: map[string]interface{}{
+				"subscription": subID,
+				"customer":     custID,
+			},
+		},
+	}
+}
+
+// extractKeepURL pulls the keep-link URL from the cancel email body.
+func extractKeepURL(t *testing.T, body, baseURL string) string {
+	t.Helper()
+	re := regexp.MustCompile(regexp.QuoteMeta(baseURL) + `/sub/keep\?t=[A-Za-z0-9._-]+`)
+	m := re.FindString(body)
+	require.NotEmpty(t, m, "keep URL not found in email body")
+	return m
+}

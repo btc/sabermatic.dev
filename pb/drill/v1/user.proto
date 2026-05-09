@@ -12,6 +12,7 @@ service UserService {
   rpc GetUsage(GetUsageRequest) returns (GetUsageResponse);
   rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
   rpc ExportData(ExportDataRequest) returns (ExportDataResponse);
+  rpc AckKeptBanner(AckKeptBannerRequest) returns (AckKeptBannerResponse);
 }
 
 message GetMeRequest {}
@@ -40,6 +41,7 @@ message User {
   UserPlan plan = 5;
   bool email_verified = 6;
   google.protobuf.Timestamp create_time = 7;
+  bool pending_kept_banner = 8;
 }
 
 message GetUsageRequest {}
@@ -81,3 +83,7 @@ message UpdateProfileResponse {
 message ExportDataRequest {}
 
 message ExportDataResponse {}
+
+message AckKeptBannerRequest {}
+
+message AckKeptBannerResponse {}

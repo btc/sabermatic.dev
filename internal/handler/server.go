@@ -79,6 +79,10 @@ func registerRoutes(mux *http.ServeMux, b *backend.Backend) error {
 	// Stripe webhook — signature-verified by the handler.
 	mux.HandleFunc("POST /api/webhooks/stripe", PostStripeWebhook(b))
 
+	// Idle-auto-cancel keep-link. Public route — the signed HMAC token IS the
+	// auth. Single-use enforcement and reversal happen inside Backend.
+	mux.HandleFunc("GET /sub/keep", GetKeepLink(b))
+
 	// Local-dev storage server: serve uploaded files via HTTP so the browser
 	// can load them. In production (Storage.Backend == "gcs"), files are
 	// served directly from GCS by signed URLs.

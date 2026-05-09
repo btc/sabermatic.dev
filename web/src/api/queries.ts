@@ -31,7 +31,7 @@ import {
   getSession,
   getTranscript,
 } from "@/pb/drill/v1/session-SessionService_connectquery";
-import { getMe } from "@/pb/drill/v1/user-UserService_connectquery";
+import { ackKeptBanner, getMe } from "@/pb/drill/v1/user-UserService_connectquery";
 
 // --- Questions ---
 
@@ -46,6 +46,16 @@ export function useCreateQuestion() {
 }
 
 // --- User ---
+
+export function useAckKeptBanner() {
+  const qc = useQueryClient();
+  return useConnectMutation(ackKeptBanner, {
+    onSuccess: () =>
+      qc.invalidateQueries({
+        queryKey: createConnectQueryKey({ schema: getMe, input: {}, cardinality: undefined }),
+      }),
+  });
+}
 
 export function useMe(options?: { enabled?: boolean }) {
   return useQuery(getMe, {}, {

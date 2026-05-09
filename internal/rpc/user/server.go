@@ -152,29 +152,47 @@ func (s *Server) ExportData(
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ExportData not yet implemented"))
 }
 
+// AckKeptBanner clears the pending_kept_banner flag for the authenticated
+// user. Idempotent: clearing an already-clear flag is a no-op.
+func (s *Server) AckKeptBanner(
+	ctx context.Context,
+	req *connect.Request[drillv1.AckKeptBannerRequest],
+) (*connect.Response[drillv1.AckKeptBannerResponse], error) {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
+	if err := s.b.ClearKeptBanner(ctx, user.ID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("clear banner: %w", err))
+	}
+	return connect.NewResponse(&drillv1.AckKeptBannerResponse{}), nil
+}
+
 // dbUserToProto converts a db.User (sqlc model) to its proto representation.
 // Used by UpdateProfile which returns the updated record from the database.
 func dbUserToProto(u *db.User) *drillv1.User {
 	return &drillv1.User{
-		Id:            u.ID.String(),
-		Email:         u.Email,
-		DisplayName:   u.DisplayName,
-		Role:          roleToProto(u.Role),
-		Plan:          planToProto(u.Plan),
-		EmailVerified: u.EmailVerified,
-		CreateTime:    timestamppb.New(u.CreatedAt),
+		Id:                u.ID.String(),
+		Email:             u.Email,
+		DisplayName:       u.DisplayName,
+		Role:              roleToProto(u.Role),
+		Plan:              planToProto(u.Plan),
+		EmailVerified:     u.EmailVerified,
+		CreateTime:        timestamppb.New(u.CreatedAt),
+		PendingKeptBanner: u.PendingKeptBanner,
 	}
 }
 
 func userToProto(u *auth.AuthUser) *drillv1.User {
 	return &drillv1.User{
-		Id:            u.ID.String(),
-		Email:         u.Email,
-		DisplayName:   u.DisplayName,
-		Role:          roleToProto(u.Role),
-		Plan:          planToProto(u.Plan),
-		EmailVerified: u.EmailVerified,
-		CreateTime:    timestamppb.New(u.CreatedAt),
+		Id:                u.ID.String(),
+		Email:             u.Email,
+		DisplayName:       u.DisplayName,
+		Role:              roleToProto(u.Role),
+		Plan:              planToProto(u.Plan),
+		EmailVerified:     u.EmailVerified,
+		CreateTime:        timestamppb.New(u.CreatedAt),
+		PendingKeptBanner: u.PendingKeptBanner,
 	}
 }
 

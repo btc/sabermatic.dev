@@ -22,6 +22,19 @@ type Querier interface {
 	CancelSession(ctx context.Context, arg CancelSessionParams) error
 	// Reset sessions stuck in 'generating' for too long (crash recovery).
 	CleanupStaleGenerating(ctx context.Context) error
+	ClearKeptBanner(ctx context.Context, id uuid.UUID) error
+	// Periodic hygiene: clear banners that are older than 14 days, where "older"
+	// means the user's MOST RECENT subscription_kept event is >14 days old.
+	// Grouping by user_id and using MAX(created_at) prevents clearing a fresh
+	// banner when an older kept-event also exists for the same user.
+	ClearStaleKeptBanners(ctx context.Context) error
+	// Called by handleSubscriptionDeleted. Clears all sub state and downgrades plan.
+	ClearSubStateOnDeletion(ctx context.Context, id uuid.UUID) error
+	// Called by KeepSubscription / AutoReverse on reversal. Sets banner flag.
+	ClearUserAutoCancelState(ctx context.Context, arg ClearUserAutoCancelStateParams) error
+	// For cache-drift correction in AutoReverse: clear gates without setting the
+	// banner. We only flip the banner when an actual reversal happened.
+	ClearUserAutoCancelStateNoBanner(ctx context.Context, arg ClearUserAutoCancelStateNoBannerParams) error
 	// Batch-completes abandoned sessions that have at least one candidate message.
 	// These are real interviews that the user forgot to end.
 	CompleteAbandonedActiveSessions(ctx context.Context) ([]CompleteAbandonedActiveSessionsRow, error)
@@ -44,11 +57,11 @@ type Querier interface {
 	// grants_created=0 for duplicate event.
 	CreateSubscriptionGrant(ctx context.Context, arg CreateSubscriptionGrantParams) (CreateSubscriptionGrantRow, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
-	// Soft-deletes the user and wipes all auth sessions in one round-trip.
-	// Idempotent: re-calling on a deleted user is a no-op on the user row.
+	// Soft-deletes the user and hard-deletes all auth sessions in one round-trip
+	// (data minimization / GDPR). Logout uses RevokeAuthSession / RevokeUserAuthSessions
+	// in auth_sessions.sql instead. Idempotent: re-calling on a deleted user is a
+	// no-op on the user row.
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
-	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
-	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	// Creates the one-time free trial grant + ledger entry atomically. Called
 	// only at account creation (Signup, OAuthLogin). If the grant already exists
 	// (ON CONFLICT), both the INSERT and the ledger SELECT produce zero rows — a
@@ -60,6 +73,8 @@ type Querier interface {
 	// Idempotent: returns 0 rows if session_refund ledger entries already exist.
 	FullRefundSessionMinutes(ctx context.Context, arg FullRefundSessionMinutesParams) ([]FullRefundSessionMinutesRow, error)
 	GetAnnotationsByEvaluation(ctx context.Context, evaluationID uuid.UUID) ([]GetAnnotationsByEvaluationRow, error)
+	// Filters out soft-revoked sessions; only returns valid live sessions.
+	// (Activity queries do NOT filter on revoked_at — see GetUserLastActive.)
 	GetAuthSessionByToken(ctx context.Context, tokenHash string) (GetAuthSessionByTokenRow, error)
 	// Single query to fetch all billing state needed for entitlement checks.
 	// Fetch inside the caller's transaction to avoid TOCTOU.
@@ -73,6 +88,10 @@ type Querier interface {
 	GetMessagesBySessionAfterSeq(ctx context.Context, arg GetMessagesBySessionAfterSeqParams) ([]Message, error)
 	// Return messages after the given offset (for known_message_count cursor).
 	GetMessagesBySessionOffset(ctx context.Context, arg GetMessagesBySessionOffsetParams) ([]Message, error)
+	// For multi-firing dedup: did a 'subscription_kept' event arrive after the
+	// most recent 'subscription_auto_canceled' for this period? If yes, the user
+	// already kept their sub for this period; don't re-cancel.
+	GetMostRecentKeptOrCanceledForPeriod(ctx context.Context, arg GetMostRecentKeptOrCanceledForPeriodParams) (string, error)
 	GetOAuthAccount(ctx context.Context, arg GetOAuthAccountParams) (OauthAccount, error)
 	GetOAuthAccountsByUser(ctx context.Context, userID uuid.UUID) ([]OauthAccount, error)
 	GetQuestion(ctx context.Context, id uuid.UUID) (Question, error)
@@ -86,12 +105,31 @@ type Querier interface {
 	GetSessionForTurn(ctx context.Context, id uuid.UUID) (GetSessionForTurnRow, error)
 	// Lightweight status check for EndSession/CancelSession polling.
 	GetSessionStatus(ctx context.Context, id uuid.UUID) (GetSessionStatusRow, error)
+	// Used by AutoReverse to defensively re-read both gates.
+	GetUserAutoCancelGates(ctx context.Context, id uuid.UUID) (GetUserAutoCancelGatesRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailForUpdate(ctx context.Context, email string) (User, error)
 	GetUserByEmailIncludingDeleted(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByIDIncludingDeleted(ctx context.Context, id uuid.UUID) (User, error)
+	// Used by idleunsub.HandleInvoiceUpcoming to map a Stripe customer to our user.
+	GetUserByStripeCustomer(ctx context.Context, stripeCustomerID pgtype.Text) (User, error)
+	// Reads across all history (including revoked sessions). Returns NULL
+	// when the user has no auth_sessions rows.
+	//
+	// The LEFT-JOIN-from-placeholder shape (rather than the simpler MAX()) is
+	// a workaround: in sqlc 1.25 with pgx/v5, MAX(timestamptz_not_null) is
+	// generated as a non-nullable time.Time even though the SQL semantics are
+	// "NULL when zero rows match." LEFT JOIN forces sqlc's nullability
+	// inference correctly. If a future sqlc version makes MAX() nullable for
+	// this case, simplify back to:
+	//   SELECT MAX(last_active)::timestamptz FROM auth_sessions WHERE user_id = $1;
+	GetUserLastActive(ctx context.Context, userID uuid.UUID) (pgtype.Timestamptz, error)
 	GetUserUsageSummary(ctx context.Context, userID uuid.UUID) (GetUserUsageSummaryRow, error)
+	// Returns true if a subscription_auto_canceled event already exists for
+	// this (user, subscription, period). Backs the multi-firing dedup in §4.1.
+	// metadata->>'current_period_start' is RFC3339 text written by cancelMetadata.
+	HasAutoCanceledThisPeriod(ctx context.Context, arg HasAutoCanceledThisPeriodParams) (bool, error)
 	IncrementFreeEducatorUsed(ctx context.Context, arg IncrementFreeEducatorUsedParams) (int32, error)
 	// Inline crash recovery for EndSession/CancelSession.
 	// Conditional WHERE makes this idempotent and race-free.
@@ -104,6 +142,9 @@ type Querier interface {
 	InsertLLMCallContent(ctx context.Context, arg InsertLLMCallContentParams) error
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	InsertQuestion(ctx context.Context, arg InsertQuestionParams) (uuid.UUID, error)
+	// Composed insert for the cancel decision. metadata is already-marshaled JSON.
+	InsertSubscriptionAutoCanceledEvent(ctx context.Context, arg InsertSubscriptionAutoCanceledEventParams) error
+	InsertSubscriptionKeptEvent(ctx context.Context, arg InsertSubscriptionKeptEventParams) error
 	LinkOAuthAccount(ctx context.Context, arg LinkOAuthAccountParams) (OauthAccount, error)
 	ListActiveGrants(ctx context.Context, userID uuid.UUID) ([]ListActiveGrantsRow, error)
 	ListFeaturedQuestions(ctx context.Context) ([]ListFeaturedQuestionsRow, error)
@@ -111,6 +152,10 @@ type Querier interface {
 	ListQuestionsWithoutImages(ctx context.Context) ([]uuid.UUID, error)
 	ListSeedQuestions(ctx context.Context) ([]ListSeedQuestionsRow, error)
 	ListSessionsByUser(ctx context.Context, userID uuid.UUID) ([]ListSessionsByUserRow, error)
+	// Per-user mutex for the cancel transaction. Acquires a row-level lock that
+	// serializes concurrent invoice.upcoming evaluations for the same user.
+	// Must be inside a transaction; releases on COMMIT or ROLLBACK.
+	LockUserForSubDecision(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	MarkSessionCompleted(ctx context.Context, id uuid.UUID) error
 	ReactivateUser(ctx context.Context, id uuid.UUID) error
 	// Refunds unused minutes for a completed session based on wall-clock duration.
@@ -123,10 +168,25 @@ type Querier interface {
 	// Returns one row per grant debited. Returns zero rows if balance is insufficient
 	// (all-or-nothing: no mutations occur when balance < requested).
 	ReserveMinutes(ctx context.Context, arg ReserveMinutesParams) ([]ReserveMinutesRow, error)
+	// Soft-delete: marks the row revoked but preserves it for the activity query.
+	RevokeAuthSession(ctx context.Context, id uuid.UUID) error
+	// Soft-delete every active session for a user (logout-everywhere).
+	RevokeUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	SetAudioURL(ctx context.Context, arg SetAudioURLParams) error
 	SetQuestionImageURL(ctx context.Context, arg SetQuestionImageURLParams) error
+	// Called by idleunsub.HandleInvoiceUpcoming when our trigger fires.
+	// Sets BOTH cache flags so the auto-reverse middleware gate fires for this user.
+	SetUserAutoCancelState(ctx context.Context, arg SetUserAutoCancelStateParams) error
 	SoftDeleteUser(ctx context.Context, id uuid.UUID) error
+	// Called by handleSubscriptionUpdated. Does NOT touch sub_cancel_is_auto:
+	// only our handler sets that flag; webhook sync must not overwrite it.
+	SyncSubStateFromWebhook(ctx context.Context, arg SyncSubStateFromWebhookParams) error
 	TouchAuthSession(ctx context.Context, id uuid.UUID) error
+	// Single-use enforcement. Returns the hash on first claim, no row otherwise.
+	TryClaimKeepToken(ctx context.Context, arg TryClaimKeepTokenParams) ([]byte, error)
+	// Returns the event_id on first claim; returns no row on subsequent claims.
+	// Use the no-row return as the signal "this event was already handled".
+	TryClaimWebhookEvent(ctx context.Context, arg TryClaimWebhookEventParams) (string, error)
 	UpdateEducatorAnalysisContent(ctx context.Context, arg UpdateEducatorAnalysisContentParams) error
 	UpdateEducatorAnalysisStatus(ctx context.Context, arg UpdateEducatorAnalysisStatusParams) error
 	UpdatePlanByStripeCustomer(ctx context.Context, arg UpdatePlanByStripeCustomerParams) (int64, error)

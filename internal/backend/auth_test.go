@@ -8,10 +8,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
+	stripe "github.com/stripe/stripe-go/v82"
 
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
+	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
 	"github.com/btc/drill/internal/jobs"
 )
 
@@ -274,11 +277,12 @@ func TestLogout_Success(t *testing.T) {
 	err = b.Logout(ctx, loginRes.Token)
 	require.NoError(t, err)
 
-	// Session should be deleted -- lookup by hash should fail.
+	// Session should be revoked (soft-deleted) -- lookup by token should fail
+	// because GetAuthSessionByToken filters on revoked_at IS NULL.
 	tokenHash := auth.HashSessionToken(loginRes.Token)
 	queries := db.New(b.Pool())
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
-	require.Error(t, err) // pgx.ErrNoRows
+	require.Error(t, err) // pgx.ErrNoRows — revoked session is invisible
 }
 
 func TestLogout_NonExistentToken(t *testing.T) {
@@ -289,6 +293,55 @@ func TestLogout_NonExistentToken(t *testing.T) {
 	// Logging out with a bogus token should not error.
 	err := b.Logout(ctx, "completely-bogus-token")
 	require.NoError(t, err)
+}
+
+func TestLogout_SoftDeletes_PreservesActivityHistory(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupUser(t, b, "softlogout@example.com", "strongpass1", "SoftLogout")
+	loginRes, err := b.Login(ctx, backend.LoginParams{
+		Email:    "softlogout@example.com",
+		Password: "strongpass1",
+		IP:       "127.0.0.1:1234",
+	})
+	require.NoError(t, err)
+
+	// Logout should soft-delete the session.
+	require.NoError(t, b.Logout(ctx, loginRes.Token))
+
+	// GetAuthSessionByToken should no longer find it (revoked_at IS NULL filter).
+	tokenHash := auth.HashSessionToken(loginRes.Token)
+	queries := db.New(b.Pool())
+	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
+	require.Error(t, err, "revoked session should not be returned by GetAuthSessionByToken")
+
+	// The session row should still exist with revoked_at set (soft delete).
+	var revokedAt pgtype.Timestamptz
+	err = b.Pool().QueryRow(ctx,
+		`SELECT revoked_at FROM auth_sessions WHERE user_id = $1`,
+		loginRes.UserID).Scan(&revokedAt)
+	require.NoError(t, err)
+	require.True(t, revokedAt.Valid, "revoked_at should be set after logout")
+
+	// GetUserLastActive should still return a value (reads across revoked sessions).
+	last, err := queries.GetUserLastActive(ctx, loginRes.UserID)
+	require.NoError(t, err)
+	require.True(t, last.Valid, "last_active should have a value across revoked sessions")
+}
+
+func TestGetUserLastActive_NoSessions(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	// SeedUser calls Signup only — no auth_sessions row is created, so no
+	// DELETE needed to reach the "zero sessions" precondition.
+	userID := backendtest.SeedUser(t, b)
+
+	last, err := db.New(b.Pool()).GetUserLastActive(ctx, userID)
+	require.NoError(t, err)
+	require.False(t, last.Valid, "MAX over zero rows should be NULL")
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +471,7 @@ func TestResetPassword_Success(t *testing.T) {
 	tokenHash := auth.HashSessionToken(loginRes.Token)
 	queries := db.New(b.Pool())
 	_, err = queries.GetAuthSessionByToken(ctx, tokenHash)
-	require.Error(t, err) // session deleted
+	require.Error(t, err) // session revoked (soft-deleted) — invisible to token lookup
 
 	// Can login with new password.
 	newLoginRes, err := b.Login(ctx, backend.LoginParams{
@@ -434,6 +487,51 @@ func TestResetPassword_Success(t *testing.T) {
 		Password: "oldpassword1",
 	})
 	require.ErrorIs(t, err, backend.ErrInvalidCredentials)
+}
+
+// ---------------------------------------------------------------------------
+// AuthenticateSession
+// ---------------------------------------------------------------------------
+
+func TestAuthenticateSession_ProjectsSubState(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupRes := signupUser(t, b, "substate@example.com", "testpassword123", "SubState")
+
+	loginRes, err := b.Login(ctx, backend.LoginParams{
+		Email:    "substate@example.com",
+		Password: "testpassword123",
+	})
+	require.NoError(t, err)
+
+	tokenHash := auth.HashSessionToken(loginRes.Token)
+
+	// Assert schema defaults: all three booleans must be FALSE before mutation.
+	user, err := b.AuthenticateSession(ctx, tokenHash)
+	require.NoError(t, err)
+	require.False(t, user.SubCancelAtPeriodEnd)
+	require.False(t, user.SubCancelIsAuto)
+	require.False(t, user.PendingKeptBanner)
+
+	// Raw SQL: SetUserAutoCancelState doesn't touch pending_kept_banner,
+	// and we want to assert all three projections at once.
+	_, err = b.Pool().Exec(ctx, `
+		UPDATE users
+		SET sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = TRUE,
+		    pending_kept_banner      = TRUE
+		WHERE id = $1`, signupRes.UserID)
+	require.NoError(t, err)
+
+	// AuthenticateSession re-reads the user row on every call — same token is valid.
+	user, err = b.AuthenticateSession(ctx, tokenHash)
+	require.NoError(t, err)
+	require.True(t, user.SubCancelAtPeriodEnd)
+	require.True(t, user.SubCancelIsAuto)
+	require.True(t, user.PendingKeptBanner)
+	require.Equal(t, "substate@example.com", user.Email)
 }
 
 func TestResetPassword_InvalidToken(t *testing.T) {
@@ -625,4 +723,169 @@ func TestDeleteAccount_Idempotent(t *testing.T) {
 	// Calling again should not return an error.
 	err = b.DeleteAccount(ctx, signupRes.UserID)
 	require.NoError(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// AuthenticateSession — AutoReverse hook
+// ---------------------------------------------------------------------------
+
+// TestAuthenticateSession_FiresAutoReverseWhenGatesSet verifies that
+// AuthenticateSession triggers AutoReverse in the background when a user's
+// sub_cancel_at_period_end and sub_cancel_is_auto are both TRUE.
+func TestAuthenticateSession_FiresAutoReverseWhenGatesSet(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupRes := signupUser(t, b, "autoreverse@example.com", "testpassword123", "AutoReverse")
+	userID := signupRes.UserID
+
+	subID := "sub_test_autoreverse_" + userID.String()[:8]
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, -1, 0) // one month ago
+	periodEnd := now.AddDate(0, 0, 7)    // one week from now
+
+	// Mutate user to look like it was auto-canceled.
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET sub_cancel_at_period_end  = TRUE,
+		    sub_cancel_is_auto        = TRUE,
+		    stripe_customer_id        = $2,
+		    stripe_subscription_id    = $3,
+		    sub_current_period_start  = $4
+		WHERE id = $1`,
+		userID,
+		"cus_test_autoreverse",
+		subID,
+		pgtype.Timestamptz{Time: periodStart, Valid: true},
+	)
+	require.NoError(t, err)
+
+	// Fake Stripe: subscription still has CancelAtPeriodEnd=true, so
+	// AutoReverse will take the real-reversal branch.
+	fakeSub := &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: true,
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+			CurrentPeriodEnd:   periodEnd.Unix(),
+		}}},
+	}
+	fakeStripe := idleunsubtest.NewFakeStripe()
+	fakeStripe.Subs[subID] = fakeSub
+	svc := idleunsubtest.NewServiceWithFake(t, b.Pool(), fakeStripe)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	// Login to get a valid session token.
+	loginRes, err := b.Login(ctx, backend.LoginParams{
+		Email:    "autoreverse@example.com",
+		Password: "testpassword123",
+		IP:       "127.0.0.1:1234",
+	})
+	require.NoError(t, err)
+	tokenHash := auth.HashSessionToken(loginRes.Token)
+
+	// AuthenticateSession fires the goroutine.
+	_, err = b.AuthenticateSession(ctx, tokenHash)
+	require.NoError(t, err)
+
+	// Wait for the background goroutine to clear the cache.
+	require.Eventually(t, func() bool {
+		var cancelAtEnd bool
+		err := b.Pool().QueryRow(ctx,
+			`SELECT sub_cancel_at_period_end FROM users WHERE id = $1`,
+			userID).Scan(&cancelAtEnd)
+		return err == nil && !cancelAtEnd
+	}, 2*time.Second, 50*time.Millisecond, "AutoReverse goroutine did not clear sub_cancel_at_period_end")
+
+	// Cache cleared: both gates must be FALSE, banner must be TRUE.
+	var cancelAtEnd, cancelIsAuto, pendingBanner bool
+	err = b.Pool().QueryRow(ctx,
+		`SELECT sub_cancel_at_period_end, sub_cancel_is_auto, pending_kept_banner FROM users WHERE id = $1`,
+		userID).Scan(&cancelAtEnd, &cancelIsAuto, &pendingBanner)
+	require.NoError(t, err)
+	require.False(t, cancelAtEnd, "sub_cancel_at_period_end should be cleared")
+	require.False(t, cancelIsAuto, "sub_cancel_is_auto should be cleared")
+	require.True(t, pendingBanner, "pending_kept_banner should be set")
+
+	// One subscription_kept event row with via=auto_activity.
+	var count int
+	err = b.Pool().QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_events
+		 WHERE user_id = $1 AND event_type = 'subscription_kept'
+		   AND metadata->>'via' = 'auto_activity'`,
+		userID).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "expected 1 subscription_kept event with via=auto_activity")
+}
+
+// TestAuthenticateSession_DoesNotFireAutoReverseForManualCancel verifies that
+// the AutoReverse goroutine is NOT triggered when sub_cancel_is_auto is FALSE
+// (manual portal cancel).
+func TestAuthenticateSession_DoesNotFireAutoReverseForManualCancel(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	signupRes := signupUser(t, b, "manualcancel@example.com", "testpassword123", "ManualCancel")
+	userID := signupRes.UserID
+
+	subID := "sub_test_manualcancel_" + userID.String()[:8]
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, -1, 0)
+
+	// sub_cancel_at_period_end=TRUE but sub_cancel_is_auto=FALSE — manual cancel.
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = FALSE,
+		    stripe_customer_id       = $2,
+		    stripe_subscription_id   = $3,
+		    sub_current_period_start = $4
+		WHERE id = $1`,
+		userID,
+		"cus_test_manualcancel",
+		subID,
+		pgtype.Timestamptz{Time: periodStart, Valid: true},
+	)
+	require.NoError(t, err)
+
+	fakeStripe := idleunsubtest.NewFakeStripe()
+	svc := idleunsubtest.NewServiceWithFake(t, b.Pool(), fakeStripe)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	loginRes, err := b.Login(ctx, backend.LoginParams{
+		Email:    "manualcancel@example.com",
+		Password: "testpassword123",
+		IP:       "127.0.0.1:1234",
+	})
+	require.NoError(t, err)
+	tokenHash := auth.HashSessionToken(loginRes.Token)
+
+	_, err = b.AuthenticateSession(ctx, tokenHash)
+	require.NoError(t, err)
+
+	// Short fixed sleep to give the goroutine time to NOT fire. We're proving
+	// absence, so there's no positive signal to wait for.
+	time.Sleep(200 * time.Millisecond)
+
+	// Zero Stripe calls — goroutine must not have fired.
+	require.Empty(t, fakeStripe.UpdateCalls, "AutoReverse must not call Stripe for manual cancel")
+
+	// Zero subscription_kept events.
+	var count int
+	err = b.Pool().QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_events WHERE user_id = $1 AND event_type = 'subscription_kept'`,
+		userID).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 0, count, "expected no subscription_kept events for manual cancel")
+
+	// Cache unchanged: sub_cancel_at_period_end still TRUE.
+	var cancelAtEnd bool
+	err = b.Pool().QueryRow(ctx,
+		`SELECT sub_cancel_at_period_end FROM users WHERE id = $1`,
+		userID).Scan(&cancelAtEnd)
+	require.NoError(t, err)
+	require.True(t, cancelAtEnd, "sub_cancel_at_period_end should remain set for manual cancel")
 }

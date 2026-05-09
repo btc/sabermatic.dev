@@ -2,6 +2,8 @@ package backend_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
+	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
 )
 
 // ---------------------------------------------------------------------------
@@ -485,13 +488,20 @@ func TestFullRefundSessionMinutes_Idempotent(t *testing.T) {
 
 // makeEvent constructs a stripe.Event with the given type, ID, and object data.
 // GetObjectValue reads from Data.Object (a map[string]interface{}), so we set
-// that directly without going through JSON round-tripping.
+// that directly. Data.Raw is also populated by JSON-encoding the object map
+// so handlers that unmarshal the typed object (e.g. handleSubscriptionUpdated)
+// see a faithful payload — production webhooks have both Object and Raw set.
 func makeEvent(eventType, eventID string, object map[string]interface{}) stripe.Event {
+	raw, err := json.Marshal(object)
+	if err != nil {
+		panic(fmt.Sprintf("makeEvent: marshal object: %v", err))
+	}
 	return stripe.Event{
 		ID:   eventID,
 		Type: stripe.EventType(eventType),
 		Data: &stripe.EventData{
 			Object: object,
+			Raw:    raw,
 		},
 	}
 }
@@ -825,6 +835,277 @@ func TestHandleSubscriptionUpdated_UnknownCustomerIsNoOp(t *testing.T) {
 
 	err := b.HandleStripeWebhook(ctx, event)
 	require.NoError(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// Idle auto-cancel webhook integration tests (Task 10).
+//
+// These tests exercise the full Backend.HandleStripeWebhook dispatch:
+//   - invoice.upcoming routes to idleunsub.Service.HandleInvoiceUpcoming.
+//   - customer.subscription.created routes to handleSubscriptionUpdated
+//     (cache seed on first event).
+//   - customer.subscription.updated extends to call SyncSubStateFromWebhook
+//     after the plan update.
+//   - customer.subscription.deleted now uses ClearSubStateOnDeletion (clears
+//     stripe_subscription_id, sub_cancel_at_period_end, sub_cancel_is_auto,
+//     sub_current_period_start, and sets plan='free' in one query).
+// ---------------------------------------------------------------------------
+
+// makeSubscriptionEvent constructs a Stripe webhook event whose Data.Raw is
+// the JSON encoding of the *stripe.Subscription. Object is also populated
+// (just the customer key) so handlers that read GetObjectValue still work.
+// Mirrors how stripe-go decodes a real webhook payload.
+func makeSubscriptionEvent(eventType, eventID string, sub *stripe.Subscription, status string) stripe.Event {
+	raw, err := json.Marshal(sub)
+	if err != nil {
+		panic(fmt.Sprintf("makeSubscriptionEvent: marshal: %v", err))
+	}
+	custID := ""
+	if sub.Customer != nil {
+		custID = sub.Customer.ID
+	}
+	return stripe.Event{
+		ID:   eventID,
+		Type: stripe.EventType(eventType),
+		Data: &stripe.EventData{
+			Object: map[string]interface{}{
+				"customer": custID,
+				"status":   status,
+			},
+			Raw: raw,
+		},
+	}
+}
+
+// TestWebhookSwitch_InvoiceUpcoming_RoutesToIdleunsub asserts that the
+// dispatch in Backend.HandleStripeWebhook actually reaches idleunsub for
+// invoice.upcoming events. We inject a fake-Stripe-backed Service via
+// TestOverrides and fire an event matching the fake's seeded subscription.
+func TestWebhookSwitch_InvoiceUpcoming_RoutesToIdleunsub(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	// Seed an idle Pro user wired to a Stripe customer + subscription.
+	userID, custID := seedUserWithStripeCustomer(t, b)
+	subID := "sub_test_" + uuid.NewString()[:8]
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET plan                = 'pro',
+		    idle_eligible_after = NOW() - INTERVAL '6 months'
+		WHERE id = $1`, userID)
+	require.NoError(t, err)
+	_, err = b.Pool().Exec(ctx, `
+		INSERT INTO auth_sessions (user_id, token_hash, expires_at, last_active)
+		VALUES ($1, $2, NOW() + INTERVAL '30 days', NOW() - INTERVAL '3 months')`,
+		userID, "tok_test_"+uuid.NewString())
+	require.NoError(t, err)
+
+	// Build the fake Stripe subscription. Period started 23 days ago,
+	// monthly billing — threshold (= periodStart - 1 month) sits ~53 days
+	// ago, so a 3-months-ago last_active is "before" it: cancel fires.
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, 0, -23)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+	sub := &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: false,
+		Customer:          &stripe.Customer{ID: custID},
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+			CurrentPeriodEnd:   periodEnd.Unix(),
+			Price: &stripe.Price{Recurring: &stripe.PriceRecurring{
+				Interval: stripe.PriceRecurringIntervalMonth,
+			}},
+		}}},
+	}
+	fake := &idleunsubtest.FakeStripe{Subs: map[string]*stripe.Subscription{subID: sub}}
+	svc := idleunsubtest.NewServiceWithFake(t, b.Pool(), fake)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	eventID := "evt_invoice_upcoming_" + uuid.NewString()[:8]
+	event := stripe.Event{
+		ID:   eventID,
+		Type: "invoice.upcoming",
+		Data: &stripe.EventData{
+			Object: map[string]interface{}{"subscription": subID},
+		},
+	}
+
+	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+
+	// idleunsub fired the cancel through the fake Stripe client.
+	require.Len(t, fake.UpdateCalls, 1, "expected exactly one Stripe update call")
+	assert.Equal(t, subID, fake.UpdateCalls[0].ID)
+	assert.True(t, fake.UpdateCalls[0].CancelAtPeriodEnd)
+	assert.Equal(t, eventID, fake.UpdateCalls[0].IdempotencyKey)
+
+	// Audit row landed in user_events.
+	var count int
+	err = b.Pool().QueryRow(ctx, `
+		SELECT COUNT(*) FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_auto_canceled'`,
+		userID).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
+// TestHandleSubscriptionUpdated_SyncsSubStateCache verifies that, after the
+// plan-update step, the handler also syncs stripe_subscription_id,
+// sub_cancel_at_period_end, and sub_current_period_start from the webhook
+// payload (Spec §6: this is the single sole population path).
+func TestHandleSubscriptionUpdated_SyncsSubStateCache(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	subID := "sub_sync_" + uuid.NewString()[:8]
+	periodStart := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
+	sub := &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: true,
+		Customer:          &stripe.Customer{ID: custID},
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+		}}},
+	}
+	event := makeSubscriptionEvent("customer.subscription.updated",
+		"evt_sync_"+uuid.NewString()[:8], sub, "active")
+
+	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+
+	var (
+		gotSubID            pgtype.Text
+		gotCancelAtEnd      bool
+		gotPeriodStart      pgtype.Timestamptz
+	)
+	err := b.Pool().QueryRow(ctx, `
+		SELECT stripe_subscription_id, sub_cancel_at_period_end, sub_current_period_start
+		FROM users WHERE id = $1`, userID).Scan(&gotSubID, &gotCancelAtEnd, &gotPeriodStart)
+	require.NoError(t, err)
+	require.True(t, gotSubID.Valid, "stripe_subscription_id should be populated")
+	assert.Equal(t, subID, gotSubID.String)
+	assert.True(t, gotCancelAtEnd, "sub_cancel_at_period_end should be synced from event")
+	require.True(t, gotPeriodStart.Valid)
+	assert.WithinDuration(t, periodStart, gotPeriodStart.Time, time.Second)
+}
+
+// TestHandleSubscriptionUpdated_DoesNotOverwriteSubCancelIsAuto guards spec
+// §6's invariant: SyncSubStateFromWebhook must NOT touch sub_cancel_is_auto.
+// Only idleunsub.HandleInvoiceUpcoming sets that flag, and a webhook race
+// must not flip it back to false.
+func TestHandleSubscriptionUpdated_DoesNotOverwriteSubCancelIsAuto(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	// Pretend an idle auto-cancel just landed: sub_cancel_is_auto = true.
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = TRUE
+		WHERE id = $1`, userID)
+	require.NoError(t, err)
+
+	subID := "sub_isauto_" + uuid.NewString()[:8]
+	periodStart := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
+	sub := &stripe.Subscription{
+		ID:                subID,
+		Customer:          &stripe.Customer{ID: custID},
+		CancelAtPeriodEnd: true,
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+		}}},
+	}
+	event := makeSubscriptionEvent("customer.subscription.updated",
+		"evt_isauto_"+uuid.NewString()[:8], sub, "active")
+
+	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+
+	var isAuto bool
+	err = b.Pool().QueryRow(ctx,
+		`SELECT sub_cancel_is_auto FROM users WHERE id = $1`, userID).Scan(&isAuto)
+	require.NoError(t, err)
+	assert.True(t, isAuto, "sub_cancel_is_auto must not be overwritten by webhook sync")
+}
+
+// TestHandleSubscriptionCreated_SeedsCache verifies the new dispatch case:
+// a customer.subscription.created event reuses handleSubscriptionUpdated and
+// seeds the cache columns on the very first event (rather than waiting for a
+// later update).
+func TestHandleSubscriptionCreated_SeedsCache(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	subID := "sub_create_" + uuid.NewString()[:8]
+	periodStart := time.Now().Add(-1 * time.Minute).UTC().Truncate(time.Second)
+	sub := &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: false,
+		Customer:          &stripe.Customer{ID: custID},
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+		}}},
+	}
+	event := makeSubscriptionEvent("customer.subscription.created",
+		"evt_create_"+uuid.NewString()[:8], sub, "active")
+
+	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+
+	user, err := db.New(b.Pool()).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	require.True(t, user.StripeSubscriptionID.Valid)
+	assert.Equal(t, subID, user.StripeSubscriptionID.String)
+	assert.False(t, user.SubCancelAtPeriodEnd)
+	assert.Equal(t, "pro", user.Plan, "subscription.created with active status upgrades to pro")
+}
+
+// TestHandleSubscriptionDeleted_ClearsSubStateAndPlan replaces the original
+// "sets plan to free" behavior with the new ClearSubStateOnDeletion call,
+// which clears all sub-state cache columns AND downgrades the plan in a
+// single statement.
+func TestHandleSubscriptionDeleted_ClearsSubStateAndPlan(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+
+	userID, custID := seedUserWithStripeCustomer(t, b)
+
+	// Seed a fully-populated sub state to simulate an active Pro subscriber
+	// who is then deleted.
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET plan                     = 'pro',
+		    stripe_subscription_id   = $1,
+		    sub_cancel_at_period_end = TRUE,
+		    sub_cancel_is_auto       = TRUE,
+		    sub_current_period_start = NOW() - INTERVAL '1 day'
+		WHERE id = $2`, "sub_to_delete_"+uuid.NewString()[:8], userID)
+	require.NoError(t, err)
+
+	event := makeEvent("customer.subscription.deleted",
+		"evt_sub_deleted_clear_"+uuid.NewString()[:8],
+		map[string]interface{}{"customer": custID})
+
+	require.NoError(t, b.HandleStripeWebhook(ctx, event))
+
+	user, err := db.New(b.Pool()).GetUserByID(ctx, userID)
+	require.NoError(t, err)
+	assert.Equal(t, "free", user.Plan)
+	assert.False(t, user.StripeSubscriptionID.Valid, "stripe_subscription_id should be cleared")
+	assert.False(t, user.SubCancelAtPeriodEnd, "sub_cancel_at_period_end should be cleared")
+	assert.False(t, user.SubCancelIsAuto, "sub_cancel_is_auto should be cleared")
+	assert.False(t, user.SubCurrentPeriodStart.Valid, "sub_current_period_start should be cleared")
 }
 
 // ---------------------------------------------------------------------------
