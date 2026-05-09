@@ -313,6 +313,18 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 		queries.TouchAuthSession(touchCtx, row.ID)
 	}()
 
+	// AutoReverse hook: when both gates are set the current request is the
+	// activity signal — reverse the auto-cancel in the background.
+	if row.SubCancelAtPeriodEnd && row.SubCancelIsAuto {
+		go func() {
+			reverseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := b.idleunsub.AutoReverse(reverseCtx, row.UserID); err != nil {
+				slog.Warn("auto-reverse failed", "user_id", row.UserID, "err", err)
+			}
+		}()
+	}
+
 	return &auth.AuthUser{
 		ID:                   row.UserID,
 		Email:                row.Email,
