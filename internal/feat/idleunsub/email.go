@@ -29,7 +29,7 @@ type keptEmailData struct {
 func composeCancelEmail(toEmail, displayName, keepURL string, periodEnd time.Time) (email.Message, error) {
 	data := cancelEmailData{
 		DisplayName:      displayName,
-		CurrentPeriodEnd: periodEnd.Format("January 2, 2006"),
+		CurrentPeriodEnd: periodEnd.UTC().Format("January 2, 2006"),
 		KeepLink:         keepURL,
 	}
 	return renderEmail("cancel", toEmail, "We won't charge you for the next period", data)
@@ -38,7 +38,7 @@ func composeCancelEmail(toEmail, displayName, keepURL string, periodEnd time.Tim
 func composeKeptEmail(toEmail, displayName string, nextRenewal time.Time) (email.Message, error) {
 	data := keptEmailData{
 		DisplayName:     displayName,
-		NextRenewalDate: nextRenewal.Format("January 2, 2006"),
+		NextRenewalDate: nextRenewal.UTC().Format("January 2, 2006"),
 	}
 	return renderEmail("kept", toEmail, "Your subscription is still active", data)
 }

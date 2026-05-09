@@ -41,8 +41,8 @@ type Service struct {
 	log     *slog.Logger
 }
 
-// NewService constructs a Service. The signer may be nil for tests that
-// only exercise HandleInvoiceUpcoming (Task 7); Tasks 8/9 wire it in.
+// NewService constructs a Service. The signer is required for the cancel email
+// flow (buildKeepURL); pass a real TokenSigner in all test fixtures.
 // baseURL is the public-facing base URL (e.g. "https://sabermatic.dev") used
 // to build keep-links; pass "http://localhost:3000" in tests.
 func NewService(pool *pgxpool.Pool, sc StripeClient, m email.Sender, sn *TokenSigner, baseURL string, log *slog.Logger) *Service {
@@ -357,7 +357,7 @@ func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) 
 
 	if err := s.enqueueKeptEmail(ctx, claims.UserID, claims.SubscriptionID, claims.CurrentPeriodEnd); err != nil {
 		mEmailEnqueue(ctx, "kept", "error")
-		s.log.Error("kept email enqueue failed", "user_id", claims.UserID, "err", err)
+		s.log.Error("kept email enqueue failed", "user_id", claims.UserID, "sub_id", claims.SubscriptionID, "err", err)
 	} else {
 		mEmailEnqueue(ctx, "kept", "ok")
 	}
@@ -458,7 +458,7 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 
 	if err := s.enqueueKeptEmail(ctx, userID, subID, periodEnd); err != nil {
 		mEmailEnqueue(ctx, "kept", "error")
-		s.log.Error("kept email enqueue failed", "user_id", userID, "err", err)
+		s.log.Error("kept email enqueue failed", "user_id", userID, "sub_id", subID, "err", err)
 	} else {
 		mEmailEnqueue(ctx, "kept", "ok")
 	}
@@ -475,8 +475,7 @@ func marshalKeptMetadata(subID, via string, periodStart time.Time) ([]byte, erro
 
 // enqueueKeptEmail composes the kept-confirmation email and sends it.
 // Called from KeepSubscription and AutoReverse after a successful reversal.
-func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, subID string, periodEnd time.Time) error {
-	_ = subID
+func (s *Service) enqueueKeptEmail(ctx context.Context, userID uuid.UUID, _ string, periodEnd time.Time) error {
 	q := db.New(s.pool)
 	user, err := q.GetUserByID(ctx, userID)
 	if err != nil {

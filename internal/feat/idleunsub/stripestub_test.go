@@ -56,3 +56,16 @@ type nullMailer struct{}
 func (nullMailer) Send(_ context.Context, _ email.Message) error { return nil }
 
 var _ email.Sender = nullMailer{}
+
+// recordingMailer captures every sent message for assertion in tests.
+// It is a strict superset of nullMailer.
+type recordingMailer struct {
+	msgs []email.Message
+}
+
+func (r *recordingMailer) Send(_ context.Context, msg email.Message) error {
+	r.msgs = append(r.msgs, msg)
+	return nil
+}
+
+var _ email.Sender = (*recordingMailer)(nil)
