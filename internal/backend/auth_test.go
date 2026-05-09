@@ -2,10 +2,7 @@ package backend_test
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -17,7 +14,6 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/feat/idleunsub"
 	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
 	"github.com/btc/drill/internal/jobs"
 )
@@ -733,25 +729,6 @@ func TestDeleteAccount_Idempotent(t *testing.T) {
 // AuthenticateSession — AutoReverse hook
 // ---------------------------------------------------------------------------
 
-// makeIdleunsubSvc builds an idleunsub.Service with a caller-supplied fake
-// Stripe and applies it to b via ApplyTestOverrides.
-func makeIdleunsubSvc(t *testing.T, b *backend.Backend, fake *idleunsubtest.FakeStripe) {
-	t.Helper()
-	var key [32]byte
-	_, err := rand.Read(key[:])
-	require.NoError(t, err)
-	signer := idleunsub.NewTokenSigner(key[:])
-	svc := idleunsub.NewService(
-		b.Pool(),
-		fake,
-		idleunsubtest.NullMailer{},
-		signer,
-		"http://localhost:3000",
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-	)
-	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
-}
-
 // TestAuthenticateSession_FiresAutoReverseWhenGatesSet verifies that
 // AuthenticateSession triggers AutoReverse in the background when a user's
 // sub_cancel_at_period_end and sub_cancel_is_auto are both TRUE.
@@ -797,7 +774,8 @@ func TestAuthenticateSession_FiresAutoReverseWhenGatesSet(t *testing.T) {
 	}
 	fakeStripe := idleunsubtest.NewFakeStripe()
 	fakeStripe.Subs[subID] = fakeSub
-	makeIdleunsubSvc(t, b, fakeStripe)
+	svc := idleunsubtest.NewServiceWithFake(t, b.Pool(), fakeStripe)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
 
 	// Login to get a valid session token.
 	loginRes, err := b.Login(ctx, backend.LoginParams{
@@ -874,7 +852,8 @@ func TestAuthenticateSession_DoesNotFireAutoReverseForManualCancel(t *testing.T)
 	require.NoError(t, err)
 
 	fakeStripe := idleunsubtest.NewFakeStripe()
-	makeIdleunsubSvc(t, b, fakeStripe)
+	svc := idleunsubtest.NewServiceWithFake(t, b.Pool(), fakeStripe)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
 
 	loginRes, err := b.Login(ctx, backend.LoginParams{
 		Email:    "manualcancel@example.com",

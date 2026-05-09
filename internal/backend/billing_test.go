@@ -2,11 +2,8 @@ package backend_test
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -19,7 +16,6 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/feat/idleunsub"
 	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
 )
 
@@ -855,25 +851,6 @@ func TestHandleSubscriptionUpdated_UnknownCustomerIsNoOp(t *testing.T) {
 //     sub_current_period_start, and sets plan='free' in one query).
 // ---------------------------------------------------------------------------
 
-// makeIdleunsubOverride builds an idleunsub.Service backed by a caller-supplied
-// fake StripeClient and applies it via ApplyTestOverrides.
-func makeIdleunsubOverride(t *testing.T, b *backend.Backend, fake *idleunsubtest.FakeStripe) {
-	t.Helper()
-	var key [32]byte
-	_, err := rand.Read(key[:])
-	require.NoError(t, err)
-	signer := idleunsub.NewTokenSigner(key[:])
-	svc := idleunsub.NewService(
-		b.Pool(),
-		fake,
-		idleunsubtest.NullMailer{},
-		signer,
-		"http://localhost:3000",
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-	)
-	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
-}
-
 // makeSubscriptionEvent constructs a Stripe webhook event whose Data.Raw is
 // the JSON encoding of the *stripe.Subscription. Object is also populated
 // (just the customer key) so handlers that read GetObjectValue still work.
@@ -944,7 +921,8 @@ func TestWebhookSwitch_InvoiceUpcoming_RoutesToIdleunsub(t *testing.T) {
 		}}},
 	}
 	fake := &idleunsubtest.FakeStripe{Subs: map[string]*stripe.Subscription{subID: sub}}
-	makeIdleunsubOverride(t, b, fake)
+	svc := idleunsubtest.NewServiceWithFake(t, b.Pool(), fake)
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
 
 	eventID := "evt_invoice_upcoming_" + uuid.NewString()[:8]
 	event := stripe.Event{
