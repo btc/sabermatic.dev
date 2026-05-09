@@ -1,6 +1,7 @@
 package aippatch
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -83,6 +84,11 @@ func decode(m protoreflect.Message, fd protoreflect.FieldDescriptor, raw any, co
 	}
 }
 
+// errEnumValueOutOfMap is returned by encode when a writable enum field
+// carries a value that is not in the codec's ToText map. This is a client
+// input error, not a server config issue — Apply maps it to InvalidArgument.
+var errEnumValueOutOfMap = errors.New("enum value not in codec ToText")
+
 // formatUUID converts pgx's [16]byte uuid to canonical 8-4-4-4-12 string.
 func formatUUID(b [16]byte) string { return uuid.UUID(b).String() }
 
@@ -121,7 +127,7 @@ func encode(m proto.Message, fd protoreflect.FieldDescriptor, codec string, code
 		num := int32(v.Enum())
 		text, ok := c.ToText[num]
 		if !ok {
-			return nil, fmt.Errorf("aippatch: encode: enum value %d not in codec %q ToText", num, name)
+			return nil, fmt.Errorf("%w: enum %d for codec %q", errEnumValueOutOfMap, num, name)
 		}
 		return text, nil
 	}

@@ -323,6 +323,35 @@ func TestApply_CloneOfPreservesInputFields(t *testing.T) {
 	require.True(t, result.GetEnabled(), "enabled should be preserved from input via CloneOf")
 }
 
+func TestApply_EnumOutOfMapReturnsInvalidArg(t *testing.T) {
+	pool := aippatchtest.NewPool(t)
+	ctx := context.Background()
+	id := uuid.New()
+	_, err := pool.Exec(ctx, "INSERT INTO widgets (id) VALUES ($1)", id)
+	require.NoError(t, err)
+
+	m := &Mapping[*fixturepb.Widget]{
+		Table: "widgets", PK: "id",
+		Bindings: []Binding{
+			{Proto: "id", Column: "id", SQLType: "uuid", Writable: false},
+			{Proto: "color", Column: "color", SQLType: "text", Writable: true, Codec: "enum:enum_color"},
+		},
+	}
+	// ToText only maps COLOR_RED; COLOR_BLUE is intentionally absent.
+	codecs := map[string]EnumCodec{
+		"enum_color": {ToText: map[int32]string{int32(fixturepb.Color_COLOR_RED): "red"}},
+	}
+	require.NoError(t, m.Validate(codecs))
+
+	// Sending COLOR_BLUE (not in ToText) should produce InvalidArgument, not Internal.
+	_, err = Apply(ctx, pool, m, Op[*fixturepb.Widget]{
+		Message: &fixturepb.Widget{Color: fixturepb.Color_COLOR_BLUE},
+		Mask:    &fieldmaskpb.FieldMask{Paths: []string{"color"}},
+		PKValue: id,
+	})
+	require.Equal(t, connect.CodeInvalidArgument, connect.CodeOf(err))
+}
+
 func TestApply_AutoSetBumpsUpdatedAt(t *testing.T) {
 	pool := aippatchtest.NewPool(t)
 	id := uuid.New()

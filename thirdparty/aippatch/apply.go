@@ -2,6 +2,7 @@ package aippatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -71,11 +72,13 @@ func Apply[T proto.Message](
 		}
 		v, err := encode(op.Message, fd, b.Codec, m.codecs)
 		if err != nil {
-			// encode errors are predominantly server-side configuration
-			// issues that escaped Validate (unsupported kind, codec not in
-			// registry, missing ToText entry). Surface as Internal so the
-			// caller doesn't mistake them for client mistakes.
-			return zero, connectInternal("encode %s: %s", b.Proto, err.Error())
+			// errEnumValueOutOfMap is a client input error: the caller sent
+			// an enum value that has no SQL text mapping. Everything else is
+			// a server-side configuration issue that escaped Validate.
+			if errors.Is(err, errEnumValueOutOfMap) {
+				return zero, connectInvalidArg("encode %s: %w", b.Proto, err)
+			}
+			return zero, connectInternal("encode %s: %w", b.Proto, err)
 		}
 		sets = append(sets, ub.Assign(b.Column, v))
 	}
