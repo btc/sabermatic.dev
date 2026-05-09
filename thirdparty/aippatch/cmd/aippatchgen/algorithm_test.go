@@ -300,3 +300,66 @@ func TestProcessResource_SoftDeleteColumnMissing_Diagnostic(t *testing.T) {
 	require.Contains(t, err, `soft_delete column "removed_at" not found`)
 	require.Contains(t, err, "id", "hint should list candidate columns")
 }
+
+func TestProcessResource_ProtoEnumNotFound_Diagnostic(t *testing.T) {
+	// proto_enum names a non-existent descriptor — should emit a diagnostic.
+	files, err := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	require.NoError(t, err)
+	schema, err := loadSchema(filepath.Join("..", "..", "internal", "fixturepb", "migrations"))
+	require.NoError(t, err)
+	yaml := yamlConfig{
+		Codecs: map[string]yamlCodec{
+			"bad_codec": {
+				ProtoEnum: "aippatch.fixture.v1.NoSuchEnum",
+				Map:       map[string]string{"VALUE": "val"},
+			},
+		},
+		Resources: []yamlResource{{
+			Message:  "aippatch.fixture.v1.Widget",
+			Table:    "widgets",
+			PK:       "id",
+			Writable: []string{"name"},
+			Overrides: map[string]yamlOverride{
+				"color":       {Codec: "bad_codec"},
+				"create_time": {Column: "created_at"},
+			},
+		}},
+	}
+	_, _, diags := processAll(&yaml, files, schema)
+	require.NotEmpty(t, diags)
+	require.Contains(t, diags.Err().Error(), "not found in descriptor set")
+}
+
+func TestProcessResource_StaleYamlMapKeys_Diagnostic(t *testing.T) {
+	// yaml Map key "COLOR_PURPLE" doesn't exist in the proto enum.
+	files, err := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	require.NoError(t, err)
+	schema, err := loadSchema(filepath.Join("..", "..", "internal", "fixturepb", "migrations"))
+	require.NoError(t, err)
+	yaml := yamlConfig{
+		Codecs: map[string]yamlCodec{
+			"enum_color": {
+				ProtoEnum: "aippatch.fixture.v1.Color",
+				Map: map[string]string{
+					"COLOR_RED":    "red",
+					"COLOR_PURPLE": "purple", // stale — not in proto
+				},
+			},
+		},
+		Resources: []yamlResource{{
+			Message:  "aippatch.fixture.v1.Widget",
+			Table:    "widgets",
+			PK:       "id",
+			Writable: []string{"name"},
+			Overrides: map[string]yamlOverride{
+				"color":       {Codec: "enum_color"},
+				"create_time": {Column: "created_at"},
+			},
+		}},
+	}
+	_, _, diags := processAll(&yaml, files, schema)
+	require.NotEmpty(t, diags)
+	err2 := diags.Err().Error()
+	require.Contains(t, err2, "COLOR_PURPLE")
+	require.Contains(t, err2, "do not match any proto enum value name")
+}

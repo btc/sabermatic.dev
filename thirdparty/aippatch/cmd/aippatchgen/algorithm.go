@@ -207,20 +207,61 @@ func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *pr
 			cn := strings.TrimPrefix(codec, "enum:")
 			yc := codecsYaml[cn]
 			cm := CodecModel{Name: cn, ProtoEnum: yc.ProtoEnum}
-			ed, _ := files.FindDescriptorByName(protoreflect.FullName(yc.ProtoEnum))
-			if enumDesc, ok := ed.(protoreflect.EnumDescriptor); ok {
-				// Go enum constants are named "<EnumName>_<VALUE_NAME>".
-				goEnumType := string(enumDesc.Name())
-				for j := 0; j < enumDesc.Values().Len(); j++ {
-					vd := enumDesc.Values().Get(j)
-					if text, ok := yc.Map[string(vd.Name())]; ok {
-						cm.Values = append(cm.Values, EnumValue{
-							Number:  int32(vd.Number()),
-							GoConst: goEnumType + "_" + string(vd.Name()),
-							Text:    text,
-						})
-					}
+			ed, err := files.FindDescriptorByName(protoreflect.FullName(yc.ProtoEnum))
+			if err != nil {
+				diags = append(diags, Diagnostic{
+					Resource: r.Message,
+					Message: fmt.Sprintf("codec %q: proto_enum %q not found in descriptor set: %v",
+						cn, yc.ProtoEnum, err),
+					Hint: "check the proto_enum value in aippatch.yaml matches the fully-qualified proto enum name",
+				})
+				diagnosedFields[fname] = true
+				continue
+			}
+			enumDesc, ok := ed.(protoreflect.EnumDescriptor)
+			if !ok {
+				diags = append(diags, Diagnostic{
+					Resource: r.Message,
+					Message: fmt.Sprintf("codec %q: proto_enum %q is not an enum descriptor (got %T)",
+						cn, yc.ProtoEnum, ed),
+				})
+				diagnosedFields[fname] = true
+				continue
+			}
+			// Build the set of valid proto value names to detect stale yaml keys.
+			validNames := map[string]bool{}
+			goEnumType := string(enumDesc.Name())
+			for j := 0; j < enumDesc.Values().Len(); j++ {
+				vd := enumDesc.Values().Get(j)
+				validNames[string(vd.Name())] = true
+				if text, ok := yc.Map[string(vd.Name())]; ok {
+					cm.Values = append(cm.Values, EnumValue{
+						Number:  int32(vd.Number()),
+						GoConst: goEnumType + "_" + string(vd.Name()),
+						Text:    text,
+					})
 				}
+			}
+			// Identify yaml map keys that don't match any proto enum value name.
+			var unknown []string
+			for k := range yc.Map {
+				if !validNames[k] {
+					unknown = append(unknown, k)
+				}
+			}
+			if len(unknown) > 0 {
+				sort.Strings(unknown)
+				validList := make([]string, 0, len(validNames))
+				for n := range validNames {
+					validList = append(validList, n)
+				}
+				sort.Strings(validList)
+				diags = append(diags, Diagnostic{
+					Resource: r.Message,
+					Message: fmt.Sprintf("codec %q: yaml map keys %v do not match any proto enum value name",
+						cn, unknown),
+					Hint: fmt.Sprintf("valid value names: %s", strings.Join(validList, ", ")),
+				})
 			}
 			usedCodecs[cn] = cm
 		}
