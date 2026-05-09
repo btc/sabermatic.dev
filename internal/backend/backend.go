@@ -174,6 +174,15 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 				},
 				nil,
 			),
+			river.NewPeriodicJob(
+				// Daily hygiene: clear pending_kept_banner rows older than 14 days.
+				// Spec §4.5 — low-priority cleanup; once a day is plenty.
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return jobs.ClearStaleKeptBannersArgs{}, nil
+				},
+				nil,
+			),
 		},
 	})
 	if err != nil {
@@ -314,10 +323,14 @@ func (b *Backend) AuthenticateSession(ctx context.Context, tokenHash string) (_ 
 	}
 
 	// Touch session last_active (fire-and-forget, don't block the request).
+	// Errors are logged but never bubble up — TouchAuthSession failure must
+	// not break authentication; activity tracking is best-effort.
 	go func() {
 		touchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		queries.TouchAuthSession(touchCtx, row.ID)
+		if err := queries.TouchAuthSession(touchCtx, row.ID); err != nil {
+			slog.Warn("touch auth session", "user_id", row.UserID, "err", err)
+		}
 	}()
 
 	// AutoReverse hook: when both gates are set the current request is the

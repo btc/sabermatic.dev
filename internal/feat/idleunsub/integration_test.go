@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -224,6 +225,126 @@ func TestE2E_AutoReverseOnLogin(t *testing.T) {
 		userID).Scan(&via)
 	require.NoError(t, err)
 	require.Equal(t, "auto_activity", via)
+}
+
+// TestE2E_ConcurrentInvoiceUpcomingSerializes exercises the spec §8.2
+// scenario: two simultaneous invoice.upcoming deliveries for the same user
+// (with DIFFERENT event IDs, bypassing webhook dedup) must serialize on the
+// per-user FOR UPDATE lock. Whichever goroutine wins the lock runs to
+// completion; the loser sees the prior decision via HasAutoCanceledThisPeriod
+// and rolls back its in-flight TX.
+//
+// Expected end-state:
+//   - exactly 1 Stripe Update call (the winner's)
+//   - exactly 1 subscription_auto_canceled event row
+//   - exactly 1 stripe_webhook_dedup row (the winner's; the loser's claim
+//     is rolled back with the rest of its TX since TryClaimWebhookEvent
+//     runs INSIDE the same tx)
+func TestE2E_ConcurrentInvoiceUpcomingSerializes(t *testing.T) {
+	t.Parallel()
+	b := pg.NewBackend(t)
+	ctx := context.Background()
+	userID := backendtest.SeedUser(t, b)
+	subID := "sub_concurrent"
+	custID := "cus_concurrent"
+
+	// Same fixture as TestE2E_CancelAndKeepViaLink.
+	_, err := b.Pool().Exec(ctx, `
+		UPDATE users
+		SET stripe_customer_id     = $1,
+		    stripe_subscription_id = $2,
+		    plan                   = 'pro',
+		    idle_eligible_after    = NOW() - INTERVAL '6 months'
+		WHERE id = $3`, custID, subID, userID)
+	require.NoError(t, err)
+	_, err = b.Pool().Exec(ctx, `
+		INSERT INTO auth_sessions (user_id, token_hash, expires_at, last_active)
+		VALUES ($1, 'concurrent-fake-hash', NOW() + INTERVAL '24 hours', NOW() - INTERVAL '3 months')`, userID)
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	periodStart := now.AddDate(0, 0, -23)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+	fake := idleunsubtest.NewFakeStripe()
+	fake.Subs[subID] = &stripe.Subscription{
+		ID:                subID,
+		Status:            stripe.SubscriptionStatusActive,
+		CancelAtPeriodEnd: false,
+		Customer:          &stripe.Customer{ID: custID},
+		Items: &stripe.SubscriptionItemList{Data: []*stripe.SubscriptionItem{{
+			CurrentPeriodStart: periodStart.Unix(),
+			CurrentPeriodEnd:   periodEnd.Unix(),
+			Price: &stripe.Price{Recurring: &stripe.PriceRecurring{
+				Interval:      stripe.PriceRecurringIntervalMonth,
+				IntervalCount: 1,
+			}},
+		}}},
+	}
+
+	enqueuer := &idleunsubtest.RecordingEnqueuer{}
+	signer := idleunsub.NewTokenSigner([]byte("test-key-32-bytes-padding-aaaaaa"))
+	svc := idleunsub.NewService(b.Pool(), fake, enqueuer, signer, testBaseURL, slog.Default())
+	b.ApplyTestOverrides(backend.TestOverrides{Idleunsub: svc})
+
+	// Two distinct event IDs — webhook dedup cannot collapse them at the row
+	// level, so the per-user lock + period dedup must do the serialization.
+	evtA := makeInvoiceUpcomingEvent("evt_concurrent_a", subID, custID)
+	evtB := makeInvoiceUpcomingEvent("evt_concurrent_b", subID, custID)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errs <- b.HandleStripeWebhook(ctx, evtA)
+	}()
+	go func() {
+		defer wg.Done()
+		errs <- b.HandleStripeWebhook(ctx, evtB)
+	}()
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		require.NoError(t, e)
+	}
+
+	// Exactly one Stripe Update call (the winner's).
+	require.Len(t, fake.UpdateCalls, 1, "expected exactly one Stripe update across both events")
+	require.True(t, fake.UpdateCalls[0].CancelAtPeriodEnd)
+
+	// Exactly one subscription_auto_canceled event row.
+	var auditCount int
+	err = b.Pool().QueryRow(ctx, `
+		SELECT COUNT(*) FROM user_events
+		WHERE user_id = $1 AND event_type = 'subscription_auto_canceled'`,
+		userID).Scan(&auditCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, auditCount, "expected exactly one auto-cancel audit row")
+
+	// Exactly one stripe_webhook_dedup row. The loser claimed its event_id
+	// inside its TX, but HasAutoCanceledThisPeriod returned true and the TX
+	// rolled back, taking the dedup claim with it.
+	var dedupCount int
+	err = b.Pool().QueryRow(ctx,
+		`SELECT COUNT(*) FROM stripe_webhook_dedup WHERE event_id IN ($1, $2)`,
+		evtA.ID, evtB.ID).Scan(&dedupCount)
+	require.NoError(t, err)
+	require.Equal(t, 1, dedupCount, "exactly one dedup row persisted (loser's TX rolled back)")
+
+	// And the winner's dedup row is one of the two — but exactly which one
+	// depends on goroutine scheduling, so don't assert on the specific ID.
+
+	// Cache flags flipped to canceled.
+	var cancelAtEnd, isAuto bool
+	err = b.Pool().QueryRow(ctx,
+		`SELECT sub_cancel_at_period_end, sub_cancel_is_auto FROM users WHERE id = $1`,
+		userID).Scan(&cancelAtEnd, &isAuto)
+	require.NoError(t, err)
+	require.True(t, cancelAtEnd)
+	require.True(t, isAuto)
+
+	// Exactly one cancel email enqueued.
+	require.Equal(t, 1, enqueuer.Len(), "exactly one cancel email enqueued")
 }
 
 // makeInvoiceUpcomingEvent builds a Stripe event suitable for the production

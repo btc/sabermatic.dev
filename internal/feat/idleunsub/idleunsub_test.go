@@ -387,6 +387,31 @@ func TestHandleInvoiceUpcoming_FirstPeriodGrace(t *testing.T) {
 	requireNoCancel(t, fx)
 }
 
+// TestHandleInvoiceUpcoming_LastActiveAtThreshold pins the spec §8.1 boundary:
+// last_active EXACTLY equal to the threshold must NOT trigger ("`<` is
+// strict"). Without this guarantee a user who happened to log in on the
+// threshold instant would be unfairly canceled.
+func TestHandleInvoiceUpcoming_LastActiveAtThreshold(t *testing.T) {
+	t.Parallel()
+	fx := setupHappyPath(t)
+
+	// Threshold = periodStart - 1 month (monthly billing). Set last_active
+	// to exactly that instant. Use the actual periodStart from the fixture
+	// to avoid rounding errors.
+	threshold := fx.PeriodStart.AddDate(0, -1, 0)
+	_, err := fx.B.Pool().Exec(fx.Ctx,
+		`UPDATE auth_sessions SET last_active = $1 WHERE user_id = $2`,
+		threshold, fx.UserID)
+	require.NoError(t, err)
+
+	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
+
+	// last_active.Before(threshold) is false when they are equal → skip
+	// with reason active_in_window.
+	requireNoCancel(t, fx)
+	require.Equal(t, 0, fx.Enqueuer.Len(), "no email when activity is exactly at threshold")
+}
+
 // ---------------------------------------------------------------------------
 // KeepSubscription / AutoReverse fixtures
 // ---------------------------------------------------------------------------

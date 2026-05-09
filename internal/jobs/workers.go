@@ -14,13 +14,14 @@ import (
 // WorkerRefs holds references to workers that need post-creation wiring
 // (their Jobs field must be set after the River client is created).
 type WorkerRefs struct {
-	Evaluate          *EvaluateSessionWorker
-	Cleanup           *CleanupAbandonedSessionsWorker
-	CleanupGenerating *CleanupStaleGeneratingWorker
-	Educator          *GenerateEducatorContentWorker
-	Coach             *RunCoachAnalysisWorker
-	ImageGen          *GenerateQuestionImageWorker
-	SweepImages       *SweepMissingImagesWorker
+	Evaluate              *EvaluateSessionWorker
+	Cleanup               *CleanupAbandonedSessionsWorker
+	CleanupGenerating     *CleanupStaleGeneratingWorker
+	Educator              *GenerateEducatorContentWorker
+	Coach                 *RunCoachAnalysisWorker
+	ImageGen              *GenerateQuestionImageWorker
+	SweepImages           *SweepMissingImagesWorker
+	ClearStaleKeptBanners *ClearStaleKeptBannersWorker
 }
 
 // RegisterWorkers creates a Workers bundle with all job workers registered.
@@ -42,13 +43,16 @@ func RegisterWorkers(cfg *config.Config, sender email.Sender, pool *pgxpool.Pool
 	river.AddWorker(workers, imgGen)
 	sweep := &SweepMissingImagesWorker{Pool: pool}
 	river.AddWorker(workers, sweep)
+	clearBanners := &ClearStaleKeptBannersWorker{Pool: pool}
+	river.AddWorker(workers, clearBanners)
 	return workers, WorkerRefs{
-		Evaluate:          eval,
-		Cleanup:           cleanup,
-		CleanupGenerating: cleanupGenerating,
-		Educator:          edu,
-		Coach:             coachWorker,
-		ImageGen:          imgGen,
-		SweepImages:       sweep,
+		Evaluate:              eval,
+		Cleanup:               cleanup,
+		CleanupGenerating:     cleanupGenerating,
+		Educator:              edu,
+		Coach:                 coachWorker,
+		ImageGen:              imgGen,
+		SweepImages:           sweep,
+		ClearStaleKeptBanners: clearBanners,
 	}
 }

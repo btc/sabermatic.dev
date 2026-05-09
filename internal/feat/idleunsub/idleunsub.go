@@ -270,7 +270,11 @@ func subtractInterval(t time.Time, interval stripe.PriceRecurringInterval, count
 	case stripe.PriceRecurringIntervalYear:
 		return t.AddDate(-n, 0, 0)
 	default:
-		return t.AddDate(0, -n, 0) // safe default
+		// Surfaces a future Stripe schema change. Falls through to monthly
+		// arithmetic so we don't fail closed and miss an eligible cancel.
+		slog.Warn("idleunsub: unknown stripe interval, defaulting to month",
+			"interval", string(interval), "interval_count", count)
+		return t.AddDate(0, -n, 0)
 	}
 }
 
@@ -340,6 +344,13 @@ func (s *Service) KeepSubscription(ctx context.Context, claims KeepTokenClaims) 
 	// gate read on the next call. Unlike HandleInvoiceUpcoming (which uses event.ID
 	// because Stripe retries webhooks with the same ID), reversal is request-driven
 	// and idempotent at the gate-check layer.
+	//
+	// Stripe call is INTENTIONALLY before the DB transaction. If the DB write
+	// fails after Stripe succeeds, AutoReverse on the user's next authed
+	// request will detect the cache-Stripe disagreement and silently clear
+	// the cache (cache-drift correction, spec §4.3). The user keeps their sub
+	// but does not see the kept-banner or receive a confirmation email — a
+	// known UX trade-off accepted in the spec for correctness.
 	updated, err := s.stripe.UpdateSubscriptionCancel(ctx, claims.SubscriptionID, false, "")
 	if err != nil {
 		return fmt.Errorf("stripe reverse: %w", err)
@@ -435,11 +446,12 @@ func (s *Service) AutoReverse(ctx context.Context, userID uuid.UUID) error {
 	}
 
 	// Real reversal.
-	// Empty idempotency key is intentional: KeepSubscription is gated upstream by
-	// keep_link_token_uses single-use enforcement; AutoReverse converges via the
-	// gate read on the next call. Unlike HandleInvoiceUpcoming (which uses event.ID
-	// because Stripe retries webhooks with the same ID), reversal is request-driven
-	// and idempotent at the gate-check layer.
+	// Empty idempotency key is intentional: AutoReverse converges via the gate
+	// re-read at the top of this function — if a concurrent KeepSubscription or
+	// AutoReverse already cleared the gates, this function returned early and
+	// never reached this line. Setting cancel_at_period_end=false on a sub
+	// where Stripe already shows false is also a no-op, so a network retry is
+	// safe.
 	updated, err := s.stripe.UpdateSubscriptionCancel(ctx, subID, false, "")
 	if err != nil {
 		return fmt.Errorf("stripe reverse: %w", err)
