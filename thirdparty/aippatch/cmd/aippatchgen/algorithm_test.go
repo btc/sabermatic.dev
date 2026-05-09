@@ -271,3 +271,32 @@ func TestProcessResource_AutoSetMultiTargetLiteral_Diagnostic(t *testing.T) {
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "single expression")
 }
+
+func TestProcessResource_PKColumnMissing_Diagnostic(t *testing.T) {
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (row_id UUID PRIMARY KEY)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+	}}}
+	_, _, diags := processAll(&yaml, files, schema)
+	require.NotEmpty(t, diags)
+	err := diags.Err().Error()
+	require.Contains(t, err, `pk column "id" not found`)
+	require.Contains(t, err, "row_id", "hint should list candidate columns")
+}
+
+func TestProcessResource_SoftDeleteColumnMissing_Diagnostic(t *testing.T) {
+	files, _ := loadProto(filepath.Join("testdata", "proto_basic", "buf.binpb"))
+	schema := newSchema()
+	require.NoError(t, schema.applySQL(`CREATE TABLE widgets (id UUID PRIMARY KEY)`))
+	yaml := yamlConfig{Resources: []yamlResource{{
+		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
+		SoftDelete: "removed_at",
+	}}}
+	_, _, diags := processAll(&yaml, files, schema)
+	require.NotEmpty(t, diags)
+	err := diags.Err().Error()
+	require.Contains(t, err, `soft_delete column "removed_at" not found`)
+	require.Contains(t, err, "id", "hint should list candidate columns")
+}

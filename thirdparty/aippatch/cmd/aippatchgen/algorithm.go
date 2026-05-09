@@ -99,6 +99,29 @@ func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *pr
 		return nil, nil, diags
 	}
 
+	// Validate PK column exists in table.
+	if _, ok := tbl.Column(r.PK); !ok {
+		candidates := columnNames(tbl)
+		diags = append(diags, Diagnostic{
+			Resource: r.Message,
+			Message:  fmt.Sprintf("pk column %q not found in table %q", r.PK, r.Table),
+			Hint:     fmt.Sprintf("candidate columns: %s", strings.Join(candidates, ", ")),
+		})
+		return nil, nil, diags
+	}
+	// Validate SoftDelete column exists in table (if set).
+	if r.SoftDelete != "" {
+		if _, ok := tbl.Column(r.SoftDelete); !ok {
+			candidates := columnNames(tbl)
+			diags = append(diags, Diagnostic{
+				Resource: r.Message,
+				Message:  fmt.Sprintf("soft_delete column %q not found in table %q", r.SoftDelete, r.Table),
+				Hint:     fmt.Sprintf("candidate columns: %s", strings.Join(candidates, ", ")),
+			})
+			return nil, nil, diags
+		}
+	}
+
 	// Per proto-field processing.
 	writableSet := map[string]bool{}
 	for _, w := range r.Writable {
@@ -453,4 +476,15 @@ type EnumValue struct {
 	Number  int32
 	GoConst string // e.g. "UserRole_USER_ROLE_ADMIN"
 	Text    string // SQL text
+}
+
+// columnNames returns sorted column names for a table, used in hint messages.
+func columnNames(tbl *Table) []string {
+	cols := tbl.Columns()
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = c.Name
+	}
+	sort.Strings(names)
+	return names
 }
