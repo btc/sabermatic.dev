@@ -12,6 +12,10 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
+// Apply executes the PATCH described by op against m, and returns the
+// updated proto message populated from the RETURNING row. op.Message must
+// be non-nil; the returned T is a clone (via proto.CloneOf) of op.Message
+// with mapped columns overwritten from RETURNING.
 func Apply[T proto.Message](
 	ctx context.Context, db DBTX,
 	m *Mapping[T], op Op[T],
