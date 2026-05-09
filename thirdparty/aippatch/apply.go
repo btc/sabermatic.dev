@@ -122,20 +122,20 @@ func Apply[T proto.Message](
 	// 6. Execute.
 	rows, err := db.Query(ctx, sqlStr, args...)
 	if err != nil {
-		return zero, connectInternal("query: %s", err.Error())
+		return zero, connectInternal("query: %w", err)
 	}
 	defer rows.Close()
 
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return zero, connectInternal("query: %s", err.Error())
+			return zero, connectInternal("query: %w", err)
 		}
 		return zero, connectNotFound("resource not found, soft-deleted, or filtered out")
 	}
 	cols := rows.FieldDescriptions()
 	vals, err := rows.Values()
 	if err != nil {
-		return zero, connectInternal("scan: %s", err.Error())
+		return zero, connectInternal("scan: %w", err)
 	}
 
 	// 7. Build result via CloneOf.
@@ -151,7 +151,7 @@ func Apply[T proto.Message](
 			return zero, connectInternal("binding/proto desync on read: %q", b.Proto)
 		}
 		if err := decode(msg, fd, vals[i], b.Codec, m.codecs); err != nil {
-			return zero, connectInternal("decode %s: %s", b.Proto, err.Error())
+			return zero, connectInternal("decode %s: %w", b.Proto, err)
 		}
 	}
 	return result, nil
