@@ -5,7 +5,13 @@ import (
 
 	stripe "github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/subscription"
+
+	"github.com/btc/drill/internal/feat/idleunsub"
 )
+
+// TODO: stripe-go v82's subscription package functions are not context-aware
+// (Get/Update don't accept a ctx). Tracing and cancellation cannot propagate
+// into the Stripe HTTP call. Revisit when the library exposes a contextual API.
 
 // realStripeClient adapts stripe-go's package-level subscription API to
 // idleunsub.StripeClient. Used in production wiring; tests inject a fake.
@@ -29,3 +35,5 @@ func (realStripeClient) UpdateSubscriptionCancel(_ context.Context, id string, c
 	}
 	return subscription.Update(id, params)
 }
+
+var _ idleunsub.StripeClient = realStripeClient{}
