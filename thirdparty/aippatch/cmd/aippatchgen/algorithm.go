@@ -14,7 +14,7 @@ import (
 
 var identifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func processAll(yaml yamlConfig, files *protoregistry.Files, schema *Schema) ([]ResourceModel, map[string]CodecModel, Diagnostics) {
+func processAll(yaml *yamlConfig, files *protoregistry.Files, schema *Schema) ([]ResourceModel, map[string]CodecModel, Diagnostics) {
 	var diags Diagnostics
 	models := make([]ResourceModel, 0, len(yaml.Resources))
 	codecsUsed := map[string]CodecModel{}
@@ -32,8 +32,8 @@ func processAll(yaml yamlConfig, files *protoregistry.Files, schema *Schema) ([]
 		}
 	}
 
-	for _, r := range yaml.Resources {
-		m, used, ds := processResource(r, yaml.Codecs, files, schema)
+	for i := range yaml.Resources {
+		m, used, ds := processResource(&yaml.Resources[i], yaml.Codecs, files, schema)
 		diags = append(diags, ds...)
 		if m != nil {
 			models = append(models, *m)
@@ -46,7 +46,7 @@ func processAll(yaml yamlConfig, files *protoregistry.Files, schema *Schema) ([]
 	return models, codecsUsed, diags
 }
 
-func processResource(r yamlResource, codecsYaml map[string]yamlCodec, files *protoregistry.Files, schema *Schema) (*ResourceModel, map[string]CodecModel, Diagnostics) {
+func processResource(r *yamlResource, codecsYaml map[string]yamlCodec, files *protoregistry.Files, schema *Schema) (*ResourceModel, map[string]CodecModel, Diagnostics) {
 	var diags Diagnostics
 
 	// Step 9: reject update_writable in v0.

@@ -67,7 +67,7 @@ func run(cfg config) error {
 		return err
 	}
 
-	models, codecs, diags := processAll(yaml, files, schema)
+	models, codecs, diags := processAll(&yaml, files, schema)
 	if err := diags.Err(); err != nil {
 		return err
 	}
@@ -95,7 +95,8 @@ func run(cfg config) error {
 
 	// Emit each resource and the init file.
 	outputs := map[string]string{}
-	for i, m := range models {
+	for i := range models {
+		m := &models[i]
 		src, err := emitResource(m, resolveImportPath(yaml.Resources[i], m.Message))
 		if err != nil {
 			return err

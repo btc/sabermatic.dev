@@ -36,7 +36,7 @@ func TestProcessResource_Happy(t *testing.T) {
 		}},
 	}
 
-	models, codecs, diags := processAll(yaml, files, schema)
+	models, codecs, diags := processAll(&yaml, files, schema)
 	require.Empty(t, diags, "no diagnostics for happy path: %v", diags)
 	require.Len(t, models, 1)
 	r := models[0]
@@ -87,7 +87,7 @@ func TestProcessResource_NullableBoundField_Diagnostic(t *testing.T) {
 			"color": {Skip: true}, "create_time": {Skip: true},
 		},
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "nullable column not supported in v0")
 }
@@ -100,7 +100,7 @@ func TestProcessResource_AutoSetBadIdentifier_Diagnostic(t *testing.T) {
 		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
 		AutoSet: map[string]string{"user-id": "NOW()"},
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.Contains(t, diags.Err().Error(), `auto_set column "user-id" is not a plain SQL identifier`)
 }
 
@@ -113,7 +113,7 @@ func TestProcessResource_CodecDuplicateValue_Diagnostic(t *testing.T) {
 			"enum_color": {ProtoEnum: "x", Map: map[string]string{"A": "x", "B": "x"}},
 		},
 	}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.Contains(t, diags.Err().Error(), "duplicate map value")
 }
 
@@ -125,7 +125,7 @@ func TestProcessResource_UpdateWritableRejected_Diagnostic(t *testing.T) {
 		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
 		EmptyMask: "update_writable",
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.Contains(t, diags.Err().Error(), `update_writable" is not supported in v0`)
 }
 
@@ -139,7 +139,7 @@ func TestProcessResource_UnmatchedProtoField_Diagnostic(t *testing.T) {
 	yaml := yamlConfig{Resources: []yamlResource{{
 		Message: "aippatch.fixture.v1.Widget", Table: "widgets", PK: "id",
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	msg := diags.Err().Error()
 	for _, fname := range []string{"name", "enabled", "count", "small_count", "big_count", "color", "create_time"} {
 		require.Contains(t, msg, fname, "expected diagnostic mentioning %q", fname)
@@ -163,7 +163,7 @@ func TestProcessResource_AutoSetConflict_Diagnostic(t *testing.T) {
 			"color": {Skip: true}, "create_time": {Skip: true},
 		},
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "conflicts with binding")
 }
@@ -184,7 +184,7 @@ func TestProcessResource_AutoSetBadLiteral_Diagnostic(t *testing.T) {
 			"color": {Skip: true}, "create_time": {Skip: true},
 		},
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "not a valid Postgres expression")
 }
@@ -203,7 +203,7 @@ func TestProcessResource_AutoSetColumnNotFound_Diagnostic(t *testing.T) {
 			"color": {Skip: true}, "create_time": {Skip: true},
 		},
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "nonexistent_col")
 }
@@ -224,7 +224,7 @@ func TestProcessResource_AutoSetColumnNullable_Diagnostic(t *testing.T) {
 			"color": {Skip: true}, "create_time": {Skip: true},
 		},
 	}}}
-	_, _, diags := processAll(yaml, files, schema)
+	_, _, diags := processAll(&yaml, files, schema)
 	require.NotEmpty(t, diags)
 	require.Contains(t, diags.Err().Error(), "must be NOT NULL")
 }

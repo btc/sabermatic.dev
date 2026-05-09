@@ -47,9 +47,9 @@ type resourceTplData struct {
 	GoVarName       string
 }
 
-func emitResource(r ResourceModel, protoImportPath string) (string, error) {
+func emitResource(r *ResourceModel, protoImportPath string) (string, error) {
 	data := resourceTplData{
-		ResourceModel:   r,
+		ResourceModel:   *r,
 		ProtoImportPath: protoImportPath,
 		GoVarName:       goVarName(r.Message),
 	}
