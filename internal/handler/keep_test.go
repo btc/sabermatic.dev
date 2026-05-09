@@ -3,7 +3,6 @@ package handler_test
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,52 +17,12 @@ import (
 
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/backendtest"
-	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/feat/idleunsub"
+	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
 	"github.com/btc/drill/internal/handler"
 )
 
-// ---------------------------------------------------------------------------
-// Fakes — local to handler_test (Go forbids importing _test.go from another
-// package, so we duplicate the minimal Stripe + mailer surface used here).
-// ---------------------------------------------------------------------------
-
-type fakeKeepStripe struct {
-	subs        map[string]*stripe.Subscription
-	updateCalls []fakeKeepUpdateCall
-}
-
-type fakeKeepUpdateCall struct {
-	ID                string
-	CancelAtPeriodEnd bool
-	IdempotencyKey    string
-}
-
-var errFakeKeepNotFound = errors.New("fakeKeepStripe: subscription not found")
-
-func (f *fakeKeepStripe) GetSubscription(_ context.Context, id string) (*stripe.Subscription, error) {
-	if s, ok := f.subs[id]; ok {
-		return s, nil
-	}
-	return nil, errFakeKeepNotFound
-}
-
-func (f *fakeKeepStripe) UpdateSubscriptionCancel(_ context.Context, id string, cancelAtEnd bool, key string) (*stripe.Subscription, error) {
-	f.updateCalls = append(f.updateCalls, fakeKeepUpdateCall{id, cancelAtEnd, key})
-	if s, ok := f.subs[id]; ok {
-		s.CancelAtPeriodEnd = cancelAtEnd
-		return s, nil
-	}
-	return nil, errFakeKeepNotFound
-}
-
-var _ idleunsub.StripeClient = (*fakeKeepStripe)(nil)
-
-type nullKeepMailer struct{}
-
-func (nullKeepMailer) Send(_ context.Context, _ email.Message) error { return nil }
-
-var _ email.Sender = nullKeepMailer{}
+// Fakes are provided by idleunsubtest; no local definitions needed.
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -78,7 +37,7 @@ type keepFixture struct {
 	PeriodStart time.Time
 	PeriodEnd   time.Time
 	Sub         *stripe.Subscription
-	Fake        *fakeKeepStripe
+	Fake        *idleunsubtest.FakeStripe
 	Signer      *idleunsub.TokenSigner
 }
 
@@ -124,7 +83,7 @@ func setupKeepFixture(t *testing.T) *keepFixture {
 			}},
 		}}},
 	}
-	fake := &fakeKeepStripe{subs: map[string]*stripe.Subscription{subID: sub}}
+	fake := &idleunsubtest.FakeStripe{Subs: map[string]*stripe.Subscription{subID: sub}}
 
 	var signerKey [32]byte
 	_, err = rand.Read(signerKey[:])
@@ -134,7 +93,7 @@ func setupKeepFixture(t *testing.T) *keepFixture {
 	svc := idleunsub.NewService(
 		b.Pool(),
 		fake,
-		nullKeepMailer{},
+		idleunsubtest.NullMailer{},
 		signer,
 		"http://localhost:3000",
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -189,9 +148,9 @@ func TestKeep_HappyPath(t *testing.T) {
 	assert.Contains(t, w.Body.String(), fx.PeriodEnd.UTC().Format("January 2, 2006"))
 
 	// Exactly one Stripe Update call: cancel_at_period_end=false.
-	require.Len(t, fx.Fake.updateCalls, 1, "exactly one Stripe call on first claim")
-	assert.Equal(t, fx.SubID, fx.Fake.updateCalls[0].ID)
-	assert.False(t, fx.Fake.updateCalls[0].CancelAtPeriodEnd)
+	require.Len(t, fx.Fake.UpdateCalls, 1, "exactly one Stripe call on first claim")
+	assert.Equal(t, fx.SubID, fx.Fake.UpdateCalls[0].ID)
+	assert.False(t, fx.Fake.UpdateCalls[0].CancelAtPeriodEnd)
 
 	// One subscription_kept event row was written.
 	var count int
@@ -232,7 +191,7 @@ func TestKeep_TamperedToken(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "invalid")
-	assert.Empty(t, fx.Fake.updateCalls, "tampered token must not reach Stripe")
+	assert.Empty(t, fx.Fake.UpdateCalls, "tampered token must not reach Stripe")
 }
 
 func TestKeep_ExpiredToken(t *testing.T) {
@@ -257,7 +216,7 @@ func TestKeep_ExpiredToken(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "subscription has ended")
 	assert.Contains(t, w.Body.String(), pastEnd.UTC().Format("January 2, 2006"))
-	assert.Empty(t, fx.Fake.updateCalls, "expired token must not reach Stripe")
+	assert.Empty(t, fx.Fake.UpdateCalls, "expired token must not reach Stripe")
 }
 
 func TestKeep_Replay(t *testing.T) {
@@ -271,7 +230,7 @@ func TestKeep_Replay(t *testing.T) {
 	handler.GetKeepLink(fx.B)(w1, newKeepRequest(tok))
 	require.Equal(t, http.StatusOK, w1.Code)
 	require.Contains(t, w1.Body.String(), "You're all set")
-	require.Len(t, fx.Fake.updateCalls, 1)
+	require.Len(t, fx.Fake.UpdateCalls, 1)
 
 	// Second click with the same token — TryClaimKeepToken returns no rows
 	// (already claimed). The handler must render the same confirmation page
@@ -280,7 +239,7 @@ func TestKeep_Replay(t *testing.T) {
 	handler.GetKeepLink(fx.B)(w2, newKeepRequest(tok))
 	require.Equal(t, http.StatusOK, w2.Code)
 	assert.Contains(t, w2.Body.String(), "You're all set")
-	assert.Len(t, fx.Fake.updateCalls, 1, "replay must not trigger a second Stripe call")
+	assert.Len(t, fx.Fake.UpdateCalls, 1, "replay must not trigger a second Stripe call")
 
 	// Still exactly one subscription_kept row.
 	var count int
@@ -312,7 +271,7 @@ func TestKeep_RefusesManualCancel(t *testing.T) {
 		"manual-cancel refusal still renders the kept page idempotently")
 
 	// Zero Stripe calls — KeepSubscription's gate refused.
-	assert.Empty(t, fx.Fake.updateCalls, "manual cancel must not reach Stripe")
+	assert.Empty(t, fx.Fake.UpdateCalls, "manual cancel must not reach Stripe")
 
 	// Zero new event rows.
 	var count int

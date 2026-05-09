@@ -96,7 +96,7 @@ func setupHappyPath(t *testing.T) *fixture {
 			}},
 		}}},
 	}
-	fake := &fakeStripe{subs: map[string]*stripe.Subscription{subID: sub}}
+	fake := &fakeStripe{Subs: map[string]*stripe.Subscription{subID: sub}}
 	mailer := &recordingMailer{}
 
 	var signerKey [32]byte
@@ -134,7 +134,7 @@ func setupHappyPath(t *testing.T) *fixture {
 // written. Used by every early-return test below.
 func requireNoCancel(t *testing.T, fx *fixture) {
 	t.Helper()
-	require.Empty(t, fx.Fake.updateCalls, "expected no Stripe update calls")
+	require.Empty(t, fx.Fake.UpdateCalls, "expected no Stripe update calls")
 	var count int
 	err := fx.B.Pool().QueryRow(fx.Ctx, `
 		SELECT COUNT(*) FROM user_events
@@ -163,9 +163,9 @@ func TestHandleInvoiceUpcoming_FiresCancel_WhenIdleTwoPeriods(t *testing.T) {
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 
 	// Stripe Update was called with cancel_at_period_end=true.
-	require.Len(t, fx.Fake.updateCalls, 1)
-	require.True(t, fx.Fake.updateCalls[0].CancelAtPeriodEnd)
-	require.Equal(t, fx.Event.ID, fx.Fake.updateCalls[0].IdempotencyKey)
+	require.Len(t, fx.Fake.UpdateCalls, 1)
+	require.True(t, fx.Fake.UpdateCalls[0].CancelAtPeriodEnd)
+	require.Equal(t, fx.Event.ID, fx.Fake.UpdateCalls[0].IdempotencyKey)
 
 	// user_events row exists.
 	var count int
@@ -203,8 +203,8 @@ func TestHandleInvoiceUpcoming_FiresCancel_WhenIdleTwoPeriods(t *testing.T) {
 	require.False(t, subIDCol.Valid, "spec invariant: HandleInvoiceUpcoming does not write stripe_subscription_id")
 
 	// Cancel email was sent: exactly one message with correct subject, To, and body.
-	require.Len(t, fx.Mailer.msgs, 1, "expected exactly one cancel email")
-	cancelMsg := fx.Mailer.msgs[0]
+	require.Len(t, fx.Mailer.Msgs, 1, "expected exactly one cancel email")
+	cancelMsg := fx.Mailer.Msgs[0]
 	require.Equal(t, "We won't charge you for the next period", cancelMsg.Subject)
 	// Fetch user email from DB to assert on To field.
 	var userEmail string
@@ -226,7 +226,7 @@ func TestHandleInvoiceUpcoming_SkipsTrialing(t *testing.T) {
 
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 	requireNoCancel(t, fx)
-	require.Empty(t, fx.Mailer.msgs, "no email when cancel is skipped")
+	require.Empty(t, fx.Mailer.Msgs, "no email when cancel is skipped")
 }
 
 func TestHandleInvoiceUpcoming_SkipsAlreadyCanceled(t *testing.T) {
@@ -236,7 +236,7 @@ func TestHandleInvoiceUpcoming_SkipsAlreadyCanceled(t *testing.T) {
 
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 	requireNoCancel(t, fx)
-	require.Empty(t, fx.Mailer.msgs, "no email when cancel is skipped")
+	require.Empty(t, fx.Mailer.Msgs, "no email when cancel is skipped")
 }
 
 func TestHandleInvoiceUpcoming_SkipsGrandfathered(t *testing.T) {
@@ -259,12 +259,12 @@ func TestHandleInvoiceUpcoming_DedupesRetryStorm(t *testing.T) {
 
 	// Step 1: First call with evt_1 → fires cancel (1 Stripe update call).
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
-	require.Len(t, fx.Fake.updateCalls, 1)
+	require.Len(t, fx.Fake.UpdateCalls, 1)
 
 	// Step 2: Second call with evt_1 → blocked by webhook dedup (same event
 	// ID); still exactly 1 update call.
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
-	require.Len(t, fx.Fake.updateCalls, 1)
+	require.Len(t, fx.Fake.UpdateCalls, 1)
 
 	// Step 3: Third call with evt_2 (different event ID, same period) →
 	// TryClaimWebhookEvent succeeds (new event), but HasAutoCanceledThisPeriod
@@ -272,7 +272,7 @@ func TestHandleInvoiceUpcoming_DedupesRetryStorm(t *testing.T) {
 	evt2 := fx.Event
 	evt2.ID = "evt_" + uuid.NewString()[:8]
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, evt2))
-	require.Len(t, fx.Fake.updateCalls, 1)
+	require.Len(t, fx.Fake.UpdateCalls, 1)
 
 	// Exactly one auto-cancel user_events row (only step 1 wrote it).
 	var count int
@@ -327,7 +327,7 @@ func TestHandleInvoiceUpcoming_DedupesPostKeep(t *testing.T) {
 	require.NoError(t, fx.Svc.HandleInvoiceUpcoming(fx.Ctx, fx.Event))
 
 	// No update call.
-	require.Empty(t, fx.Fake.updateCalls)
+	require.Empty(t, fx.Fake.UpdateCalls)
 	// No new auto-cancel rows.
 	var count int
 	err = fx.B.Pool().QueryRow(fx.Ctx, `
@@ -468,10 +468,10 @@ func TestKeepSubscription_HappyPath(t *testing.T) {
 	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
 
 	// Stripe Update called once, with cancel_at_period_end=false.
-	require.Len(t, fx.Fake.updateCalls, 1)
-	require.Equal(t, fx.SubID, fx.Fake.updateCalls[0].ID)
-	require.False(t, fx.Fake.updateCalls[0].CancelAtPeriodEnd)
-	require.Empty(t, fx.Fake.updateCalls[0].IdempotencyKey,
+	require.Len(t, fx.Fake.UpdateCalls, 1)
+	require.Equal(t, fx.SubID, fx.Fake.UpdateCalls[0].ID)
+	require.False(t, fx.Fake.UpdateCalls[0].CancelAtPeriodEnd)
+	require.Empty(t, fx.Fake.UpdateCalls[0].IdempotencyKey,
 		"KeepSubscription passes empty idempotency key (Stripe treats as non-idempotent)")
 
 	// Cache flipped, banner set.
@@ -493,8 +493,8 @@ func TestKeepSubscription_HappyPath(t *testing.T) {
 	require.Equal(t, fx.SubID, gotSubID)
 
 	// Kept-confirmation email was sent.
-	require.Len(t, fx.Mailer.msgs, 1, "expected exactly one kept email")
-	require.Equal(t, "Your subscription is still active", fx.Mailer.msgs[0].Subject)
+	require.Len(t, fx.Mailer.Msgs, 1, "expected exactly one kept email")
+	require.Equal(t, "Your subscription is still active", fx.Mailer.Msgs[0].Subject)
 }
 
 func TestKeepSubscription_RefusesManualCancel(t *testing.T) {
@@ -510,7 +510,7 @@ func TestKeepSubscription_RefusesManualCancel(t *testing.T) {
 	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
 
 	// Zero Stripe calls.
-	require.Empty(t, fx.Fake.updateCalls, "must not touch Stripe on a manual cancel")
+	require.Empty(t, fx.Fake.UpdateCalls, "must not touch Stripe on a manual cancel")
 	// Zero new event rows.
 	require.Equal(t, 0, countKeptEvents(t, fx))
 	// Cache unchanged: still cancel_at_period_end=true, is_auto=false (we set
@@ -523,7 +523,7 @@ func TestKeepSubscription_RefusesManualCancel(t *testing.T) {
 	require.True(t, cancelAtEnd, "manual-cancel cache flag must be left intact")
 	require.False(t, isAuto)
 	require.False(t, banner)
-	require.Empty(t, fx.Mailer.msgs, "no email when reversal is a no-op")
+	require.Empty(t, fx.Mailer.Msgs, "no email when reversal is a no-op")
 }
 
 func TestKeepSubscription_Idempotent(t *testing.T) {
@@ -536,12 +536,12 @@ func TestKeepSubscription_Idempotent(t *testing.T) {
 	require.NoError(t, fx.Svc.KeepSubscription(fx.Ctx, keepClaims(fx)))
 
 	// Exactly one Stripe call, exactly one event row.
-	require.Len(t, fx.Fake.updateCalls, 1, "second call must not re-hit Stripe")
+	require.Len(t, fx.Fake.UpdateCalls, 1, "second call must not re-hit Stripe")
 	require.Equal(t, 1, countKeptEvents(t, fx), "second call must not re-insert event")
 
 	// Exactly one email: first call sends it; second call is a gate-off no-op.
-	require.Len(t, fx.Mailer.msgs, 1, "exactly one kept email across both calls")
-	require.Equal(t, "Your subscription is still active", fx.Mailer.msgs[0].Subject)
+	require.Len(t, fx.Mailer.Msgs, 1, "exactly one kept email across both calls")
+	require.Equal(t, "Your subscription is still active", fx.Mailer.Msgs[0].Subject)
 }
 
 // ---------------------------------------------------------------------------
@@ -556,11 +556,11 @@ func TestAutoReverse_GateOff(t *testing.T) {
 
 	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
 
-	require.Empty(t, fx.Fake.updateCalls, "gate off → no Stripe calls")
+	require.Empty(t, fx.Fake.UpdateCalls, "gate off → no Stripe calls")
 	// Note: setupHappyPath does not call GetSubscription either; AutoReverse
 	// must early-return before any Stripe round-trip.
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.msgs, "no email when gate is off")
+	require.Empty(t, fx.Mailer.Msgs, "no email when gate is off")
 }
 
 func TestAutoReverse_HappyPath(t *testing.T) {
@@ -570,9 +570,9 @@ func TestAutoReverse_HappyPath(t *testing.T) {
 	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
 
 	// Exactly one Stripe Update call, with cancel_at_period_end=false.
-	require.Len(t, fx.Fake.updateCalls, 1)
-	require.Equal(t, fx.SubID, fx.Fake.updateCalls[0].ID)
-	require.False(t, fx.Fake.updateCalls[0].CancelAtPeriodEnd)
+	require.Len(t, fx.Fake.UpdateCalls, 1)
+	require.Equal(t, fx.SubID, fx.Fake.UpdateCalls[0].ID)
+	require.False(t, fx.Fake.UpdateCalls[0].CancelAtPeriodEnd)
 
 	// Cache cleared with banner=true.
 	cancelAtEnd, isAuto, banner := readUserCache(t, fx)
@@ -591,8 +591,8 @@ func TestAutoReverse_HappyPath(t *testing.T) {
 	require.Equal(t, "auto_activity", via)
 
 	// Kept-confirmation email was sent.
-	require.Len(t, fx.Mailer.msgs, 1, "expected exactly one kept email")
-	require.Equal(t, "Your subscription is still active", fx.Mailer.msgs[0].Subject)
+	require.Len(t, fx.Mailer.Msgs, 1, "expected exactly one kept email")
+	require.Equal(t, "Your subscription is still active", fx.Mailer.Msgs[0].Subject)
 }
 
 func TestAutoReverse_CacheDriftCorrected(t *testing.T) {
@@ -607,7 +607,7 @@ func TestAutoReverse_CacheDriftCorrected(t *testing.T) {
 	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
 
 	// ZERO Stripe Update calls — only the GetSubscription read.
-	require.Empty(t, fx.Fake.updateCalls, "drift correction must not hit Stripe Update")
+	require.Empty(t, fx.Fake.UpdateCalls, "drift correction must not hit Stripe Update")
 
 	// Cache silently cleared.
 	cancelAtEnd, isAuto, banner := readUserCache(t, fx)
@@ -617,7 +617,7 @@ func TestAutoReverse_CacheDriftCorrected(t *testing.T) {
 
 	// No subscription_kept event row (no real reversal happened).
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.msgs, "no email on cache drift correction")
+	require.Empty(t, fx.Mailer.Msgs, "no email on cache drift correction")
 }
 
 func TestAutoReverse_RefusesManualCancel(t *testing.T) {
@@ -633,7 +633,7 @@ func TestAutoReverse_RefusesManualCancel(t *testing.T) {
 	require.NoError(t, fx.Svc.AutoReverse(fx.Ctx, fx.UserID))
 
 	// Zero Stripe calls of any kind.
-	require.Empty(t, fx.Fake.updateCalls)
+	require.Empty(t, fx.Fake.UpdateCalls)
 	// Cache unchanged.
 	var cancelAtEnd, isAuto, banner bool
 	err = fx.B.Pool().QueryRow(fx.Ctx,
@@ -644,7 +644,7 @@ func TestAutoReverse_RefusesManualCancel(t *testing.T) {
 	require.False(t, isAuto)
 	require.False(t, banner)
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.msgs, "no email when reversal is refused")
+	require.Empty(t, fx.Mailer.Msgs, "no email when reversal is refused")
 }
 
 func TestAutoReverse_StripeUpdateFails(t *testing.T) {
@@ -652,7 +652,7 @@ func TestAutoReverse_StripeUpdateFails(t *testing.T) {
 	fx := setupAutoCanceledState(t)
 
 	// Configure fakeStripe to fail on the next Update call.
-	fx.Fake.updateErr = errors.New("stripe down")
+	fx.Fake.UpdateErr = errors.New("stripe down")
 
 	err := fx.Svc.AutoReverse(fx.Ctx, fx.UserID)
 	require.Error(t, err)
@@ -666,5 +666,5 @@ func TestAutoReverse_StripeUpdateFails(t *testing.T) {
 
 	// No subscription_kept rows because we returned before DB writes.
 	require.Equal(t, 0, countKeptEvents(t, fx))
-	require.Empty(t, fx.Mailer.msgs, "no email when Stripe update fails")
+	require.Empty(t, fx.Mailer.Msgs, "no email when Stripe update fails")
 }

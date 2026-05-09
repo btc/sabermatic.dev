@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,8 +19,8 @@ import (
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/backendtest"
 	"github.com/btc/drill/internal/db"
-	"github.com/btc/drill/internal/email"
 	"github.com/btc/drill/internal/feat/idleunsub"
+	"github.com/btc/drill/internal/feat/idleunsub/idleunsubtest"
 )
 
 // ---------------------------------------------------------------------------
@@ -856,53 +855,9 @@ func TestHandleSubscriptionUpdated_UnknownCustomerIsNoOp(t *testing.T) {
 //     sub_current_period_start, and sets plan='free' in one query).
 // ---------------------------------------------------------------------------
 
-// fakeBillingStripe is a local in-memory StripeClient for backend tests.
-// idleunsub_test has its own fakeStripe but it lives in the idleunsub_test
-// package and is unexported. We reproduce a minimal version here so this
-// _test.go file stays self-contained.
-type fakeBillingStripe struct {
-	subs        map[string]*stripe.Subscription
-	updateCalls []fakeBillingUpdateCall
-}
-
-type fakeBillingUpdateCall struct {
-	ID                string
-	CancelAtPeriodEnd bool
-	IdempotencyKey    string
-}
-
-var errFakeStripeNotFound = errors.New("fakeBillingStripe: subscription not found")
-
-func (f *fakeBillingStripe) GetSubscription(_ context.Context, id string) (*stripe.Subscription, error) {
-	if s, ok := f.subs[id]; ok {
-		return s, nil
-	}
-	return nil, errFakeStripeNotFound
-}
-
-func (f *fakeBillingStripe) UpdateSubscriptionCancel(_ context.Context, id string, cancelAtEnd bool, key string) (*stripe.Subscription, error) {
-	f.updateCalls = append(f.updateCalls, fakeBillingUpdateCall{id, cancelAtEnd, key})
-	if s, ok := f.subs[id]; ok {
-		s.CancelAtPeriodEnd = cancelAtEnd
-		return s, nil
-	}
-	return nil, errFakeStripeNotFound
-}
-
-var _ idleunsub.StripeClient = (*fakeBillingStripe)(nil)
-
-// nullBillingMailer drops all sends. The cancel-decision flow is best-effort
-// on email; tests assert on DB state and Stripe-call effects, not delivery.
-type nullBillingMailer struct{}
-
-func (nullBillingMailer) Send(_ context.Context, _ email.Message) error { return nil }
-
-var _ email.Sender = nullBillingMailer{}
-
 // makeIdleunsubOverride builds an idleunsub.Service backed by a caller-supplied
-// fake StripeClient and applies it via ApplyTestOverrides. Returns the fake so
-// callers can assert on calls made into Stripe.
-func makeIdleunsubOverride(t *testing.T, b *backend.Backend, fake *fakeBillingStripe) {
+// fake StripeClient and applies it via ApplyTestOverrides.
+func makeIdleunsubOverride(t *testing.T, b *backend.Backend, fake *idleunsubtest.FakeStripe) {
 	t.Helper()
 	var key [32]byte
 	_, err := rand.Read(key[:])
@@ -911,7 +866,7 @@ func makeIdleunsubOverride(t *testing.T, b *backend.Backend, fake *fakeBillingSt
 	svc := idleunsub.NewService(
 		b.Pool(),
 		fake,
-		nullBillingMailer{},
+		idleunsubtest.NullMailer{},
 		signer,
 		"http://localhost:3000",
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -988,7 +943,7 @@ func TestWebhookSwitch_InvoiceUpcoming_RoutesToIdleunsub(t *testing.T) {
 			}},
 		}}},
 	}
-	fake := &fakeBillingStripe{subs: map[string]*stripe.Subscription{subID: sub}}
+	fake := &idleunsubtest.FakeStripe{Subs: map[string]*stripe.Subscription{subID: sub}}
 	makeIdleunsubOverride(t, b, fake)
 
 	eventID := "evt_invoice_upcoming_" + uuid.NewString()[:8]
@@ -1003,10 +958,10 @@ func TestWebhookSwitch_InvoiceUpcoming_RoutesToIdleunsub(t *testing.T) {
 	require.NoError(t, b.HandleStripeWebhook(ctx, event))
 
 	// idleunsub fired the cancel through the fake Stripe client.
-	require.Len(t, fake.updateCalls, 1, "expected exactly one Stripe update call")
-	assert.Equal(t, subID, fake.updateCalls[0].ID)
-	assert.True(t, fake.updateCalls[0].CancelAtPeriodEnd)
-	assert.Equal(t, eventID, fake.updateCalls[0].IdempotencyKey)
+	require.Len(t, fake.UpdateCalls, 1, "expected exactly one Stripe update call")
+	assert.Equal(t, subID, fake.UpdateCalls[0].ID)
+	assert.True(t, fake.UpdateCalls[0].CancelAtPeriodEnd)
+	assert.Equal(t, eventID, fake.UpdateCalls[0].IdempotencyKey)
 
 	// Audit row landed in user_events.
 	var count int
