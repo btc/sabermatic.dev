@@ -84,9 +84,10 @@ func run(cfg config) error {
 	// file can never reference a package it didn't declare. Multi-package
 	// support is a v1+ extension that would require either multiple
 	// init.gen.go files or a richer import block.
-	importPath := resolveImportPath(yaml.Resources[0], models[0].Message)
+	importPath := resolveImportPath(&yaml.Resources[0], models[0].Message)
 	pkg := models[0].Package
-	for _, m := range models[1:] {
+	for i := range models[1:] {
+		m := &models[1:][i]
 		if m.Package != pkg {
 			return fmt.Errorf("aippatchgen: multi-package yaml not supported in v0: %s vs %s",
 				models[0].Message, m.Message)
@@ -97,7 +98,7 @@ func run(cfg config) error {
 	outputs := map[string]string{}
 	for i := range models {
 		m := &models[i]
-		src, err := emitResource(m, resolveImportPath(yaml.Resources[i], m.Message))
+		src, err := emitResource(m, resolveImportPath(&yaml.Resources[i], m.Message))
 		if err != nil {
 			return err
 		}
@@ -106,8 +107,8 @@ func run(cfg config) error {
 		outputs[fname] = src
 	}
 	resVarNames := make([]string, 0, len(models))
-	for _, m := range models {
-		resVarNames = append(resVarNames, goVarName(m.Message))
+	for i := range models {
+		resVarNames = append(resVarNames, goVarName(models[i].Message))
 	}
 	initSrc, err := emitInit(codecs, resVarNames, pkg, importPath)
 	if err != nil {
@@ -125,7 +126,7 @@ func run(cfg config) error {
 // falls back to the drill-specific heuristic (proto full-name → drill's
 // generated-pb directory layout). Spanda projects MUST set go_package_path
 // to point at their own pb directory; the heuristic only fits drill.
-func resolveImportPath(r yamlResource, messageFullName string) string {
+func resolveImportPath(r *yamlResource, messageFullName string) string {
 	if r.GoPackagePath != "" {
 		return r.GoPackagePath
 	}
