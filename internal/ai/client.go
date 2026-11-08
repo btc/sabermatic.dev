@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"strings"
 	"sync"
@@ -55,6 +56,11 @@ type RefusalError struct {
 	Model       string // model that produced the final (refused) response
 	Category    string // stop_details.category; empty when the API sent none
 	Explanation string // stop_details.explanation; may be empty
+	// RecommendedModel is stop_details.recommended_model: the fallback model
+	// the API suggests retrying on directly. The API sets it only when a
+	// fallback attempt could not run (the fallback model was rate-limited or
+	// overloaded); empty otherwise.
+	RecommendedModel string
 }
 
 func (e *RefusalError) Error() string {
@@ -65,6 +71,9 @@ func (e *RefusalError) Error() string {
 	msg := fmt.Sprintf("ai: %s declined the request (refusal category: %s)", e.Model, category)
 	if e.Explanation != "" {
 		msg += ": " + e.Explanation
+	}
+	if e.RecommendedModel != "" {
+		msg += " (recommended retry model: " + e.RecommendedModel + ")"
 	}
 	return msg
 }
@@ -183,9 +192,10 @@ func checkStop(stopReason anthropic.BetaStopReason, details anthropic.BetaRefusa
 	switch stopReason {
 	case anthropic.BetaStopReasonRefusal:
 		return &RefusalError{
-			Model:       model,
-			Category:    string(details.Category),
-			Explanation: details.Explanation,
+			Model:            model,
+			Category:         string(details.Category),
+			Explanation:      details.Explanation,
+			RecommendedModel: details.RecommendedModel,
 		}
 	case anthropic.BetaStopReasonMaxTokens:
 		return fmt.Errorf("%w: %s used all %d tokens (thinking counts toward the limit)", ErrMaxTokens, model, maxTokens)
@@ -275,11 +285,14 @@ type JSONParams struct {
 }
 
 // CallJSONAndLog makes a structured-output request and returns the JSON text
-// of the response. It persists the call within the caller's transaction.
+// of the response. On success it persists the call within the caller's
+// transaction; a nil tx skips persistence.
 //
 // A refusal returns a *RefusalError and a max_tokens stop returns an error
-// wrapping ErrMaxTokens; in both cases nothing is persisted, because the
-// output may not match the schema.
+// wrapping ErrMaxTokens. Those responses, and responses with no text or with
+// invalid JSON, are still billed, so the call is persisted through the pool
+// (outside tx, which the caller rolls back on error) before the error is
+// returned. Persistence is skipped when the client has no pool.
 func (c *Client) CallJSONAndLog(ctx context.Context, tx pgx.Tx, p JSONParams) (_ json.RawMessage, err error) {
 	ctx, span := tracer.Start(ctx, "Client.CallJSONAndLog")
 	defer func() { drilotel.End(span, err) }()
@@ -302,10 +315,35 @@ func (c *Client) CallJSONAndLog(ctx context.Context, tx pgx.Tx, p JSONParams) (_
 		return nil, err
 	}
 	model := servedModel(resp, p.Model)
-	if err := checkStop(resp.StopReason, resp.StopDetails, model, params.MaxTokens); err != nil {
-		return nil, err
+	rec := func() (callRecord, error) {
+		return messageRecord(resp, model, params, p.UserID, p.Role, p.SessionID, latency)
 	}
 
+	out, outErr := jsonOutput(resp, model, params.MaxTokens)
+	if outErr != nil {
+		c.persistFailed(ctx, rec, outErr)
+		return nil, outErr
+	}
+
+	if tx == nil {
+		return out, nil
+	}
+	r, err := rec()
+	if err != nil {
+		return out, err
+	}
+	if err := insertCall(ctx, db.New(tx), r); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// jsonOutput returns the JSON text of a structured-output response, or the
+// error that makes the response unusable.
+func jsonOutput(resp *anthropic.BetaMessage, model string, maxTokens int64) (json.RawMessage, error) {
+	if err := checkStop(resp.StopReason, resp.StopDetails, model, maxTokens); err != nil {
+		return nil, err
+	}
 	text := textOf(resp)
 	if strings.TrimSpace(text) == "" {
 		return nil, fmt.Errorf("ai: %s returned no text content (stop_reason %q)", model, resp.StopReason)
@@ -314,35 +352,52 @@ func (c *Client) CallJSONAndLog(ctx context.Context, tx pgx.Tx, p JSONParams) (_
 	if !json.Valid(out) {
 		return nil, fmt.Errorf("ai: %s returned invalid JSON (stop_reason %q)", model, resp.StopReason)
 	}
+	return out, nil
+}
 
-	// Persist within the caller's transaction. The response column keeps the
-	// full message, as the previous tool-use path did.
+// messageRecord builds the llm_calls record for a completed blocking call.
+// The response column keeps the full message, which includes stop_reason and
+// stop_details.
+func messageRecord(resp *anthropic.BetaMessage, model string, params anthropic.BetaMessageNewParams, userID uuid.UUID, role string, sessionID uuid.UUID, latency time.Duration) (callRecord, error) {
 	respJSON := json.RawMessage(resp.RawJSON())
 	if !json.Valid(respJSON) {
+		var err error
 		respJSON, err = json.Marshal(resp)
 		if err != nil {
-			return out, fmt.Errorf("marshal response: %w", err)
+			return callRecord{}, fmt.Errorf("marshal response: %w", err)
 		}
 	}
 	promptJSON, err := json.Marshal(params)
 	if err != nil {
-		return out, fmt.Errorf("marshal prompt: %w", err)
+		return callRecord{}, fmt.Errorf("marshal prompt: %w", err)
 	}
-	err = insertCall(ctx, db.New(tx), callRecord{
-		model:        model,
-		userID:       p.UserID,
-		role:         p.Role,
-		sessionID:    p.SessionID,
-		inputTokens:  resp.Usage.InputTokens,
-		outputTokens: resp.Usage.OutputTokens,
-		latency:      latency,
-		prompt:       promptJSON,
-		response:     respJSON,
-	})
+	return callRecord{
+		model:     model,
+		userID:    userID,
+		role:      role,
+		sessionID: sessionID,
+		usage:     resp.Usage,
+		latency:   latency,
+		prompt:    promptJSON,
+		response:  respJSON,
+	}, nil
+}
+
+// persistFailed records a billed call whose output could not be used. It
+// writes through the pool because the caller's transaction rolls back on
+// error. Failures are logged, not returned: callErr is the error the caller
+// needs to see.
+func (c *Client) persistFailed(ctx context.Context, rec func() (callRecord, error), callErr error) {
+	if c.pool == nil {
+		return
+	}
+	r, err := rec()
+	if err == nil {
+		err = insertCall(ctx, db.New(c.pool), r)
+	}
 	if err != nil {
-		return out, err
+		slog.Warn("ai: persist llm_call record for failed call", "error", err, "call_error", callErr)
 	}
-	return out, nil
 }
 
 // CallParams configures a blocking text LLM call.
@@ -356,11 +411,17 @@ type CallParams struct {
 
 // CallResult holds the response and usage metadata from a blocking LLM call.
 type CallResult struct {
-	Text         string
-	Model        string // model that served the response (may be a fallback model)
+	Text  string
+	Model string // model that served the response (may be a fallback model)
+	// InputTokens and OutputTokens are billed totals: summed over
+	// usage.iterations when the API reports per-attempt usage (a server-side
+	// fallback ran), else the top-level usage.
 	InputTokens  int64
 	OutputTokens int64
-	Latency      time.Duration
+	// Cost is the estimated USD cost, each attempt priced at the model that
+	// ran it.
+	Cost    float64
+	Latency time.Duration
 }
 
 // Call makes a blocking Anthropic request without logging. Returns the text
@@ -369,7 +430,9 @@ type CallResult struct {
 // happens in a separate transaction.
 //
 // A refusal returns a *RefusalError and a max_tokens stop returns an error
-// wrapping ErrMaxTokens.
+// wrapping ErrMaxTokens. Both are billed, so on those errors the returned
+// CallResult still carries Model, token counts, Cost and Latency (Text is
+// empty) for the caller to log.
 func (c *Client) Call(ctx context.Context, p CallParams) (_ CallResult, err error) {
 	ctx, span := tracer.Start(ctx, "Client.Call")
 	defer func() { drilotel.End(span, err) }()
@@ -387,17 +450,19 @@ func (c *Client) Call(ctx context.Context, p CallParams) (_ CallResult, err erro
 		return CallResult{}, err
 	}
 	model := servedModel(resp, p.Model)
-	if err := checkStop(resp.StopReason, resp.StopDetails, model, params.MaxTokens); err != nil {
-		return CallResult{}, err
-	}
-
-	return CallResult{
-		Text:         textOf(resp),
+	in, out := billedTokens(resp.Usage)
+	result := CallResult{
 		Model:        model,
-		InputTokens:  resp.Usage.InputTokens,
-		OutputTokens: resp.Usage.OutputTokens,
+		InputTokens:  in,
+		OutputTokens: out,
+		Cost:         usageCost(resp.Usage, model),
 		Latency:      latency,
-	}, nil
+	}
+	if err := checkStop(resp.StopReason, resp.StopDetails, model, params.MaxTokens); err != nil {
+		return result, err
+	}
+	result.Text = textOf(resp)
+	return result, nil
 }
 
 // TokenStream wraps an Anthropic streaming response and yields text tokens
@@ -507,6 +572,15 @@ func (ts *TokenStream) drain() {
 	if ts.done {
 		return
 	}
+	if ts.err != nil {
+		// Next already stopped on an error. A stop-reason error (refusal,
+		// max_tokens) arrives in message_delta, which carries the final usage,
+		// so only message_stop is left. Any other error means the stream is
+		// broken or the rest of the generation is unusable; reading it to the
+		// end would block Close for the remaining generation time.
+		ts.done = true
+		return
+	}
 	for ts.stream.Next() {
 		event := ts.stream.Current()
 		_ = ts.message.Accumulate(event)
@@ -533,34 +607,35 @@ func (ts *TokenStream) persist(ctx context.Context, q *db.Queries) error {
 		return fmt.Errorf("marshal response: %w", err)
 	}
 	return insertCall(ctx, q, callRecord{
-		model:        model,
-		userID:       ts.userID,
-		role:         ts.role,
-		sessionID:    ts.sessionID,
-		inputTokens:  usage.InputTokens,
-		outputTokens: usage.OutputTokens,
-		latency:      time.Since(ts.startTime),
-		prompt:       promptJSON,
-		response:     responseJSON,
+		model:     model,
+		userID:    ts.userID,
+		role:      ts.role,
+		sessionID: ts.sessionID,
+		usage:     usage,
+		latency:   time.Since(ts.startTime),
+		prompt:    promptJSON,
+		response:  responseJSON,
 	})
 }
 
 // callRecord holds the data written to llm_calls + llm_call_content.
 type callRecord struct {
-	model        string // model that served the response
-	userID       uuid.UUID
-	role         string
-	sessionID    uuid.UUID
-	inputTokens  int64
-	outputTokens int64
-	latency      time.Duration
-	prompt       json.RawMessage
-	response     json.RawMessage
+	model     string // model that served the response
+	userID    uuid.UUID
+	role      string
+	sessionID uuid.UUID
+	usage     anthropic.BetaUsage
+	latency   time.Duration
+	prompt    json.RawMessage
+	response  json.RawMessage
 }
 
-// insertCall inserts into llm_calls and llm_call_content.
+// insertCall inserts into llm_calls and llm_call_content. The token columns
+// and estimated_cost cover every billed attempt (see billedTokens and
+// usageCost); the model column names the model that served the response.
 func insertCall(ctx context.Context, q *db.Queries, r callRecord) error {
-	cost := EstimateCost(r.model, r.inputTokens, r.outputTokens)
+	cost := usageCost(r.usage, r.model)
+	inputTokens, outputTokens := billedTokens(r.usage)
 
 	sessionID := pgtype.UUID{}
 	if r.sessionID != uuid.Nil {
@@ -576,8 +651,8 @@ func insertCall(ctx context.Context, q *db.Queries, r callRecord) error {
 		UserID:        userID,
 		Role:          r.role,
 		Model:         r.model,
-		InputTokens:   int32(r.inputTokens),
-		OutputTokens:  int32(r.outputTokens),
+		InputTokens:   int32(inputTokens),
+		OutputTokens:  int32(outputTokens),
 		EstimatedCost: NumericFromFloat(cost),
 		LatencyMs:     int32(r.latency.Milliseconds()),
 	})
@@ -596,10 +671,55 @@ func insertCall(ctx context.Context, q *db.Queries, r callRecord) error {
 	return nil
 }
 
-// EstimateCost returns the estimated cost in USD.
+// billedTokens returns the input and output tokens billed for a response.
+// With server-side fallbacks, top-level usage covers only the attempt that
+// produced the returned message, and usage.iterations is the per-attempt
+// record (a declined attempt is billed too), so the iterations are summed
+// when present.
+func billedTokens(u anthropic.BetaUsage) (input, output int64) {
+	if len(u.Iterations) == 0 {
+		return u.InputTokens, u.OutputTokens
+	}
+	for _, it := range u.Iterations {
+		input += it.InputTokens
+		output += it.OutputTokens
+	}
+	return input, output
+}
+
+// usageCost returns the estimated USD cost of a response. When
+// usage.iterations is present, each attempt is priced at the model that ran
+// it (an entry without a model, such as compaction, is priced at
+// servedModel); otherwise the top-level usage is priced at servedModel.
+func usageCost(u anthropic.BetaUsage, servedModel string) float64 {
+	if len(u.Iterations) == 0 {
+		return EstimateCost(servedModel, u.InputTokens, u.OutputTokens)
+	}
+	var cost float64
+	for _, it := range u.Iterations {
+		model := string(it.Model)
+		if model == "" {
+			model = servedModel
+		}
+		cost += EstimateCost(model, it.InputTokens, it.OutputTokens)
+	}
+	return cost
+}
+
+// warnedUnknownModels records models already reported as missing from the
+// pricing map, so EstimateCost warns once per model per process.
+var warnedUnknownModels sync.Map
+
+// EstimateCost returns the estimated cost in USD. A model missing from the
+// pricing map costs 0 and logs a warning once per process: under
+// fallbacks:"default" Anthropic picks the serving model server-side, and the
+// *_MODEL env vars accept any model, so a new model can appear at runtime.
 func EstimateCost(model string, inputTokens, outputTokens int64) float64 {
 	p, ok := pricing[model]
 	if !ok {
+		if _, seen := warnedUnknownModels.LoadOrStore(model, true); !seen {
+			slog.Warn("ai: no pricing for model; llm_calls.estimated_cost will record 0", "model", model)
+		}
 		return 0
 	}
 	return float64(inputTokens)*p.Input + float64(outputTokens)*p.Output

@@ -22,25 +22,24 @@ func testSchema() map[string]any {
 }
 
 func TestCallJSONAndLog_RequestBody(t *testing.T) {
-	// Nil tx panics at persistence, after the request is sent and parsed;
-	// the request body is what this test checks.
 	srv := aitest.NewServer(t, aitest.Response{
 		Model:  "claude-opus-5-5",
 		Blocks: []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(`{"answer":`, `"42"}`)},
 	})
 	client := NewTestClient(srv.URL, nil)
 
-	assert.Panics(t, func() {
-		_, _ = client.CallJSONAndLog(context.Background(), nil, JSONParams{
-			Model:     "claude-opus-5-5",
-			System:    "sys",
-			Messages:  userMsgs("Evaluate."),
-			MaxTokens: 32000,
-			Effort:    "high",
-			Schema:    testSchema(),
-			Role:      "evaluator",
-		})
+	// A nil tx skips persistence.
+	out, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
+		Model:     "claude-opus-5-5",
+		System:    "sys",
+		Messages:  userMsgs("Evaluate."),
+		MaxTokens: 32000,
+		Effort:    "high",
+		Schema:    testSchema(),
+		Role:      "evaluator",
 	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"answer":"42"}`, string(out))
 
 	reqs := srv.Requests()
 	require.Len(t, reqs, 1)
@@ -63,6 +62,44 @@ func TestCallJSONAndLog_RequestBody(t *testing.T) {
 	assert.Equal(t, "default", body["fallbacks"])
 }
 
+// TestCallJSONAndLog_MidStreamFallback pins the documented mid-stream
+// fallback shape: the declined model's partial text block stays in content, a
+// fallback block marks the switch, and the fallback model continues from the
+// partial. The JSON is the concatenation of both text blocks, and the served
+// model is the fallback target.
+func TestCallJSONAndLog_MidStreamFallback(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model: "claude-opus-5-5",
+		Blocks: []aitest.Block{
+			aitest.ThinkingBlock(),
+			aitest.TextBlock(`{"answer":"a`),
+			aitest.FallbackBlock("claude-opus-5-5", "claude-opus-4-8"),
+			aitest.TextBlock(`b"}`),
+		},
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	p := JSONParams{
+		Model:    "claude-opus-5-5",
+		Messages: userMsgs("Evaluate."),
+		Schema:   testSchema(),
+	}
+	params := client.newParams(request{model: p.Model, messages: p.Messages, schema: p.Schema})
+	resp, _, err := client.complete(context.Background(), params)
+	require.NoError(t, err)
+	model := servedModel(resp, p.Model)
+	assert.Equal(t, "claude-opus-4-8", model)
+
+	out, err := jsonOutput(resp, model, params.MaxTokens)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"answer":"ab"}`, string(out))
+
+	// The public path returns the same JSON.
+	out, err = client.CallJSONAndLog(context.Background(), nil, p)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"answer":"ab"}`, string(out))
+}
+
 func TestCallJSONAndLog_Refusal(t *testing.T) {
 	srv := aitest.NewServer(t, aitest.Response{
 		Model:           "claude-opus-5-5",
@@ -71,7 +108,6 @@ func TestCallJSONAndLog_Refusal(t *testing.T) {
 	})
 	client := NewTestClient(srv.URL, nil)
 
-	// Refusal returns before persistence, so a nil tx does not panic.
 	_, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
 		Model:    "claude-opus-5-5",
 		Messages: userMsgs("Evaluate."),

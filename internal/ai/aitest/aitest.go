@@ -55,6 +55,20 @@ type Response struct {
 	RefusalCategory string
 	InputTokens     int64
 	OutputTokens    int64
+	// RecommendedModel, when StopReason is "refusal", is sent as
+	// stop_details.recommended_model.
+	RecommendedModel string
+	// Iterations, when set, is sent as usage.iterations in message_delta: the
+	// per-attempt usage the API reports when a server-side fallback ran.
+	Iterations []Iteration
+}
+
+// Iteration is one entry of usage.iterations.
+type Iteration struct {
+	Type         string // "message" or "fallback_message"
+	Model        string
+	InputTokens  int64
+	OutputTokens int64
 }
 
 // WriteSSE writes resp to w as an Anthropic Messages streaming response.
@@ -118,16 +132,35 @@ func WriteSSE(w http.ResponseWriter, resp Response) {
 
 	var stopDetails any
 	if stopReason == "refusal" {
-		stopDetails = map[string]any{
+		details := map[string]any{
 			"type":        "refusal",
 			"category":    resp.RefusalCategory,
 			"explanation": "declined by test server",
 		}
+		if resp.RecommendedModel != "" {
+			details["recommended_model"] = resp.RecommendedModel
+		}
+		stopDetails = details
+	}
+	usage := map[string]any{"output_tokens": resp.OutputTokens}
+	if len(resp.Iterations) > 0 {
+		its := make([]any, 0, len(resp.Iterations))
+		for _, it := range resp.Iterations {
+			its = append(its, map[string]any{
+				"type":                        it.Type,
+				"model":                       it.Model,
+				"input_tokens":                it.InputTokens,
+				"output_tokens":               it.OutputTokens,
+				"cache_creation_input_tokens": 0,
+				"cache_read_input_tokens":     0,
+			})
+		}
+		usage["iterations"] = its
 	}
 	event(w, "message_delta", map[string]any{
 		"type":  "message_delta",
 		"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil, "stop_details": stopDetails},
-		"usage": map[string]any{"output_tokens": resp.OutputTokens},
+		"usage": usage,
 	})
 	event(w, "message_stop", map[string]any{"type": "message_stop"})
 }
@@ -176,6 +209,13 @@ func NewServer(t *testing.T, resp Response) *Server {
 	}))
 	t.Cleanup(s.Close)
 	return s
+}
+
+// SetResponse replaces the response sent to later requests.
+func (s *Server) SetResponse(resp Response) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.response = resp
 }
 
 // Requests returns the decoded JSON bodies received so far.

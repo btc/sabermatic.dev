@@ -3,9 +3,13 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/google/uuid"
@@ -245,7 +249,7 @@ func TestStreamAndLog_CloseWithTxNil(t *testing.T) {
 	assert.Equal(t, "ab", stream.FullMessage())
 }
 
-func TestTokenStream_PersistsServedModelAfterFallback(t *testing.T) {
+func TestTokenStream_ServedModelAfterFallback(t *testing.T) {
 	srv := aitest.NewServer(t, aitest.Response{
 		Model: "claude-sonnet-5-5",
 		Blocks: []aitest.Block{
@@ -410,8 +414,154 @@ func TestPricing_AllModelsHaveCosts(t *testing.T) {
 func TestRefusalError_Message(t *testing.T) {
 	err := error(&RefusalError{Model: "claude-opus-5-5"})
 	assert.Contains(t, err.Error(), "unspecified")
+	assert.NotContains(t, err.Error(), "recommended")
 	wrapped := errors.Join(errors.New("ctx"), err)
 	assert.True(t, IsRefusal(wrapped))
+}
+
+func TestCall_RefusalRecommendedModel(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:            "claude-opus-5-5",
+		StopReason:       "refusal",
+		RefusalCategory:  "cyber",
+		RecommendedModel: "claude-opus-4-8",
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	_, err := client.Call(context.Background(), CallParams{Model: "claude-opus-5-5", Messages: userMsgs("Hi")})
+	var refusal *RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, "claude-opus-4-8", refusal.RecommendedModel)
+	assert.Contains(t, err.Error(), "recommended retry model: claude-opus-4-8")
+}
+
+// fallbackIterations is the per-attempt usage for a request that
+// claude-opus-5-5 declined mid-stream and claude-opus-4-8 then served.
+var fallbackIterations = []aitest.Iteration{
+	{Type: "message", Model: "claude-opus-5-5", InputTokens: 1000, OutputTokens: 300},
+	{Type: "fallback_message", Model: "claude-opus-4-8", InputTokens: 1200, OutputTokens: 500},
+}
+
+// fallbackCost is the cost of fallbackIterations, each attempt at its own
+// model's price.
+const fallbackCost = 1000*4.0/1e6 + 300*20.0/1e6 + 1200*5.0/1e6 + 500*25.0/1e6
+
+func TestCall_CostSumsFallbackIterations(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model: "claude-opus-5-5",
+		Blocks: []aitest.Block{
+			aitest.TextBlock("par"),
+			aitest.FallbackBlock("claude-opus-5-5", "claude-opus-4-8"),
+			aitest.TextBlock("tial"),
+		},
+		// Top-level usage covers only the served attempt.
+		InputTokens:  1200,
+		OutputTokens: 500,
+		Iterations:   fallbackIterations,
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	result, err := client.Call(context.Background(), CallParams{Model: "claude-opus-5-5", Messages: userMsgs("Hi")})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-opus-4-8", result.Model)
+	assert.Equal(t, int64(2200), result.InputTokens)
+	assert.Equal(t, int64(800), result.OutputTokens)
+	assert.InDelta(t, fallbackCost, result.Cost, 1e-12)
+	// Pricing only the top-level usage at the served model would undercount.
+	assert.Greater(t, result.Cost, EstimateCost("claude-opus-4-8", 1200, 500))
+}
+
+func TestTokenStream_UsageIncludesFallbackIterations(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model: "claude-opus-5-5",
+		Blocks: []aitest.Block{
+			aitest.TextBlock("par"),
+			aitest.FallbackBlock("claude-opus-5-5", "claude-opus-4-8"),
+			aitest.TextBlock("tial"),
+		},
+		InputTokens:  1200,
+		OutputTokens: 500,
+		Iterations:   fallbackIterations,
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{Model: "claude-opus-5-5", Messages: userMsgs("Hi")})
+	require.NoError(t, err)
+	_, err = collect(t, stream)
+	require.NoError(t, err)
+
+	stream.mu.Lock()
+	usage := stream.message.Usage
+	model := servedModel(&stream.message, stream.model)
+	stream.mu.Unlock()
+	in, out := billedTokens(usage)
+	assert.Equal(t, int64(2200), in)
+	assert.Equal(t, int64(800), out)
+	assert.InDelta(t, fallbackCost, usageCost(usage, model), 1e-12)
+}
+
+func TestUsageCost_NoIterationsUsesTopLevel(t *testing.T) {
+	u := anthropic.BetaUsage{InputTokens: 1000, OutputTokens: 500}
+	assert.InDelta(t, EstimateCost("claude-sonnet-5-5", 1000, 500), usageCost(u, "claude-sonnet-5-5"), 1e-12)
+	in, out := billedTokens(u)
+	assert.Equal(t, int64(1000), in)
+	assert.Equal(t, int64(500), out)
+}
+
+func TestCall_MaxTokensReturnsUsage(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:        "claude-sonnet-5-5",
+		Blocks:       []aitest.Block{aitest.ThinkingBlock()},
+		StopReason:   "max_tokens",
+		InputTokens:  100,
+		OutputTokens: 4096,
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	result, err := client.Call(context.Background(), CallParams{Model: "claude-sonnet-5-5", Messages: userMsgs("Hi"), MaxTokens: 4096})
+	require.ErrorIs(t, err, ErrMaxTokens)
+	assert.Equal(t, "claude-sonnet-5-5", result.Model)
+	assert.Equal(t, int64(4096), result.OutputTokens)
+	assert.Greater(t, result.Cost, 0.0)
+	assert.Empty(t, result.Text)
+}
+
+// TestTokenStream_CloseAfterBrokenStreamDoesNotDrain checks that Close
+// returns promptly when Next stopped on a non-stop-reason error, instead of
+// reading the rest of a generation that is still running.
+func TestTokenStream_CloseAfterBrokenStreamDoesNotDrain(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n")
+		// A block start at the wrong index makes Accumulate fail.
+		fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":5,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		w.(http.Flusher).Flush()
+		// The generation keeps running.
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{Model: "claude-sonnet-5-5", Messages: userMsgs("Hi")})
+	require.NoError(t, err)
+	_, err = stream.Next()
+	require.Error(t, err)
+	require.NotErrorIs(t, err, io.EOF)
+
+	done := make(chan error, 1)
+	go func() { done <- stream.Close(context.Background()) }()
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close blocked draining a broken stream")
+	}
 }
 
 func TestSessionID_NilConversion(t *testing.T) {
