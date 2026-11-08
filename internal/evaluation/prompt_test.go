@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildPrompt_SystemContainsRubric(t *testing.T) {
-	q := db.Question{Title: "Design a URL Shortener", Prompt: "Design a URL shortening service."}
+	q := &db.Question{Title: "Design a URL Shortener", Prompt: "Design a URL shortening service."}
 	msgs := []db.Message{
 		{Seq: 1, Role: "interviewer", Content: "Design a URL shortening service."},
 		{Seq: 2, Role: "candidate", Content: "Let me start by gathering requirements."},
@@ -31,7 +31,7 @@ func TestBuildPrompt_SystemContainsRubric(t *testing.T) {
 }
 
 func TestBuildPrompt_TranscriptFormatsCorrectly(t *testing.T) {
-	q := db.Question{Title: "Design Chat", Prompt: "Design a chat system."}
+	q := &db.Question{Title: "Design Chat", Prompt: "Design a chat system."}
 	msgs := []db.Message{
 		{Seq: 1, Role: "interviewer", Content: "Design a chat system."},
 		{Seq: 2, Role: "candidate", Content: "Sure, let me start."},
@@ -43,7 +43,7 @@ func TestBuildPrompt_TranscriptFormatsCorrectly(t *testing.T) {
 }
 
 func TestBuildPrompt_EmptyMessages(t *testing.T) {
-	q := db.Question{Title: "Design X", Prompt: "Design X."}
+	q := &db.Question{Title: "Design X", Prompt: "Design X."}
 	system, userMsgs := BuildPrompt(q, nil)
 
 	assert.Contains(t, system, "Requirements Gathering")

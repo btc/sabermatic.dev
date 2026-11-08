@@ -35,7 +35,7 @@ import (
 // does under adaptive thinking) followed by the given text tokens.
 func newBackendWithFakeLLM(t *testing.T, tokens []string) *backend.Backend {
 	t.Helper()
-	return newBackendWithFakeResponse(t, aitest.Response{
+	return newBackendWithFakeResponse(t, &aitest.Response{
 		Model:        "claude-sonnet-5-5",
 		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(tokens...)},
 		InputTokens:  25,
@@ -45,7 +45,7 @@ func newBackendWithFakeLLM(t *testing.T, tokens []string) *backend.Backend {
 
 // newBackendWithFakeResponse creates a backend whose fake Anthropic server
 // streams resp for every request.
-func newBackendWithFakeResponse(t *testing.T, resp aitest.Response) *backend.Backend {
+func newBackendWithFakeResponse(t *testing.T, resp *aitest.Response) *backend.Backend {
 	t.Helper()
 	b, _ := newBackendWithFakeServer(t, resp)
 	return b
@@ -54,7 +54,7 @@ func newBackendWithFakeResponse(t *testing.T, resp aitest.Response) *backend.Bac
 // newBackendWithFakeServer is newBackendWithFakeResponse that also returns
 // the fake server, so a test can change the response between turns and read
 // the request bodies.
-func newBackendWithFakeServer(t *testing.T, resp aitest.Response) (*backend.Backend, *aitest.Server) {
+func newBackendWithFakeServer(t *testing.T, resp *aitest.Response) (*backend.Backend, *aitest.Server) {
 	t.Helper()
 	anthropicSrv := aitest.NewServer(t, resp)
 	b := pg.NewBackend(t)
@@ -233,7 +233,7 @@ func TestSubmitTurn_OpeningQuestion(t *testing.T) {
 func TestSubmitTurn_RefusalSurfacesTurnError(t *testing.T) {
 	t.Parallel()
 
-	b := newBackendWithFakeResponse(t, aitest.Response{
+	b := newBackendWithFakeResponse(t, &aitest.Response{
 		Model:           "claude-sonnet-5-5",
 		Blocks:          []aitest.Block{aitest.TextBlock("Partial")},
 		StopReason:      "refusal",
@@ -285,7 +285,7 @@ func TestSubmitTurn_RefusalSurfacesTurnError(t *testing.T) {
 func TestSubmitTurn_RefusedAnswerCanBeRephrased(t *testing.T) {
 	t.Parallel()
 
-	ok := aitest.Response{
+	ok := &aitest.Response{
 		Model:  "claude-sonnet-5-5",
 		Blocks: []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock("Go on.")},
 	}
@@ -310,7 +310,7 @@ func TestSubmitTurn_RefusedAnswerCanBeRephrased(t *testing.T) {
 	}
 
 	// The interviewer refuses the first answer.
-	srv.SetResponse(aitest.Response{
+	srv.SetResponse(&aitest.Response{
 		Model:           "claude-sonnet-5-5",
 		Blocks:          []aitest.Block{aitest.TextBlock("Part")},
 		StopReason:      "refusal",

@@ -22,14 +22,14 @@ func testSchema() map[string]any {
 }
 
 func TestCallJSONAndLog_RequestBody(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:  "claude-opus-5-5",
 		Blocks: []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(`{"answer":`, `"42"}`)},
 	})
 	client := NewTestClient(srv.URL, nil)
 
 	// A nil tx skips persistence.
-	out, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
+	out, err := client.CallJSONAndLog(context.Background(), nil, &JSONParams{
 		Model:     "claude-opus-5-5",
 		System:    "sys",
 		Messages:  userMsgs("Evaluate."),
@@ -68,7 +68,7 @@ func TestCallJSONAndLog_RequestBody(t *testing.T) {
 // partial. The JSON is the concatenation of both text blocks, and the served
 // model is the fallback target.
 func TestCallJSONAndLog_MidStreamFallback(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model: "claude-opus-5-5",
 		Blocks: []aitest.Block{
 			aitest.ThinkingBlock(),
@@ -84,8 +84,8 @@ func TestCallJSONAndLog_MidStreamFallback(t *testing.T) {
 		Messages: userMsgs("Evaluate."),
 		Schema:   testSchema(),
 	}
-	params := client.newParams(request{model: p.Model, messages: p.Messages, schema: p.Schema})
-	resp, _, err := client.complete(context.Background(), params)
+	params := client.newParams(&request{model: p.Model, messages: p.Messages, schema: p.Schema})
+	resp, _, err := client.complete(context.Background(), &params)
 	require.NoError(t, err)
 	model := servedModel(resp, p.Model)
 	assert.Equal(t, "claude-opus-4-8", model)
@@ -95,20 +95,20 @@ func TestCallJSONAndLog_MidStreamFallback(t *testing.T) {
 	assert.JSONEq(t, `{"answer":"ab"}`, string(out))
 
 	// The public path returns the same JSON.
-	out, err = client.CallJSONAndLog(context.Background(), nil, p)
+	out, err = client.CallJSONAndLog(context.Background(), nil, &p)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"answer":"ab"}`, string(out))
 }
 
 func TestCallJSONAndLog_Refusal(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-opus-5-5",
 		StopReason:      "refusal",
 		RefusalCategory: "bio",
 	})
 	client := NewTestClient(srv.URL, nil)
 
-	_, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
+	_, err := client.CallJSONAndLog(context.Background(), nil, &JSONParams{
 		Model:    "claude-opus-5-5",
 		Messages: userMsgs("Evaluate."),
 		Schema:   testSchema(),
@@ -120,14 +120,14 @@ func TestCallJSONAndLog_Refusal(t *testing.T) {
 }
 
 func TestCallJSONAndLog_MaxTokens(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:      "claude-opus-5-5",
 		Blocks:     []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(`{"answer":"tru`)},
 		StopReason: "max_tokens",
 	})
 	client := NewTestClient(srv.URL, nil)
 
-	_, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
+	_, err := client.CallJSONAndLog(context.Background(), nil, &JSONParams{
 		Model:     "claude-opus-5-5",
 		Messages:  userMsgs("Evaluate."),
 		MaxTokens: 32000,
@@ -138,13 +138,13 @@ func TestCallJSONAndLog_MaxTokens(t *testing.T) {
 }
 
 func TestCallJSONAndLog_NoText(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:  "claude-opus-5-5",
 		Blocks: []aitest.Block{aitest.ThinkingBlock()},
 	})
 	client := NewTestClient(srv.URL, nil)
 
-	_, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
+	_, err := client.CallJSONAndLog(context.Background(), nil, &JSONParams{
 		Model:    "claude-opus-5-5",
 		Messages: userMsgs("Evaluate."),
 		Schema:   testSchema(),
@@ -154,14 +154,14 @@ func TestCallJSONAndLog_NoText(t *testing.T) {
 }
 
 func TestCallJSONAndLog_RejectsUnsupportedSchema(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{Model: "claude-opus-5-5"})
+	srv := aitest.NewServer(t, &aitest.Response{Model: "claude-opus-5-5"})
 	client := NewTestClient(srv.URL, nil)
 
 	schema := testSchema()
 	schema["properties"].(map[string]any)["score"] = map[string]any{"type": "integer", "minimum": 1}
 	schema["required"] = []string{"answer", "score"}
 
-	_, err := client.CallJSONAndLog(context.Background(), nil, JSONParams{
+	_, err := client.CallJSONAndLog(context.Background(), nil, &JSONParams{
 		Model:    "claude-opus-5-5",
 		Messages: userMsgs("Evaluate."),
 		Schema:   schema,

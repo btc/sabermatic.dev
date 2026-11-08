@@ -92,7 +92,7 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 7. Call LLM.
-	output, err := w.LLM.CallJSONAndLog(ctx, tx, ai.JSONParams{
+	output, err := w.LLM.CallJSONAndLog(ctx, tx, &ai.JSONParams{
 		Model:     w.Cfg.CoachModel,
 		System:    system,
 		Messages:  promptMsgs,

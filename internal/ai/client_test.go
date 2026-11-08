@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -25,8 +24,8 @@ func userMsgs(text string) []anthropic.BetaMessageParam {
 }
 
 // textResponse is a fake streamed response carrying one text block.
-func textResponse(tokens ...string) aitest.Response {
-	return aitest.Response{
+func textResponse(tokens ...string) *aitest.Response {
+	return &aitest.Response{
 		Model:        "claude-sonnet-5-5",
 		Blocks:       []aitest.Block{aitest.TextBlock(tokens...)},
 		InputTokens:  25,
@@ -73,7 +72,7 @@ func TestStreamAndLog_YieldsTokens(t *testing.T) {
 }
 
 func TestStreamAndLog_SkipsLeadingThinkingBlocks(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model: "claude-sonnet-5-5",
 		Blocks: []aitest.Block{
 			aitest.ThinkingBlock(),
@@ -142,7 +141,7 @@ func TestStreamAndLog_FallbacksDisabled(t *testing.T) {
 }
 
 func TestStreamAndLog_RefusalMidStream(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-sonnet-5-5",
 		Blocks:          []aitest.Block{aitest.TextBlock("Partial ")},
 		StopReason:      "refusal",
@@ -172,7 +171,7 @@ func TestStreamAndLog_RefusalMidStream(t *testing.T) {
 }
 
 func TestStreamAndLog_MaxTokens(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:      "claude-sonnet-5-5",
 		Blocks:     []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock("Cut")},
 		StopReason: "max_tokens",
@@ -250,7 +249,7 @@ func TestStreamAndLog_CloseWithTxNil(t *testing.T) {
 }
 
 func TestTokenStream_ServedModelAfterFallback(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model: "claude-sonnet-5-5",
 		Blocks: []aitest.Block{
 			aitest.FallbackBlock("claude-sonnet-5-5", "claude-sonnet-5"),
@@ -275,7 +274,7 @@ func TestTokenStream_ServedModelAfterFallback(t *testing.T) {
 }
 
 func TestCall_ReturnsTextAfterThinking(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:        "claude-sonnet-5-5",
 		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock("Hello ", "from Claude!")},
 		InputTokens:  10,
@@ -317,7 +316,7 @@ func TestCall_LargeMaxTokensStreams(t *testing.T) {
 }
 
 func TestCall_ReportsServedModel(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model: "claude-sonnet-5-5",
 		Blocks: []aitest.Block{
 			aitest.FallbackBlock("claude-sonnet-5-5", "claude-sonnet-5"),
@@ -332,7 +331,7 @@ func TestCall_ReportsServedModel(t *testing.T) {
 }
 
 func TestCall_Refusal(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-sonnet-5-5",
 		StopReason:      "refusal",
 		RefusalCategory: "frontier_llm",
@@ -347,7 +346,7 @@ func TestCall_Refusal(t *testing.T) {
 }
 
 func TestCall_MaxTokens(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:      "claude-sonnet-5-5",
 		Blocks:     []aitest.Block{aitest.ThinkingBlock()},
 		StopReason: "max_tokens",
@@ -420,7 +419,7 @@ func TestRefusalError_Message(t *testing.T) {
 }
 
 func TestCall_RefusalRecommendedModel(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:            "claude-opus-5-5",
 		StopReason:       "refusal",
 		RefusalCategory:  "cyber",
@@ -447,7 +446,7 @@ var fallbackIterations = []aitest.Iteration{
 const fallbackCost = 1000*4.0/1e6 + 300*20.0/1e6 + 1200*5.0/1e6 + 500*25.0/1e6
 
 func TestCall_CostSumsFallbackIterations(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model: "claude-opus-5-5",
 		Blocks: []aitest.Block{
 			aitest.TextBlock("par"),
@@ -472,7 +471,7 @@ func TestCall_CostSumsFallbackIterations(t *testing.T) {
 }
 
 func TestTokenStream_UsageIncludesFallbackIterations(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model: "claude-opus-5-5",
 		Blocks: []aitest.Block{
 			aitest.TextBlock("par"),
@@ -494,22 +493,22 @@ func TestTokenStream_UsageIncludesFallbackIterations(t *testing.T) {
 	usage := stream.message.Usage
 	model := servedModel(&stream.message, stream.model)
 	stream.mu.Unlock()
-	in, out := billedTokens(usage)
+	in, out := billedTokens(&usage)
 	assert.Equal(t, int64(2200), in)
 	assert.Equal(t, int64(800), out)
-	assert.InDelta(t, fallbackCost, usageCost(usage, model), 1e-12)
+	assert.InDelta(t, fallbackCost, usageCost(&usage, model), 1e-12)
 }
 
 func TestUsageCost_NoIterationsUsesTopLevel(t *testing.T) {
 	u := anthropic.BetaUsage{InputTokens: 1000, OutputTokens: 500}
-	assert.InDelta(t, EstimateCost("claude-sonnet-5-5", 1000, 500), usageCost(u, "claude-sonnet-5-5"), 1e-12)
-	in, out := billedTokens(u)
+	assert.InDelta(t, EstimateCost("claude-sonnet-5-5", 1000, 500), usageCost(&u, "claude-sonnet-5-5"), 1e-12)
+	in, out := billedTokens(&u)
 	assert.Equal(t, int64(1000), in)
 	assert.Equal(t, int64(500), out)
 }
 
 func TestCall_MaxTokensReturnsUsage(t *testing.T) {
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:        "claude-sonnet-5-5",
 		Blocks:       []aitest.Block{aitest.ThinkingBlock()},
 		StopReason:   "max_tokens",
@@ -535,9 +534,17 @@ func TestTokenStream_CloseAfterBrokenStreamDoesNotDrain(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n")
-		// A block start at the wrong index makes Accumulate fail.
-		fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":5,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		// The second event starts a block at the wrong index, which makes
+		// Accumulate fail.
+		for _, ev := range []string{
+			"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":5,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+		} {
+			if _, err := io.WriteString(w, ev); err != nil {
+				t.Errorf("write event: %v", err)
+				return
+			}
+		}
 		w.(http.Flusher).Flush()
 		// The generation keeps running.
 		select {

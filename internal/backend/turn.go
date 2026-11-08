@@ -456,7 +456,7 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 // path, so a rephrased answer replaces the rejected one. For other stream
 // errors the message is kept, and crash recovery retries the same transcript.
 func (b *Backend) dropRejectedCandidate(ctx context.Context, sessionID uuid.UUID, candidate *db.Message, streamErr error) {
-	if candidate == nil || !(ai.IsRefusal(streamErr) || errors.Is(streamErr, ai.ErrMaxTokens)) {
+	if candidate == nil || (!ai.IsRefusal(streamErr) && !errors.Is(streamErr, ai.ErrMaxTokens)) {
 		return
 	}
 	if err := b.DeleteMessage(ctx, sessionID, candidate.ID); err != nil {

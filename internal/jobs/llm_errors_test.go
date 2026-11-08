@@ -32,7 +32,7 @@ func countLLMCalls(t *testing.T, ctx context.Context, pool *pgxpool.Pool, role s
 // thinking block and a truncated JSON fragment.
 func maxTokensServer(t *testing.T, model string) *aitest.Server {
 	t.Helper()
-	return aitest.NewServer(t, aitest.Response{
+	return aitest.NewServer(t, &aitest.Response{
 		Model:        model,
 		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(`{"scores":`)},
 		StopReason:   "max_tokens",
@@ -46,7 +46,7 @@ func TestEvaluateSessionWorker_RefusalLogsCall(t *testing.T) {
 
 	ctx := context.Background()
 	pool := newTestPool(t)
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-opus-5-5",
 		StopReason:      "refusal",
 		RefusalCategory: "bio",
@@ -142,7 +142,7 @@ func TestGenerateEducatorContentWorker_RefusalCancelsAndMarksFailed(t *testing.T
 
 	ctx := context.Background()
 	pool := newTestPool(t)
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-opus-5-5",
 		StopReason:      "refusal",
 		RefusalCategory: "cyber",
@@ -195,7 +195,7 @@ func TestGenerateQuestionImageWorker_RefusalCancelsAndIsNotRequeued(t *testing.T
 
 	ctx := context.Background()
 	pool := newTestPool(t)
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-sonnet-5-5",
 		StopReason:      "refusal",
 		RefusalCategory: "general_harms",

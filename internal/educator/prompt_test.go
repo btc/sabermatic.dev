@@ -11,8 +11,8 @@ import (
 	"github.com/btc/drill/internal/db"
 )
 
-func makeQuestion() db.Question {
-	return db.Question{
+func makeQuestion() *db.Question {
+	return &db.Question{
 		ID:     uuid.New(),
 		Title:  "Design a URL Shortener",
 		Prompt: "Design a system like bit.ly that handles 100M daily active users.",
@@ -27,10 +27,10 @@ func makeMessages() []db.Message {
 	}
 }
 
-func makeEval() db.Evaluation {
+func makeEval() *db.Evaluation {
 	strengths, _ := json.Marshal([]string{"Clear requirements gathering", "Solid hash function choice"})
 	gaps, _ := json.Marshal([]string{"Cache invalidation not addressed", "No discussion of database sharding"})
-	return db.Evaluation{
+	return &db.Evaluation{
 		ID:                 uuid.New(),
 		ScoreRequirements:  3,
 		ScoreArchitecture:  2,

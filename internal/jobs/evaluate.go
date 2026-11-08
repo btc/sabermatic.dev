@@ -107,7 +107,7 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	}
 
 	// 6. Build prompt.
-	system, userMsgs := evaluation.BuildPrompt(db.Question{
+	system, userMsgs := evaluation.BuildPrompt(&db.Question{
 		Title:      row.QuestionTitle,
 		Prompt:     row.QuestionPrompt,
 		Difficulty: row.QuestionDifficulty,
@@ -122,7 +122,7 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 8. Call LLM.
-	output, err := w.LLM.CallJSONAndLog(ctx, tx, ai.JSONParams{
+	output, err := w.LLM.CallJSONAndLog(ctx, tx, &ai.JSONParams{
 		Model:     w.Cfg.EvaluatorModel,
 		System:    system,
 		Messages:  userMsgs,

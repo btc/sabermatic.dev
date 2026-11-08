@@ -71,8 +71,10 @@ type Iteration struct {
 	OutputTokens int64
 }
 
-// WriteSSE writes resp to w as an Anthropic Messages streaming response.
-func WriteSSE(w http.ResponseWriter, resp Response) {
+// WriteSSE writes resp to w as an Anthropic Messages streaming response. It
+// stops at the first failed write and returns its error; a failed write
+// means the client went away.
+func WriteSSE(w http.ResponseWriter, resp *Response) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(http.StatusOK)
 
@@ -80,8 +82,10 @@ func WriteSSE(w http.ResponseWriter, resp Response) {
 	if stopReason == "" {
 		stopReason = "end_turn"
 	}
+	sw := &sseWriter{w: w}
+	event := sw.event
 
-	event(w, "message_start", map[string]any{
+	event("message_start", map[string]any{
 		"type": "message_start",
 		"message": map[string]any{
 			"id": "msg_test", "type": "message", "role": "assistant",
@@ -94,16 +98,16 @@ func WriteSSE(w http.ResponseWriter, resp Response) {
 	for i, b := range resp.Blocks {
 		switch b.Type {
 		case "thinking":
-			event(w, "content_block_start", map[string]any{
+			event("content_block_start", map[string]any{
 				"type": "content_block_start", "index": i,
 				"content_block": map[string]any{"type": "thinking", "thinking": "", "signature": ""},
 			})
-			event(w, "content_block_delta", map[string]any{
+			event("content_block_delta", map[string]any{
 				"type": "content_block_delta", "index": i,
 				"delta": map[string]any{"type": "signature_delta", "signature": "sig"},
 			})
 		case "fallback":
-			event(w, "content_block_start", map[string]any{
+			event("content_block_start", map[string]any{
 				"type": "content_block_start", "index": i,
 				"content_block": map[string]any{
 					"type": "fallback",
@@ -112,7 +116,7 @@ func WriteSSE(w http.ResponseWriter, resp Response) {
 				},
 			})
 		default:
-			event(w, "content_block_start", map[string]any{
+			event("content_block_start", map[string]any{
 				"type": "content_block_start", "index": i,
 				"content_block": map[string]any{"type": "text", "text": ""},
 			})
@@ -121,13 +125,13 @@ func WriteSSE(w http.ResponseWriter, resp Response) {
 				deltas = []string{b.Text}
 			}
 			for _, d := range deltas {
-				event(w, "content_block_delta", map[string]any{
+				event("content_block_delta", map[string]any{
 					"type": "content_block_delta", "index": i,
 					"delta": map[string]any{"type": "text_delta", "text": d},
 				})
 			}
 		}
-		event(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": i})
+		event("content_block_stop", map[string]any{"type": "content_block_stop", "index": i})
 	}
 
 	var stopDetails any
@@ -157,20 +161,31 @@ func WriteSSE(w http.ResponseWriter, resp Response) {
 		}
 		usage["iterations"] = its
 	}
-	event(w, "message_delta", map[string]any{
+	event("message_delta", map[string]any{
 		"type":  "message_delta",
 		"delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil, "stop_details": stopDetails},
 		"usage": usage,
 	})
-	event(w, "message_stop", map[string]any{"type": "message_stop"})
+	event("message_stop", map[string]any{"type": "message_stop"})
+	return sw.err
 }
 
-func event(w io.Writer, name string, data any) {
+// sseWriter writes server-sent events and keeps the first write error. After
+// an error it writes nothing more.
+type sseWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (sw *sseWriter) event(name string, data any) {
+	if sw.err != nil {
+		return
+	}
 	b, err := json.Marshal(data)
 	if err != nil {
 		panic(fmt.Sprintf("aitest: marshal %s: %v", name, err))
 	}
-	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b)
+	_, sw.err = fmt.Fprintf(sw.w, "event: %s\ndata: %s\n\n", name, b)
 }
 
 // Server is a fake Anthropic server that answers every request with the same
@@ -186,9 +201,9 @@ type Server struct {
 
 // NewServer starts a Server that answers with resp. It is closed on test
 // cleanup.
-func NewServer(t *testing.T, resp Response) *Server {
+func NewServer(t *testing.T, resp *Response) *Server {
 	t.Helper()
-	s := &Server{response: resp}
+	s := &Server{response: *resp}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -205,17 +220,19 @@ func NewServer(t *testing.T, resp Response) *Server {
 		s.headers = append(s.headers, r.Header.Clone())
 		resp := s.response
 		s.mu.Unlock()
-		WriteSSE(w, resp)
+		// A write error means the client disconnected; the client side of
+		// the test observes that, and the handler has no one to report to.
+		_ = WriteSSE(w, &resp)
 	}))
 	t.Cleanup(s.Close)
 	return s
 }
 
 // SetResponse replaces the response sent to later requests.
-func (s *Server) SetResponse(resp Response) {
+func (s *Server) SetResponse(resp *Response) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.response = resp
+	s.response = *resp
 }
 
 // Requests returns the decoded JSON bodies received so far.
