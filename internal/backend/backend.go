@@ -76,12 +76,10 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
 	}
 
-	// Gemini client for image generation.
-	geminiClient, err := ai.NewGeminiClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("gemini client: %w", err)
-	}
-	slog.Info("gemini client initialized", "model", cfg.Gemini.Model)
+	// Gemini client for image generation. Credentials are resolved on first
+	// use, so the server starts without Google ADC.
+	geminiClient := ai.NewGeminiClient(cfg)
+	slog.Info("gemini client configured", "model", cfg.Gemini.Model, "location", cfg.Gemini.Location)
 
 	// NB(btc): if an object doesn't depend on the pool, initialize it
 	// before so we don't need to clean up pool in case of error

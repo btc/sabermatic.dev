@@ -51,9 +51,20 @@ func TestFullStartup(t *testing.T) {
 		errCh <- runWithContext(runCtx)
 	}()
 
-	// Wait for server to become healthy
+	// Wait for server to become healthy. If runWithContext returns first
+	// (startup error), stop waiting and report its error.
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", port)
+	var (
+		exited bool
+		runErr error
+	)
 	require.Eventually(t, func() bool {
+		select {
+		case runErr = <-errCh:
+			exited = true
+			return true
+		default:
+		}
 		resp, err := http.Get(healthURL)
 		if err != nil {
 			return false
@@ -61,6 +72,7 @@ func TestFullStartup(t *testing.T) {
 		defer resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
 	}, 15*time.Second, 100*time.Millisecond, "server did not become healthy")
+	require.False(t, exited, "server exited during startup: %v", runErr)
 
 	// Verify health response
 	resp, err := http.Get(healthURL)
