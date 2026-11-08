@@ -78,7 +78,7 @@ export default function Privacy() {
           abuse monitoring before deletion.
         </li>
         <li>
-          <strong>OpenAI</strong> — converts your speech to text (Whisper) and
+          <strong>OpenAI</strong> — converts your speech to text and
           generates the interviewer's voice (TTS). Audio and transcripts are sent
           to OpenAI for processing. OpenAI's standard API retention is up to 30
           days for abuse monitoring before deletion.

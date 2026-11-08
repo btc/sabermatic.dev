@@ -118,10 +118,15 @@ func (l *LLM) validate() error {
 }
 
 type Speech struct {
-	OpenAIAPIKey       string        `env:"OPENAI_API_KEY,required"`
-	TTSVoice           string        `env:"TTS_VOICE,default=onyx"`
-	TTSModel           string        `env:"TTS_MODEL,default=tts-1"`
-	WhisperModel       string        `env:"WHISPER_MODEL,default=whisper-1"`
+	OpenAIAPIKey string `env:"OPENAI_API_KEY,required"`
+	TTSVoice     string `env:"TTS_VOICE,default=onyx"`
+	TTSModel     string `env:"TTS_MODEL,default=tts-1"`
+	// TranscriptionModel is the speech-to-text model for
+	// /v1/audio/transcriptions. The env var keeps its original name,
+	// WHISPER_MODEL, so existing deploy config that sets it keeps working.
+	// whisper-1 shuts down 2027-02-26; gpt-transcribe is OpenAI's named
+	// replacement on the same endpoint.
+	TranscriptionModel string        `env:"WHISPER_MODEL,default=gpt-transcribe"`
 	TTSSentenceTimeout time.Duration `env:"TTS_SENTENCE_TIMEOUT,default=10s"`
 }
 
@@ -182,7 +187,10 @@ type Stripe struct {
 }
 
 type Gemini struct {
-	Model    string `env:"GEMINI_MODEL,default=gemini-3.1-flash-image-preview"`
+	// Model is the Vertex AI image model. gemini-3.1-flash-image is GA with
+	// retirement no earlier than 2027-05-28; the -preview ID was retired on
+	// Vertex on 2026-07-17.
+	Model    string `env:"GEMINI_MODEL,default=gemini-3.1-flash-image"`
 	Location string `env:"GEMINI_LOCATION,default=global"`
 }
 

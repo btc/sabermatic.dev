@@ -16,7 +16,7 @@ type Transcriber interface {
 	Transcribe(ctx context.Context, audio []byte, format string) (string, error)
 }
 
-// OpenAITranscriber calls the OpenAI Whisper transcription API.
+// OpenAITranscriber calls the OpenAI transcription API (/v1/audio/transcriptions).
 type OpenAITranscriber struct {
 	client openai.Client
 	model  string
@@ -30,8 +30,11 @@ func NewOpenAITranscriber(apiKey, model string) *OpenAITranscriber {
 	}
 }
 
-// Transcribe sends audio bytes to the Whisper API and returns the transcript text.
+// Transcribe sends audio bytes to the transcription API and returns the transcript text.
 // The format parameter is the audio container format (e.g. "webm", "mp3", "wav").
+// No response_format is sent, so the API returns its default json body; the
+// gpt-4o-*-transcribe models accept only json, and the gpt-transcribe model
+// page documents no other format, so the default is the safe choice.
 func (t *OpenAITranscriber) Transcribe(ctx context.Context, audio []byte, format string) (_ string, err error) {
 	ctx, span := tracer.Start(ctx, "OpenAITranscriber.Transcribe")
 	defer func() { drilotel.End(span, err) }()

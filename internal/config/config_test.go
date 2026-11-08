@@ -40,6 +40,10 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	require.Equal(t, 720*time.Hour, cfg.Auth.SessionTTL)
 	require.Equal(t, 12, cfg.Auth.BcryptCost)
 	require.Equal(t, 10*time.Second, cfg.Speech.TTSSentenceTimeout)
+	require.Equal(t, "gpt-transcribe", cfg.Speech.TranscriptionModel)
+	require.Equal(t, "tts-1", cfg.Speech.TTSModel)
+	require.Equal(t, "gemini-3.1-flash-image", cfg.Gemini.Model)
+	require.Equal(t, "global", cfg.Gemini.Location)
 }
 
 func TestLoadConfig_MissingRequired(t *testing.T) {
