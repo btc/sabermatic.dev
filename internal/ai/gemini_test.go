@@ -20,7 +20,8 @@ func TestGeminiClient_GenerateImage_EmptyPrompt(t *testing.T) {
 
 // NewGeminiClient must not need Google credentials: the server has to start
 // (and tests have to run) on machines without ADC. Credential errors surface
-// from GenerateImage instead, and a failed init is retried on the next call.
+// from Ready and GenerateImage instead, wrapped in ErrGeminiUnavailable.
+// TestGeminiClient_FailedInitIsRetried covers retry after a failure.
 func TestGeminiClient_LazyInit_CredentialErrorFromGenerateImage(t *testing.T) {
 	// Point ADC at a path that does not exist so credential lookup fails
 	// deterministically, whether or not this machine has real ADC. No API
@@ -35,9 +36,9 @@ func TestGeminiClient_LazyInit_CredentialErrorFromGenerateImage(t *testing.T) {
 	client := ai.NewGeminiClient(cfg)
 	require.NotNil(t, client)
 
-	for range 2 {
-		_, _, err := client.GenerateImage(context.Background(), "a prompt")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "create gemini client")
-	}
+	require.ErrorIs(t, client.Ready(context.Background()), ai.ErrGeminiUnavailable)
+
+	_, _, err := client.GenerateImage(context.Background(), "a prompt")
+	require.ErrorIs(t, err, ai.ErrGeminiUnavailable)
+	require.Contains(t, err.Error(), "create gemini client")
 }

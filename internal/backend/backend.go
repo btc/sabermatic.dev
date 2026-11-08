@@ -76,10 +76,19 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 		slog.Info("storage: local", "dir", cfg.Storage.LocalDir)
 	}
 
-	// Gemini client for image generation. Credentials are resolved on first
-	// use, so the server starts without Google ADC.
+	// Gemini client for image generation. The server starts without Google
+	// ADC; image jobs snooze until credentials work. Probe once here so a
+	// missing or broken ADC shows up in the startup log, not only in River
+	// job logs.
 	geminiClient := ai.NewGeminiClient(cfg)
-	slog.Info("gemini client configured", "model", cfg.Gemini.Model, "location", cfg.Gemini.Location)
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := geminiClient.Ready(probeCtx); err != nil {
+		slog.Warn("gemini credentials unavailable; image generation will not run",
+			"model", cfg.Gemini.Model, "location", cfg.Gemini.Location, "error", err)
+	} else {
+		slog.Info("gemini client initialized", "model", cfg.Gemini.Model, "location", cfg.Gemini.Location)
+	}
+	cancelProbe()
 
 	// NB(btc): if an object doesn't depend on the pool, initialize it
 	// before so we don't need to clean up pool in case of error
