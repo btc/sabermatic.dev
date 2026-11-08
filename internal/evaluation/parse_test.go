@@ -11,7 +11,7 @@ import (
 	"github.com/btc/drill/internal/ai"
 )
 
-func validToolInput() map[string]any {
+func validOutput() map[string]any {
 	return map[string]any{
 		"scores": map[string]any{
 			"requirements":  float64(3),
@@ -21,9 +21,9 @@ func validToolInput() map[string]any {
 			"communication": float64(4),
 			"overall":       float64(3),
 		},
-		"strengths":   []any{"Good requirements gathering"},
-		"gaps":        []any{"Missing cache invalidation"},
-		"advice":      "Focus on deep dive components next time.",
+		"strengths": []any{"Good requirements gathering"},
+		"gaps":      []any{"Missing cache invalidation"},
+		"advice":    "Focus on deep dive components next time.",
 		"annotations": []any{
 			map[string]any{
 				"message_seq": float64(2),
@@ -40,7 +40,7 @@ func validToolInput() map[string]any {
 }
 
 func TestParse_ValidInput(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
 
@@ -62,7 +62,7 @@ func TestParse_ValidInput(t *testing.T) {
 }
 
 func TestParse_EmptyStrengthsAndGaps(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["strengths"] = []any{}
 	input["gaps"] = []any{}
 	raw, err := json.Marshal(input)
@@ -75,7 +75,7 @@ func TestParse_EmptyStrengthsAndGaps(t *testing.T) {
 }
 
 func TestParse_ZeroAnnotations(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["annotations"] = []any{}
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestParse_ZeroAnnotations(t *testing.T) {
 }
 
 func TestParse_MissingScoresField(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	delete(input, "scores")
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)

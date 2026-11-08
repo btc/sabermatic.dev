@@ -10,7 +10,7 @@ import (
 	"github.com/btc/drill/internal/ai"
 )
 
-func validToolInput() map[string]any {
+func validOutput() map[string]any {
 	return map[string]any{
 		"model_answer":   "## Architecture\n\nUse a distributed cache with write-through...",
 		"gap_deep_dives": "## Cache Invalidation\n\nThe candidate missed...",
@@ -18,7 +18,7 @@ func validToolInput() map[string]any {
 }
 
 func TestParse_ValidInput(t *testing.T) {
-	raw, err := json.Marshal(validToolInput())
+	raw, err := json.Marshal(validOutput())
 	require.NoError(t, err)
 	result, err := Parse(json.RawMessage(raw))
 	require.NoError(t, err)
@@ -27,7 +27,7 @@ func TestParse_ValidInput(t *testing.T) {
 }
 
 func TestParse_EmptyModelAnswer(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["model_answer"] = ""
 	raw, _ := json.Marshal(input)
 	_, err := Parse(json.RawMessage(raw))
@@ -36,7 +36,7 @@ func TestParse_EmptyModelAnswer(t *testing.T) {
 }
 
 func TestParse_EmptyGapDeepDives(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["gap_deep_dives"] = ""
 	raw, _ := json.Marshal(input)
 	_, err := Parse(json.RawMessage(raw))
