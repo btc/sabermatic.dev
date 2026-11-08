@@ -105,10 +105,11 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 	})
 	if err != nil {
 		err = fmt.Errorf("call coach LLM: %w", err)
-		if ai.IsRefusal(err) {
-			// A refusal will not change on retry; the coach has no failure
-			// status to set, so cancelling is the whole response.
-			slog.Warn("coach refused, cancelling job", "user_id", userID, "error", err)
+		if terminalLLMError(err, job.JobRow) {
+			// A refusal or a repeated max_tokens stop is not retried (see
+			// terminalLLMError); the coach has no failure status to set, so
+			// cancelling is the whole response.
+			slog.Warn("coach LLM call cannot succeed on retry, cancelling job", "user_id", userID, "error", err)
 			return river.JobCancel(err)
 		}
 		return err

@@ -24,6 +24,11 @@ func TestGenerateQuestionImageInsertOpts(t *testing.T) {
 	require.Equal(t, QueueGemini, opts.Queue)
 	require.Equal(t, 3, opts.MaxAttempts)
 	require.True(t, opts.UniqueOpts.ByArgs)
+	// Cancelled and discarded jobs block re-queueing by the sweep; completed
+	// does not, so nulling image_url regenerates.
+	require.Contains(t, opts.UniqueOpts.ByState, rivertype.JobStateCancelled)
+	require.Contains(t, opts.UniqueOpts.ByState, rivertype.JobStateDiscarded)
+	require.NotContains(t, opts.UniqueOpts.ByState, rivertype.JobStateCompleted)
 }
 
 // Without usable Google credentials the worker must snooze before loading the

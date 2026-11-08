@@ -52,12 +52,21 @@ func GenerateQuestionImageInsertOpts() *river.InsertOpts {
 	return &river.InsertOpts{
 		Queue:       QueueGemini,
 		MaxAttempts: 3,
-		// Exclude completed from unique states so that nulling image_url and
-		// letting the sweep re-queue is sufficient to trigger a regen.
+		// Completed is excluded from the unique states so that nulling
+		// image_url and letting the sweep re-queue is enough to regenerate.
+		//
+		// Cancelled and discarded are included so that the per-minute sweep
+		// does not re-queue a question whose job ended in failure (a refused
+		// image prompt, or exhausted retries); each re-queued run would make
+		// another paid call that is expected to fail the same way. River
+		// prunes cancelled rows after 24h and discarded rows after 7 days by
+		// default, after which the sweep retries the question once more.
 		UniqueOpts: river.UniqueOpts{
 			ByArgs: true,
 			ByState: []rivertype.JobState{
 				rivertype.JobStateAvailable,
+				rivertype.JobStateCancelled,
+				rivertype.JobStateDiscarded,
 				rivertype.JobStatePending,
 				rivertype.JobStateRetryable,
 				rivertype.JobStateRunning,
@@ -129,9 +138,18 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	})
 	if err != nil {
 		err = fmt.Errorf("call image prompt LLM: %w", err)
-		if ai.IsRefusal(err) {
-			// A refusal will not change on retry.
-			slog.Warn("image prompt LLM refused, cancelling job", "question_id", questionID, "error", err)
+		if sonnetResult.Model != "" {
+			// Refusals and max_tokens stops are billed; Call returns their
+			// usage. Log through the pool, since no transaction is open.
+			if logErr := insertImagePromptCall(ctx, q, question.UserID, meta, sonnetResult); logErr != nil {
+				slog.Warn("log failed image prompt LLM call", "question_id", questionID, "error", logErr)
+			}
+		}
+		if terminalLLMError(err, job.JobRow) {
+			// Not retried (see terminalLLMError). The cancelled job also
+			// keeps the sweep from re-queueing the question; see
+			// GenerateQuestionImageInsertOpts.
+			slog.Warn("image prompt LLM call cannot succeed on retry, cancelling job", "question_id", questionID, "error", err)
 			return river.JobCancel(err)
 		}
 		return err
@@ -182,35 +200,8 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	}
 
 	// Log Sonnet call.
-	sonnetPromptJSON, err := json.Marshal(map[string]string{"system": meta.System, "user": meta.User})
-	if err != nil {
-		return fmt.Errorf("marshal sonnet prompt: %w", err)
-	}
-	sonnetRespJSON, err := json.Marshal(map[string]string{"text": sonnetResult.Text})
-	if err != nil {
-		return fmt.Errorf("marshal sonnet response: %w", err)
-	}
-
-	sonnetCost := ai.EstimateCost(sonnetResult.Model, sonnetResult.InputTokens, sonnetResult.OutputTokens)
-	sonnetCallID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
-		SessionID:     pgtype.UUID{},
-		UserID:        question.UserID,
-		Role:          "image_prompt_generator",
-		Model:         sonnetResult.Model,
-		InputTokens:   int32(sonnetResult.InputTokens),
-		OutputTokens:  int32(sonnetResult.OutputTokens),
-		EstimatedCost: ai.NumericFromFloat(sonnetCost),
-		LatencyMs:     int32(sonnetResult.Latency.Milliseconds()),
-	})
-	if err != nil {
-		return fmt.Errorf("insert sonnet llm_call: %w", err)
-	}
-	if err := txq.InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
-		LlmCallID: sonnetCallID,
-		Prompt:    sonnetPromptJSON,
-		Response:  sonnetRespJSON,
-	}); err != nil {
-		return fmt.Errorf("insert sonnet llm_call_content: %w", err)
+	if err := insertImagePromptCall(ctx, txq, question.UserID, meta, sonnetResult); err != nil {
+		return err
 	}
 
 	// Log Gemini call.
@@ -253,5 +244,40 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		"image_url", imageURL,
 		"gemini_latency_ms", geminiLatency.Milliseconds(),
 	)
+	return nil
+}
+
+// insertImagePromptCall logs the image-prompt LLM call to llm_calls and
+// llm_call_content. result's token counts and Cost cover every billed attempt
+// (see ai.CallResult).
+func insertImagePromptCall(ctx context.Context, q *db.Queries, userID pgtype.UUID, meta imagegen.MetaPromptParts, result ai.CallResult) error {
+	promptJSON, err := json.Marshal(map[string]string{"system": meta.System, "user": meta.User})
+	if err != nil {
+		return fmt.Errorf("marshal sonnet prompt: %w", err)
+	}
+	respJSON, err := json.Marshal(map[string]string{"text": result.Text})
+	if err != nil {
+		return fmt.Errorf("marshal sonnet response: %w", err)
+	}
+	callID, err := q.InsertLLMCall(ctx, db.InsertLLMCallParams{
+		SessionID:     pgtype.UUID{},
+		UserID:        userID,
+		Role:          "image_prompt_generator",
+		Model:         result.Model,
+		InputTokens:   int32(result.InputTokens),
+		OutputTokens:  int32(result.OutputTokens),
+		EstimatedCost: ai.NumericFromFloat(result.Cost),
+		LatencyMs:     int32(result.Latency.Milliseconds()),
+	})
+	if err != nil {
+		return fmt.Errorf("insert sonnet llm_call: %w", err)
+	}
+	if err := q.InsertLLMCallContent(ctx, db.InsertLLMCallContentParams{
+		LlmCallID: callID,
+		Prompt:    promptJSON,
+		Response:  respJSON,
+	}); err != nil {
+		return fmt.Errorf("insert sonnet llm_call_content: %w", err)
+	}
 	return nil
 }
