@@ -59,7 +59,7 @@ func buildSystemPrompt(question *db.Question) string {
 	var sb strings.Builder
 	sb.WriteString(systemPromptBase)
 	sb.WriteString("\n\n## Interview Context\n\n")
-	sb.WriteString(fmt.Sprintf("**Question:** %s\n\n", question.Title))
+	fmt.Fprintf(&sb, "**Question:** %s\n\n", question.Title)
 	sb.WriteString(question.Prompt)
 	return sb.String()
 }
@@ -67,9 +67,9 @@ func buildSystemPrompt(question *db.Question) string {
 // buildTranscript formats the interview messages as a numbered transcript.
 func buildTranscript(question *db.Question, messages []db.Message) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## Interview Transcript\n\n**Question:** %s\n\n", question.Title))
+	fmt.Fprintf(&sb, "## Interview Transcript\n\n**Question:** %s\n\n", question.Title)
 	for i, msg := range messages {
-		sb.WriteString(fmt.Sprintf("[%d] %s: %s\n\n", i+1, roleLabel(msg.Role), msg.Content))
+		fmt.Fprintf(&sb, "[%d] %s: %s\n\n", i+1, roleLabel(msg.Role), msg.Content)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -78,12 +78,12 @@ func buildTranscript(question *db.Question, messages []db.Message) string {
 func buildEvaluationSummary(eval *db.Evaluation) string {
 	var sb strings.Builder
 	sb.WriteString("## Evaluation Summary\n\n")
-	sb.WriteString(fmt.Sprintf("- Requirements: %d/4\n", eval.ScoreRequirements))
-	sb.WriteString(fmt.Sprintf("- Architecture: %d/4\n", eval.ScoreArchitecture))
-	sb.WriteString(fmt.Sprintf("- Deep Dive: %d/4\n", eval.ScoreDeepDive))
-	sb.WriteString(fmt.Sprintf("- Scalability: %d/4\n", eval.ScoreScalability))
-	sb.WriteString(fmt.Sprintf("- Communication: %d/4\n", eval.ScoreCommunication))
-	sb.WriteString(fmt.Sprintf("- Overall: %d/4\n", eval.ScoreOverall))
+	fmt.Fprintf(&sb, "- Requirements: %d/5\n", eval.ScoreRequirements)
+	fmt.Fprintf(&sb, "- Architecture: %d/5\n", eval.ScoreArchitecture)
+	fmt.Fprintf(&sb, "- Deep Dive: %d/5\n", eval.ScoreDeepDive)
+	fmt.Fprintf(&sb, "- Scalability: %d/5\n", eval.ScoreScalability)
+	fmt.Fprintf(&sb, "- Communication: %d/5\n", eval.ScoreCommunication)
+	fmt.Fprintf(&sb, "- Overall: %d/5\n", eval.ScoreOverall)
 
 	var strengths []string
 	if len(eval.Strengths) > 0 {
@@ -92,7 +92,7 @@ func buildEvaluationSummary(eval *db.Evaluation) string {
 	if len(strengths) > 0 {
 		sb.WriteString("\n**Strengths:**\n")
 		for _, s := range strengths {
-			sb.WriteString(fmt.Sprintf("- %s\n", s))
+			fmt.Fprintf(&sb, "- %s\n", s)
 		}
 	}
 
@@ -103,12 +103,12 @@ func buildEvaluationSummary(eval *db.Evaluation) string {
 	if len(gaps) > 0 {
 		sb.WriteString("\n**Gaps:**\n")
 		for _, g := range gaps {
-			sb.WriteString(fmt.Sprintf("- %s\n", g))
+			fmt.Fprintf(&sb, "- %s\n", g)
 		}
 	}
 
 	if eval.Advice != "" {
-		sb.WriteString(fmt.Sprintf("\n**Advice:** %s\n", eval.Advice))
+		fmt.Fprintf(&sb, "\n**Advice:** %s\n", eval.Advice)
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
