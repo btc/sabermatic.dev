@@ -2,6 +2,7 @@ package backend
 
 import (
 	"errors"
+	"fmt"
 	"net/netip"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/ai"
 )
 
 // ---------------------------------------------------------------------------
@@ -164,4 +167,22 @@ func TestTruncateRunes(t *testing.T) {
 			assert.Equal(t, tc.want, truncateRunes(tc.s, tc.n))
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// turnErrorForLLM
+// ---------------------------------------------------------------------------
+
+func TestTurnErrorForLLM(t *testing.T) {
+	refusal := fmt.Errorf("stream: %w", &ai.RefusalError{Model: "claude-sonnet-5-5", Category: "cyber"})
+	assert.Equal(t, "llm_refusal", turnErrorForLLM(refusal).Code)
+	assert.NotContains(t, turnErrorForLLM(refusal).Message, "cyber", "category is for logs, not the candidate")
+
+	truncated := fmt.Errorf("%w: claude-sonnet-5-5 used all 8192 tokens", ai.ErrMaxTokens)
+	assert.Equal(t, "llm_truncated", turnErrorForLLM(truncated).Code)
+
+	other := errors.New("stream: connection reset")
+	got := turnErrorForLLM(other)
+	assert.Equal(t, "llm_stream_error", got.Code)
+	assert.Equal(t, "stream: connection reset", got.Message)
 }
