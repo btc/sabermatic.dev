@@ -32,6 +32,10 @@ var imagegenTracer = drilotel.Tracer("imagegen")
 // geminiImageCostUSD is the estimated cost per Gemini native image generation call.
 const geminiImageCostUSD = 0.067
 
+// geminiUnavailableSnooze is how long an image job waits before checking
+// again when the Gemini client cannot be created (missing or broken ADC).
+const geminiUnavailableSnooze = 15 * time.Minute
+
 // GenerateQuestionImageArgs are the arguments for the image generation job.
 type GenerateQuestionImageArgs struct {
 	QuestionID uuid.UUID `json:"question_id" river:"unique"`
@@ -76,6 +80,21 @@ func (w *GenerateQuestionImageWorker) Timeout(job *river.Job[GenerateQuestionIma
 func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[GenerateQuestionImageArgs]) (err error) {
 	ctx, span := imagegenTracer.Start(ctx, "GenerateQuestionImageWorker.Work")
 	defer func() { drilotel.End(span, err) }()
+
+	// 0. Make sure Gemini can be reached before any billed Anthropic call:
+	//    without usable Google credentials the Sonnet output would be thrown
+	//    away. A credential problem does not fix itself between retries, so
+	//    snooze instead of failing; a snoozed job costs nothing, keeps its
+	//    attempts, and its scheduled state stops the sweep from inserting a
+	//    duplicate.
+	if err := w.Gemini.Ready(ctx); err != nil {
+		if errors.Is(err, ai.ErrGeminiUnavailable) {
+			slog.Error("gemini unavailable, snoozing image job",
+				"question_id", job.Args.QuestionID, "error", err)
+			return river.JobSnooze(geminiUnavailableSnooze)
+		}
+		return fmt.Errorf("gemini ready: %w", err)
+	}
 
 	questionID := job.Args.QuestionID
 	q := db.New(w.Pool)
