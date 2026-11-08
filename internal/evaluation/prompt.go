@@ -80,7 +80,7 @@ Respond with a single JSON object that matches the provided output schema. Each 
 
 // BuildPrompt returns the evaluator system prompt and a single user message
 // containing the formatted interview transcript.
-func BuildPrompt(question db.Question, messages []db.Message) (string, []anthropic.BetaMessageParam) {
+func BuildPrompt(question *db.Question, messages []db.Message) (string, []anthropic.BetaMessageParam) {
 	transcript := buildTranscript(question, messages)
 	userMsg := anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(transcript))
 	return systemPrompt, []anthropic.BetaMessageParam{userMsg}
@@ -88,7 +88,7 @@ func BuildPrompt(question db.Question, messages []db.Message) (string, []anthrop
 
 // buildTranscript formats the question and messages into a structured markdown
 // transcript for the evaluator.
-func buildTranscript(question db.Question, messages []db.Message) string {
+func buildTranscript(question *db.Question, messages []db.Message) string {
 	var sb strings.Builder
 
 	fmt.Fprintf(&sb, "# Interview Transcript: %s\n", question.Title)

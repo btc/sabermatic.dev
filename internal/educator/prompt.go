@@ -46,7 +46,7 @@ Be the senior engineer who sits down with the candidate after the interview and 
 Format everything in Markdown. Use headers, code blocks, and tables where they aid clarity.`
 
 // BuildPrompt constructs the system prompt and user messages for the educator LLM call.
-func BuildPrompt(question db.Question, messages []db.Message, eval db.Evaluation) (string, []anthropic.BetaMessageParam) {
+func BuildPrompt(question *db.Question, messages []db.Message, eval *db.Evaluation) (string, []anthropic.BetaMessageParam) {
 	system := buildSystemPrompt(question)
 	userContent := buildTranscript(question, messages) + "\n\n" + buildEvaluationSummary(eval)
 	return system, []anthropic.BetaMessageParam{
@@ -55,7 +55,7 @@ func BuildPrompt(question db.Question, messages []db.Message, eval db.Evaluation
 }
 
 // buildSystemPrompt appends the interview context section to the base system prompt.
-func buildSystemPrompt(question db.Question) string {
+func buildSystemPrompt(question *db.Question) string {
 	var sb strings.Builder
 	sb.WriteString(systemPromptBase)
 	sb.WriteString("\n\n## Interview Context\n\n")
@@ -65,7 +65,7 @@ func buildSystemPrompt(question db.Question) string {
 }
 
 // buildTranscript formats the interview messages as a numbered transcript.
-func buildTranscript(question db.Question, messages []db.Message) string {
+func buildTranscript(question *db.Question, messages []db.Message) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Interview Transcript\n\n**Question:** %s\n\n", question.Title))
 	for i, msg := range messages {
@@ -75,7 +75,7 @@ func buildTranscript(question db.Question, messages []db.Message) string {
 }
 
 // buildEvaluationSummary formats the evaluation scores, strengths, and gaps.
-func buildEvaluationSummary(eval db.Evaluation) string {
+func buildEvaluationSummary(eval *db.Evaluation) string {
 	var sb strings.Builder
 	sb.WriteString("## Evaluation Summary\n\n")
 	sb.WriteString(fmt.Sprintf("- Requirements: %d/4\n", eval.ScoreRequirements))

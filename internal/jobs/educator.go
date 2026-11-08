@@ -109,7 +109,7 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 	}
 
 	// 5. Build prompt.
-	system, promptMsgs := educator.BuildPrompt(question, messages, eval)
+	system, promptMsgs := educator.BuildPrompt(&question, messages, &eval)
 
 	// 6. Begin transaction.
 	tx, err := w.Pool.Begin(ctx)
@@ -119,7 +119,7 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 7. Call LLM.
-	output, err := w.LLM.CallJSONAndLog(ctx, tx, ai.JSONParams{
+	output, err := w.LLM.CallJSONAndLog(ctx, tx, &ai.JSONParams{
 		Model:     w.Cfg.EducatorModel,
 		System:    system,
 		Messages:  promptMsgs,

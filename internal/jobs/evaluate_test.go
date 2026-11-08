@@ -153,7 +153,7 @@ func newFakeEvalServer(t *testing.T) *aitest.Server {
 	outputJSON, err := json.Marshal(evalInput)
 	require.NoError(t, err)
 
-	return aitest.NewServer(t, aitest.Response{
+	return aitest.NewServer(t, &aitest.Response{
 		Model:        "claude-opus-5-5",
 		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(string(outputJSON))},
 		InputTokens:  500,
@@ -264,7 +264,7 @@ func TestEvaluateSessionWorker_RefusalCancelsAndMarksFailed(t *testing.T) {
 
 	ctx := context.Background()
 	pool := newTestPool(t)
-	srv := aitest.NewServer(t, aitest.Response{
+	srv := aitest.NewServer(t, &aitest.Response{
 		Model:           "claude-opus-5-5",
 		StopReason:      "refusal",
 		RefusalCategory: "bio",
