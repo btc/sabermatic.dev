@@ -14,6 +14,14 @@ var unsupportedSchemaKeywords = []string{
 	"minLength", "maxLength", "pattern",
 	"minItems", "maxItems", "uniqueItems", "contains",
 	"minProperties", "maxProperties", "patternProperties",
+	// Composition, conditional and tuple keywords. Branches under these are
+	// not walked, so a nested object could skip the additionalProperties
+	// check; none of the schemas here need them.
+	"oneOf", "not", "if", "then", "else", "prefixItems",
+	"dependentSchemas", "dependentRequired", "unevaluatedProperties", "unevaluatedItems",
+	// References. Definitions under $defs/definitions are not walked, so
+	// they are rejected until a schema needs them.
+	"$ref", "$defs", "definitions",
 }
 
 // CheckOutputSchema reports whether schema stays inside the subset of JSON
@@ -27,6 +35,10 @@ var unsupportedSchemaKeywords = []string{
 //     are expressed as nullable with anyOf instead);
 //   - "type" is a single string, never an array (use anyOf for unions);
 //   - no numeric, string-length, or array-size constraints.
+//
+// It also rejects keywords it does not walk (oneOf, not, if/then/else,
+// prefixItems, $ref, $defs and similar), so every object in an accepted
+// schema has been checked.
 func CheckOutputSchema(schema map[string]any) error {
 	if schema == nil {
 		return fmt.Errorf("ai: output schema is nil")

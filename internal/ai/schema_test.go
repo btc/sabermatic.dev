@@ -57,6 +57,40 @@ func TestCheckOutputSchema(t *testing.T) {
 			schema:  obj(map[string]any{"xs": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{}}}}, "xs"),
 			wantErr: "$.xs[]",
 		},
+		{
+			name:    "oneOf",
+			schema:  obj(map[string]any{"a": map[string]any{"oneOf": []any{str, map[string]any{"type": "null"}}}}, "a"),
+			wantErr: `"oneOf"`,
+		},
+		{
+			name:    "not",
+			schema:  obj(map[string]any{"a": map[string]any{"type": "string", "not": map[string]any{"const": "x"}}}, "a"),
+			wantErr: `"not"`,
+		},
+		{
+			name:    "if",
+			schema:  obj(map[string]any{"a": map[string]any{"type": "string", "if": str, "then": str}}, "a"),
+			wantErr: `"if"`,
+		},
+		{
+			name:    "prefixItems",
+			schema:  obj(map[string]any{"a": map[string]any{"type": "array", "prefixItems": []any{str}}}, "a"),
+			wantErr: `"prefixItems"`,
+		},
+		{
+			name: "$defs with unchecked object",
+			schema: func() map[string]any {
+				s := obj(map[string]any{"a": map[string]any{"$ref": "#/$defs/x"}}, "a")
+				s["$defs"] = map[string]any{"x": map[string]any{"type": "object", "properties": map[string]any{}}}
+				return s
+			}(),
+			wantErr: `"$defs"`,
+		},
+		{
+			name:    "$ref",
+			schema:  obj(map[string]any{"a": map[string]any{"$ref": "#/$defs/x"}}, "a"),
+			wantErr: `"$ref"`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
