@@ -62,17 +62,59 @@ type Database struct {
 	MaxPoolConns int32 `env:"DATABASE_MAX_POOL_SIZE,default=16"`
 }
 
+// LLM configures the Claude calls. Each role has a model, a max_tokens limit
+// and an output_config.effort level. claude-opus-5-5 always thinks and
+// claude-sonnet-5-5 thinks adaptively by default; thinking tokens count
+// against max_tokens, so the limits leave room for thinking plus the reply.
 type LLM struct {
-	APIKey               string `env:"ANTHROPIC_API_KEY,required"`
-	InterviewerModel     string `env:"INTERVIEWER_MODEL,default=claude-sonnet-4-20250514"`
-	EvaluatorModel       string `env:"EVALUATOR_MODEL,default=claude-opus-4-20250514"`
-	EvaluatorMaxTokens   int64  `env:"EVALUATOR_MAX_TOKENS,default=4096"`
-	EducatorModel        string `env:"EDUCATOR_MODEL,default=claude-opus-4-20250514"`
-	EducatorMaxTokens    int64  `env:"EDUCATOR_MAX_TOKENS,default=8192"`
-	CoachModel           string `env:"COACH_MODEL,default=claude-sonnet-4-20250514"`
-	CoachMaxTokens       int64  `env:"COACH_MAX_TOKENS,default=4096"`
-	ImagePromptModel     string `env:"IMAGE_PROMPT_MODEL,default=claude-sonnet-4-20250514"`
-	ImagePromptMaxTokens int64  `env:"IMAGE_PROMPT_MAX_TOKENS,default=1024"`
+	APIKey string `env:"ANTHROPIC_API_KEY,required"`
+
+	// RefusalFallbacks sends fallbacks:"default" (beta
+	// server-side-fallback-2026-07-01) so a safety-classifier refusal is
+	// retried server-side on the model Anthropic recommends for that refusal
+	// category.
+	RefusalFallbacks bool `env:"LLM_REFUSAL_FALLBACKS,default=true"`
+
+	// Interviewer is the real-time voice route; effort low keeps time to
+	// first token short.
+	InterviewerModel     string `env:"INTERVIEWER_MODEL,default=claude-sonnet-5-5"`
+	InterviewerMaxTokens int64  `env:"INTERVIEWER_MAX_TOKENS,default=8192"`
+	InterviewerEffort    string `env:"INTERVIEWER_EFFORT,default=low"`
+
+	EvaluatorModel     string `env:"EVALUATOR_MODEL,default=claude-opus-5-5"`
+	EvaluatorMaxTokens int64  `env:"EVALUATOR_MAX_TOKENS,default=32000"`
+	EvaluatorEffort    string `env:"EVALUATOR_EFFORT,default=high"`
+
+	EducatorModel     string `env:"EDUCATOR_MODEL,default=claude-opus-5-5"`
+	EducatorMaxTokens int64  `env:"EDUCATOR_MAX_TOKENS,default=32000"`
+	EducatorEffort    string `env:"EDUCATOR_EFFORT,default=high"`
+
+	CoachModel     string `env:"COACH_MODEL,default=claude-sonnet-5-5"`
+	CoachMaxTokens int64  `env:"COACH_MAX_TOKENS,default=16000"`
+	CoachEffort    string `env:"COACH_EFFORT,default=medium"`
+
+	ImagePromptModel     string `env:"IMAGE_PROMPT_MODEL,default=claude-sonnet-5-5"`
+	ImagePromptMaxTokens int64  `env:"IMAGE_PROMPT_MAX_TOKENS,default=4096"`
+	ImagePromptEffort    string `env:"IMAGE_PROMPT_EFFORT,default=low"`
+}
+
+// validEfforts are the output_config.effort values the API accepts.
+var validEfforts = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+
+func (l *LLM) validate() error {
+	efforts := []struct{ env, value string }{
+		{"INTERVIEWER_EFFORT", l.InterviewerEffort},
+		{"EVALUATOR_EFFORT", l.EvaluatorEffort},
+		{"EDUCATOR_EFFORT", l.EducatorEffort},
+		{"COACH_EFFORT", l.CoachEffort},
+		{"IMAGE_PROMPT_EFFORT", l.ImagePromptEffort},
+	}
+	for _, e := range efforts {
+		if !validEfforts[e.value] {
+			return fmt.Errorf("%s must be one of low, medium, high, xhigh, max; got %q", e.env, e.value)
+		}
+	}
+	return nil
 }
 
 type Speech struct {
@@ -205,6 +247,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.LLM.APIKey == "" {
 		return fmt.Errorf("ANTHROPIC_API_KEY is required")
+	}
+	if err := cfg.LLM.validate(); err != nil {
+		return err
 	}
 	if cfg.Speech.OpenAIAPIKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
