@@ -10,7 +10,7 @@ import (
 	"github.com/btc/drill/internal/ai"
 )
 
-func validToolInput() map[string]any {
+func validOutput() map[string]any {
 	return map[string]any{
 		"narrative":            "The candidate consistently struggles with scalability.",
 		"weakest_dimension":    "scalability",
@@ -20,7 +20,7 @@ func validToolInput() map[string]any {
 }
 
 func TestParse_ValidInput(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
 
@@ -35,7 +35,7 @@ func TestParse_ValidInput(t *testing.T) {
 }
 
 func TestParse_ValidInputWithQuestion(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["generated_question"] = map[string]any{
 		"title":      "Design a Distributed Cache",
 		"prompt":     "Design a distributed caching system like Redis.",
@@ -56,7 +56,7 @@ func TestParse_ValidInputWithQuestion(t *testing.T) {
 }
 
 func TestParse_ValidInputWithMediumDifficulty(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["generated_question"] = map[string]any{
 		"title":      "Design a Rate Limiter",
 		"prompt":     "Design a rate limiting service.",
@@ -74,7 +74,7 @@ func TestParse_ValidInputWithMediumDifficulty(t *testing.T) {
 }
 
 func TestParse_EmptyNarrative(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["narrative"] = ""
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestParse_EmptyNarrative(t *testing.T) {
 }
 
 func TestParse_EmptyPromptOnGeneratedQuestion(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["generated_question"] = map[string]any{
 		"title":      "Some Question",
 		"prompt":     "",
@@ -101,7 +101,7 @@ func TestParse_EmptyPromptOnGeneratedQuestion(t *testing.T) {
 }
 
 func TestParse_InvalidDifficulty(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["generated_question"] = map[string]any{
 		"title":      "Some Question",
 		"prompt":     "Some prompt.",
@@ -149,7 +149,7 @@ func TestParse_GeneratedQuestionNullTagsBecomesEmpty(t *testing.T) {
 }
 
 func TestParse_SummaryField(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["summary"] = "Focus on architecture — requirements are improving."
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestParse_SummaryField(t *testing.T) {
 }
 
 func TestParse_MissingSummary(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	// no "summary" key
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
@@ -186,7 +186,7 @@ func TestOutputSchema_Fields(t *testing.T) {
 }
 
 func TestParse_NullGeneratedQuestion(t *testing.T) {
-	input := validToolInput()
+	input := validOutput()
 	input["generated_question"] = nil
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)

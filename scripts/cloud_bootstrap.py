@@ -745,7 +745,12 @@ def phase_stripe(state: dict) -> None:
 
         Stripe Product Setup
         ────────────────────
-        Cost to serve: ~$0.035/min (Sonnet interviewer, gpt-transcribe STT, OpenAI TTS, Opus eval)
+        Cost to serve: ~$0.035/min, measured on the previous models (Sonnet 4
+        interviewer, Whisper STT, OpenAI TTS, Opus 4 eval). Not yet re-measured
+        for Sonnet 5.5 / Opus 5.5 / gpt-transcribe: list prices are lower
+        ($2/$10 and $4/$20 per MTok vs $3/$15 and $15/$75; STT $0.0045/min vs
+        $0.006/min), but thinking tokens add output. The margins below use the
+        old figure.
         GCP hosting baseline: ~$20-30/month
 
         Suggested pricing (each tier discounts over the last):
