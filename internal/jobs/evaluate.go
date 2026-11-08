@@ -135,17 +135,18 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	})
 	if err != nil {
 		err = fmt.Errorf("call evaluator LLM: %w", err)
-		if ai.IsRefusal(err) {
-			// A refusal will not change on retry. River skips the error
-			// handler for cancelled jobs, so mark the session failed here
-			// (outside tx, which rolls back).
+		if terminalLLMError(err, job.JobRow) {
+			// A refusal or a repeated max_tokens stop is not retried (see
+			// terminalLLMError). River skips the error handler for cancelled
+			// jobs, so mark the session failed here (outside tx, which rolls
+			// back).
 			if statusErr := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
 				ID:     sessionID,
 				Status: "evaluation_failed",
 			}); statusErr != nil {
-				return fmt.Errorf("set evaluation_failed after refusal: %w (refusal: %v)", statusErr, err)
+				return fmt.Errorf("set evaluation_failed: %w (LLM error: %v)", statusErr, err)
 			}
-			slog.Warn("evaluator refused, marked evaluation_failed", "session_id", sessionID, "error", err)
+			slog.Warn("evaluator LLM call cannot succeed on retry, marked evaluation_failed", "session_id", sessionID, "error", err)
 			return river.JobCancel(err)
 		}
 		return err

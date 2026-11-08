@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"google.golang.org/genai"
@@ -60,6 +61,18 @@ func NewGeminiClient(cfg *config.Config) *GeminiClient {
 	}
 }
 
+// NewTestGeminiClient returns a GeminiClient that sends requests through
+// httpClient and needs no Google credentials (the SDK skips ADC lookup when
+// an HTTP client is supplied). For tests in other packages.
+func NewTestGeminiClient(model string, httpClient *http.Client) *GeminiClient {
+	g := NewGeminiClient(&config.Config{
+		GCP:    config.GCP{ProjectID: "test-project"},
+		Gemini: config.Gemini{Location: "global", Model: model},
+	})
+	g.cfg.HTTPClient = httpClient
+	return g
+}
+
 // Ready creates the genai client if it does not exist yet and reports
 // whether that succeeded. A creation failure wraps ErrGeminiUnavailable.
 // Call it before doing paid work whose output only Gemini can use.
@@ -85,9 +98,9 @@ func (g *GeminiClient) genaiClient(ctx context.Context) (*genai.Client, error) {
 	// genai.NewClient writes resolved values (e.g. Credentials) into the
 	// config it is given; pass a copy so a failed attempt leaves g.cfg
 	// untouched for the next try. The copy is shallow: in genai v1.53.0
-	// NewClient assigns only top-level fields (HTTPOptions is a value field
-	// and g.cfg.HTTPClient is nil), so no state shared with g.cfg is
-	// modified. Recheck this when bumping the SDK. The SDK uses ctx only
+	// NewClient assigns only top-level fields (HTTPOptions is a value field,
+	// and a supplied HTTPClient is used as is), so no state shared with
+	// g.cfg is modified. Recheck this when bumping the SDK. The SDK uses ctx only
 	// during creation (quota project lookup) and does not retain it.
 	initCtx, cancel := context.WithTimeout(ctx, geminiInitTimeout)
 	defer cancel()

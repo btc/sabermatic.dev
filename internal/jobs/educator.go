@@ -132,17 +132,18 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 	})
 	if err != nil {
 		err = fmt.Errorf("call educator LLM: %w", err)
-		if ai.IsRefusal(err) {
-			// A refusal will not change on retry. River skips the error
-			// handler for cancelled jobs, so mark the analysis failed here
-			// (outside tx, which rolls back).
+		if terminalLLMError(err, job.JobRow) {
+			// A refusal or a repeated max_tokens stop is not retried (see
+			// terminalLLMError). River skips the error handler for cancelled
+			// jobs, so mark the analysis failed here (outside tx, which
+			// rolls back).
 			if statusErr := q.UpdateEducatorAnalysisStatus(ctx, db.UpdateEducatorAnalysisStatusParams{
 				ID:     analysisID,
 				Status: "failed",
 			}); statusErr != nil {
-				return fmt.Errorf("set educator failed after refusal: %w (refusal: %v)", statusErr, err)
+				return fmt.Errorf("set educator failed: %w (LLM error: %v)", statusErr, err)
 			}
-			slog.Warn("educator refused, marked failed", "session_id", sessionID, "error", err)
+			slog.Warn("educator LLM call cannot succeed on retry, marked failed", "session_id", sessionID, "error", err)
 			return river.JobCancel(err)
 		}
 		return err
