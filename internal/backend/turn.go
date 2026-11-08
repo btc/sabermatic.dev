@@ -459,7 +459,27 @@ func (w *sinkTokenWriter) OnDone(_ string) {
 }
 
 func (w *sinkTokenWriter) OnError(err error) {
-	w.sink.Error(&drillv1.TurnError{Code: "llm_stream_error", Message: err.Error()})
+	w.sink.Error(turnErrorForLLM(err))
+}
+
+// turnErrorForLLM maps an interviewer stream error to the TurnError the client
+// shows. Refusals and max_tokens stops get their own codes and a message
+// written for the candidate; other errors keep the raw message.
+func turnErrorForLLM(err error) *drillv1.TurnError {
+	switch {
+	case ai.IsRefusal(err):
+		return &drillv1.TurnError{
+			Code:    "llm_refusal",
+			Message: "The interviewer couldn't respond to that. Try rephrasing your answer and submitting again.",
+		}
+	case errors.Is(err, ai.ErrMaxTokens):
+		return &drillv1.TurnError{
+			Code:    "llm_truncated",
+			Message: "The interviewer's response was cut off. Please try again.",
+		}
+	default:
+		return &drillv1.TurnError{Code: "llm_stream_error", Message: err.Error()}
+	}
 }
 
 // sinkTTSAdapter implements observer.TTSSink and routes TTS audio to the

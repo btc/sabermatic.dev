@@ -200,6 +200,50 @@ func TestSubmitTurn_OpeningQuestion(t *testing.T) {
 	require.Equal(t, 1, doneCount, "expected exactly one InterviewerDone event")
 }
 
+func TestSubmitTurn_RefusalSurfacesTurnError(t *testing.T) {
+	t.Parallel()
+
+	b := newBackendWithFakeResponse(t, aitest.Response{
+		Model:           "claude-sonnet-5-5",
+		Blocks:          []aitest.Block{aitest.TextBlock("Partial")},
+		StopReason:      "refusal",
+		RefusalCategory: "general_harms",
+	})
+	srvURL := startInterviewServer(t, b)
+	rawToken := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, rawToken)
+
+	questionID := seedQuestion(t, b)
+	ctx := context.Background()
+	user, err := db.New(b.Pool()).GetUserByEmail(ctx, "testuser@example.com")
+	require.NoError(t, err)
+	sessionID := createSession(t, b, user.ID, questionID)
+
+	// submitTurn drains the stream, so returning at all shows it did not hang.
+	events := submitOpeningTurn(t, client, sessionID.String())
+
+	var turnErr *drillv1.TurnError
+	var doneCount int
+	for _, e := range events {
+		switch ev := e.Event.(type) {
+		case *drillv1.TurnEvent_Error:
+			turnErr = ev.Error
+		case *drillv1.TurnEvent_InterviewerDone:
+			doneCount++
+		}
+	}
+	require.NotNil(t, turnErr, "expected a TurnError event")
+	require.Equal(t, "llm_refusal", turnErr.Code)
+	require.Equal(t, 0, doneCount, "a refused turn must not complete")
+
+	// The partial interviewer text is not saved as a message.
+	msgs, err := db.New(b.Pool()).GetMessagesBySession(ctx, sessionID)
+	require.NoError(t, err)
+	for _, m := range msgs {
+		require.NotEqual(t, "interviewer", m.Role)
+	}
+}
+
 func TestGetSessionState_ReturnsMessages(t *testing.T) {
 	t.Parallel()
 
