@@ -22,3 +22,6 @@ WHERE session_id = $1;
 
 -- name: SetAudioURL :exec
 UPDATE messages SET audio_url = $2 WHERE id = $1;
+
+-- name: DeleteMessage :exec
+DELETE FROM messages WHERE id = $1 AND session_id = $2;

@@ -12,6 +12,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteMessage = `-- name: DeleteMessage :exec
+DELETE FROM messages WHERE id = $1 AND session_id = $2
+`
+
+type DeleteMessageParams struct {
+	ID        uuid.UUID `json:"id"`
+	SessionID uuid.UUID `json:"session_id"`
+}
+
+func (q *Queries) DeleteMessage(ctx context.Context, arg DeleteMessageParams) error {
+	_, err := q.db.Exec(ctx, deleteMessage, arg.ID, arg.SessionID)
+	return err
+}
+
 const getMaxSeqForSession = `-- name: GetMaxSeqForSession :one
 SELECT COALESCE(MAX(seq), 0)::int AS max_seq
 FROM messages

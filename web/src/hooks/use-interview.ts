@@ -124,6 +124,17 @@ export function useInterview(sessionId: string) {
         const err = e.value;
         console.error(`Turn error: ${err.code} -- ${err.message}`);
         setLastError(err.message);
+        if (err.code === "llm_refusal" || err.code === "llm_truncated") {
+          // The server deleted the candidate answer this turn responded to
+          // (so the next submission is processed as new input) and saved no
+          // interviewer reply. Drop the local copies to match.
+          streamingTextRef.current = "";
+          setStreamingText("");
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            return last?.role === "candidate" ? prev.slice(0, -1) : prev;
+          });
+        }
         setState("waiting");
         if (turnSpanRef.current) {
           closeTurnSpan(turnSpanRef.current, false);

@@ -2,6 +2,7 @@ package interview_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -46,12 +47,41 @@ func newBackendWithFakeLLM(t *testing.T, tokens []string) *backend.Backend {
 // streams resp for every request.
 func newBackendWithFakeResponse(t *testing.T, resp aitest.Response) *backend.Backend {
 	t.Helper()
+	b, _ := newBackendWithFakeServer(t, resp)
+	return b
+}
+
+// newBackendWithFakeServer is newBackendWithFakeResponse that also returns
+// the fake server, so a test can change the response between turns and read
+// the request bodies.
+func newBackendWithFakeServer(t *testing.T, resp aitest.Response) (*backend.Backend, *aitest.Server) {
+	t.Helper()
 	anthropicSrv := aitest.NewServer(t, resp)
 	b := pg.NewBackend(t)
 	b.ApplyTestOverrides(backend.TestOverrides{
 		LLM: ai.NewTestClient(anthropicSrv.URL, b.Pool()),
 	})
-	return b
+	return b, anthropicSrv
+}
+
+// turnError returns the TurnError in events, or nil.
+func turnError(events []*drillv1.TurnEvent) *drillv1.TurnError {
+	for _, e := range events {
+		if ev, ok := e.Event.(*drillv1.TurnEvent_Error); ok {
+			return ev.Error
+		}
+	}
+	return nil
+}
+
+// countInterviewerCalls returns the number of llm_calls rows logged for the
+// interviewer in a session.
+func countInterviewerCalls(t *testing.T, b *backend.Backend, sessionID uuid.UUID) int {
+	t.Helper()
+	var n int
+	require.NoError(t, b.Pool().QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM llm_calls WHERE session_id = $1 AND role = 'interviewer'`, sessionID).Scan(&n))
+	return n
 }
 
 // startInterviewServer creates the ConnectRPC InterviewService handler with
@@ -236,12 +266,83 @@ func TestSubmitTurn_RefusalSurfacesTurnError(t *testing.T) {
 	require.Equal(t, "llm_refusal", turnErr.Code)
 	require.Equal(t, 0, doneCount, "a refused turn must not complete")
 
+	require.NotContains(t, turnErr.Message, "rephras", "the opening turn has no answer to rephrase")
+
 	// The partial interviewer text is not saved as a message.
 	msgs, err := db.New(b.Pool()).GetMessagesBySession(ctx, sessionID)
 	require.NoError(t, err)
 	for _, m := range msgs {
 		require.NotEqual(t, "interviewer", m.Role)
 	}
+
+	// The refused call is billed, so it is logged.
+	require.Equal(t, 1, countInterviewerCalls(t, b, sessionID))
+}
+
+// TestSubmitTurn_RefusedAnswerCanBeRephrased checks that after the
+// interviewer refuses a candidate answer, the next submission is processed as
+// new input: the refused answer is not kept in the transcript or resent.
+func TestSubmitTurn_RefusedAnswerCanBeRephrased(t *testing.T) {
+	t.Parallel()
+
+	ok := aitest.Response{
+		Model:  "claude-sonnet-5-5",
+		Blocks: []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock("Go on.")},
+	}
+	b, srv := newBackendWithFakeServer(t, ok)
+	srvURL := startInterviewServer(t, b)
+	rawToken := testutil.SignupAndLogin(t, b)
+	client := authedClient(t, srvURL, rawToken)
+
+	questionID := seedQuestion(t, b)
+	ctx := context.Background()
+	user, err := db.New(b.Pool()).GetUserByEmail(ctx, "testuser@example.com")
+	require.NoError(t, err)
+	sessionID := createSession(t, b, user.ID, questionID)
+
+	require.Nil(t, turnError(submitOpeningTurn(t, client, sessionID.String())))
+
+	textTurn := func(content string) []*drillv1.TurnEvent {
+		return submitTurn(t, client, &drillv1.SubmitTurnRequest{
+			SessionId: sessionID.String(),
+			Input:     &drillv1.SubmitTurnRequest_TextInput{TextInput: &drillv1.TextInput{Content: content}},
+		})
+	}
+
+	// The interviewer refuses the first answer.
+	srv.SetResponse(aitest.Response{
+		Model:           "claude-sonnet-5-5",
+		Blocks:          []aitest.Block{aitest.TextBlock("Part")},
+		StopReason:      "refusal",
+		RefusalCategory: "general_harms",
+	})
+	turnErr := turnError(textTurn("REFUSED-ANSWER"))
+	require.NotNil(t, turnErr)
+	require.Equal(t, "llm_refusal", turnErr.Code)
+
+	msgs, err := db.New(b.Pool()).GetMessagesBySession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 1, "the refused answer must not stay in the transcript")
+	require.Equal(t, "interviewer", msgs[0].Role)
+	require.Equal(t, 2, countInterviewerCalls(t, b, sessionID), "the refused call is logged")
+
+	// The rephrased answer goes through the normal input path.
+	srv.SetResponse(ok)
+	events := textTurn("REPHRASED-ANSWER")
+	require.Nil(t, turnError(events))
+
+	reqs := srv.Requests()
+	require.Len(t, reqs, 3)
+	last, err := json.Marshal(reqs[2])
+	require.NoError(t, err)
+	require.Contains(t, string(last), "REPHRASED-ANSWER")
+	require.NotContains(t, string(last), "REFUSED-ANSWER")
+
+	msgs, err = db.New(b.Pool()).GetMessagesBySession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	require.Equal(t, "REPHRASED-ANSWER", msgs[1].Content)
+	require.Equal(t, "interviewer", msgs[2].Role)
 }
 
 func TestGetSessionState_ReturnsMessages(t *testing.T) {

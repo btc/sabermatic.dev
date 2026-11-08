@@ -328,10 +328,17 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 		WithTranscript(sp.messages).
 		Build()
 
+	// The trailing candidate message, if any: the answer this turn responds
+	// to. It is absent on the opening turn.
+	var pendingCandidate *db.Message
+	if n := len(sp.messages); n > 0 && sp.messages[n-1].Role == "candidate" {
+		pendingCandidate = &sp.messages[n-1]
+	}
+
 	// Create observer fan-out.
 	accumulator := observer.NewMessageAccumulator()
 	observers := []observer.TokenObserver{
-		newSinkTokenWriter(sp.sink),
+		newSinkTokenWriter(sp.sink, pendingCandidate == nil),
 		accumulator,
 	}
 	if sp.ttsEnabled {
@@ -391,11 +398,15 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 	// and closing releases the HTTP response body.
 	if streamErr != nil {
 		fanOut.Close()
+		// ctx is already uncancellable (callers pass pipelineCtx); the
+		// WithoutCancel guards against a future caller passing a cancellable
+		// context, which would skip logging the billed call.
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if closeErr := stream.Close(closeCtx); closeErr != nil {
 			slog.Warn("persist llm_call record after stream error", "error", closeErr, "session_id", sp.sessionID)
 		}
+		b.dropRejectedCandidate(closeCtx, sp.sessionID, pendingCandidate, streamErr)
 		return nil
 	}
 
@@ -435,6 +446,25 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 	return nil
 }
 
+// dropRejectedCandidate deletes the candidate message a refused or
+// max_tokens-truncated turn responded to.
+//
+// The candidate message is saved before the interviewer streams. If it stayed
+// as the last message, the next SubmitTurn would take the crash-recovery
+// path, ignore the new input, and resend the transcript that was just
+// refused. Deleting it lets the next submission go through the normal input
+// path, so a rephrased answer replaces the rejected one. For other stream
+// errors the message is kept, and crash recovery retries the same transcript.
+func (b *Backend) dropRejectedCandidate(ctx context.Context, sessionID uuid.UUID, candidate *db.Message, streamErr error) {
+	if candidate == nil || !(ai.IsRefusal(streamErr) || errors.Is(streamErr, ai.ErrMaxTokens)) {
+		return
+	}
+	if err := b.DeleteMessage(ctx, sessionID, candidate.ID); err != nil {
+		slog.Error("turn: delete candidate message after refusal or truncation",
+			"error", err, "session_id", sessionID, "message_id", candidate.ID)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Sink adapters: bridge observer interfaces to TurnEventSink proto types
 // ---------------------------------------------------------------------------
@@ -442,11 +472,12 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 // sinkTokenWriter implements observer.TokenObserver and routes tokens to the
 // TurnEventSink.
 type sinkTokenWriter struct {
-	sink TurnEventSink
+	sink    TurnEventSink
+	opening bool // the turn has no candidate answer (opening question)
 }
 
-func newSinkTokenWriter(sink TurnEventSink) *sinkTokenWriter {
-	return &sinkTokenWriter{sink: sink}
+func newSinkTokenWriter(sink TurnEventSink, opening bool) *sinkTokenWriter {
+	return &sinkTokenWriter{sink: sink, opening: opening}
 }
 
 func (w *sinkTokenWriter) OnToken(token string) {
@@ -459,23 +490,35 @@ func (w *sinkTokenWriter) OnDone(_ string) {
 }
 
 func (w *sinkTokenWriter) OnError(err error) {
-	w.sink.Error(turnErrorForLLM(err))
+	w.sink.Error(turnErrorForLLM(err, w.opening))
 }
 
 // turnErrorForLLM maps an interviewer stream error to the TurnError the client
 // shows. Refusals and max_tokens stops get their own codes and a message
-// written for the candidate; other errors keep the raw message.
-func turnErrorForLLM(err error) *drillv1.TurnError {
+// written for the candidate; other errors keep the raw message. opening is
+// true when the turn had no candidate answer. Otherwise the answer has been
+// deleted (see dropRejectedCandidate), and the message says so.
+func turnErrorForLLM(err error, opening bool) *drillv1.TurnError {
 	switch {
+	case ai.IsRefusal(err) && opening:
+		return &drillv1.TurnError{
+			Code:    "llm_refusal",
+			Message: "The interviewer couldn't start this question. Try again, or pick a different question.",
+		}
 	case ai.IsRefusal(err):
 		return &drillv1.TurnError{
 			Code:    "llm_refusal",
-			Message: "The interviewer couldn't respond to that. Try rephrasing your answer and submitting again.",
+			Message: "The interviewer couldn't respond to that answer, so it wasn't saved. Try rephrasing it and submitting again.",
+		}
+	case errors.Is(err, ai.ErrMaxTokens) && opening:
+		return &drillv1.TurnError{
+			Code:    "llm_truncated",
+			Message: "The interviewer's response was cut off. Please try again.",
 		}
 	case errors.Is(err, ai.ErrMaxTokens):
 		return &drillv1.TurnError{
 			Code:    "llm_truncated",
-			Message: "The interviewer's response was cut off. Please try again.",
+			Message: "The interviewer's response was cut off, so your answer wasn't saved. Please submit it again.",
 		}
 	default:
 		return &drillv1.TurnError{Code: "llm_stream_error", Message: err.Error()}

@@ -258,6 +258,13 @@ func (b *Backend) PersistMessage(ctx context.Context, p PersistMessageParams) (d
 	return b.persistMessage(ctx, b.pool, p)
 }
 
+// DeleteMessage deletes one message from a session.
+func (b *Backend) DeleteMessage(ctx context.Context, sessionID, messageID uuid.UUID) (err error) {
+	ctx, span := tracer.Start(ctx, "Backend.DeleteMessage")
+	defer func() { drilotel.End(span, err) }()
+	return db.New(b.pool).DeleteMessage(ctx, db.DeleteMessageParams{ID: messageID, SessionID: sessionID})
+}
+
 // PersistInterviewerTurn atomically persists the interviewer message AND the
 // LLM call record. The TokenStream's CloseWithTx is called within the
 // transaction.
