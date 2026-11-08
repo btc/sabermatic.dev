@@ -88,6 +88,42 @@ func TestValidate_InvalidEffort(t *testing.T) {
 	require.Contains(t, err.Error(), "COACH_EFFORT")
 }
 
+func TestValidate_MaxTokensRange(t *testing.T) {
+	for _, tc := range []struct{ env, value string }{
+		{"INTERVIEWER_MAX_TOKENS", "0"},
+		{"EVALUATOR_MAX_TOKENS", "-1"},
+		{"EDUCATOR_MAX_TOKENS", "128001"},
+		{"COACH_MAX_TOKENS", "0"},
+		{"IMAGE_PROMPT_MAX_TOKENS", "200000"},
+	} {
+		t.Run(tc.env+"="+tc.value, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://localhost:5432/drill")
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+			t.Setenv("OPENAI_API_KEY", "sk-test")
+			t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+			t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+			t.Setenv(tc.env, tc.value)
+
+			_, err := config.Load()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.env)
+		})
+	}
+
+	t.Run("128000 accepted", func(t *testing.T) {
+		t.Setenv("DATABASE_URL", "postgres://localhost:5432/drill")
+		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+		t.Setenv("OPENAI_API_KEY", "sk-test")
+		t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+		t.Setenv("EVALUATOR_MAX_TOKENS", "128000")
+
+		cfg, err := config.Load()
+		require.NoError(t, err)
+		require.Equal(t, int64(128000), cfg.LLM.EvaluatorMaxTokens)
+	})
+}
+
 func TestSecureCookies(t *testing.T) {
 	tests := []struct {
 		name    string

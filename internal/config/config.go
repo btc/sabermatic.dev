@@ -114,8 +114,29 @@ func (l *LLM) validate() error {
 			return fmt.Errorf("%s must be one of low, medium, high, xhigh, max; got %q", e.env, e.value)
 		}
 	}
+	limits := []struct {
+		env   string
+		value int64
+	}{
+		{"INTERVIEWER_MAX_TOKENS", l.InterviewerMaxTokens},
+		{"EVALUATOR_MAX_TOKENS", l.EvaluatorMaxTokens},
+		{"EDUCATOR_MAX_TOKENS", l.EducatorMaxTokens},
+		{"COACH_MAX_TOKENS", l.CoachMaxTokens},
+		{"IMAGE_PROMPT_MAX_TOKENS", l.ImagePromptMaxTokens},
+	}
+	for _, m := range limits {
+		if m.value < 1 || m.value > maxOutputTokens {
+			return fmt.Errorf("%s must be between 1 and %d; got %d", m.env, maxOutputTokens, m.value)
+		}
+	}
 	return nil
 }
+
+// maxOutputTokens is the max_tokens ceiling the API accepts for
+// claude-opus-5-5 and claude-sonnet-5-5 (128K output). A larger value is
+// rejected with a 400 at request time; zero would otherwise be replaced by
+// the client's 4096 default, which thinking alone can use up.
+const maxOutputTokens = 128000
 
 type Speech struct {
 	OpenAIAPIKey string `env:"OPENAI_API_KEY,required"`
