@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genai"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -19,8 +18,9 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // TestGeminiClient_GenerateImage_Request checks the Vertex AI request the SDK
-// builds from GenerateImage: model path, IMAGE modality, 4:3 aspect ratio and
-// PNG output, and that the inline image part is returned.
+// builds from GenerateImage: model path, IMAGE modality and 4:3 aspect ratio
+// with no output format option, and that the inline image part and its MIME
+// type are returned.
 func TestGeminiClient_GenerateImage_Request(t *testing.T) {
 	png := []byte("\x89PNG fake")
 	var gotPath string
@@ -45,15 +45,7 @@ func TestGeminiClient_GenerateImage_Request(t *testing.T) {
 		}, nil
 	})
 
-	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		Project:    "test-project",
-		Location:   "global",
-		Backend:    genai.BackendVertexAI,
-		HTTPClient: &http.Client{Transport: transport},
-	})
-	require.NoError(t, err)
-
-	g := &GeminiClient{client: client, model: "gemini-3.1-flash-image"}
+	g := NewTestGeminiClient("gemini-3.1-flash-image", &http.Client{Transport: transport})
 	data, mimeType, err := g.GenerateImage(context.Background(), "a load balancer")
 	require.NoError(t, err)
 	require.Equal(t, png, data)
@@ -67,5 +59,5 @@ func TestGeminiClient_GenerateImage_Request(t *testing.T) {
 	img, ok := gen["imageConfig"].(map[string]any)
 	require.True(t, ok, "imageConfig missing: %v", gen)
 	require.Equal(t, "4:3", img["aspectRatio"])
-	require.Equal(t, map[string]any{"mimeType": "image/png"}, img["imageOutputOptions"])
+	require.NotContains(t, img, "imageOutputOptions", "output format is not pinned")
 }
