@@ -59,10 +59,10 @@ func TestBuildPrompt_EvalSummaryIncludesScores(t *testing.T) {
 	eval := makeEval()
 	summary := buildEvaluationSummary(eval)
 
-	assert.Contains(t, summary, "Requirements: 3/4")
-	assert.Contains(t, summary, "Architecture: 2/4")
-	assert.Contains(t, summary, "Scalability: 1/4")
-	assert.Contains(t, summary, "Overall: 2/4")
+	assert.Contains(t, summary, "Requirements: 3/5")
+	assert.Contains(t, summary, "Architecture: 2/5")
+	assert.Contains(t, summary, "Scalability: 1/5")
+	assert.Contains(t, summary, "Overall: 2/5")
 	assert.Contains(t, summary, "Clear requirements gathering")
 	assert.Contains(t, summary, "Cache invalidation not addressed")
 }
