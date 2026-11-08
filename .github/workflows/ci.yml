@@ -60,7 +60,7 @@ jobs:
 
       - name: Install tools
         run: |
-          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 
       - name: Sqlc diff
         run: sqlc diff
