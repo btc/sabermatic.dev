@@ -58,7 +58,8 @@ func TestBuildPrompt_HistorySummaryIncludesScores(t *testing.T) {
 	require.Len(t, userMsgs, 1)
 
 	// Extract text content from the user message.
-	content := userMsgs[0].Content
+	require.NotNil(t, userMsgs[0].OfUser)
+	content := userMsgs[0].OfUser.Content
 	require.NotEmpty(t, content)
 
 	// The message content is a union type — convert back to verify it contains our data.

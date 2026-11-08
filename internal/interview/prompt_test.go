@@ -115,9 +115,9 @@ func TestPromptBuilder_TranscriptRoleMapping(t *testing.T) {
 		Build()
 	require.Len(t, msgs, 3)
 	// interviewer → assistant, candidate → user
-	assert.Equal(t, "assistant", string(msgs[0].Role))
-	assert.Equal(t, "user", string(msgs[1].Role))
-	assert.Equal(t, "assistant", string(msgs[2].Role))
+	assert.Equal(t, "assistant", role(t, msgs[0]))
+	assert.Equal(t, "user", role(t, msgs[1]))
+	assert.Equal(t, "assistant", role(t, msgs[2]))
 }
 
 func TestPromptBuilder_EmptyTranscriptSeedsUserMessage(t *testing.T) {
@@ -130,7 +130,7 @@ func TestPromptBuilder_EmptyTranscriptSeedsUserMessage(t *testing.T) {
 		Build()
 
 	require.NotEmpty(t, msgs, "opening turn must have at least one message")
-	assert.Equal(t, "user", string(msgs[0].Role), "first message must be user role")
+	assert.Equal(t, "user", role(t, msgs[0]), "first message must be user role")
 }
 
 func TestPromptBuilder_NonEmptyTranscriptNoSeed(t *testing.T) {
@@ -163,4 +163,13 @@ func TestPromptBuilder_SystemInstructionsContent(t *testing.T) {
 	assert.Contains(t, system, "neutral")
 	assert.Contains(t, system, "2-4 sentences")
 	assert.Contains(t, system, "coverage")
+}
+
+// role returns the role of an anthropic.MessageParam. In SDK v2 MessageParam is
+// a union of per-role variants, so the role is read through GetRole.
+func role(t *testing.T, m interface{ GetRole() *string }) string {
+	t.Helper()
+	r := m.GetRole()
+	require.NotNil(t, r, "message has no role variant set")
+	return *r
 }
