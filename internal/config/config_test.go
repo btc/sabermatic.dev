@@ -20,13 +20,22 @@ func TestLoadConfig_Defaults(t *testing.T) {
 
 	require.Equal(t, "postgres://localhost:5432/drill", cfg.Database.URL)
 	require.Equal(t, "sk-ant-test", cfg.LLM.APIKey)
-	require.Equal(t, "claude-sonnet-4-20250514", cfg.LLM.InterviewerModel)
-	require.Equal(t, "claude-opus-4-20250514", cfg.LLM.EvaluatorModel)
-	require.Equal(t, int64(4096), cfg.LLM.EvaluatorMaxTokens)
-	require.Equal(t, "claude-opus-4-20250514", cfg.LLM.EducatorModel)
-	require.Equal(t, int64(8192), cfg.LLM.EducatorMaxTokens)
-	require.Equal(t, "claude-sonnet-4-20250514", cfg.LLM.CoachModel)
-	require.Equal(t, int64(4096), cfg.LLM.CoachMaxTokens)
+	require.True(t, cfg.LLM.RefusalFallbacks)
+	require.Equal(t, "claude-sonnet-5-5", cfg.LLM.InterviewerModel)
+	require.Equal(t, int64(8192), cfg.LLM.InterviewerMaxTokens)
+	require.Equal(t, "low", cfg.LLM.InterviewerEffort)
+	require.Equal(t, "claude-opus-5-5", cfg.LLM.EvaluatorModel)
+	require.Equal(t, int64(32000), cfg.LLM.EvaluatorMaxTokens)
+	require.Equal(t, "high", cfg.LLM.EvaluatorEffort)
+	require.Equal(t, "claude-opus-5-5", cfg.LLM.EducatorModel)
+	require.Equal(t, int64(32000), cfg.LLM.EducatorMaxTokens)
+	require.Equal(t, "high", cfg.LLM.EducatorEffort)
+	require.Equal(t, "claude-sonnet-5-5", cfg.LLM.CoachModel)
+	require.Equal(t, int64(16000), cfg.LLM.CoachMaxTokens)
+	require.Equal(t, "medium", cfg.LLM.CoachEffort)
+	require.Equal(t, "claude-sonnet-5-5", cfg.LLM.ImagePromptModel)
+	require.Equal(t, int64(4096), cfg.LLM.ImagePromptMaxTokens)
+	require.Equal(t, "low", cfg.LLM.ImagePromptEffort)
 	require.Equal(t, 8080, cfg.Server.Port)
 	require.Equal(t, 720*time.Hour, cfg.Auth.SessionTTL)
 	require.Equal(t, 12, cfg.Auth.BcryptCost)
@@ -49,13 +58,30 @@ func TestLoadConfig_Override(t *testing.T) {
 	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 	t.Setenv("SERVER_PORT", "9090")
-	t.Setenv("INTERVIEWER_MODEL", "claude-opus-4-6")
+	t.Setenv("INTERVIEWER_MODEL", "claude-opus-5-5")
+	t.Setenv("INTERVIEWER_EFFORT", "medium")
+	t.Setenv("LLM_REFUSAL_FALLBACKS", "false")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
 
 	require.Equal(t, 9090, cfg.Server.Port)
-	require.Equal(t, "claude-opus-4-6", cfg.LLM.InterviewerModel)
+	require.Equal(t, "claude-opus-5-5", cfg.LLM.InterviewerModel)
+	require.Equal(t, "medium", cfg.LLM.InterviewerEffort)
+	require.False(t, cfg.LLM.RefusalFallbacks)
+}
+
+func TestValidate_InvalidEffort(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/drill")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("AUTH_TOKEN_SECRET", "test-secret-at-least-32-bytes-long")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+	t.Setenv("COACH_EFFORT", "extreme")
+
+	_, err := config.Load()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "COACH_EFFORT")
 }
 
 func TestSecureCookies(t *testing.T) {
