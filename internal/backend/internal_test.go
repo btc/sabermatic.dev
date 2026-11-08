@@ -175,14 +175,21 @@ func TestTruncateRunes(t *testing.T) {
 
 func TestTurnErrorForLLM(t *testing.T) {
 	refusal := fmt.Errorf("stream: %w", &ai.RefusalError{Model: "claude-sonnet-5-5", Category: "cyber"})
-	assert.Equal(t, "llm_refusal", turnErrorForLLM(refusal).Code)
-	assert.NotContains(t, turnErrorForLLM(refusal).Message, "cyber", "category is for logs, not the candidate")
+	for _, opening := range []bool{false, true} {
+		got := turnErrorForLLM(refusal, opening)
+		assert.Equal(t, "llm_refusal", got.Code)
+		assert.NotContains(t, got.Message, "cyber", "category is for logs, not the candidate")
+	}
+	assert.Contains(t, turnErrorForLLM(refusal, false).Message, "rephras")
+	assert.NotContains(t, turnErrorForLLM(refusal, true).Message, "rephras", "the opening turn has no answer to rephrase")
 
 	truncated := fmt.Errorf("%w: claude-sonnet-5-5 used all 8192 tokens", ai.ErrMaxTokens)
-	assert.Equal(t, "llm_truncated", turnErrorForLLM(truncated).Code)
+	assert.Equal(t, "llm_truncated", turnErrorForLLM(truncated, false).Code)
+	assert.Contains(t, turnErrorForLLM(truncated, false).Message, "submit it again")
+	assert.Equal(t, "llm_truncated", turnErrorForLLM(truncated, true).Code)
 
 	other := errors.New("stream: connection reset")
-	got := turnErrorForLLM(other)
+	got := turnErrorForLLM(other, false)
 	assert.Equal(t, "llm_stream_error", got.Code)
 	assert.Equal(t, "stream: connection reset", got.Message)
 }

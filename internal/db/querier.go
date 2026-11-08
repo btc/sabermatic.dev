@@ -48,6 +48,7 @@ type Querier interface {
 	// Idempotent: re-calling on a deleted user is a no-op on the user row.
 	DeleteAccount(ctx context.Context, id uuid.UUID) error
 	DeleteAuthSession(ctx context.Context, id uuid.UUID) error
+	DeleteMessage(ctx context.Context, arg DeleteMessageParams) error
 	DeleteUserAuthSessions(ctx context.Context, userID uuid.UUID) error
 	// Creates the one-time free trial grant + ledger entry atomically. Called
 	// only at account creation (Signup, OAuthLogin). If the grant already exists
