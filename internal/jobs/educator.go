@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -120,24 +119,37 @@ func (w *GenerateEducatorContentWorker) Work(ctx context.Context, job *river.Job
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 7. Call LLM.
-	toolSchema := educator.ToolSchema()
-	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, ai.CallToolParams{
-		Model:      w.Cfg.EducatorModel,
-		System:     system,
-		Messages:   promptMsgs,
-		MaxTokens:  w.Cfg.EducatorMaxTokens,
-		UserID:     session.UserID,
-		Role:       "educator",
-		SessionID:  sessionID,
-		Tools:      []anthropic.ToolUnionParam{{OfTool: &toolSchema}},
-		ToolChoice: anthropic.ToolChoiceParamOfTool("submit_education"),
+	output, err := w.LLM.CallJSONAndLog(ctx, tx, ai.JSONParams{
+		Model:     w.Cfg.EducatorModel,
+		System:    system,
+		Messages:  promptMsgs,
+		MaxTokens: w.Cfg.EducatorMaxTokens,
+		Effort:    w.Cfg.EducatorEffort,
+		Schema:    educator.OutputSchema(),
+		UserID:    session.UserID,
+		Role:      "educator",
+		SessionID: sessionID,
 	})
 	if err != nil {
-		return fmt.Errorf("call educator LLM: %w", err)
+		err = fmt.Errorf("call educator LLM: %w", err)
+		if ai.IsRefusal(err) {
+			// A refusal will not change on retry. River skips the error
+			// handler for cancelled jobs, so mark the analysis failed here
+			// (outside tx, which rolls back).
+			if statusErr := q.UpdateEducatorAnalysisStatus(ctx, db.UpdateEducatorAnalysisStatusParams{
+				ID:     analysisID,
+				Status: "failed",
+			}); statusErr != nil {
+				return fmt.Errorf("set educator failed after refusal: %w (refusal: %v)", statusErr, err)
+			}
+			slog.Warn("educator refused, marked failed", "session_id", sessionID, "error", err)
+			return river.JobCancel(err)
+		}
+		return err
 	}
 
 	// 8. Parse.
-	result, err := educator.Parse(toolInput)
+	result, err := educator.Parse(output)
 	if err != nil {
 		return fmt.Errorf("parse educator: %w", err)
 	}

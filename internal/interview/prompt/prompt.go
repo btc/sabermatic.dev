@@ -16,7 +16,7 @@ import (
 // interviewer LLM. Methods chain via the builder pattern.
 type Builder struct {
 	system strings.Builder
-	msgs   []anthropic.MessageParam
+	msgs   []anthropic.BetaMessageParam
 }
 
 // NewInterviewerPrompt returns a fresh Builder.
@@ -166,9 +166,11 @@ func (b *Builder) WithTranscript(msgs []db.Message) *Builder {
 	for _, m := range msgs {
 		switch m.Role {
 		case "interviewer":
-			b.msgs = append(b.msgs, anthropic.NewAssistantMessage(anthropic.NewTextBlock(m.Content)))
+			b.msgs = append(b.msgs, anthropic.BetaMessageParam{OfAssistant: &anthropic.BetaAssistantMessageParam{
+				Content: []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(m.Content)},
+			}})
 		case "candidate":
-			b.msgs = append(b.msgs, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
+			b.msgs = append(b.msgs, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(m.Content)))
 		}
 	}
 	return b
@@ -177,10 +179,10 @@ func (b *Builder) WithTranscript(msgs []db.Message) *Builder {
 // Build returns the assembled system prompt string and message history.
 // If the transcript is empty (opening turn), a seed user message is injected
 // because the Anthropic API requires messages to begin with a user role.
-func (b *Builder) Build() (string, []anthropic.MessageParam) {
+func (b *Builder) Build() (string, []anthropic.BetaMessageParam) {
 	if len(b.msgs) == 0 {
-		b.msgs = append(b.msgs, anthropic.NewUserMessage(
-			anthropic.NewTextBlock("(Present the question in 1-2 sentences only. No elaboration, no hints, no suggested approach.)"),
+		b.msgs = append(b.msgs, anthropic.NewBetaUserMessage(
+			anthropic.NewBetaTextBlock("(Present the question in 1-2 sentences only. No elaboration, no hints, no suggested approach.)"),
 		))
 	}
 	return b.system.String(), b.msgs

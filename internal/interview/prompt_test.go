@@ -165,7 +165,7 @@ func TestPromptBuilder_SystemInstructionsContent(t *testing.T) {
 	assert.Contains(t, system, "coverage")
 }
 
-// role returns the role of an anthropic.MessageParam. In SDK v2 MessageParam is
+// role returns the role of an anthropic.BetaMessageParam. BetaMessageParam is
 // a union of per-role variants, so the role is read through GetRole.
 func role(t *testing.T, m interface{ GetRole() *string }) string {
 	t.Helper()

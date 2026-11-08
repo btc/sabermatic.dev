@@ -76,14 +76,14 @@ For each annotation you create:
 
 ## Output
 
-You MUST use the submit_evaluation tool to submit your structured evaluation. Do not produce free-text output — use the tool.`
+Respond with a single JSON object that matches the provided output schema. Each score is an integer from 1 to 5.`
 
 // BuildPrompt returns the evaluator system prompt and a single user message
 // containing the formatted interview transcript.
-func BuildPrompt(question db.Question, messages []db.Message) (string, []anthropic.MessageParam) {
+func BuildPrompt(question db.Question, messages []db.Message) (string, []anthropic.BetaMessageParam) {
 	transcript := buildTranscript(question, messages)
-	userMsg := anthropic.NewUserMessage(anthropic.NewTextBlock(transcript))
-	return systemPrompt, []anthropic.MessageParam{userMsg}
+	userMsg := anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(transcript))
+	return systemPrompt, []anthropic.BetaMessageParam{userMsg}
 }
 
 // buildTranscript formats the question and messages into a structured markdown

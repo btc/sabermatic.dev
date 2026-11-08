@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/google/uuid"
 )
 
@@ -29,108 +28,84 @@ type AnnotationResult struct {
 	Content    string
 }
 
-// ToolSchema returns the anthropic.ToolParam for the submit_evaluation tool
-// with a forced tool_choice schema.
-func ToolSchema() anthropic.ToolParam {
-	return anthropic.ToolParam{
-		Name:        "submit_evaluation",
-		Description: anthropic.String("Submit a structured evaluation of the candidate's system design interview performance."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"scores": map[string]any{
-					"type":        "object",
-					"description": "Scores for each evaluation dimension.",
+// OutputSchema returns the JSON schema for the evaluator's structured output
+// (output_config.format). It stays inside the structured-outputs subset:
+// every object sets additionalProperties:false and lists all properties as
+// required, and there are no minimum/maximum constraints. The 1-5 score range
+// is enforced by Validate instead.
+func OutputSchema() map[string]any {
+	score := func(description string) map[string]any {
+		return map[string]any{"type": "integer", "description": description}
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"scores": map[string]any{
+				"type":                 "object",
+				"description":          "Scores for each evaluation dimension, each an integer from 1 to 5.",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"requirements":  score("Score for requirements gathering (1-5)."),
+					"architecture":  score("Score for system architecture (1-5)."),
+					"deep_dive":     score("Score for component deep dive (1-5)."),
+					"scalability":   score("Score for scalability considerations (1-5)."),
+					"communication": score("Score for communication clarity (1-5)."),
+					"overall":       score("Overall score (1-5)."),
+				},
+				"required": []string{"requirements", "architecture", "deep_dive", "scalability", "communication", "overall"},
+			},
+			"strengths": map[string]any{
+				"type":        "array",
+				"description": "List of candidate strengths observed during the interview.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"gaps": map[string]any{
+				"type":        "array",
+				"description": "List of gaps or weaknesses identified during the interview.",
+				"items":       map[string]any{"type": "string"},
+			},
+			"advice": map[string]any{
+				"type":        "string",
+				"description": "Actionable advice for the candidate to improve.",
+			},
+			"annotations": map[string]any{
+				"type":        "array",
+				"description": "Per-message annotations referencing specific moments in the interview.",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
 					"properties": map[string]any{
-						"requirements": map[string]any{
+						"message_seq": map[string]any{
 							"type":        "integer",
-							"description": "Score for requirements gathering (1-5).",
-							"minimum":     1,
-							"maximum":     5,
+							"description": "The sequence number of the message being annotated.",
 						},
-						"architecture": map[string]any{
-							"type":        "integer",
-							"description": "Score for system architecture (1-5).",
-							"minimum":     1,
-							"maximum":     5,
+						"type": map[string]any{
+							"type":        "string",
+							"enum":        []string{"strength", "gap", "missed_opportunity", "note"},
+							"description": "The category of this annotation.",
 						},
-						"deep_dive": map[string]any{
-							"type":        "integer",
-							"description": "Score for component deep dive (1-5).",
-							"minimum":     1,
-							"maximum":     5,
-						},
-						"scalability": map[string]any{
-							"type":        "integer",
-							"description": "Score for scalability considerations (1-5).",
-							"minimum":     1,
-							"maximum":     5,
-						},
-						"communication": map[string]any{
-							"type":        "integer",
-							"description": "Score for communication clarity (1-5).",
-							"minimum":     1,
-							"maximum":     5,
-						},
-						"overall": map[string]any{
-							"type":        "integer",
-							"description": "Overall score (1-5).",
-							"minimum":     1,
-							"maximum":     5,
+						"content": map[string]any{
+							"type":        "string",
+							"description": "The annotation text.",
 						},
 					},
-					"required": []string{"requirements", "architecture", "deep_dive", "scalability", "communication", "overall"},
-				},
-				"strengths": map[string]any{
-					"type":        "array",
-					"description": "List of candidate strengths observed during the interview.",
-					"items":       map[string]any{"type": "string"},
-				},
-				"gaps": map[string]any{
-					"type":        "array",
-					"description": "List of gaps or weaknesses identified during the interview.",
-					"items":       map[string]any{"type": "string"},
-				},
-				"advice": map[string]any{
-					"type":        "string",
-					"description": "Actionable advice for the candidate to improve.",
-				},
-				"annotations": map[string]any{
-					"type":        "array",
-					"description": "Per-message annotations referencing specific moments in the interview.",
-					"items": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"message_seq": map[string]any{
-								"type":        "integer",
-								"description": "The sequence number of the message being annotated.",
-							},
-							"type": map[string]any{
-								"type":        "string",
-								"enum":        []string{"strength", "gap", "missed_opportunity", "note"},
-								"description": "The category of this annotation.",
-							},
-							"content": map[string]any{
-								"type":        "string",
-								"description": "The annotation text.",
-							},
-						},
-						"required": []string{"message_seq", "type", "content"},
-					},
+					"required": []string{"message_seq", "type", "content"},
 				},
 			},
-			Required: []string{"scores", "strengths", "gaps", "advice", "annotations"},
 		},
+		"required": []string{"scores", "strengths", "gaps", "advice", "annotations"},
 	}
 }
 
-// rawToolInput is an intermediate struct for JSON unmarshaling.
+// rawOutput is an intermediate struct for JSON unmarshaling.
 // JSON numbers decode as float64; we convert to int32 after.
-type rawToolInput struct {
-	Scores      *rawScores       `json:"scores"`
-	Strengths   []string         `json:"strengths"`
-	Gaps        []string         `json:"gaps"`
-	Advice      string           `json:"advice"`
-	Annotations []rawAnnotation  `json:"annotations"`
+type rawOutput struct {
+	Scores      *rawScores      `json:"scores"`
+	Strengths   []string        `json:"strengths"`
+	Gaps        []string        `json:"gaps"`
+	Advice      string          `json:"advice"`
+	Annotations []rawAnnotation `json:"annotations"`
 }
 
 type rawScores struct {
@@ -148,12 +123,12 @@ type rawAnnotation struct {
 	Content    string  `json:"content"`
 }
 
-// Parse unmarshals tool input JSON into an EvaluationResult.
+// Parse unmarshals the structured-output JSON into an EvaluationResult.
 // Returns an error if the scores field is missing.
 func Parse(raw json.RawMessage) (*EvaluationResult, error) {
-	var input rawToolInput
+	var input rawOutput
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return nil, fmt.Errorf("evaluation: unmarshal tool input: %w", err)
+		return nil, fmt.Errorf("evaluation: unmarshal output: %w", err)
 	}
 
 	if input.Scores == nil {

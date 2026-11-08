@@ -3,8 +3,6 @@ package educator
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 // EducatorResult holds the parsed educator content ready for persistence.
@@ -13,37 +11,36 @@ type EducatorResult struct {
 	GapDeepDives string
 }
 
-// ToolSchema returns the anthropic.ToolParam for the submit_education tool.
-func ToolSchema() anthropic.ToolParam {
-	return anthropic.ToolParam{
-		Name:        "submit_education",
-		Description: anthropic.String("Submit the educational analysis with model answer and gap deep-dives."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"model_answer": map[string]any{
-					"type":        "string",
-					"description": "Markdown: what a strong answer to this specific problem looks like.",
-				},
-				"gap_deep_dives": map[string]any{
-					"type":        "string",
-					"description": "Markdown: detailed technical explanation for each gap identified by the evaluator.",
-				},
+// OutputSchema returns the JSON schema for the educator's structured output
+// (output_config.format).
+func OutputSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"model_answer": map[string]any{
+				"type":        "string",
+				"description": "Markdown: what a strong answer to this specific problem looks like.",
 			},
-			Required: []string{"model_answer", "gap_deep_dives"},
+			"gap_deep_dives": map[string]any{
+				"type":        "string",
+				"description": "Markdown: detailed technical explanation for each gap identified by the evaluator.",
+			},
 		},
+		"required": []string{"model_answer", "gap_deep_dives"},
 	}
 }
 
-type rawToolInput struct {
+type rawOutput struct {
 	ModelAnswer  string `json:"model_answer"`
 	GapDeepDives string `json:"gap_deep_dives"`
 }
 
-// Parse extracts an EducatorResult from the raw JSON tool input.
+// Parse extracts an EducatorResult from the structured-output JSON.
 func Parse(raw json.RawMessage) (*EducatorResult, error) {
-	var input rawToolInput
+	var input rawOutput
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return nil, fmt.Errorf("educator: unmarshal tool input: %w", err)
+		return nil, fmt.Errorf("educator: unmarshal output: %w", err)
 	}
 	if input.ModelAnswer == "" {
 		return nil, fmt.Errorf("educator: model_answer is empty")

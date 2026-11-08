@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/ai"
 )
 
 func validToolInput() map[string]any {
@@ -174,4 +176,25 @@ func TestValidate_InvalidAnnotationType(t *testing.T) {
 	err := Validate(result, seqMap)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid type")
+}
+
+func TestOutputSchema_StructuredOutputsCompatible(t *testing.T) {
+	schema := OutputSchema()
+	require.NoError(t, ai.CheckOutputSchema(schema))
+
+	// The 1-5 range is no longer in the schema, so Validate must enforce it.
+	scores := schema["properties"].(map[string]any)["scores"].(map[string]any)
+	req := scores["properties"].(map[string]any)["requirements"].(map[string]any)
+	assert.NotContains(t, req, "minimum")
+	assert.NotContains(t, req, "maximum")
+}
+
+func TestValidate_RejectsScoreOutsideSchemaRange(t *testing.T) {
+	result := &EvaluationResult{
+		ScoreRequirements: 6, ScoreArchitecture: 3, ScoreDeepDive: 3,
+		ScoreScalability: 3, ScoreCommunication: 3, ScoreOverall: 0,
+	}
+	err := Validate(result, map[int32]uuid.UUID{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "out of range")
 }

@@ -24,7 +24,8 @@ func TestBuildPrompt_SystemContainsRubric(t *testing.T) {
 	assert.Contains(t, system, "Scalability & Trade-offs")
 	assert.Contains(t, system, "Communication")
 	assert.Contains(t, system, "Calibration Guidance")
-	assert.Contains(t, system, "submit_evaluation")
+	assert.Contains(t, system, "output schema")
+	assert.NotContains(t, system, "submit_evaluation")
 
 	require.Len(t, userMsgs, 1)
 }

@@ -119,11 +119,18 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 	sonnetResult, err := w.LLM.Call(ctx, ai.CallParams{
 		Model:     w.Cfg.LLM.ImagePromptModel,
 		System:    meta.System,
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(meta.User))},
+		Messages:  []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(meta.User))},
 		MaxTokens: w.Cfg.LLM.ImagePromptMaxTokens,
+		Effort:    w.Cfg.LLM.ImagePromptEffort,
 	})
 	if err != nil {
-		return fmt.Errorf("call image prompt LLM: %w", err)
+		err = fmt.Errorf("call image prompt LLM: %w", err)
+		if ai.IsRefusal(err) {
+			// A refusal will not change on retry.
+			slog.Warn("image prompt LLM refused, cancelling job", "question_id", questionID, "error", err)
+			return river.JobCancel(err)
+		}
+		return err
 	}
 
 	// 4. Assemble full image prompt.
@@ -180,12 +187,12 @@ func (w *GenerateQuestionImageWorker) Work(ctx context.Context, job *river.Job[G
 		return fmt.Errorf("marshal sonnet response: %w", err)
 	}
 
-	sonnetCost := ai.EstimateCost(w.Cfg.LLM.ImagePromptModel, sonnetResult.InputTokens, sonnetResult.OutputTokens)
+	sonnetCost := ai.EstimateCost(sonnetResult.Model, sonnetResult.InputTokens, sonnetResult.OutputTokens)
 	sonnetCallID, err := txq.InsertLLMCall(ctx, db.InsertLLMCallParams{
 		SessionID:     pgtype.UUID{},
 		UserID:        question.UserID,
 		Role:          "image_prompt_generator",
-		Model:         w.Cfg.LLM.ImagePromptModel,
+		Model:         sonnetResult.Model,
 		InputTokens:   int32(sonnetResult.InputTokens),
 		OutputTokens:  int32(sonnetResult.OutputTokens),
 		EstimatedCost: ai.NumericFromFloat(sonnetCost),

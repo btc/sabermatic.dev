@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,9 +12,11 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/ai/aitest"
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/db"
 	"github.com/btc/drill/internal/jobs"
@@ -127,9 +127,10 @@ func seedSessionWithMessages(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	}
 }
 
-// newFakeEvalServer returns an httptest.Server that mimics the Anthropic messages
-// endpoint, returning a valid tool_use response with evaluation scores and annotations.
-func newFakeEvalServer(t *testing.T) *httptest.Server {
+// newFakeEvalServer returns a fake Anthropic server that streams a valid
+// structured-output evaluation (preceded by a thinking block, as
+// claude-opus-5-5 sends).
+func newFakeEvalServer(t *testing.T) *aitest.Server {
 	t.Helper()
 
 	evalInput := map[string]any{
@@ -141,26 +142,23 @@ func newFakeEvalServer(t *testing.T) *httptest.Server {
 			"communication": 4,
 			"overall":       3,
 		},
-		"strengths":   []string{"Good requirements gathering"},
-		"gaps":        []string{"Missing cache strategy"},
-		"advice":      "Focus on deep dive. Ask: what if this component failed?",
+		"strengths": []string{"Good requirements gathering"},
+		"gaps":      []string{"Missing cache strategy"},
+		"advice":    "Focus on deep dive. Ask: what if this component failed?",
 		"annotations": []any{
 			map[string]any{"message_seq": 2, "type": "strength", "content": "Structured approach."},
 			map[string]any{"message_seq": 4, "type": "gap", "content": "Hand-waved caching."},
 		},
 	}
-	inputJSON, err := json.Marshal(evalInput)
+	outputJSON, err := json.Marshal(evalInput)
 	require.NoError(t, err)
 
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{
-			"id": "msg_eval", "type": "message", "role": "assistant",
-			"content": [{"type": "tool_use", "id": "toolu_eval", "name": "submit_evaluation", "input": %s}],
-			"model": "claude-opus-4-20250514", "stop_reason": "tool_use",
-			"usage": {"input_tokens": 500, "output_tokens": 200}
-		}`, inputJSON)
-	}))
+	return aitest.NewServer(t, aitest.Response{
+		Model:        "claude-opus-5-5",
+		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(string(outputJSON))},
+		InputTokens:  500,
+		OutputTokens: 200,
+	})
 }
 
 // newEvalWorker constructs an EvaluateSessionWorker with a real River client for testing.
@@ -170,8 +168,9 @@ func newEvalWorker(t *testing.T, pool *pgxpool.Pool, srvURL string) *jobs.Evalua
 		Pool: pool,
 		LLM:  ai.NewTestClient(srvURL, pool),
 		Cfg: &config.LLM{
-			EvaluatorModel:     "claude-opus-4-20250514",
-			EvaluatorMaxTokens: 4096,
+			EvaluatorModel:     "claude-opus-5-5",
+			EvaluatorMaxTokens: 32000,
+			EvaluatorEffort:    "high",
 		},
 	}
 
@@ -250,6 +249,41 @@ func TestEvaluateSessionWorker_HappyPath(t *testing.T) {
 	).Scan(&callCount)
 	require.NoError(t, err)
 	require.Equal(t, 1, callCount, "expected exactly one evaluator LLM call")
+
+	// Assert: the request used structured outputs, not forced tool use.
+	reqs := srv.Requests()
+	require.Len(t, reqs, 1)
+	require.NotContains(t, reqs[0], "tool_choice")
+	oc := reqs[0]["output_config"].(map[string]any)
+	require.Equal(t, "high", oc["effort"])
+	require.Contains(t, oc, "format")
+}
+
+func TestEvaluateSessionWorker_RefusalCancelsAndMarksFailed(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	pool := newTestPool(t)
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:           "claude-opus-5-5",
+		StopReason:      "refusal",
+		RefusalCategory: "bio",
+	})
+
+	seed := seedSessionWithMessages(t, ctx, pool, 4)
+	worker := newEvalWorker(t, pool, srv.URL)
+
+	err := worker.Work(ctx, &river.Job[jobs.EvaluateSessionArgs]{
+		Args: jobs.EvaluateSessionArgs{SessionID: seed.SessionID},
+	})
+	require.Error(t, err)
+	var cancelErr *rivertype.JobCancelError
+	require.ErrorAs(t, err, &cancelErr, "refusal must cancel the job, not retry it")
+	require.True(t, ai.IsRefusal(err))
+
+	session, err := db.New(pool).GetSession(ctx, seed.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, "evaluation_failed", session.Status)
 }
 
 func TestEvaluateSessionWorker_Idempotent(t *testing.T) {

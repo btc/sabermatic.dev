@@ -46,11 +46,11 @@ Be the senior engineer who sits down with the candidate after the interview and 
 Format everything in Markdown. Use headers, code blocks, and tables where they aid clarity.`
 
 // BuildPrompt constructs the system prompt and user messages for the educator LLM call.
-func BuildPrompt(question db.Question, messages []db.Message, eval db.Evaluation) (string, []anthropic.MessageParam) {
+func BuildPrompt(question db.Question, messages []db.Message, eval db.Evaluation) (string, []anthropic.BetaMessageParam) {
 	system := buildSystemPrompt(question)
 	userContent := buildTranscript(question, messages) + "\n\n" + buildEvaluationSummary(eval)
-	return system, []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock(userContent)),
+	return system, []anthropic.BetaMessageParam{
+		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(userContent)),
 	}
 }
 
