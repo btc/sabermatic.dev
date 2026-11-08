@@ -53,16 +53,16 @@ Help the candidate develop self-awareness about their interview approach:
 
 ## Output
 
-You MUST use the submit_analysis tool to submit your structured analysis. Do not produce free-text output — use the tool.
+Respond with a single JSON object that matches the provided output schema.
 
 If you identify a specific gap that would benefit from a custom practice question, include it in the generated_question field. Otherwise, set generated_question to null.`
 
 // BuildPrompt returns the coach system prompt and a single user message
 // containing the candidate's full interview history summary.
-func BuildPrompt(sessions []db.InterviewSession, evaluations []db.Evaluation, questions []db.Question) (string, []anthropic.MessageParam) {
+func BuildPrompt(sessions []db.InterviewSession, evaluations []db.Evaluation, questions []db.Question) (string, []anthropic.BetaMessageParam) {
 	summary := buildHistorySummary(sessions, evaluations, questions)
-	userMsg := anthropic.NewUserMessage(anthropic.NewTextBlock(summary))
-	return systemPrompt, []anthropic.MessageParam{userMsg}
+	userMsg := anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(summary))
+	return systemPrompt, []anthropic.BetaMessageParam{userMsg}
 }
 
 // buildHistorySummary formats session history, evaluations, and topic coverage

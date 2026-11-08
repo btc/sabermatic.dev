@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -123,24 +122,37 @@ func (w *EvaluateSessionWorker) Work(ctx context.Context, job *river.Job[Evaluat
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 8. Call LLM.
-	toolSchema := evaluation.ToolSchema()
-	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, ai.CallToolParams{
-		Model:      w.Cfg.EvaluatorModel,
-		System:     system,
-		Messages:   userMsgs,
-		MaxTokens:  w.Cfg.EvaluatorMaxTokens,
-		UserID:     row.UserID,
-		Role:       "evaluator",
-		SessionID:  sessionID,
-		Tools:      []anthropic.ToolUnionParam{{OfTool: &toolSchema}},
-		ToolChoice: anthropic.ToolChoiceParamOfTool("submit_evaluation"),
+	output, err := w.LLM.CallJSONAndLog(ctx, tx, ai.JSONParams{
+		Model:     w.Cfg.EvaluatorModel,
+		System:    system,
+		Messages:  userMsgs,
+		MaxTokens: w.Cfg.EvaluatorMaxTokens,
+		Effort:    w.Cfg.EvaluatorEffort,
+		Schema:    evaluation.OutputSchema(),
+		UserID:    row.UserID,
+		Role:      "evaluator",
+		SessionID: sessionID,
 	})
 	if err != nil {
-		return fmt.Errorf("call evaluator LLM: %w", err)
+		err = fmt.Errorf("call evaluator LLM: %w", err)
+		if ai.IsRefusal(err) {
+			// A refusal will not change on retry. River skips the error
+			// handler for cancelled jobs, so mark the session failed here
+			// (outside tx, which rolls back).
+			if statusErr := q.UpdateSessionStatusOnly(ctx, db.UpdateSessionStatusOnlyParams{
+				ID:     sessionID,
+				Status: "evaluation_failed",
+			}); statusErr != nil {
+				return fmt.Errorf("set evaluation_failed after refusal: %w (refusal: %v)", statusErr, err)
+			}
+			slog.Warn("evaluator refused, marked evaluation_failed", "session_id", sessionID, "error", err)
+			return river.JobCancel(err)
+		}
+		return err
 	}
 
 	// 9. Parse.
-	result, err := evaluation.Parse(toolInput)
+	result, err := evaluation.Parse(output)
 	if err != nil {
 		return fmt.Errorf("parse evaluation: %w", err)
 	}

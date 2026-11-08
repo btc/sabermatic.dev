@@ -3,8 +3,6 @@ package coach
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/anthropics/anthropic-sdk-go/v2"
 )
 
 // CoachResult holds the parsed coaching analysis ready for persistence.
@@ -25,53 +23,58 @@ type GeneratedQuestion struct {
 	Tags       []string
 }
 
-// ToolSchema returns the anthropic.ToolParam for the submit_analysis tool.
-func ToolSchema() anthropic.ToolParam {
-	return anthropic.ToolParam{
-		Name:        "submit_analysis",
-		Description: anthropic.String("Submit the strategic coaching analysis based on the candidate's interview history."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"narrative": map[string]any{
-					"type":        "string",
-					"description": "Strategic coaching narrative including thinking patterns and metacognitive coaching.",
-				},
-				"weakest_dimension": map[string]any{
-					"type":        "string",
-					"description": "The evaluation dimension where the candidate scores lowest.",
-				},
-				"improving_dimensions": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Dimensions showing improvement over time.",
-				},
-				"topic_gaps": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "System design topics the candidate hasn't practiced yet.",
-				},
-				"summary": map[string]any{
-					"type":        "string",
-					"description": "One sentence, action-oriented coaching insight. Example: 'Focus on architecture fundamentals — your requirements gathering is improving but needs to drive structural decisions.'",
-				},
-				"generated_question": map[string]any{
-					"type":        []any{"object", "null"},
-					"description": "An optional custom question targeting the candidate's weaknesses.",
-					"properties": map[string]any{
-						"title":      map[string]any{"type": "string", "description": "Short title for the generated question."},
-						"prompt":     map[string]any{"type": "string", "description": "Full interview-style prompt for the question."},
-						"difficulty": map[string]any{"type": "string", "enum": []string{"medium", "hard"}, "description": "Difficulty level."},
-						"tags":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Topic tags."},
+// OutputSchema returns the JSON schema for the coach's structured output
+// (output_config.format). Structured outputs need additionalProperties:false
+// on every object; this schema also lists every property as required and
+// expresses the optional generated question as anyOf [object, null] rather
+// than a type array, so the output shape does not rely on behavior the
+// structured-outputs docs leave unstated.
+func OutputSchema() map[string]any {
+	stringList := func(description string) map[string]any {
+		return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": description}
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"narrative": map[string]any{
+				"type":        "string",
+				"description": "Strategic coaching narrative including thinking patterns and metacognitive coaching.",
+			},
+			"weakest_dimension": map[string]any{
+				"type":        "string",
+				"description": "The evaluation dimension where the candidate scores lowest.",
+			},
+			"improving_dimensions": stringList("Dimensions showing improvement over time."),
+			"topic_gaps":           stringList("System design topics the candidate hasn't practiced yet."),
+			"summary": map[string]any{
+				"type":        "string",
+				"description": "One sentence, action-oriented coaching insight. Example: 'Focus on architecture fundamentals — your requirements gathering is improving but needs to drive structural decisions.'",
+			},
+			"generated_question": map[string]any{
+				"description": "A custom question targeting the candidate's weaknesses, or null when none is warranted.",
+				"anyOf": []any{
+					map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"title":      map[string]any{"type": "string", "description": "Short title for the generated question."},
+							"prompt":     map[string]any{"type": "string", "description": "Full interview-style prompt for the question."},
+							"difficulty": map[string]any{"type": "string", "enum": []string{"medium", "hard"}, "description": "Difficulty level."},
+							"tags":       stringList("Topic tags."),
+						},
+						"required": []string{"title", "prompt", "difficulty", "tags"},
 					},
+					map[string]any{"type": "null"},
 				},
 			},
-			Required: []string{"narrative"},
 		},
+		"required": []string{"narrative", "weakest_dimension", "improving_dimensions", "topic_gaps", "summary", "generated_question"},
 	}
 }
 
-// rawToolInput is an intermediate struct for JSON unmarshaling.
-type rawToolInput struct {
+// rawOutput is an intermediate struct for JSON unmarshaling.
+type rawOutput struct {
 	Summary             string          `json:"summary"`
 	Narrative           string          `json:"narrative"`
 	WeakestDimension    string          `json:"weakest_dimension"`
@@ -87,12 +90,12 @@ type rawGenQuestion struct {
 	Tags       []string `json:"tags"`
 }
 
-// Parse unmarshals tool input JSON into a CoachResult.
+// Parse unmarshals the structured-output JSON into a CoachResult.
 // Returns an error if narrative is empty or generated_question has an invalid difficulty.
 func Parse(raw json.RawMessage) (*CoachResult, error) {
-	var input rawToolInput
+	var input rawOutput
 	if err := json.Unmarshal(raw, &input); err != nil {
-		return nil, fmt.Errorf("coach: unmarshal tool input: %w", err)
+		return nil, fmt.Errorf("coach: unmarshal output: %w", err)
 	}
 	if input.Narrative == "" {
 		return nil, fmt.Errorf("coach: narrative is empty")

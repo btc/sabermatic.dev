@@ -353,6 +353,8 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 		Model:     model,
 		System:    system,
 		Messages:  promptMsgs,
+		MaxTokens: b.cfg.LLM.InterviewerMaxTokens,
+		Effort:    b.cfg.LLM.InterviewerEffort,
 		UserID:    sp.userID,
 		Role:      "interviewer",
 		SessionID: sp.sessionID,
@@ -381,11 +383,19 @@ func (b *Backend) streamInterviewerResponse(ctx context.Context, sp streamParams
 		fanOut.OnToken(token)
 	}
 
-	// If the LLM stream errored, do NOT persist the partial message or send
-	// InterviewerDone. The client already received a TurnError via fan-out.
-	// Close synchronously so TTS resources are cleaned up before we return.
+	// If the LLM stream errored (including a refusal or a max_tokens stop),
+	// do NOT persist the partial message or send InterviewerDone. The client
+	// already received a TurnError via fan-out. Close synchronously so TTS
+	// resources are cleaned up before we return. The LLM call itself is still
+	// logged (via the pool, outside any transaction) so its cost is recorded,
+	// and closing releases the HTTP response body.
 	if streamErr != nil {
 		fanOut.Close()
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if closeErr := stream.Close(closeCtx); closeErr != nil {
+			slog.Warn("persist llm_call record after stream error", "error", closeErr, "session_id", sp.sessionID)
+		}
 		return nil
 	}
 

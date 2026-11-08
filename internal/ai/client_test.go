@@ -2,11 +2,9 @@ package ai
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"math/big"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
@@ -14,54 +12,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/ai/aitest"
 )
 
-// fakeSSEHandler returns an HTTP handler that streams Anthropic-format SSE events
-// with the given text tokens.
-func fakeSSEHandler(tokens []string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
+func userMsgs(text string) []anthropic.BetaMessageParam {
+	return []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(text))}
+}
 
-		// message_start with usage
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
+// textResponse is a fake streamed response carrying one text block.
+func textResponse(tokens ...string) aitest.Response {
+	return aitest.Response{
+		Model:        "claude-sonnet-5-5",
+		Blocks:       []aitest.Block{aitest.TextBlock(tokens...)},
+		InputTokens:  25,
+		OutputTokens: int64(len(tokens)),
+	}
+}
 
-		// content_block_start
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-
-		// content_block_delta for each token
-		for _, token := range tokens {
-			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
+// collect reads tokens until EOF or error.
+func collect(t *testing.T, stream *TokenStream) ([]string, error) {
+	t.Helper()
+	var got []string
+	for {
+		token, err := stream.Next()
+		if err == io.EOF {
+			return got, nil
 		}
-
-		// content_block_stop
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-
-		// message_delta with final usage
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens))
-
-		// message_stop
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
+		if err != nil {
+			return got, err
+		}
+		got = append(got, token)
 	}
 }
 
 func TestStreamAndLog_YieldsTokens(t *testing.T) {
 	tokens := []string{"Hello", " there", ", how", " are", " you?"}
-	srv := httptest.NewServer(fakeSSEHandler(tokens))
-	defer srv.Close()
+	srv := aitest.NewServer(t, textResponse(tokens...))
 
 	client := NewTestClient(srv.URL, nil)
 
 	stream, err := client.StreamAndLog(context.Background(), StreamParams{
-		Model:     "claude-sonnet-4-20250514",
+		Model:     "claude-sonnet-5-5",
 		System:    "You are a helpful assistant.",
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Hi"))},
+		Messages:  userMsgs("Hi"),
 		MaxTokens: 100,
 		UserID:    uuid.New(),
 		Role:      "interviewer",
@@ -69,57 +63,155 @@ func TestStreamAndLog_YieldsTokens(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var got []string
-	for {
-		token, err := stream.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-		got = append(got, token)
-	}
-
+	got, err := collect(t, stream)
+	require.NoError(t, err)
 	assert.Equal(t, tokens, got)
 }
 
-func TestStreamAndLog_FullMessage(t *testing.T) {
-	tokens := []string{"The ", "answer ", "is ", "42."}
-	srv := httptest.NewServer(fakeSSEHandler(tokens))
-	defer srv.Close()
-
+func TestStreamAndLog_SkipsLeadingThinkingBlocks(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model: "claude-sonnet-5-5",
+		Blocks: []aitest.Block{
+			aitest.ThinkingBlock(),
+			aitest.TextBlock("Tell me", " about scale."),
+		},
+	})
 	client := NewTestClient(srv.URL, nil)
 
 	stream, err := client.StreamAndLog(context.Background(), StreamParams{
-		Model:     "claude-sonnet-4-20250514",
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("What is the answer?"))},
+		Model:    "claude-sonnet-5-5",
+		Messages: userMsgs("Hi"),
+	})
+	require.NoError(t, err)
+
+	got, err := collect(t, stream)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Tell me", " about scale."}, got)
+	assert.Equal(t, "Tell me about scale.", stream.FullMessage())
+}
+
+func TestStreamAndLog_RequestBody(t *testing.T) {
+	srv := aitest.NewServer(t, textResponse("ok"))
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+		Model:     "claude-sonnet-5-5",
+		System:    "sys",
+		Messages:  userMsgs("Hi"),
+		MaxTokens: 8192,
+		Effort:    "low",
+	})
+	require.NoError(t, err)
+	_, err = collect(t, stream)
+	require.NoError(t, err)
+
+	reqs := srv.Requests()
+	require.Len(t, reqs, 1)
+	body := reqs[0]
+	assert.Equal(t, "claude-sonnet-5-5", body["model"])
+	assert.Equal(t, float64(8192), body["max_tokens"])
+	assert.Equal(t, true, body["stream"])
+	assert.Equal(t, map[string]any{"effort": "low"}, body["output_config"])
+	assert.Equal(t, "default", body["fallbacks"])
+	for _, k := range []string{"tool_choice", "tools", "thinking", "temperature", "top_p", "top_k"} {
+		assert.NotContains(t, body, k)
+	}
+	assert.Contains(t, srv.Headers()[0].Get("anthropic-beta"), "server-side-fallback-2026-07-01")
+}
+
+func TestStreamAndLog_FallbacksDisabled(t *testing.T) {
+	srv := aitest.NewServer(t, textResponse("ok"))
+	client := NewTestClient(srv.URL, nil)
+	client.fallbacks = false
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+		Model:    "claude-sonnet-5-5",
+		Messages: userMsgs("Hi"),
+	})
+	require.NoError(t, err)
+	_, err = collect(t, stream)
+	require.NoError(t, err)
+
+	body := srv.Requests()[0]
+	assert.NotContains(t, body, "fallbacks")
+	assert.NotContains(t, srv.Headers()[0].Get("anthropic-beta"), "server-side-fallback")
+}
+
+func TestStreamAndLog_RefusalMidStream(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:           "claude-sonnet-5-5",
+		Blocks:          []aitest.Block{aitest.TextBlock("Partial ")},
+		StopReason:      "refusal",
+		RefusalCategory: "cyber",
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+		Model:    "claude-sonnet-5-5",
+		Messages: userMsgs("Hi"),
+	})
+	require.NoError(t, err)
+
+	got, err := collect(t, stream)
+	assert.Equal(t, []string{"Partial "}, got)
+	var refusal *RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, "cyber", refusal.Category)
+	assert.Equal(t, "claude-sonnet-5-5", refusal.Model)
+	assert.True(t, IsRefusal(err))
+
+	// The error is sticky: a later Next does not report EOF.
+	_, err = stream.Next()
+	assert.True(t, IsRefusal(err))
+
+	require.NoError(t, stream.Close(context.Background()))
+}
+
+func TestStreamAndLog_MaxTokens(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:      "claude-sonnet-5-5",
+		Blocks:     []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock("Cut")},
+		StopReason: "max_tokens",
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+		Model:     "claude-sonnet-5-5",
+		Messages:  userMsgs("Hi"),
+		MaxTokens: 50,
+	})
+	require.NoError(t, err)
+
+	_, err = collect(t, stream)
+	require.ErrorIs(t, err, ErrMaxTokens)
+	assert.Contains(t, err.Error(), "50")
+}
+
+func TestStreamAndLog_FullMessage(t *testing.T) {
+	srv := aitest.NewServer(t, textResponse("The ", "answer ", "is ", "42."))
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+		Model:     "claude-sonnet-5-5",
+		Messages:  userMsgs("What is the answer?"),
 		MaxTokens: 100,
 		UserID:    uuid.New(),
 		Role:      "evaluator",
 	})
 	require.NoError(t, err)
 
-	// Drain the stream.
-	for {
-		_, err := stream.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-	}
-
+	_, err = collect(t, stream)
+	require.NoError(t, err)
 	assert.Equal(t, "The answer is 42.", stream.FullMessage())
 }
 
 func TestStreamAndLog_CloseNilPool(t *testing.T) {
-	tokens := []string{"ok"}
-	srv := httptest.NewServer(fakeSSEHandler(tokens))
-	defer srv.Close()
-
+	srv := aitest.NewServer(t, textResponse("ok"))
 	client := NewTestClient(srv.URL, nil)
 
 	stream, err := client.StreamAndLog(context.Background(), StreamParams{
-		Model:     "claude-sonnet-4-20250514",
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("test"))},
+		Model:     "claude-sonnet-5-5",
+		Messages:  userMsgs("test"),
 		MaxTokens: 100,
 		UserID:    uuid.New(),
 		Role:      "interviewer",
@@ -135,15 +227,12 @@ func TestStreamAndLog_CloseNilPool(t *testing.T) {
 }
 
 func TestStreamAndLog_CloseWithTxNil(t *testing.T) {
-	tokens := []string{"a", "b"}
-	srv := httptest.NewServer(fakeSSEHandler(tokens))
-	defer srv.Close()
-
+	srv := aitest.NewServer(t, textResponse("a", "b"))
 	client := NewTestClient(srv.URL, nil)
 
 	stream, err := client.StreamAndLog(context.Background(), StreamParams{
-		Model:     "claude-sonnet-4-20250514",
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("test"))},
+		Model:     "claude-sonnet-5-5",
+		Messages:  userMsgs("test"),
 		MaxTokens: 100,
 		UserID:    uuid.New(),
 		Role:      "interviewer",
@@ -156,10 +245,135 @@ func TestStreamAndLog_CloseWithTxNil(t *testing.T) {
 	assert.Equal(t, "ab", stream.FullMessage())
 }
 
+func TestTokenStream_PersistsServedModelAfterFallback(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model: "claude-sonnet-5-5",
+		Blocks: []aitest.Block{
+			aitest.FallbackBlock("claude-sonnet-5-5", "claude-sonnet-5"),
+			aitest.TextBlock("Hello"),
+		},
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	stream, err := client.StreamAndLog(context.Background(), StreamParams{
+		Model:    "claude-sonnet-5-5",
+		Messages: userMsgs("Hi"),
+	})
+	require.NoError(t, err)
+	got, err := collect(t, stream)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Hello"}, got)
+
+	stream.mu.Lock()
+	model := servedModel(&stream.message, stream.model)
+	stream.mu.Unlock()
+	assert.Equal(t, "claude-sonnet-5", model)
+}
+
+func TestCall_ReturnsTextAfterThinking(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:        "claude-sonnet-5-5",
+		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock("Hello ", "from Claude!")},
+		InputTokens:  10,
+		OutputTokens: 5,
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	result, err := client.Call(context.Background(), CallParams{
+		Model:     "claude-sonnet-5-5",
+		System:    "Be helpful.",
+		Messages:  userMsgs("Hi"),
+		MaxTokens: 4096,
+		Effort:    "low",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Hello from Claude!", result.Text)
+	assert.Equal(t, "claude-sonnet-5-5", result.Model)
+	assert.Equal(t, int64(10), result.InputTokens)
+	assert.Equal(t, int64(5), result.OutputTokens)
+
+	body := srv.Requests()[0]
+	assert.Equal(t, true, body["stream"], "blocking calls stream internally")
+	assert.Equal(t, map[string]any{"effort": "low"}, body["output_config"])
+}
+
+func TestCall_LargeMaxTokensStreams(t *testing.T) {
+	// The SDK rejects non-streaming requests above ~21K max_tokens before
+	// sending. Call must still work at the evaluator's 32000.
+	srv := aitest.NewServer(t, textResponse("ok"))
+	client := NewTestClient(srv.URL, nil)
+
+	result, err := client.Call(context.Background(), CallParams{
+		Model:     "claude-opus-5-5",
+		Messages:  userMsgs("Hi"),
+		MaxTokens: 32000,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", result.Text)
+}
+
+func TestCall_ReportsServedModel(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model: "claude-sonnet-5-5",
+		Blocks: []aitest.Block{
+			aitest.FallbackBlock("claude-sonnet-5-5", "claude-sonnet-5"),
+			aitest.TextBlock("ok"),
+		},
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	result, err := client.Call(context.Background(), CallParams{Model: "claude-sonnet-5-5", Messages: userMsgs("Hi")})
+	require.NoError(t, err)
+	assert.Equal(t, "claude-sonnet-5", result.Model)
+}
+
+func TestCall_Refusal(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:           "claude-sonnet-5-5",
+		StopReason:      "refusal",
+		RefusalCategory: "frontier_llm",
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	_, err := client.Call(context.Background(), CallParams{Model: "claude-sonnet-5-5", Messages: userMsgs("Hi")})
+	var refusal *RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, "frontier_llm", refusal.Category)
+	assert.Contains(t, err.Error(), "frontier_llm")
+}
+
+func TestCall_MaxTokens(t *testing.T) {
+	srv := aitest.NewServer(t, aitest.Response{
+		Model:      "claude-sonnet-5-5",
+		Blocks:     []aitest.Block{aitest.ThinkingBlock()},
+		StopReason: "max_tokens",
+	})
+	client := NewTestClient(srv.URL, nil)
+
+	_, err := client.Call(context.Background(), CallParams{Model: "claude-sonnet-5-5", Messages: userMsgs("Hi"), MaxTokens: 4096})
+	require.ErrorIs(t, err, ErrMaxTokens)
+	assert.False(t, IsRefusal(err))
+}
+
 func TestEstimateCost(t *testing.T) {
-	cost := EstimateCost("claude-sonnet-4-20250514", 1000, 500)
-	// 1000 * 3.0/1M + 500 * 15.0/1M = 0.003 + 0.0075 = 0.0105
-	assert.InDelta(t, 0.0105, cost, 1e-9)
+	tests := []struct {
+		model string
+		want  float64
+	}{
+		// 1000 input + 500 output tokens.
+		{"claude-sonnet-5-5", 1000*2.0/1e6 + 500*10.0/1e6}, // 0.007
+		{"claude-opus-5-5", 1000*4.0/1e6 + 500*20.0/1e6},   // 0.014
+		{"claude-opus-5", 1000*5.0/1e6 + 500*25.0/1e6},
+		{"claude-opus-4-8", 1000*5.0/1e6 + 500*25.0/1e6},
+		{"claude-sonnet-5", 1000*2.0/1e6 + 500*10.0/1e6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.InDelta(t, tt.want, EstimateCost(tt.model, 1000, 500), 1e-12)
+		})
+	}
+	assert.InDelta(t, 0.007, EstimateCost("claude-sonnet-5-5", 1000, 500), 1e-12)
+	assert.InDelta(t, 0.014, EstimateCost("claude-opus-5-5", 1000, 500), 1e-12)
 }
 
 func TestEstimateCost_UnknownModel(t *testing.T) {
@@ -185,44 +399,19 @@ func TestNumericFromFloat_Zero(t *testing.T) {
 	assert.Equal(t, 0, big.NewInt(0).Cmp(n.Int))
 }
 
-func TestCall_ReturnsText(t *testing.T) {
-	// Fake server that returns a non-streaming message response.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{
-			"id": "msg_test",
-			"type": "message",
-			"role": "assistant",
-			"content": [{"type": "text", "text": "Hello from Claude!"}],
-			"model": "claude-sonnet-4-20250514",
-			"stop_reason": "end_turn",
-			"stop_sequence": null,
-			"usage": {"input_tokens": 10, "output_tokens": 5}
-		}`)
-	}))
-	defer srv.Close()
-
-	client := NewTestClient(srv.URL, nil)
-
-	result, err := client.Call(context.Background(), CallParams{
-		Model:     "claude-sonnet-4-20250514",
-		System:    "Be helpful.",
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Hi"))},
-		MaxTokens: 100,
-		UserID:    uuid.New(),
-		Role:      "evaluator",
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "Hello from Claude!", result.Text)
-}
-
 func TestPricing_AllModelsHaveCosts(t *testing.T) {
 	// Verify that all pricing entries have non-zero costs.
 	for model, p := range pricing {
 		assert.Greater(t, p.Input, 0.0, "model %s has zero input cost", model)
 		assert.Greater(t, p.Output, 0.0, "model %s has zero output cost", model)
 	}
+}
+
+func TestRefusalError_Message(t *testing.T) {
+	err := error(&RefusalError{Model: "claude-opus-5-5"})
+	assert.Contains(t, err.Error(), "unspecified")
+	wrapped := errors.Join(errors.New("ctx"), err)
+	assert.True(t, IsRefusal(wrapped))
 }
 
 func TestSessionID_NilConversion(t *testing.T) {

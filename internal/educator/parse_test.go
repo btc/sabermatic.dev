@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/ai"
 )
 
 func validToolInput() map[string]any {
@@ -52,10 +54,11 @@ func TestParse_InvalidJSON(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestToolSchema_HasRequiredFields(t *testing.T) {
-	schema := ToolSchema()
-	assert.Equal(t, "submit_education", schema.Name)
-	assert.Contains(t, schema.InputSchema.Properties, "model_answer")
-	assert.Contains(t, schema.InputSchema.Properties, "gap_deep_dives")
-	assert.Equal(t, []string{"model_answer", "gap_deep_dives"}, schema.InputSchema.Required)
+func TestOutputSchema_HasRequiredFields(t *testing.T) {
+	schema := OutputSchema()
+	require.NoError(t, ai.CheckOutputSchema(schema))
+	props := schema["properties"].(map[string]any)
+	assert.Contains(t, props, "model_answer")
+	assert.Contains(t, props, "gap_deep_dives")
+	assert.Equal(t, []string{"model_answer", "gap_deep_dives"}, schema["required"])
 }

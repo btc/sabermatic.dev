@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go/v2"
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -93,24 +92,30 @@ func (w *RunCoachAnalysisWorker) Work(ctx context.Context, job *river.Job[RunCoa
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 7. Call LLM.
-	toolSchema := coach.ToolSchema()
-	toolInput, err := w.LLM.CallToolAndLog(ctx, tx, ai.CallToolParams{
-		Model:      w.Cfg.CoachModel,
-		System:     system,
-		Messages:   promptMsgs,
-		MaxTokens:  w.Cfg.CoachMaxTokens,
-		UserID:     userID,
-		Role:       "coach",
-		SessionID:  uuid.Nil,
-		Tools:      []anthropic.ToolUnionParam{{OfTool: &toolSchema}},
-		ToolChoice: anthropic.ToolChoiceParamOfTool("submit_analysis"),
+	output, err := w.LLM.CallJSONAndLog(ctx, tx, ai.JSONParams{
+		Model:     w.Cfg.CoachModel,
+		System:    system,
+		Messages:  promptMsgs,
+		MaxTokens: w.Cfg.CoachMaxTokens,
+		Effort:    w.Cfg.CoachEffort,
+		Schema:    coach.OutputSchema(),
+		UserID:    userID,
+		Role:      "coach",
+		SessionID: uuid.Nil,
 	})
 	if err != nil {
-		return fmt.Errorf("call coach LLM: %w", err)
+		err = fmt.Errorf("call coach LLM: %w", err)
+		if ai.IsRefusal(err) {
+			// A refusal will not change on retry; the coach has no failure
+			// status to set, so cancelling is the whole response.
+			slog.Warn("coach refused, cancelling job", "user_id", userID, "error", err)
+			return river.JobCancel(err)
+		}
+		return err
 	}
 
 	// 8. Parse.
-	result, err := coach.Parse(toolInput)
+	result, err := coach.Parse(output)
 	if err != nil {
 		return fmt.Errorf("parse coach: %w", err)
 	}

@@ -24,7 +24,8 @@ func TestBuildPrompt_SystemContainsCoachInstructions(t *testing.T) {
 	assert.Contains(t, system, "Topic Coverage")
 	assert.Contains(t, system, "Thinking Pattern Recognition")
 	assert.Contains(t, system, "Metacognitive Coaching")
-	assert.Contains(t, system, "submit_analysis")
+	assert.Contains(t, system, "output schema")
+	assert.NotContains(t, system, "submit_analysis")
 
 	require.Len(t, userMsgs, 1)
 }

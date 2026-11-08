@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/btc/drill/internal/ai"
 )
 
 func validToolInput() map[string]any {
@@ -168,21 +170,28 @@ func TestParse_MissingSummary(t *testing.T) {
 	assert.Equal(t, "", result.Summary)
 }
 
-func TestToolSchema_Fields(t *testing.T) {
-	schema := ToolSchema()
+func TestOutputSchema_Fields(t *testing.T) {
+	schema := OutputSchema()
+	require.NoError(t, ai.CheckOutputSchema(schema))
 
-	assert.Equal(t, "submit_analysis", schema.Name)
-	require.NotNil(t, schema.Description)
+	props := schema["properties"].(map[string]any)
+	for _, name := range []string{"narrative", "weakest_dimension", "improving_dimensions", "topic_gaps", "generated_question", "summary"} {
+		assert.Contains(t, props, name)
+	}
 
-	props := schema.InputSchema.Properties
-	assert.Contains(t, props, "narrative")
-	assert.Contains(t, props, "weakest_dimension")
-	assert.Contains(t, props, "improving_dimensions")
-	assert.Contains(t, props, "topic_gaps")
-	assert.Contains(t, props, "generated_question")
-	assert.Contains(t, props, "summary")
+	// generated_question is nullable through anyOf, not a type array.
+	gq := props["generated_question"].(map[string]any)
+	assert.NotContains(t, gq, "type")
+	require.Len(t, gq["anyOf"], 2)
+}
 
-	required := schema.InputSchema.Required
-	assert.Contains(t, required, "narrative")
-	assert.NotContains(t, required, "summary")
+func TestParse_NullGeneratedQuestion(t *testing.T) {
+	input := validToolInput()
+	input["generated_question"] = nil
+	raw, err := json.Marshal(input)
+	require.NoError(t, err)
+
+	result, err := Parse(json.RawMessage(raw))
+	require.NoError(t, err)
+	assert.Nil(t, result.GeneratedQuestion)
 }

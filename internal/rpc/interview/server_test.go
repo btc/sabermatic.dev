@@ -2,7 +2,6 @@ package interview_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -15,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/btc/drill/internal/ai"
+	"github.com/btc/drill/internal/ai/aitest"
 	"github.com/btc/drill/internal/auth"
 	"github.com/btc/drill/internal/backend"
 	"github.com/btc/drill/internal/db"
@@ -29,44 +29,24 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-// fakeAnthropicServer returns an httptest.Server that streams Anthropic-format
-// SSE events with the given tokens.
-func fakeAnthropicServer(t *testing.T, tokens []string) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-
-		fmt.Fprintf(w, "event: message_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":25,\"output_tokens\":0}}}\n\n")
-
-		fmt.Fprintf(w, "event: content_block_start\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-
-		for _, token := range tokens {
-			fmt.Fprintf(w, "event: content_block_delta\n")
-			fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", token)
-		}
-
-		fmt.Fprintf(w, "event: content_block_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-
-		fmt.Fprintf(w, "event: message_delta\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":%d}}\n\n", len(tokens))
-
-		fmt.Fprintf(w, "event: message_stop\n")
-		fmt.Fprintf(w, "data: {\"type\":\"message_stop\"}\n\n")
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 // newBackendWithFakeLLM creates a backend with a real Postgres database and a
-// fake Anthropic server that returns the given tokens. The fake server is
-// registered with t.Cleanup and does not need to be closed by the caller.
+// fake Anthropic server that streams a thinking block (as claude-sonnet-5-5
+// does under adaptive thinking) followed by the given text tokens.
 func newBackendWithFakeLLM(t *testing.T, tokens []string) *backend.Backend {
 	t.Helper()
-	anthropicSrv := fakeAnthropicServer(t, tokens)
+	return newBackendWithFakeResponse(t, aitest.Response{
+		Model:        "claude-sonnet-5-5",
+		Blocks:       []aitest.Block{aitest.ThinkingBlock(), aitest.TextBlock(tokens...)},
+		InputTokens:  25,
+		OutputTokens: int64(len(tokens)),
+	})
+}
+
+// newBackendWithFakeResponse creates a backend whose fake Anthropic server
+// streams resp for every request.
+func newBackendWithFakeResponse(t *testing.T, resp aitest.Response) *backend.Backend {
+	t.Helper()
+	anthropicSrv := aitest.NewServer(t, resp)
 	b := pg.NewBackend(t)
 	b.ApplyTestOverrides(backend.TestOverrides{
 		LLM: ai.NewTestClient(anthropicSrv.URL, b.Pool()),
