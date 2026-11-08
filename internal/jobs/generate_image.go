@@ -29,7 +29,11 @@ import (
 
 var imagegenTracer = drilotel.Tracer("imagegen")
 
-// geminiImageCostUSD is the estimated cost per Gemini native image generation call.
+// geminiImageCostUSD is the estimated cost per Gemini native image generation
+// call: gemini-3.1-flash-image Vertex AI Standard pricing for one 1K image,
+// $0.067 (global endpoint), per https://cloud.google.com/vertex-ai/generative-ai/pricing
+// as read 2026-11-07. It excludes input tokens and thinking tokens (billed
+// at the text-output rate), which the response's UsageMetadata would give.
 const geminiImageCostUSD = 0.067
 
 // geminiUnavailableSnooze is how long an image job waits before checking

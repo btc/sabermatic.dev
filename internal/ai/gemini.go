@@ -103,6 +103,9 @@ func (g *GeminiClient) genaiClient(ctx context.Context) (*genai.Client, error) {
 // GenerateImage generates an image from a text prompt using Gemini's native
 // image generation API (GenerateContent with IMAGE response modality).
 // Returns image bytes and MIME type. Uses 4:3 aspect ratio for card images.
+// Output is pinned to PNG because the image job stores objects under a .png
+// key; Vertex accepts ImageConfig.OutputMIMEType (the SDK sends it as
+// imageOutputOptions.mimeType), the Gemini Developer API does not.
 func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) (_ []byte, _ string, err error) {
 	ctx, span := geminiTracer.Start(ctx, "GeminiClient.GenerateImage")
 	defer func() { drilotel.End(span, err) }()
@@ -121,7 +124,8 @@ func (g *GeminiClient) GenerateImage(ctx context.Context, prompt string) (_ []by
 		&genai.GenerateContentConfig{
 			ResponseModalities: []string{"IMAGE"},
 			ImageConfig: &genai.ImageConfig{
-				AspectRatio: "4:3",
+				AspectRatio:    "4:3",
+				OutputMIMEType: "image/png",
 			},
 		},
 	)

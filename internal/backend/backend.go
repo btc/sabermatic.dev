@@ -127,7 +127,7 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 
 	// AI clients
 	llmClient := ai.NewClient(cfg.LLM.APIKey, pool, ai.Options{DisableFallbacks: !cfg.LLM.RefusalFallbacks})
-	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.WhisperModel)
+	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.TranscriptionModel)
 	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
 
 	// River client
