@@ -9,6 +9,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { safeRedirect } from "@/lib/redirect";
 
 import { AuthLayout } from "./auth-layout";
 import { OAuthError } from "./oauth-error";
@@ -21,8 +22,7 @@ export default function Login() {
   const navigate = useNavigate();
   const login = useLogin();
 
-  const rawRedirect = searchParams.get("redirect") ?? "/";
-  const redirect = rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/";
+  const redirect = safeRedirect(searchParams.get("redirect"));
   // Forward the redirect hint across every alternative authentication path
   // (signup cross-link, OAuth starts) so visitors bounced here from a
   // question card land back on that question after whichever flow they pick.
