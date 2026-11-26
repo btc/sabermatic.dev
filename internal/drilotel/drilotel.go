@@ -100,10 +100,11 @@ func Init(cfg *config.Otel) (*Providers, error) {
 
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	// W3C trace context only. Nothing in the app reads or sets baggage, and
+	// not parsing incoming baggage headers avoids GO-2026-6975 (memory
+	// amplification in baggage parsing, fixed in otel v1.47.0, which needs
+	// Go 1.26).
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	shutdown := func(ctx context.Context) error {
 		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
@@ -121,10 +122,13 @@ func buildResource(serviceName string) (*resource.Resource, error) {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
 		version = info.Main.Version
 	}
+	// Schemaless: resource.Merge fails when both sides carry different schema
+	// URLs, and resource.Default() moves to the SDK's newest semconv schema on
+	// SDK upgrades (1.43.0 as of otel v1.46.0). Leaving ours empty keeps
+	// Default's URL instead of pinning one that each SDK bump must match.
 	return resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+		resource.NewSchemaless(
 			semconv.ServiceName(serviceName),
 			semconv.ServiceVersion(version),
 		),

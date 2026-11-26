@@ -225,13 +225,23 @@ func TestOAuthStart_RejectsUnsafeRedirect(t *testing.T) {
 	goth.UseProviders(&faux.Provider{})
 	t.Cleanup(goth.ClearProviders)
 
-	// Protocol-relative URL would send the user to evil.com — must not be stashed.
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux?redirect=%2F%2Fevil.com%2Fpwn", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
+	// Each of these resolves to //evil.com in a browser and must not be stashed:
+	// protocol-relative, "\" (treated as "/" in http URLs), and tab/newline
+	// (stripped by the URL parser).
+	for _, rd := range []string{
+		"%2F%2Fevil.com%2Fpwn",
+		"%2F%5Cevil.com",
+		"%2F%5C%2Fevil.com",
+		"%2F%09%2Fevil.com",
+		"%2F%0A%2Fevil.com",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/oauth/faux?redirect="+rd, nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
 
-	for _, c := range w.Result().Cookies() {
-		assert.NotEqual(t, auth.OAuthRedirectCookieName, c.Name, "unsafe redirect should not be stashed")
+		for _, c := range w.Result().Cookies() {
+			assert.NotEqual(t, auth.OAuthRedirectCookieName, c.Name, "unsafe redirect %q should not be stashed", rd)
+		}
 	}
 }
 

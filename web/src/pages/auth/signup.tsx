@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { track } from "@/lib/analytics";
+import { safeRedirect } from "@/lib/redirect";
 
 import { AuthLayout } from "./auth-layout";
 import { OAuthError } from "./oauth-error";
@@ -26,8 +27,7 @@ export default function Signup() {
   // Forward the redirect hint to the sign-in cross-link and OAuth starts.
   // Email/password signup success still drops the hint (the flow pauses for
   // email verification, which is out of the client-side URL chain).
-  const rawRedirect = searchParams.get("redirect") ?? "/";
-  const redirect = rawRedirect.startsWith("/") && !rawRedirect.startsWith("//") ? rawRedirect : "/";
+  const redirect = safeRedirect(searchParams.get("redirect"));
   const redirectQuery = redirect !== "/" ? `?redirect=${encodeURIComponent(redirect)}` : "";
 
   function handleSubmit(e: React.FormEvent) {

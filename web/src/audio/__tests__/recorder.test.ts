@@ -23,8 +23,11 @@ function makeMediaRecorderMock() {
 }
 
 function setupBrowserMocks() {
-  // MediaRecorder class mock
-  const MediaRecorderMock = vi.fn().mockImplementation(() => makeMediaRecorderMock());
+  // MediaRecorder class mock. Function expressions, not arrows: the recorder
+  // calls these with `new`, and vitest 4 constructs mocks via Reflect.construct.
+  const MediaRecorderMock = vi.fn().mockImplementation(function () {
+    return makeMediaRecorderMock();
+  });
   MediaRecorderMock.isTypeSupported = (type: string) => type === "audio/webm;codecs=opus";
   vi.stubGlobal("MediaRecorder", MediaRecorderMock);
 
@@ -41,11 +44,13 @@ function setupBrowserMocks() {
     connect: vi.fn(),
   };
   const sourceMock = { connect: vi.fn() };
-  const AudioContextMock = vi.fn().mockImplementation(() => ({
-    createAnalyser: vi.fn().mockReturnValue(analyserMock),
-    createMediaStreamSource: vi.fn().mockReturnValue(sourceMock),
-    close: vi.fn().mockResolvedValue(undefined),
-  }));
+  const AudioContextMock = vi.fn().mockImplementation(function () {
+    return {
+      createAnalyser: vi.fn().mockReturnValue(analyserMock),
+      createMediaStreamSource: vi.fn().mockReturnValue(sourceMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+  });
   vi.stubGlobal("AudioContext", AudioContextMock);
 }
 

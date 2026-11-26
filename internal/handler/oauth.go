@@ -20,9 +20,16 @@ const oauthRedirectMaxAge = 5 * 60
 // isSafeRedirect reports whether target is a same-origin relative URL.
 // Must start with "/" and not "//" (protocol-relative), to prevent
 // open-redirect abuse where a hostile redirect sends the user off-site
-// after a successful login.
+// after a successful login. Backslashes and ASCII control characters are
+// rejected too: browsers read "\" as "/" and strip tab/newline, so "/\evil.com"
+// and "/\t/evil.com" also resolve to "//evil.com".
 func isSafeRedirect(target string) bool {
-	return strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "//")
+	if !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") {
+		return false
+	}
+	return !strings.ContainsFunc(target, func(r rune) bool {
+		return r == '\\' || r < 0x20 || r == 0x7f
+	})
 }
 
 // OAuthStart returns a handler that begins the OAuth flow for the given provider.

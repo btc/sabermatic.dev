@@ -9,3 +9,6 @@ coverage.out
 .env*
 *.md
 scripts/
+
+# google-github-actions/auth writes service-account credentials here in CI
+gha-creds-*.json

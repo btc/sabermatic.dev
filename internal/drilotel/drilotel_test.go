@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
@@ -33,8 +33,8 @@ func TestInit_StdoutExporter(t *testing.T) {
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
 	defer func() {
-		p.Shutdown(context.Background())
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+		assert.NoError(t, p.Shutdown(context.Background()))
+		otel.SetTracerProvider(noop.NewTracerProvider())
 	}()
 
 	assert.NotNil(t, p.TracerProvider)
@@ -45,6 +45,28 @@ func TestInit_StdoutExporter(t *testing.T) {
 	_, span := tracer.Start(context.Background(), "test-span")
 	assert.True(t, span.SpanContext().IsValid())
 	span.End()
+}
+
+// Incoming requests are parsed by the global propagator (the otelhttp
+// middleware and the otelconnect interceptor). Only W3C trace context is
+// read: nothing in the app uses baggage, and parsing attacker-supplied
+// baggage headers is the GO-2026-6975 memory-amplification path in
+// otel < v1.47.0.
+func TestInit_PropagatesTraceContextOnly(t *testing.T) {
+	cfg := &config.Otel{
+		Enabled:     true,
+		Exporter:    "stdout",
+		SampleRate:  1.0,
+		ServiceName: "drill-test",
+	}
+	p, err := drilotel.Init(cfg)
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, p.Shutdown(context.Background()))
+		otel.SetTracerProvider(noop.NewTracerProvider())
+	}()
+
+	assert.ElementsMatch(t, []string{"traceparent", "tracestate"}, otel.GetTextMapPropagator().Fields())
 }
 
 func TestInit_InvalidExporter(t *testing.T) {
@@ -66,7 +88,7 @@ func TestInit_FullRoundtrip(t *testing.T) {
 	}
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
-	t.Cleanup(func() { otel.SetTracerProvider(trace.NewNoopTracerProvider()) })
+	t.Cleanup(func() { otel.SetTracerProvider(noop.NewTracerProvider()) })
 
 	tracer := otel.Tracer("roundtrip")
 	ctx, span := tracer.Start(context.Background(), "roundtrip-span")
