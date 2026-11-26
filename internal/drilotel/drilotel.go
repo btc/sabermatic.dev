@@ -121,10 +121,13 @@ func buildResource(serviceName string) (*resource.Resource, error) {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
 		version = info.Main.Version
 	}
+	// Schemaless: resource.Merge fails when both sides carry different schema
+	// URLs, and resource.Default() moves to the SDK's newest semconv schema on
+	// SDK upgrades (1.43.0 as of otel v1.46.0). Leaving ours empty keeps
+	// Default's URL instead of pinning one that each SDK bump must match.
 	return resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+		resource.NewSchemaless(
 			semconv.ServiceName(serviceName),
 			semconv.ServiceVersion(version),
 		),
