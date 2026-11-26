@@ -47,6 +47,28 @@ func TestInit_StdoutExporter(t *testing.T) {
 	span.End()
 }
 
+// Incoming requests are parsed by the global propagator (the otelhttp
+// middleware and the otelconnect interceptor). Only W3C trace context is
+// read: nothing in the app uses baggage, and parsing attacker-supplied
+// baggage headers is the GO-2026-6975 memory-amplification path in
+// otel < v1.47.0.
+func TestInit_PropagatesTraceContextOnly(t *testing.T) {
+	cfg := &config.Otel{
+		Enabled:     true,
+		Exporter:    "stdout",
+		SampleRate:  1.0,
+		ServiceName: "drill-test",
+	}
+	p, err := drilotel.Init(cfg)
+	require.NoError(t, err)
+	defer func() {
+		p.Shutdown(context.Background())
+		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+	}()
+
+	assert.ElementsMatch(t, []string{"traceparent", "tracestate"}, otel.GetTextMapPropagator().Fields())
+}
+
 func TestInit_InvalidExporter(t *testing.T) {
 	cfg := &config.Otel{
 		Enabled:  true,

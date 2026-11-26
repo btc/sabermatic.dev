@@ -100,10 +100,11 @@ func Init(cfg *config.Otel) (*Providers, error) {
 
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	// W3C trace context only. Nothing in the app reads or sets baggage, and
+	// not parsing incoming baggage headers avoids GO-2026-6975 (memory
+	// amplification in baggage parsing, fixed in otel v1.47.0, which needs
+	// Go 1.26).
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	shutdown := func(ctx context.Context) error {
 		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
