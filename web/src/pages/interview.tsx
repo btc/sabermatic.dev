@@ -259,8 +259,8 @@ function InterviewInner({ sessionId }: { sessionId: string }) {
 
   // ------ Audio player wiring ------
   useEffect(() => {
-    setOnTtsChunk((data: Uint8Array, seq: number) => {
-      audioPlayer.enqueue(data, seq);
+    setOnTtsChunk((data: Uint8Array, seq: number, mimeType: string) => {
+      audioPlayer.enqueue(data, seq, mimeType);
     });
     setOnTtsDone(() => audioPlayer.done());
   }, [setOnTtsChunk, setOnTtsDone, audioPlayer]);

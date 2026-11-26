@@ -64,9 +64,9 @@ export function useAudioPlayer() {
     await playerRef.current?.initContext();
   }, []);
 
-  const enqueue = useCallback((data: Uint8Array, seq: number) => {
+  const enqueue = useCallback((data: Uint8Array, seq: number, mimeType = "") => {
     setIsPlaying(true);
-    playerRef.current?.enqueue(data, seq);
+    playerRef.current?.enqueue(data, seq, mimeType);
   }, []);
 
   const cancel = useCallback(() => {
