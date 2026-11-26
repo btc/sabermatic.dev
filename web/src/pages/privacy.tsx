@@ -3,7 +3,7 @@ import { LegalPage } from "@/components/legal-page";
 export default function Privacy() {
   return (
     <LegalPage title="Privacy Policy">
-      <p><em>Last updated: 2026-05-04</em></p>
+      <p><em>Last updated: 2026-11-26</em></p>
 
       <p>
         Sabermatic is operated by Spanda, LLC ("we"). This policy explains what
@@ -78,15 +78,16 @@ export default function Privacy() {
           abuse monitoring before deletion.
         </li>
         <li>
-          <strong>OpenAI</strong> — converts your speech to text and
-          generates the interviewer's voice (TTS). Audio and transcripts are sent
+          <strong>OpenAI</strong> — converts your speech to text and may
+          generate the interviewer's voice (TTS). Audio and transcripts are sent
           to OpenAI for processing. OpenAI's standard API retention is up to 30
           days for abuse monitoring before deletion.
         </li>
         <li>
           <strong>Google Cloud Platform</strong> — hosts the service (Cloud Run,
           Cloud SQL, Cloud Storage, BigQuery) and runs Vertex AI / Gemini for
-          image generation. Your account data and practice content are stored on
+          image generation and may generate the interviewer's voice (TTS) from
+          the interviewer's replies. Your account data and practice content are stored on
           Google Cloud infrastructure in the United States.
         </li>
         <li>
