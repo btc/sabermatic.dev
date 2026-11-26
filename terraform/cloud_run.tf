@@ -124,6 +124,13 @@ resource "google_cloud_run_v2_service" "sabermatic" {
         name  = "GEMINI_LOCATION"
         value = "global"
       }
+      # Interviewer voice. OpenAI shuts down tts-1 on 2027-01-06; Gemini
+      # text-to-speech (gemini-3.8-flash-lite-tts in the us multi-region,
+      # voice Charon by default) replaces it. Set to "openai" to switch back.
+      env {
+        name  = "TTS_PROVIDER"
+        value = "gemini"
+      }
 
       # ---- Secret env vars ----
       env {
