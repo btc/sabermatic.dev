@@ -140,8 +140,26 @@ const maxOutputTokens = 128000
 
 type Speech struct {
 	OpenAIAPIKey string `env:"OPENAI_API_KEY,required"`
-	TTSVoice     string `env:"TTS_VOICE,default=onyx"`
-	TTSModel     string `env:"TTS_MODEL,default=tts-1"`
+	// TTSProvider selects the text-to-speech service: "openai" or "gemini".
+	// OpenAI shuts down tts-1, tts-1-hd and gpt-4o-mini-tts on 2027-01-06
+	// and offers no replacement on /v1/audio/speech, so "openai" stops
+	// working on that date.
+	TTSProvider string `env:"TTS_PROVIDER,default=openai"`
+	// TTSVoice and TTSModel apply when TTSProvider is "openai".
+	TTSVoice string `env:"TTS_VOICE,default=onyx"`
+	TTSModel string `env:"TTS_MODEL,default=tts-1"`
+	// GeminiTTSModel, GeminiTTSLocation, GeminiTTSVoice and GeminiTTSStyle
+	// apply when TTSProvider is "gemini". The us and eu multi-region
+	// locations give a shorter time to first audio than global, per the
+	// Vertex AI text-to-speech docs; custom voices (voice_... IDs) are
+	// served only from global.
+	GeminiTTSModel    string `env:"GEMINI_TTS_MODEL,default=gemini-3.8-flash-lite-tts"`
+	GeminiTTSLocation string `env:"GEMINI_TTS_LOCATION,default=us"`
+	GeminiTTSVoice    string `env:"GEMINI_TTS_VOICE,default=Charon"`
+	// GeminiTTSStyle is an optional delivery instruction (for example
+	// "calm, measured"). It is sent separately from the text, which the
+	// model reads verbatim.
+	GeminiTTSStyle string `env:"GEMINI_TTS_STYLE"`
 	// TranscriptionModel is the speech-to-text model for
 	// /v1/audio/transcriptions. The env var keeps its original name,
 	// WHISPER_MODEL, so existing deploy config that sets it keeps working.
@@ -282,6 +300,15 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Speech.OpenAIAPIKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
+	}
+	switch cfg.Speech.TTSProvider {
+	case "openai":
+	case "gemini":
+		if cfg.Speech.GeminiTTSModel == "" || cfg.Speech.GeminiTTSLocation == "" || cfg.Speech.GeminiTTSVoice == "" {
+			return fmt.Errorf("GEMINI_TTS_MODEL, GEMINI_TTS_LOCATION and GEMINI_TTS_VOICE must be non-empty when TTS_PROVIDER=gemini")
+		}
+	default:
+		return fmt.Errorf("TTS_PROVIDER must be \"openai\" or \"gemini\", got %q", cfg.Speech.TTSProvider)
 	}
 	if len(cfg.Auth.TokenSecret) < 32 {
 		return fmt.Errorf("AUTH_TOKEN_SECRET must be at least 32 characters")

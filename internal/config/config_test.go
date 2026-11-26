@@ -42,6 +42,11 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	require.Equal(t, 10*time.Second, cfg.Speech.TTSSentenceTimeout)
 	require.Equal(t, "gpt-transcribe", cfg.Speech.TranscriptionModel)
 	require.Equal(t, "tts-1", cfg.Speech.TTSModel)
+	require.Equal(t, "openai", cfg.Speech.TTSProvider)
+	require.Equal(t, "gemini-3.8-flash-lite-tts", cfg.Speech.GeminiTTSModel)
+	require.Equal(t, "us", cfg.Speech.GeminiTTSLocation)
+	require.Equal(t, "Charon", cfg.Speech.GeminiTTSVoice)
+	require.Empty(t, cfg.Speech.GeminiTTSStyle)
 	require.Equal(t, "gemini-3.1-flash-image", cfg.Gemini.Model)
 	require.Equal(t, "global", cfg.Gemini.Location)
 }
@@ -186,6 +191,52 @@ func TestValidate_EachRequiredFieldEmpty(t *testing.T) {
 			_, err := config.Load()
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.wantMsg)
+		})
+	}
+}
+
+func TestValidate_TTSProvider(t *testing.T) {
+	base := map[string]string{
+		"DATABASE_URL":         "postgres://localhost:5432/drill",
+		"ANTHROPIC_API_KEY":    "sk-ant-test",
+		"OPENAI_API_KEY":       "sk-test",
+		"AUTH_TOKEN_SECRET":    "test-secret-at-least-32-bytes-long",
+		"GOOGLE_CLOUD_PROJECT": "test-project",
+	}
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr string
+	}{
+		{name: "openai", env: map[string]string{"TTS_PROVIDER": "openai"}},
+		{name: "gemini with defaults", env: map[string]string{"TTS_PROVIDER": "gemini"}},
+		{name: "gemini with overrides", env: map[string]string{
+			"TTS_PROVIDER": "gemini", "GEMINI_TTS_MODEL": "gemini-3.8-flash-tts",
+			"GEMINI_TTS_LOCATION": "eu", "GEMINI_TTS_VOICE": "Orus", "GEMINI_TTS_STYLE": "calm",
+		}},
+		{name: "unknown provider", env: map[string]string{"TTS_PROVIDER": "elevenlabs"}, wantErr: "TTS_PROVIDER must be"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range base {
+				t.Setenv(k, v)
+			}
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			cfg, err := config.Load()
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.env["TTS_PROVIDER"], cfg.Speech.TTSProvider)
+			if v, ok := tt.env["GEMINI_TTS_VOICE"]; ok {
+				require.Equal(t, v, cfg.Speech.GeminiTTSVoice)
+				require.Equal(t, tt.env["GEMINI_TTS_STYLE"], cfg.Speech.GeminiTTSStyle)
+				require.Equal(t, tt.env["GEMINI_TTS_LOCATION"], cfg.Speech.GeminiTTSLocation)
+				require.Equal(t, tt.env["GEMINI_TTS_MODEL"], cfg.Speech.GeminiTTSModel)
+			}
 		})
 	}
 }

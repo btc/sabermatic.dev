@@ -26,13 +26,14 @@ var ErrGeminiUnavailable = errors.New("gemini client unavailable")
 // slow metadata server from holding the init slot indefinitely.
 const geminiInitTimeout = 30 * time.Second
 
-// GeminiClient wraps the Google Gen AI SDK for image generation.
+// GeminiClient wraps the Google Gen AI SDK for one Vertex AI model and
+// location. The server creates one for image generation and, when
+// TTS_PROVIDER=gemini, a second for text-to-speech (see GeminiSynthesizer).
 //
-// The underlying genai client is created on first use (Ready or
-// GenerateImage), not at construction. Creating it resolves ADC, and image
-// generation is the only feature that needs them, so the server starts
-// without ADC and only image generation stops. A failed creation is not
-// cached: the next call tries again.
+// The underlying genai client is created on first use, not at construction.
+// Creating it resolves ADC, so the server starts without ADC and only the
+// Gemini features stop. A failed creation is not cached: the next call tries
+// again.
 type GeminiClient struct {
 	cfg   genai.ClientConfig
 	model string
@@ -46,16 +47,24 @@ type GeminiClient struct {
 	client  *genai.Client // guarded by initSem
 }
 
-// NewGeminiClient returns a GeminiClient configured for Vertex AI with ADC.
-// It does not contact Google or read credentials; see GeminiClient.
+// NewGeminiClient returns the image-generation GeminiClient, configured for
+// Vertex AI with ADC. It does not contact Google or read credentials; see
+// GeminiClient.
 func NewGeminiClient(cfg *config.Config) *GeminiClient {
+	return NewVertexGeminiClient(cfg.GCP.ProjectID, cfg.Gemini.Location, cfg.Gemini.Model)
+}
+
+// NewVertexGeminiClient returns a GeminiClient for model in the given Vertex
+// AI project and location, authenticated with ADC on first use. It does not
+// contact Google or read credentials.
+func NewVertexGeminiClient(project, location, model string) *GeminiClient {
 	return &GeminiClient{
 		cfg: genai.ClientConfig{
-			Project:  cfg.GCP.ProjectID,
-			Location: cfg.Gemini.Location,
+			Project:  project,
+			Location: location,
 			Backend:  genai.BackendVertexAI,
 		},
-		model:     cfg.Gemini.Model,
+		model:     model,
 		newClient: genai.NewClient,
 		initSem:   make(chan struct{}, 1),
 	}
@@ -97,10 +106,10 @@ func (g *GeminiClient) genaiClient(ctx context.Context) (*genai.Client, error) {
 	}
 	// genai.NewClient writes resolved values (e.g. Credentials) into the
 	// config it is given; pass a copy so a failed attempt leaves g.cfg
-	// untouched for the next try. The copy is shallow: in genai v1.53.0
+	// untouched for the next try. The copy is shallow: in genai v1.79.1
 	// NewClient assigns only top-level fields (HTTPOptions is a value field,
-	// and a supplied HTTPClient is used as is), so no state shared with
-	// g.cfg is modified. Recheck this when bumping the SDK. The SDK uses ctx only
+	// its Headers map is cloned before use, and a supplied HTTPClient is used
+	// as is), so no state shared with g.cfg is modified. Recheck this when bumping the SDK. The SDK uses ctx only
 	// during creation (quota project lookup) and does not retain it.
 	initCtx, cancel := context.WithTimeout(ctx, geminiInitTimeout)
 	defer cancel()

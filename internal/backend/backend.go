@@ -128,7 +128,7 @@ func New(cfg *config.Config, em *events.Emitter) (*Backend, error) {
 	// AI clients
 	llmClient := ai.NewClient(cfg.LLM.APIKey, pool, ai.Options{DisableFallbacks: !cfg.LLM.RefusalFallbacks})
 	stt := ai.NewOpenAITranscriber(cfg.Speech.OpenAIAPIKey, cfg.Speech.TranscriptionModel)
-	tts := ai.NewOpenAISynthesizer(cfg.Speech.OpenAIAPIKey, cfg.Speech.TTSModel, cfg.Speech.TTSVoice)
+	tts := newSynthesizer(&cfg.GCP, &cfg.Speech)
 
 	// River client
 	emailSender := email.NewSender(&cfg.Email)
@@ -329,3 +329,17 @@ func (b *Backend) Close() error {
 // RiverUIHandler returns the pre-built River UI http.Handler.
 // Mount it under /admin/jobs/ in the HTTP mux.
 func (b *Backend) RiverUIHandler() http.Handler { return b.riverUI }
+
+// newSynthesizer returns the text-to-speech client selected by
+// TTS_PROVIDER. config.Load has already rejected any value other than
+// "openai" or "gemini".
+func newSynthesizer(gcp *config.GCP, sp *config.Speech) ai.Synthesizer {
+	if sp.TTSProvider == "gemini" {
+		slog.Info("text-to-speech provider", "provider", "gemini", "model", sp.GeminiTTSModel,
+			"location", sp.GeminiTTSLocation, "voice", sp.GeminiTTSVoice)
+		g := ai.NewVertexGeminiClient(gcp.ProjectID, sp.GeminiTTSLocation, sp.GeminiTTSModel)
+		return ai.NewGeminiSynthesizer(g, sp.GeminiTTSVoice, sp.GeminiTTSStyle)
+	}
+	slog.Info("text-to-speech provider", "provider", "openai", "model", sp.TTSModel, "voice", sp.TTSVoice)
+	return ai.NewOpenAISynthesizer(sp.OpenAIAPIKey, sp.TTSModel, sp.TTSVoice)
+}
