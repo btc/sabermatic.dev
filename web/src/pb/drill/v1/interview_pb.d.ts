@@ -204,9 +204,22 @@ export declare type TtsChunk = Message<"drill.v1.TtsChunk"> & {
   messageId: string;
 
   /**
+   * Order of this chunk within the message, starting at 0.
+   *
    * @generated from field: int32 seq = 3;
    */
   seq: number;
+
+  /**
+   * Format of data. Empty means data is a complete encoded audio file
+   * (MP3 or WAV) to decode as a whole. "audio/L16;rate=R;channels=C" means
+   * data is a piece of a stream of 16-bit little-endian PCM samples at R Hz
+   * with C interleaved channels, always a whole number of sample frames;
+   * consecutive chunks play back to back.
+   *
+   * @generated from field: string mime_type = 4;
+   */
+  mimeType: string;
 };
 
 /**

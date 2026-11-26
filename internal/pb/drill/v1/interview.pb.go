@@ -497,10 +497,17 @@ func (x *InterviewerDone) GetMessageId() string {
 }
 
 type TtsChunk struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	MessageId     string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	Seq           int32                  `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Data      []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	MessageId string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	// Order of this chunk within the message, starting at 0.
+	Seq int32 `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
+	// Format of data. Empty means data is a complete encoded audio file
+	// (MP3 or WAV) to decode as a whole. "audio/L16;rate=R;channels=C" means
+	// data is a piece of a stream of 16-bit little-endian PCM samples at R Hz
+	// with C interleaved channels, always a whole number of sample frames;
+	// consecutive chunks play back to back.
+	MimeType      string `protobuf:"bytes,4,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -554,6 +561,13 @@ func (x *TtsChunk) GetSeq() int32 {
 		return x.Seq
 	}
 	return 0
+}
+
+func (x *TtsChunk) GetMimeType() string {
+	if x != nil {
+		return x.MimeType
+	}
+	return ""
 }
 
 type TtsDone struct {
@@ -1042,12 +1056,13 @@ const file_drill_v1_interview_proto_rawDesc = "" +
 	"\x05token\x18\x01 \x01(\tR\x05token\"0\n" +
 	"\x0fInterviewerDone\x12\x1d\n" +
 	"\n" +
-	"message_id\x18\x01 \x01(\tR\tmessageId\"O\n" +
+	"message_id\x18\x01 \x01(\tR\tmessageId\"l\n" +
 	"\bTtsChunk\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x10\n" +
-	"\x03seq\x18\x03 \x01(\x05R\x03seq\"(\n" +
+	"\x03seq\x18\x03 \x01(\x05R\x03seq\x12\x1b\n" +
+	"\tmime_type\x18\x04 \x01(\tR\bmimeType\"(\n" +
 	"\aTtsDone\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\"9\n" +

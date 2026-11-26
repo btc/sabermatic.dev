@@ -16,6 +16,24 @@ type Synthesizer interface {
 	Synthesize(ctx context.Context, text string) (io.ReadCloser, error)
 }
 
+// StreamingSynthesizer is implemented by synthesizers that can return audio
+// while the vendor is still generating it. SynthesizeStream calls emit with
+// each piece in order and returns once the whole text is synthesized, emit
+// returns an error, or ctx ends. Every piece is a whole number of 16-bit
+// little-endian PCM sample frames, and mimeType has the form
+// "audio/L16;rate=R;channels=C" (see PCMMIMEType). If emit returns an error,
+// SynthesizeStream stops and returns it.
+type StreamingSynthesizer interface {
+	SynthesizeStream(ctx context.Context, text string, emit func(pcm []byte, mimeType string) error) error
+}
+
+// PCMMIMEType returns the MIME type for 16-bit little-endian PCM at rate Hz
+// with the given number of interleaved channels. The browser player parses
+// this exact form.
+func PCMMIMEType(rate, channels int) string {
+	return fmt.Sprintf("audio/L16;rate=%d;channels=%d", rate, channels)
+}
+
 // OpenAISynthesizer calls the OpenAI TTS API.
 type OpenAISynthesizer struct {
 	client openai.Client

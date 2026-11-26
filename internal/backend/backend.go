@@ -336,9 +336,15 @@ func (b *Backend) RiverUIHandler() http.Handler { return b.riverUI }
 func newSynthesizer(gcp *config.GCP, sp *config.Speech) ai.Synthesizer {
 	if sp.TTSProvider == "gemini" {
 		slog.Info("text-to-speech provider", "provider", "gemini", "model", sp.GeminiTTSModel,
-			"location", sp.GeminiTTSLocation, "voice", sp.GeminiTTSVoice)
+			"location", sp.GeminiTTSLocation, "voice", sp.GeminiTTSVoice, "stream", sp.GeminiTTSStream)
 		g := ai.NewVertexGeminiClient(gcp.ProjectID, sp.GeminiTTSLocation, sp.GeminiTTSModel)
-		return ai.NewGeminiSynthesizer(g, sp.GeminiTTSVoice, sp.GeminiTTSStyle)
+		s := ai.NewGeminiSynthesizer(g, sp.GeminiTTSVoice, sp.GeminiTTSStyle)
+		if !sp.GeminiTTSStream {
+			// Hide SynthesizeStream so the TTS accumulator falls back to
+			// one WAV file per sentence.
+			return struct{ ai.Synthesizer }{s}
+		}
+		return s
 	}
 	slog.Info("text-to-speech provider", "provider", "openai", "model", sp.TTSModel, "voice", sp.TTSVoice)
 	return ai.NewOpenAISynthesizer(sp.OpenAIAPIKey, sp.TTSModel, sp.TTSVoice)

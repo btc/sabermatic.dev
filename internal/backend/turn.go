@@ -537,12 +537,13 @@ func newSinkTTSAdapter(sink TurnEventSink, messageID uuid.UUID) *sinkTTSAdapter 
 	return &sinkTTSAdapter{sink: sink, messageID: messageID}
 }
 
-func (a *sinkTTSAdapter) HandleAudio(data []byte) {
+func (a *sinkTTSAdapter) HandleAudio(data []byte, mimeType string) {
 	seq := a.seq.Add(1) - 1 // first call returns 0
 	a.sink.TtsChunk(&drillv1.TtsChunk{
 		Data:      data,
 		MessageId: a.messageID.String(),
 		Seq:       seq,
+		MimeType:  mimeType,
 	})
 }
 

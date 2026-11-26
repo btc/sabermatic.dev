@@ -160,6 +160,10 @@ type Speech struct {
 	// "calm, measured"). It is sent separately from the text, which the
 	// model reads verbatim.
 	GeminiTTSStyle string `env:"GEMINI_TTS_STYLE"`
+	// GeminiTTSStream sends each sentence's audio to the browser in pieces
+	// as Gemini generates it, so playback starts before the sentence is
+	// fully synthesized. false sends one WAV file per sentence instead.
+	GeminiTTSStream bool `env:"GEMINI_TTS_STREAM,default=true"`
 	// TranscriptionModel is the speech-to-text model for
 	// /v1/audio/transcriptions. The env var keeps its original name,
 	// WHISPER_MODEL, so existing deploy config that sets it keeps working.

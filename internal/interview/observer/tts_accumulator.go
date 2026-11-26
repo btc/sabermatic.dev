@@ -142,6 +142,11 @@ func (a *TTSAccumulator) ttsLoop() {
 				continue
 			}
 
+			if streamer, ok := a.synth.(ai.StreamingSynthesizer); ok {
+				a.streamSentence(streamer, sentence)
+				continue
+			}
+
 			synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
 			rc, err := a.synth.Synthesize(synthCtx, sentence)
 			if err != nil {
@@ -174,10 +179,43 @@ func (a *TTSAccumulator) ttsLoop() {
 				a.sink.HandleTTSError()
 				continue
 			}
-			a.sink.HandleAudio(data)
+			a.sink.HandleAudio(data, "")
 
 		case <-a.ctx.Done():
 			return
 		}
 	}
+}
+
+// streamSentence synthesizes one sentence with a streaming synthesizer and
+// forwards each piece of audio to the sink as it arrives, so playback can
+// start before the sentence is fully synthesized. The sentence timeout
+// covers the whole stream. On failure, audio already forwarded stays
+// forwarded and the user is notified once.
+func (a *TTSAccumulator) streamSentence(streamer ai.StreamingSynthesizer, sentence string) {
+	synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
+	defer synthCancel()
+	err := streamer.SynthesizeStream(synthCtx, sentence, func(pcm []byte, mimeType string) error {
+		// Stop forwarding as soon as the turn is interrupted.
+		if err := a.ctx.Err(); err != nil {
+			return err
+		}
+		a.sink.HandleAudio(pcm, mimeType)
+		return nil
+	})
+	if err == nil || a.ctx.Err() != nil {
+		// Success, or the turn was interrupted: an interrupt is not a
+		// synthesis failure and the user is not notified.
+		return
+	}
+	if synthCtx.Err() == context.DeadlineExceeded {
+		slog.Warn("tts: streaming sentence synthesis timed out",
+			"timeout", a.sentenceTimeout,
+			"sentence_len", len(sentence))
+	} else {
+		slog.Warn("tts: streaming sentence synthesis failed",
+			"error", err,
+			"sentence_len", len(sentence))
+	}
+	a.sink.HandleTTSError()
 }
