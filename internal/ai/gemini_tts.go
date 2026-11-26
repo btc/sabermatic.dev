@@ -58,19 +58,8 @@ func (s *GeminiSynthesizer) Synthesize(ctx context.Context, text string) (_ io.R
 		return nil, err
 	}
 
-	part := &genai.Part{Text: text}
-	if s.style != "" {
-		part.SpeechMetadata = &genai.SpeechMetadata{Style: s.style}
-	}
-	result, err := client.Models.GenerateContent(ctx, s.gemini.model,
-		[]*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{part}}},
-		&genai.GenerateContentConfig{
-			ResponseModalities: []string{"AUDIO"},
-			SpeechConfig: &genai.SpeechConfig{
-				VoiceConfig: &genai.VoiceConfig{Voice: s.voice},
-			},
-		},
-	)
+	contents, cfg := s.request(text)
+	result, err := client.Models.GenerateContent(ctx, s.gemini.model, contents, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("gemini tts: %w", err)
 	}
@@ -105,7 +94,7 @@ func wavFromGeminiAudio(result *genai.GenerateContentResponse) ([]byte, error) {
 	var pcm bytes.Buffer
 	rate, channels := 0, 0
 	for _, b := range parts {
-		mediaType, params, err := mime.ParseMediaType(b.MIMEType)
+		mediaType, _, err := mime.ParseMediaType(b.MIMEType)
 		if err != nil {
 			return nil, fmt.Errorf("parse audio MIME type %q: %w", b.MIMEType, err)
 		}
@@ -116,11 +105,7 @@ func wavFromGeminiAudio(result *genai.GenerateContentResponse) ([]byte, error) {
 			}
 			return b.Data, nil
 		case "audio/l16", "audio/pcm":
-			r, err := mimeIntParam(params, "rate", geminiPCMDefaultRate)
-			if err != nil {
-				return nil, err
-			}
-			c, err := mimeIntParam(params, "channels", geminiPCMDefaultChannels)
+			r, c, err := parsePCMMIMEType(b.MIMEType)
 			if err != nil {
 				return nil, err
 			}
@@ -168,4 +153,104 @@ func pcmToWAV(pcm []byte, rate, channels int) []byte {
 	binary.LittleEndian.PutUint32(out[40:44], uint32(len(pcm)))
 	copy(out[headerLen:], pcm)
 	return out
+}
+
+// SynthesizeStream converts text to speech with a streaming request and
+// calls emit with each piece of PCM audio as it arrives. It implements
+// StreamingSynthesizer. Pieces are trimmed to whole sample frames; a
+// trailing partial frame is carried into the next piece and dropped if the
+// stream ends on one.
+func (s *GeminiSynthesizer) SynthesizeStream(ctx context.Context, text string, emit func(pcm []byte, mimeType string) error) (err error) {
+	ctx, span := geminiTracer.Start(ctx, "GeminiSynthesizer.SynthesizeStream")
+	defer func() { drilotel.End(span, err) }()
+
+	if strings.TrimSpace(text) == "" {
+		return errors.New("gemini tts: empty text")
+	}
+
+	client, err := s.gemini.genaiClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	contents, cfg := s.request(text)
+	var (
+		mimeType string // normalized; set by the first audio piece
+		frame    int    // bytes per sample frame
+		carry    []byte // partial frame left over from the previous piece
+		emitted  bool
+	)
+	for result, err := range client.Models.GenerateContentStream(ctx, s.gemini.model, contents, cfg) {
+		if err != nil {
+			return fmt.Errorf("gemini tts stream: %w", err)
+		}
+		if result == nil || len(result.Candidates) == 0 || result.Candidates[0].Content == nil {
+			continue
+		}
+		for _, p := range result.Candidates[0].Content.Parts {
+			if p == nil || p.InlineData == nil || len(p.InlineData.Data) == 0 {
+				continue
+			}
+			rate, channels, err := parsePCMMIMEType(p.InlineData.MIMEType)
+			if err != nil {
+				return fmt.Errorf("gemini tts stream: %w", err)
+			}
+			m := PCMMIMEType(rate, channels)
+			if mimeType == "" {
+				mimeType, frame = m, channels*pcmBitsPerSample/8
+			} else if m != mimeType {
+				return fmt.Errorf("gemini tts stream: audio format changed from %s to %s", mimeType, m)
+			}
+			carry = append(carry, p.InlineData.Data...)
+			buf := carry
+			n := len(buf) - len(buf)%frame
+			carry = append([]byte(nil), buf[n:]...)
+			if n == 0 {
+				continue
+			}
+			if err := emit(buf[:n], mimeType); err != nil {
+				return err
+			}
+			emitted = true
+		}
+	}
+	if !emitted {
+		return errors.New("gemini tts stream: no audio data in response")
+	}
+	return nil
+}
+
+// request builds the generateContent request shared by Synthesize and
+// SynthesizeStream.
+func (s *GeminiSynthesizer) request(text string) ([]*genai.Content, *genai.GenerateContentConfig) {
+	part := &genai.Part{Text: text}
+	if s.style != "" {
+		part.SpeechMetadata = &genai.SpeechMetadata{Style: s.style}
+	}
+	return []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{part}}},
+		&genai.GenerateContentConfig{
+			ResponseModalities: []string{"AUDIO"},
+			SpeechConfig: &genai.SpeechConfig{
+				VoiceConfig: &genai.VoiceConfig{Voice: s.voice},
+			},
+		}
+}
+
+// parsePCMMIMEType parses an audio/l16 or audio/pcm MIME type and returns
+// its sample rate and channel count, defaulting to Gemini's 24 kHz mono.
+func parsePCMMIMEType(mimeType string) (rate, channels int, err error) {
+	mediaType, params, err := mime.ParseMediaType(mimeType)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse audio MIME type %q: %w", mimeType, err)
+	}
+	if mediaType != "audio/l16" && mediaType != "audio/pcm" {
+		return 0, 0, fmt.Errorf("unsupported streaming audio MIME type %q", mimeType)
+	}
+	if rate, err = mimeIntParam(params, "rate", geminiPCMDefaultRate); err != nil {
+		return 0, 0, err
+	}
+	if channels, err = mimeIntParam(params, "channels", geminiPCMDefaultChannels); err != nil {
+		return 0, 0, err
+	}
+	return rate, channels, nil
 }

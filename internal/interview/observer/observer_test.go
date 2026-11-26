@@ -87,16 +87,21 @@ func TestMessageAccumulator_EmptyStream(t *testing.T) {
 // --- TTSSink mock ---
 
 type mockTTSSink struct {
-	mu     sync.Mutex
-	audio  [][]byte
-	done   bool
-	errors int
+	mu        sync.Mutex
+	audio     [][]byte
+	mimeTypes []string
+	done      bool
+	errors    int
+	// delay simulates a slow client: HandleAudio blocks this long.
+	delay time.Duration
 }
 
-func (m *mockTTSSink) HandleAudio(data []byte) {
+func (m *mockTTSSink) HandleAudio(data []byte, mimeType string) {
+	time.Sleep(m.delay)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.audio = append(m.audio, append([]byte(nil), data...))
+	m.mimeTypes = append(m.mimeTypes, mimeType)
 }
 
 func (m *mockTTSSink) HandleTTSDone() {
@@ -179,6 +184,7 @@ func TestTTSAccumulator_SentenceBoundaries(t *testing.T) {
 	for _, data := range sink.audio {
 		assert.Equal(t, audio, data, "audio must be raw bytes, not base64")
 	}
+	assert.Equal(t, []string{"", ""}, sink.mimeTypes, "a whole encoded file per sentence has no MIME type")
 	assert.True(t, sink.done, "HandleTTSDone must be called")
 	assert.Equal(t, 0, sink.errors, "no errors expected")
 }
@@ -284,4 +290,164 @@ func TestTTSAccumulator_OnDoneAfterOnErrorNoPanic(t *testing.T) {
 	acc.OnError(fmt.Errorf("boom"))
 	acc.OnDone("text")
 	acc.Close() // must not panic from double close(sentCh)
+}
+
+// --- Streaming synth mocks ---
+
+const pcm24k = "audio/L16;rate=24000;channels=1"
+
+// streamSynth emits each sentence as its pieces, tagged with the sentence,
+// and fails after failAfter pieces when failAfter > 0. It also implements
+// the non-streaming Synthesizer, which the accumulator must not call.
+type streamSynth struct {
+	pieces    int
+	failAfter int
+	// gate, when set, is received from before each piece after the first.
+	gate chan struct{}
+}
+
+func (f *streamSynth) Synthesize(context.Context, string) (io.ReadCloser, error) {
+	return nil, fmt.Errorf("Synthesize must not be called on a streaming synthesizer")
+}
+
+func (f *streamSynth) SynthesizeStream(ctx context.Context, text string, emit func([]byte, string) error) error {
+	for i := 0; i < f.pieces; i++ {
+		if f.failAfter > 0 && i == f.failAfter {
+			return fmt.Errorf("stream broke")
+		}
+		// Like a real streaming request, stop once the context ends.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if i > 0 && f.gate != nil {
+			select {
+			case <-f.gate:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if err := emit([]byte(fmt.Sprintf("%s#%d", text, i)), pcm24k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// blockingStreamSynth blocks until its context ends.
+type blockingStreamSynth struct{ streamSynth }
+
+func (b *blockingStreamSynth) SynthesizeStream(ctx context.Context, _ string, _ func([]byte, string) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+var (
+	_ ai.StreamingSynthesizer = (*streamSynth)(nil)
+	_ ai.StreamingSynthesizer = (*blockingStreamSynth)(nil)
+)
+
+func TestTTSAccumulator_StreamingForwardsPiecesInOrder(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &streamSynth{pieces: 3})
+
+	acc.OnToken("One. Two. ")
+	acc.OnDone("One. Two. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var got []string
+	for _, a := range sink.audio {
+		got = append(got, string(a))
+	}
+	assert.Equal(t, []string{"One. #0", "One. #1", "One. #2", "Two. #0", "Two. #1", "Two. #2"}, got)
+	for _, m := range sink.mimeTypes {
+		assert.Equal(t, pcm24k, m)
+	}
+	assert.True(t, sink.done)
+	assert.Equal(t, 0, sink.errors)
+}
+
+func TestTTSAccumulator_StreamingErrorKeepsSentAudioAndNotifiesOnce(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := newTestAccumulator(sink, &streamSynth{pieces: 3, failAfter: 2})
+
+	acc.OnToken("Breaks midway. ")
+	acc.OnDone("Breaks midway. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Len(t, sink.audio, 2, "pieces sent before the failure stay sent")
+	assert.Equal(t, 1, sink.errors)
+	assert.True(t, sink.done)
+}
+
+func TestTTSAccumulator_StreamingTimeout(t *testing.T) {
+	sink := &mockTTSSink{}
+	acc := observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+		Sink:            sink,
+		Synth:           &blockingStreamSynth{},
+		SentenceTimeout: 50 * time.Millisecond,
+	})
+
+	acc.OnToken("Slow. ")
+	acc.OnDone("Slow. ")
+	start := time.Now()
+	acc.Close()
+	assert.Less(t, time.Since(start), 500*time.Millisecond, "Close must return within the sentence timeout")
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Equal(t, 1, sink.errors)
+}
+
+// TestTTSAccumulator_StreamingInterruptStopsForwarding checks that once the
+// turn is interrupted (OnError) no further pieces reach the sink and the
+// interrupt is not reported as a synthesis failure.
+func TestTTSAccumulator_StreamingInterruptStopsForwarding(t *testing.T) {
+	sink := &mockTTSSink{}
+	gate := make(chan struct{})
+	acc := newTestAccumulator(sink, &streamSynth{pieces: 3, gate: gate})
+
+	acc.OnToken("Interrupted. ")
+	assert.Eventually(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		return len(sink.audio) == 1
+	}, time.Second, 5*time.Millisecond)
+
+	acc.OnError(fmt.Errorf("candidate interrupted"))
+	close(gate) // let the synth try to emit the remaining pieces
+	acc.OnDone("Interrupted. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Len(t, sink.audio, 1, "no pieces after the interrupt")
+	assert.Equal(t, 0, sink.errors, "an interrupt is not a synthesis failure")
+	assert.False(t, sink.done)
+}
+
+// TestTTSAccumulator_StreamingSlowClientDoesNotTimeOut checks that time spent
+// sending to a slow client does not count against the sentence timeout: the
+// synthesizer finishes quickly, the sink takes longer than the timeout to
+// accept every piece, and the sentence still arrives in full.
+func TestTTSAccumulator_StreamingSlowClientDoesNotTimeOut(t *testing.T) {
+	sink := &mockTTSSink{delay: 30 * time.Millisecond}
+	acc := observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+		Sink:            sink,
+		Synth:           &streamSynth{pieces: 5},
+		SentenceTimeout: 50 * time.Millisecond,
+	})
+
+	acc.OnToken("Slow client. ")
+	acc.OnDone("Slow client. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Len(t, sink.audio, 5)
+	assert.Equal(t, 0, sink.errors)
+	assert.True(t, sink.done)
 }

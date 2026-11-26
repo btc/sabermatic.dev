@@ -47,6 +47,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	require.Equal(t, "us", cfg.Speech.GeminiTTSLocation)
 	require.Equal(t, "Charon", cfg.Speech.GeminiTTSVoice)
 	require.Empty(t, cfg.Speech.GeminiTTSStyle)
+	require.True(t, cfg.Speech.GeminiTTSStream)
 	require.Equal(t, "gemini-3.1-flash-image", cfg.Gemini.Model)
 	require.Equal(t, "global", cfg.Gemini.Location)
 }

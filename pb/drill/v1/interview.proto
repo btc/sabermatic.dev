@@ -65,7 +65,14 @@ message InterviewerDone {
 message TtsChunk {
   bytes data = 1;
   string message_id = 2;
+  // Order of this chunk within the message, starting at 0.
   int32 seq = 3;
+  // Format of data. Empty means data is a complete encoded audio file
+  // (MP3 or WAV) to decode as a whole. "audio/L16;rate=R;channels=C" means
+  // data is a piece of a stream of 16-bit little-endian PCM samples at R Hz
+  // with C interleaved channels, always a whole number of sample frames;
+  // consecutive chunks play back to back.
+  string mime_type = 4;
 }
 
 message TtsDone {

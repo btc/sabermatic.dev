@@ -31,7 +31,7 @@ export type InterviewState =
   | "ended"
   | "cancelled";
 
-type TtsChunkCallback = (data: Uint8Array, seq: number) => void;
+type TtsChunkCallback = (data: Uint8Array, seq: number, mimeType: string) => void;
 type TtsDoneCallback = () => void;
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ export function useInterview(sessionId: string) {
       }
 
       case "ttsChunk":
-        ttsChunkRef.current?.(e.value.data, e.value.seq);
+        ttsChunkRef.current?.(e.value.data, e.value.seq, e.value.mimeType);
         break;
 
       case "ttsDone":

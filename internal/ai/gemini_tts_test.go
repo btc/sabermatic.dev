@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -172,3 +173,105 @@ func TestPCMToWAV(t *testing.T) {
 	require.Equal(t, uint32(len(pcm)), le.Uint32(w[40:44]))
 	require.Equal(t, pcm, w[44:])
 }
+
+// fakeTTSStreamTransport answers a streamGenerateContent request with one
+// server-sent event per blob, and records the request path and query.
+func fakeTTSStreamTransport(t *testing.T, gotURL *string, blobs ...genai.Blob) roundTripFunc {
+	t.Helper()
+	return func(r *http.Request) (*http.Response, error) {
+		*gotURL = r.URL.Path + "?" + r.URL.RawQuery
+		var sse strings.Builder
+		for _, b := range blobs {
+			sse.WriteString(`data: {"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"` +
+				b.MIMEType + `","data":"` + base64.StdEncoding.EncodeToString(b.Data) + `"}}]}}]}` + "\n\n")
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(sse.String())),
+			Request:    r,
+		}, nil
+	}
+}
+
+type emitted struct {
+	data     []byte
+	mimeType string
+}
+
+func collectStream(t *testing.T, s *GeminiSynthesizer, text string) ([]emitted, error) {
+	t.Helper()
+	var got []emitted
+	err := s.SynthesizeStream(context.Background(), text, func(pcm []byte, mimeType string) error {
+		got = append(got, emitted{append([]byte(nil), pcm...), mimeType})
+		return nil
+	})
+	return got, err
+}
+
+// TestGeminiSynthesizer_Stream checks the streaming endpoint is used, that
+// pieces are forwarded in order with a normalized MIME type, and that a
+// piece ending mid-sample carries its odd byte into the next piece.
+func TestGeminiSynthesizer_Stream(t *testing.T) {
+	var gotURL string
+	transport := fakeTTSStreamTransport(t, &gotURL,
+		genai.Blob{MIMEType: "audio/l16; rate=24000; channels=1", Data: []byte{1, 0, 2}},
+		genai.Blob{MIMEType: "audio/l16; rate=24000; channels=1", Data: []byte{0, 3, 0}},
+		genai.Blob{MIMEType: "audio/l16; rate=24000; channels=1", Data: []byte{4, 0, 9}}, // trailing partial sample dropped
+	)
+	s := NewGeminiSynthesizer(NewTestGeminiClient("gemini-3.8-flash-lite-tts", &http.Client{Transport: transport}), "Charon", "")
+
+	got, err := collectStream(t, s, "Hello there.")
+	require.NoError(t, err)
+	require.Contains(t, gotURL, "/publishers/google/models/gemini-3.8-flash-lite-tts:streamGenerateContent")
+	require.Contains(t, gotURL, "alt=sse")
+	require.Equal(t, []emitted{
+		{[]byte{1, 0}, "audio/L16;rate=24000;channels=1"},
+		{[]byte{2, 0, 3, 0}, "audio/L16;rate=24000;channels=1"},
+		{[]byte{4, 0}, "audio/L16;rate=24000;channels=1"},
+	}, got)
+}
+
+func TestGeminiSynthesizer_StreamErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		blobs   []genai.Blob
+		wantErr string
+	}{
+		{name: "empty text", text: " ", wantErr: "empty text"},
+		{name: "no audio", text: "Hi.", wantErr: "no audio data"},
+		{name: "wav not accepted", text: "Hi.", blobs: []genai.Blob{{MIMEType: "audio/wav", Data: []byte("RIFF")}}, wantErr: "unsupported streaming audio MIME type"},
+		{name: "format change", text: "Hi.", blobs: []genai.Blob{
+			{MIMEType: "audio/l16;rate=24000", Data: []byte{1, 0}},
+			{MIMEType: "audio/l16;rate=16000", Data: []byte{1, 0}},
+		}, wantErr: "audio format changed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotURL string
+			s := NewGeminiSynthesizer(NewTestGeminiClient("m", &http.Client{Transport: fakeTTSStreamTransport(t, &gotURL, tt.blobs...)}), "Charon", "")
+			_, err := collectStream(t, s, tt.text)
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestGeminiSynthesizer_StreamEmitErrorStops(t *testing.T) {
+	var gotURL string
+	transport := fakeTTSStreamTransport(t, &gotURL,
+		genai.Blob{MIMEType: "audio/l16;rate=24000", Data: []byte{1, 0}},
+		genai.Blob{MIMEType: "audio/l16;rate=24000", Data: []byte{2, 0}},
+	)
+	s := NewGeminiSynthesizer(NewTestGeminiClient("m", &http.Client{Transport: transport}), "Charon", "")
+	stop := errors.New("stop")
+	calls := 0
+	err := s.SynthesizeStream(context.Background(), "Hi.", func([]byte, string) error {
+		calls++
+		return stop
+	})
+	require.ErrorIs(t, err, stop)
+	require.Equal(t, 1, calls)
+}
+
+var _ StreamingSynthesizer = (*GeminiSynthesizer)(nil)
