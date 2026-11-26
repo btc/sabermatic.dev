@@ -12,7 +12,7 @@ resource "google_cloud_run_v2_service" "sabermatic" {
     # on manual_instance_count — not this nested template.scaling block.
     # Verified via `terraform plan`: changes here do show up as diffs.)
     scaling {
-      max_instance_count = 3
+      max_instance_count = 1
     }
 
     max_instance_request_concurrency = 100
@@ -58,6 +58,19 @@ resource "google_cloud_run_v2_service" "sabermatic" {
       }
 
       # ---- Non-secret env vars ----
+      # Two overlapping revisions can use up to 20 of the database's 25 connections.
+      env {
+        name  = "DATABASE_MAX_POOL_SIZE"
+        value = "10"
+      }
+      env {
+        name  = "RIVER_AI_WORKERS"
+        value = "4"
+      }
+      env {
+        name  = "RIVER_GEMINI_WORKERS"
+        value = "1"
+      }
       env {
         name  = "SERVER_PORT"
         value = "8080"
