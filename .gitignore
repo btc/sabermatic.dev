@@ -66,3 +66,6 @@ terraform/.terraform/
 terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/tfplan*
+
+# google-github-actions/auth credentials file
+gha-creds-*.json
