@@ -5,7 +5,7 @@ resource "google_sql_database_instance" "sabermatic" {
 
   settings {
     edition           = "ENTERPRISE"
-    tier              = "db-g1-small"
+    tier              = "db-f1-micro"
     disk_size         = 10
     disk_type         = "PD_HDD"
     disk_autoresize   = false
