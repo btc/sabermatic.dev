@@ -2,15 +2,15 @@
 version: v2
 plugins:
   # Go message types
-  - remote: buf.build/protocolbuffers/go
+  - remote: buf.build/protocolbuffers/go:v1.36.12
     out: internal/pb
     opt: paths=source_relative
   # Go Connect service stubs
-  - remote: buf.build/connectrpc/go
+  - remote: buf.build/connectrpc/go:v1.21.0
     out: internal/pb
     opt: paths=source_relative
   # TypeScript message types
-  - remote: buf.build/bufbuild/es:v2.11.0
+  - remote: buf.build/bufbuild/es:v2.17.0
     out: web/src/pb
     include_imports: true
   # TanStack Query hooks

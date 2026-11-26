@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	cloud.google.com/go/storage v1.61.3
-	connectrpc.com/connect v1.19.1
+	connectrpc.com/connect v1.21.0
 	connectrpc.com/otelconnect v0.9.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.31.0
@@ -37,7 +37,7 @@ require (
 	google.golang.org/api v0.271.0
 	google.golang.org/genai v1.79.1
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	riverqueue.com/riverui v0.15.0
 )
 
