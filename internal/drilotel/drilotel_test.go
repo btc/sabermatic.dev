@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/btc/drill/internal/config"
 	"github.com/btc/drill/internal/drilotel"
@@ -33,8 +33,8 @@ func TestInit_StdoutExporter(t *testing.T) {
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
 	defer func() {
-		p.Shutdown(context.Background())
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+		assert.NoError(t, p.Shutdown(context.Background()))
+		otel.SetTracerProvider(noop.NewTracerProvider())
 	}()
 
 	assert.NotNil(t, p.TracerProvider)
@@ -62,8 +62,8 @@ func TestInit_PropagatesTraceContextOnly(t *testing.T) {
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
 	defer func() {
-		p.Shutdown(context.Background())
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+		assert.NoError(t, p.Shutdown(context.Background()))
+		otel.SetTracerProvider(noop.NewTracerProvider())
 	}()
 
 	assert.ElementsMatch(t, []string{"traceparent", "tracestate"}, otel.GetTextMapPropagator().Fields())
@@ -88,7 +88,7 @@ func TestInit_FullRoundtrip(t *testing.T) {
 	}
 	p, err := drilotel.Init(cfg)
 	require.NoError(t, err)
-	t.Cleanup(func() { otel.SetTracerProvider(trace.NewNoopTracerProvider()) })
+	t.Cleanup(func() { otel.SetTracerProvider(noop.NewTracerProvider()) })
 
 	tracer := otel.Tracer("roundtrip")
 	ctx, span := tracer.Start(context.Background(), "roundtrip-span")
