@@ -282,11 +282,13 @@ export function ShaderOrbImpl({ size = 120 }: ShaderOrbImplProps) {
 
     // --- Animation loop ---
     let frameId: number;
-    const clock = new THREE.Clock();
+    // THREE.Clock is deprecated since r183 and logs a warning on construction.
+    const timer = new THREE.Timer();
 
-    function animate() {
+    function animate(timestamp?: number) {
       frameId = requestAnimationFrame(animate);
-      const elapsed = clock.getElapsedTime();
+      timer.update(timestamp);
+      const elapsed = timer.getElapsed();
 
       material.uniforms.uTime!.value = elapsed;
       glowMaterial.uniforms.uTime!.value = elapsed;
@@ -304,6 +306,7 @@ export function ShaderOrbImpl({ size = 120 }: ShaderOrbImplProps) {
     // --- Cleanup ---
     return () => {
       cancelAnimationFrame(frameId);
+      timer.dispose();
       geometry.dispose();
       material.dispose();
       glowGeometry.dispose();
