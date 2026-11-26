@@ -22,7 +22,8 @@ type Synthesizer interface {
 // returns an error, or ctx ends. Every piece is a whole number of 16-bit
 // little-endian PCM sample frames, and mimeType has the form
 // "audio/L16;rate=R;channels=C" (see PCMMIMEType). If emit returns an error,
-// SynthesizeStream stops and returns it.
+// SynthesizeStream stops and returns it. The caller may keep pcm after emit
+// returns, so the synthesizer must not modify it afterwards.
 type StreamingSynthesizer interface {
 	SynthesizeStream(ctx context.Context, text string, emit func(pcm []byte, mimeType string) error) error
 }

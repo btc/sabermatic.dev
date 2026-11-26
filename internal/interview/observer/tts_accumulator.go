@@ -187,28 +187,60 @@ func (a *TTSAccumulator) ttsLoop() {
 	}
 }
 
+// streamPieceBuffer bounds how many audio pieces of one sentence can wait
+// for the sink. A sentence is typically under 200 pieces (about 80 ms each),
+// so the Gemini read only waits on a slow client in extreme cases.
+const streamPieceBuffer = 512
+
+type audioPiece struct {
+	data     []byte
+	mimeType string
+}
+
 // streamSentence synthesizes one sentence with a streaming synthesizer and
 // forwards each piece of audio to the sink as it arrives, so playback can
-// start before the sentence is fully synthesized. The sentence timeout
-// covers the whole stream. On failure, audio already forwarded stays
-// forwarded and the user is notified once.
+// start before the sentence is fully synthesized.
+//
+// The sentence timeout covers reading from the synthesizer only. Pieces are
+// handed to a forwarding goroutine through a buffer, so time spent blocked
+// sending to a slow client does not count against it (as in the
+// non-streaming path, which sends after the timeout is released). The
+// forwarder delivers pieces in order and finishes before this returns, so
+// later sentences stay behind earlier ones.
+//
+// On failure, audio already forwarded stays forwarded and the user is
+// notified once. An interrupt stops forwarding and is not reported.
 func (a *TTSAccumulator) streamSentence(streamer ai.StreamingSynthesizer, sentence string) {
-	synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
-	defer synthCancel()
-	err := streamer.SynthesizeStream(synthCtx, sentence, func(pcm []byte, mimeType string) error {
-		// Stop forwarding as soon as the turn is interrupted.
-		if err := a.ctx.Err(); err != nil {
-			return err
+	pieces := make(chan audioPiece, streamPieceBuffer)
+	forwarded := make(chan struct{})
+	go func() {
+		defer close(forwarded)
+		for p := range pieces {
+			if a.ctx.Err() != nil {
+				continue // interrupted: drain without sending
+			}
+			a.sink.HandleAudio(p.data, p.mimeType)
 		}
-		a.sink.HandleAudio(pcm, mimeType)
-		return nil
+	}()
+
+	synthCtx, synthCancel := context.WithTimeout(a.ctx, a.sentenceTimeout)
+	err := streamer.SynthesizeStream(synthCtx, sentence, func(pcm []byte, mimeType string) error {
+		select {
+		case pieces <- audioPiece{data: pcm, mimeType: mimeType}:
+			return nil
+		case <-synthCtx.Done():
+			return synthCtx.Err()
+		}
 	})
+	timedOut := synthCtx.Err() == context.DeadlineExceeded
+	synthCancel()
+	close(pieces)
+	<-forwarded
+
 	if err == nil || a.ctx.Err() != nil {
-		// Success, or the turn was interrupted: an interrupt is not a
-		// synthesis failure and the user is not notified.
 		return
 	}
-	if synthCtx.Err() == context.DeadlineExceeded {
+	if timedOut {
 		slog.Warn("tts: streaming sentence synthesis timed out",
 			"timeout", a.sentenceTimeout,
 			"sentence_len", len(sentence))

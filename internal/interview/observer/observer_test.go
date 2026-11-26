@@ -92,9 +92,12 @@ type mockTTSSink struct {
 	mimeTypes []string
 	done      bool
 	errors    int
+	// delay simulates a slow client: HandleAudio blocks this long.
+	delay time.Duration
 }
 
 func (m *mockTTSSink) HandleAudio(data []byte, mimeType string) {
+	time.Sleep(m.delay)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.audio = append(m.audio, append([]byte(nil), data...))
@@ -312,6 +315,10 @@ func (f *streamSynth) SynthesizeStream(ctx context.Context, text string, emit fu
 		if f.failAfter > 0 && i == f.failAfter {
 			return fmt.Errorf("stream broke")
 		}
+		// Like a real streaming request, stop once the context ends.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if i > 0 && f.gate != nil {
 			select {
 			case <-f.gate:
@@ -420,4 +427,27 @@ func TestTTSAccumulator_StreamingInterruptStopsForwarding(t *testing.T) {
 	assert.Len(t, sink.audio, 1, "no pieces after the interrupt")
 	assert.Equal(t, 0, sink.errors, "an interrupt is not a synthesis failure")
 	assert.False(t, sink.done)
+}
+
+// TestTTSAccumulator_StreamingSlowClientDoesNotTimeOut checks that time spent
+// sending to a slow client does not count against the sentence timeout: the
+// synthesizer finishes quickly, the sink takes longer than the timeout to
+// accept every piece, and the sentence still arrives in full.
+func TestTTSAccumulator_StreamingSlowClientDoesNotTimeOut(t *testing.T) {
+	sink := &mockTTSSink{delay: 30 * time.Millisecond}
+	acc := observer.NewTTSAccumulator(observer.TTSAccumulatorParams{
+		Sink:            sink,
+		Synth:           &streamSynth{pieces: 5},
+		SentenceTimeout: 50 * time.Millisecond,
+	})
+
+	acc.OnToken("Slow client. ")
+	acc.OnDone("Slow client. ")
+	acc.Close()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	assert.Len(t, sink.audio, 5)
+	assert.Equal(t, 0, sink.errors)
+	assert.True(t, sink.done)
 }

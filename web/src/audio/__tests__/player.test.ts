@@ -277,27 +277,28 @@ describe("AudioPlayer completion and control", () => {
     expect(ctx.resume).toHaveBeenCalled();
   });
 
-  it("cancel stops every scheduled piece, ignores late decodes, and restarts at seq 0", async () => {
+  it("cancel stops every scheduled piece, ignores late decodes, and restarts at seq 0 now", async () => {
     const { ctx, player, onComplete } = await setup();
-    player.enqueue(pcm(2400), 0, PCM);
-    player.enqueue(pcm(2400), 1, PCM);
-    player.enqueue(new Uint8Array([1]), 2);
+    player.enqueue(pcm(24000 * 5), 0, PCM); // 5 s: scheduled far ahead of currentTime
+    player.enqueue(new Uint8Array([1]), 1); // file still decoding at cancel time
+    expect(ctx.sources[0]!.onended).not.toBeNull();
+
     player.cancel();
     expect(ctx.sources.every((s) => s.stopped)).toBe(true);
+    expect(ctx.sources[0]!.onended).toBeNull();
     expect(player.isPlaying).toBe(false);
 
     ctx.decodes[0]!.resolve(new FakeBuffer(1, 2400, 24000)); // from before the cancel
     await flush();
-    expect(ctx.sources).toHaveLength(2);
+    expect(ctx.sources).toHaveLength(1);
 
-    // Stopping fires onended in browsers; cancelled sources must not complete the next turn.
-    ctx.sources[0]!.end();
-    expect(onComplete).not.toHaveBeenCalled();
-
-    ctx.currentTime = 3;
+    // The next message starts at seq 0 and plays right away, not after the
+    // 5 s that had been scheduled before the cancel.
+    ctx.currentTime = 1;
     player.enqueue(pcm(2400), 0, PCM);
-    expect(ctx.sources).toHaveLength(3);
-    expect(ctx.sources[2]!.startedAt).toBe(3);
+    expect(ctx.sources).toHaveLength(2);
+    expect(ctx.sources[1]!.startedAt).toBe(1);
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it("destroy closes the context", async () => {
