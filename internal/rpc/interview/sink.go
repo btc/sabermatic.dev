@@ -2,6 +2,7 @@ package interview
 
 import (
 	"log/slog"
+	"sync"
 
 	"connectrpc.com/connect"
 
@@ -11,11 +12,18 @@ import (
 
 var _ backend.TurnEventSink = (*connectTurnSink)(nil)
 
+// connectTurnSink sends turn events on the SubmitTurn response stream.
+// ExecuteTurn calls it from more than one goroutine (interviewer tokens from
+// the conductor, audio from the TTS goroutine), and connect.ServerStream.Send
+// is not safe for concurrent use, so sends are serialized.
 type connectTurnSink struct {
+	mu     sync.Mutex
 	stream *connect.ServerStream[drillv1.TurnEvent]
 }
 
 func (s *connectTurnSink) send(event *drillv1.TurnEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.stream.Send(event); err != nil {
 		slog.Debug("interview: sink send failed", "error", err)
 	}
