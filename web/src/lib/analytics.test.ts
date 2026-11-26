@@ -26,10 +26,11 @@ describe("track", () => {
   });
 
   it("posts a landing_view event with referrer and UTM extracted from page state", async () => {
-    // Capture the JSON body via Blob constructor spy.
+    // Capture the JSON body via Blob constructor spy. track() calls `new Blob`,
+    // so the implementation must be constructible (a function, not an arrow).
     const captured: BlobPart[] = [];
     const OrigBlob = globalThis.Blob;
-    vi.spyOn(globalThis, "Blob").mockImplementation((parts, opts) => {
+    vi.spyOn(globalThis, "Blob").mockImplementation(function (parts, opts) {
       if (parts) captured.push(...parts);
       return new OrigBlob(parts, opts);
     });
@@ -51,7 +52,7 @@ describe("track", () => {
   it("posts a sample_view event with no properties", () => {
     const captured: BlobPart[] = [];
     const OrigBlob = globalThis.Blob;
-    vi.spyOn(globalThis, "Blob").mockImplementation((parts, opts) => {
+    vi.spyOn(globalThis, "Blob").mockImplementation(function (parts, opts) {
       if (parts) captured.push(...parts);
       return new OrigBlob(parts, opts);
     });
@@ -67,7 +68,7 @@ describe("track", () => {
   it("posts a signup_started event with auth_method nested under properties", () => {
     const captured: BlobPart[] = [];
     const OrigBlob = globalThis.Blob;
-    vi.spyOn(globalThis, "Blob").mockImplementation((parts, opts) => {
+    vi.spyOn(globalThis, "Blob").mockImplementation(function (parts, opts) {
       if (parts) captured.push(...parts);
       return new OrigBlob(parts, opts);
     });
